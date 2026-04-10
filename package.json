@@ -1,7 +1,7 @@
 {
   "name": "fleetos-backend",
   "version": "2.0.0",
-  "description": "FleetOS - Sistema de gestión de flota pesada con backend seguro",
+  "description": "FleetOS - Sistema de gestión de flota pesada",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -23,7 +23,8 @@
     "dotenv": "^16.3.1",
     "compression": "^1.7.4",
     "morgan": "^1.10.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "cookie-parser": "^1.4.6"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
