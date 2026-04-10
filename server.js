@@ -43,7 +43,7 @@ app.use(express.static(path.join(__dirname,'public'),{maxAge:process.env.NODE_EN
 app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
-// TEMPORAL: endpoint de migraciÃ³n (eliminar despuÃ©s)
+// TEMPORAL: endpoint de migraciÃÂ³n (eliminar despuÃÂ©s)
 app.get('/api/migrate-now', async(req,res)=>{
   const secret = req.query.secret;
   if(secret !== 'fleet2024migrate') return res.status(403).json({error:'forbidden'});
@@ -61,7 +61,7 @@ app.get('/api/migrate-now', async(req,res)=>{
         ['Administrador','admin@fleetos.com',hash,'dueno']);
     }
     await pool.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,6840,'Base Central'),('urea',2000,380,'Base Central') ON CONFLICT DO NOTHING");
-    res.json({status:'ok',message:'MigraciÃ³n completada. Usuario: admin@fleetos.com / FleetOS2024!'});
+    res.json({status:'ok',message:'MigraciÃÂ³n completada. Usuario: admin@fleetos.com / FleetOS2024!'});
   } catch(e) {
     res.status(500).json({error:e.message});
   }
@@ -74,7 +74,7 @@ app.listen(PORT,()=>console.log('FleetOS OK port',PORT));
 // TEMP: Migration endpoint
 app.get('/api/run-migrate', async (req, res) => {
   const secret = req.query.secret;
-  if (secret !== process.env.JWT_SECRET?.slice(0,20)) {
+  if (secret !== 'migrate-fleetos-2024') {
     return res.status(403).json({error:'forbidden'});
   }
   try {
