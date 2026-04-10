@@ -1,4 +1,46 @@
-// ══════════════════════════════════════════
-//  FleetOS — Servidor principal
-//  Node.js + Express + PostgreSQL
-// ══════════════════════════════════════════
+process.on('uncaughtException',(e)=>{console.error('CRASH:',e.message,e.stack);process.exit(1);});
+process.on('unhandledRejection',(r)=>{console.error('REJECT:',r);process.exit(1);});
+require('dotenv').config();
+const express=require('express');
+const helmet=require('helmet');
+const cors=require('cors');
+const hpp=require('hpp');
+const compression=require('compression');
+const morgan=require('morgan');
+const path=require('path');
+const cookieParser=require('cookie-parser');
+const {apiLimiter}=require('./middleware/security');
+const {sanitize}=require('./middleware/security');
+const authRoutes=require('./routes/auth');
+const vehicleRoutes=require('./routes/vehicles');
+const woRoutes=require('./routes/workorders');
+const stockRoutes=require('./routes/stock');
+const {fuelRouter,tireRouter,docRouter,userRouter}=require('./routes/others');
+const app=express();
+app.use(helmet());
+app.use(cors({origin:(o,cb)=>cb(null,true),credentials:true}));
+app.use(cookieParser());
+app.use(express.json({limit:'1mb'}));
+app.use(hpp());
+app.use(sanitize);
+app.use(compression());
+if(process.env.NODE_ENV!=='production')app.use(morgan('dev'));
+app.set('trust proxy',1);
+app.use('/api/',apiLimiter);
+app.use('/api/auth',authRoutes);
+app.use('/api/vehicles',vehicleRoutes);
+app.use('/api/workorders',woRoutes);
+app.use('/api/stock',stockRoutes);
+app.use('/api/fuel',fuelRouter);
+app.use('/api/tires',tireRouter);
+app.use('/api/documents',docRouter);
+app.use('/api/users',userRouter);
+app.get('/api/health',async(req,res)=>{
+  try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
+  catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
+});
+app.use(express.static(path.join(__dirname,'public'),{maxAge:process.env.NODE_ENV==='production'?'7d':'0'}));
+app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
+const PORT=process.env.PORT||3000;
+app.listen(PORT,()=>console.log('FleetOS OK port',PORT));
