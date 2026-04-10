@@ -39,7 +39,7 @@ app.get('/api/health',async(req,res)=>{
   try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
   catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
 });
-app.use(express.static(path.join(__dirname,'public'),{maxAge:process.env.NODE_ENV==='production'?'7d':'0'}));
+app.use(express.static(path.join(__dirname,'public'),{maxAge:'0'}));
 app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
