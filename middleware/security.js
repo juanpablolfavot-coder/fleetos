@@ -1,7 +1,7 @@
 const rateLimit = require('express-rate-limit');
 const { query }  = require('../db/pool');
 
-// ── RATE LIMITING ──────────────────────────────────────────
+// ── RATE LIMITING ─────────────────────────────────────────
 
 // Login: máximo 5 intentos cada 15 minutos
 const loginLimiter = rateLimit({
