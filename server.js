@@ -43,7 +43,7 @@ app.use(express.static(path.join(__dirname,'public'),{maxAge:process.env.NODE_EN
 app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
-// TEMPORAL: endpoint de migración (eliminar después)
+// TEMPORAL: endpoint de migraciÃ³n (eliminar despuÃ©s)
 app.get('/api/migrate-now', async(req,res)=>{
   const secret = req.query.secret;
   if(secret !== 'fleet2024migrate') return res.status(403).json({error:'forbidden'});
@@ -61,7 +61,7 @@ app.get('/api/migrate-now', async(req,res)=>{
         ['Administrador','admin@fleetos.com',hash,'dueno']);
     }
     await pool.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,6840,'Base Central'),('urea',2000,380,'Base Central') ON CONFLICT DO NOTHING");
-    res.json({status:'ok',message:'Migración completada. Usuario: admin@fleetos.com / FleetOS2024!'});
+    res.json({status:'ok',message:'MigraciÃ³n completada. Usuario: admin@fleetos.com / FleetOS2024!'});
   } catch(e) {
     res.status(500).json({error:e.message});
   }
@@ -69,3 +69,28 @@ app.get('/api/migrate-now', async(req,res)=>{
 
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>console.log('FleetOS OK port',PORT));
+
+
+// TEMP: Migration endpoint
+app.get('/api/run-migrate', async (req, res) => {
+  const secret = req.query.secret;
+  if (secret !== process.env.JWT_SECRET?.slice(0,20)) {
+    return res.status(403).json({error:'forbidden'});
+  }
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const bcrypt = require('bcryptjs');
+    const {pool} = require('./db/pool');
+    const schema = fs.readFileSync(path.join(__dirname,'db','schema.sql'),'utf8');
+    await pool.query(schema);
+    const ex = await pool.query("SELECT id FROM users WHERE email=$1",['admin@fleetos.com']);
+    if(ex.rows.length===0){
+      const hash = await bcrypt.hash('FleetOS2024!',12);
+      await pool.query("INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4)",
+        ['Administrador','admin@fleetos.com',hash,'dueno']);
+    }
+    await pool.query(`INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,6840,'Base Central'),('urea',2000,380,'Base Central') ON CONFLICT DO NOTHING`);
+    res.json({ok:true,msg:'Migracion completada'});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
