@@ -42,5 +42,30 @@ app.get('/api/health',async(req,res)=>{
 app.use(express.static(path.join(__dirname,'public'),{maxAge:process.env.NODE_ENV==='production'?'7d':'0'}));
 app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
+
+// TEMPORAL: endpoint de migración (eliminar después)
+app.get('/api/migrate-now', async(req,res)=>{
+  const secret = req.query.secret;
+  if(secret !== 'fleet2024migrate') return res.status(403).json({error:'forbidden'});
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const bcrypt = require('bcryptjs');
+    const {pool} = require('./db/pool');
+    const schema = fs.readFileSync(path.join(__dirname,'db','schema.sql'),'utf8');
+    await pool.query(schema);
+    const existing = await pool.query("SELECT id FROM users WHERE email=$1",['admin@fleetos.com']);
+    if(existing.rows.length===0){
+      const hash = await bcrypt.hash('FleetOS2024!',12);
+      await pool.query("INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4)",
+        ['Administrador','admin@fleetos.com',hash,'dueno']);
+    }
+    await pool.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,6840,'Base Central'),('urea',2000,380,'Base Central') ON CONFLICT DO NOTHING");
+    res.json({status:'ok',message:'Migración completada. Usuario: admin@fleetos.com / FleetOS2024!'});
+  } catch(e) {
+    res.status(500).json({error:e.message});
+  }
+});
+
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>console.log('FleetOS OK port',PORT));
