@@ -130,7 +130,7 @@ const DEMO_USERS = [
 ];
 
 // ── LOGIN ──
-let __selectedRole = null; // scope global
+let _selectedRole = null; // scope global
 
 function initLogin() {
   const screen = document.getElementById('login-screen');
@@ -625,8 +625,8 @@ window.selectRole = function(roleKey) {
     document.querySelector(`.role-card[data-role="${roleKey}"]`).classList.add('selected');
     // Llenar usuarios de ese rol
     const users = DEMO_USERS.filter(u => u.role === roleKey);
-    userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.vehicle ? ' — ' + u.vehicle : ''}</option>`).join('');
-    userSelect.style.display = 'block';
+    document.getElementById('user-select').innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.vehicle ? ' — ' + u.vehicle : ''}</option>`).join('');
+    document.getElementById('user-select').style.display = 'block';
     const lbl1 = document.getElementById('user-select-label'); if(lbl1) lbl1.style.display = 'block';
-    btnLogin.disabled = false;
+    document.getElementById('btn-login').disabled = false;
   }
