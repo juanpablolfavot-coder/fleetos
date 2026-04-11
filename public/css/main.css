@@ -163,3 +163,5 @@ tr:hover td { background: rgba(26,38,62,.5); }
 
 .page { display: none; }
 .page.active { display: block; }
+
+.hidden { display: none !important; }

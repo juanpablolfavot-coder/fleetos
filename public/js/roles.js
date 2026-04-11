@@ -173,7 +173,7 @@ function initLogin() {
       initials: user.initials,
       vehicle: user.vehicle,
     };
-    screen.classList.add('hidden');
+    screen.style.display = 'none'; screen.classList.add('hidden');
     document.getElementById('app-shell').style.display = '';
     bootApp();
   };
@@ -208,7 +208,7 @@ function bootApp() {
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
     logoutBtn.onclick = () => {
-      document.getElementById('login-screen').classList.remove('hidden');
+      const ls = document.getElementById('login-screen'); ls.style.display = ''; ls.classList.remove('hidden');
       document.getElementById('app-shell').style.display = 'none';
       // Reset selección
       document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
