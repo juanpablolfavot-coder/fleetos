@@ -2,11 +2,27 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FleetOS — Sistema de gestión de flota</title>
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/login.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+
+  <style>
+    /* Estilos críticos inline — no dependen del CSS externo */
+    html, body { width: 100% !important; min-height: 100vh !important; margin: 0 !important; padding: 0 !important; }
+    #app-shell { width: 100% !important; min-height: 100vh !important; display: block; }
+    .main { margin-left: 220px !important; padding: 24px !important; min-height: 100vh !important; width: calc(100% - 220px) !important; }
+    .modal-overlay { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; background: rgba(0,0,0,.65) !important; z-index: 9999 !important; align-items: center !important; justify-content: center !important; display: none; }
+    .modal-overlay.open, .modal-overlay.active { display: flex !important; }
+    .modal { background: #1a263e; border: 1px solid #1e2d44; border-radius: 12px; width: 90% !important; max-width: 720px !important; max-height: 90vh !important; overflow: hidden; display: flex !important; flex-direction: column; }
+    .page { display: none; }
+    .page.active { display: block !important; }
+    .hidden { display: none !important; }
+  </style>
 </head>
 <body>
 
