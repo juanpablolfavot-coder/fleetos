@@ -158,7 +158,9 @@ tr:hover td { background: rgba(26,38,62,.5); }
   z-index: 9999;
 }
 .modal-overlay.active,
-.modal { background: var(--bg-s); border: 1px solid var(--border); border-radius: var(--radius); width: 90%; max-width: 640px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
+.modal-overlay.open { display: flex !important; }
+
+.modal { background: var(--bg-s); border: 1px solid var(--border); border-radius: var(--radius); width: 90%; max-width: 720px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
 .modal-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .modal-title { font-size: 15px; font-weight: 600; }
 .modal-close { background: none; border: none; color: var(--text-d); font-size: 18px; cursor: pointer; }
@@ -491,3 +493,9 @@ tr:hover td { background: rgba(26,38,62,.5); }
   flex-direction: column;
   overflow: hidden;
 }
+
+/* ── Toast colors ── */
+.toast.ok     { background: #065f46; border-left: 3px solid #10b981; }
+.toast.warn   { background: #78350f; border-left: 3px solid #f59e0b; }
+.toast.danger { background: #7f1d1d; border-left: 3px solid #ef4444; }
+.toast.info   { background: #1e3a5f; border-left: 3px solid #3b82f6; }

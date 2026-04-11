@@ -2554,65 +2554,6 @@ function saveManualMove(vehicleCode) {
 function renderStock() {
   const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
   const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
-  document.getElementById('page-stock').innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
-      <div class="kpi-card ${critical===0?'ok':'danger'}"><div class="kpi-label">Ítems en stock crítico</div><div class="kpi-value ${critical===0?'ok':'danger'}">${critical}</div><div class="kpi-trend">debajo del mínimo</div></div>
-      <div class="kpi-card info"><div class="kpi-label">Total ítems registrados</div><div class="kpi-value white">${App.data.stock.length}</div><div class="kpi-trend">en el pañol</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Valor stock total</div><div class="kpi-value ok">$${Math.round(totalVal/1000)}K</div><div class="kpi-trend">valorización al costo actual</div></div>
-    </div>
-    <div class="section-header">
-      <div><div class="section-title">Inventario de repuestos e insumos</div></div>
-      <button class="btn btn-primary" onclick="openNewStockModal()">+ Registrar ítem</button>
-    </div>
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table><thead><tr><th>Código</th><th>Descripción</th><th>Categoría</th><th>Stock actual</th><th>Mínimo</th><th>Punto pedido</th><th>Costo unit.</th><th>Valorización</th><th>Proveedor</th><th>Estado</th></tr></thead>
-        <tbody>${App.data.stock.map(s=>{
-          const pct = s.qty/s.min;
-          const st = pct<=1?'danger':pct<=1.5?'warn':'ok';
-          return `<tr>
-            <td class="td-mono td-main">${s.code}</td>
-            <td>${s.name}</td>
-            <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${s.cat}</span></td>
-            <td class="td-mono" style="color:var(--${st})">${s.qty} ${s.unit}</td>
-            <td class="td-mono">${s.min} ${s.unit}</td>
-            <td class="td-mono">${s.reorder} ${s.unit}</td>
-            <td class="td-mono">$${s.cost.toLocaleString()}</td>
-            <td class="td-mono">$${(s.qty*s.cost).toLocaleString()}</td>
-            <td>${s.supplier}</td>
-            <td><span class="badge ${st==='ok'?'badge-ok':st==='warn'?'badge-warn':'badge-danger'}">${st==='ok'?'Normal':st==='warn'?'Bajo':'Crítico'}</span></td>
-          </tr>`;
-        }).join('')}</tbody></table>
-      </div>
-    </div>
-  `;
-}
-
-function openNewStockModal() {
-  openModal('Registrar nuevo ítem de stock', `
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Código</label><input class="form-input" placeholder="FLT-XXX-001" id="ns-code"></div>
-      <div class="form-group"><label class="form-label">Categoría</label><select class="form-select" id="ns-cat"><option>Filtros</option><option>Lubricantes</option><option>Mecánico</option><option>Frenos</option><option>Eléctrico</option><option>Tornillería</option></select></div>
-    </div>
-    <div class="form-group"><label class="form-label">Descripción</label><input class="form-input" placeholder="Nombre completo del repuesto" id="ns-name"></div>
-    <div class="form-row form-row-3">
-      <div class="form-group"><label class="form-label">Stock actual</label><input class="form-input" type="number" placeholder="0" id="ns-qty"></div>
-      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min"></div>
-      <div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="5000" id="ns-cost"></div>
-    </div>
-  `, [
-    { label:'Guardar ítem', cls:'btn-primary', fn: () => { closeModal(); showToast('ok','Ítem registrado en stock'); } },
-    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
-  ]);
-}
-
-// ── DOCUMENTOS ──
-// ── STOCK ──
-if (!App.data.stockHistory) App.data.stockHistory = [];
-
-function renderStock() {
-  const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
-  const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
   const isDueno  = ['dueno','gerencia'].includes(App.currentUser&&App.currentUser.role);
 
   // Construir filas de la tabla sin template literals anidados
