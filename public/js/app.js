@@ -5,7 +5,7 @@
 // ── ESTADO GLOBAL ──
 const App = {
   currentPage: 'dashboard',
-  currentUser: { name: 'Roberto Méndez', role: 'dueno', initials: 'RM' },
+  currentUser: { name: 'Roberto Méndez', role: 'Dueño / Dirección', initials: 'RM' },
   data: {}
 };
 
@@ -250,109 +250,6 @@ App.data.documents = [
   { id:9, vehicle:'INT-41', plate:'QRS 061', type:'VTV',     expiry:'2026-04-08', status:'danger', file:'vtv_int41.pdf' },
   { id:10,vehicle:'INT-03', plate:'ABC 103', type:'Habilitación',expiry:'2026-05-31',status:'ok',  file:'hab_int03.pdf' },
 ];
-// ── HISTORIAL DE STOCK ──
-App.data.stockHistory = [
-  { date:'2026-04-09', name:'Filtro aceite motor MB Actros',    unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
-  { date:'2026-04-09', name:'Filtro combustible primario MB',   unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
-  { date:'2026-04-09', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
-  { date:'2026-04-09', name:'Relay de arranque DAF XF',         unit:'un', qty:1, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
-  { date:'2026-04-09', name:'Fusible principal 80A',            unit:'un', qty:2, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
-  { date:'2026-04-08', name:'Grasa EP2 multiuso 20kg balde',    unit:'kg', qty:2, type:'Egreso',  motivo:'OT-0279 — Engrase INT-05',            user:'Rubén M.' },
-  { date:'2026-04-07', name:'Rulemán masa delantera MB',        unit:'un', qty:2, type:'Egreso',  motivo:'OT-0278 — Cambio rulemanes INT-22',   user:'Carlos R.' },
-  { date:'2026-04-06', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
-  { date:'2026-04-06', name:'Aceite caja Meritor manual',       unit:'L',  qty:9, type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
-  { date:'2026-04-06', name:'Aceite diferencial 85W-140',       unit:'L',  qty:14,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
-  { date:'2026-04-01', name:'Filtro aceite motor MB Actros',    unit:'un', qty:5, type:'Ingreso', motivo:'Reposición mensual — AutoRep SA',      user:'Norberto V.' },
-  { date:'2026-04-01', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:200,type:'Ingreso',motivo:'Reposición mensual — Lubricor',        user:'Norberto V.' },
-  { date:'2026-03-28', name:'Batería 12V 150Ah Bosch',          unit:'un', qty:2, type:'Ingreso', motivo:'Compra nueva — Electro Sur',           user:'Norberto V.' },
-  { date:'2026-03-20', name:'Zapatas freno eje trasero MB',     unit:'jgo',qty:2, type:'Ingreso', motivo:'Reposición — Mec-Parts',              user:'Norberto V.' },
-  { date:'2026-03-15', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT correctivo INT-03',                user:'Carlos R.' },
-];
-
-function normalizeRole(role) {
-  return String(role || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-function userHasRole() {
-  const role = normalizeRole(App.currentUser && App.currentUser.role);
-  const aliases = {
-    dueno: ['dueno', 'dueño', 'dueño / direccion', 'dueno / direccion', 'direccion', 'owner'],
-    gerencia: ['gerencia', 'gerente', 'management'],
-  };
-
-  for (let i = 0; i < arguments.length; i++) {
-    const expected = normalizeRole(arguments[i]);
-    const valid = aliases[expected] || [expected];
-    if (valid.includes(role)) return true;
-  }
-  return false;
-}
-
-function ensureStockItem(seed) {
-  const byName = App.data.stock.find(function(item){ return item.name === seed.name; });
-  if (byName) return byName.id;
-
-  const ids = App.data.stock.map(function(item){ return item.id; }).concat([0]);
-  const id = Math.max.apply(null, ids) + 1;
-  App.data.stock.push({
-    id: id,
-    code: seed.code,
-    name: seed.name,
-    cat: seed.cat || 'Mecánico',
-    unit: seed.unit || 'un',
-    qty: seed.qty || 0,
-    min: seed.min || 0,
-    reorder: seed.reorder || seed.min || 0,
-    cost: seed.cost || 0,
-    supplier: seed.supplier || '—',
-  });
-  return id;
-}
-
-function repairSeedData() {
-  if (!Array.isArray(App.data.stockHistory)) App.data.stockHistory = [];
-  if (!Array.isArray(App.data.stock)) App.data.stock = [];
-
-  const aliasMap = {
-    'Separador agua combustible MB': 'Filtro separador agua combustible',
-  };
-
-  App.data.stock.forEach(function(item) {
-    if (aliasMap[item.name]) item.name = aliasMap[item.name];
-  });
-
-  const relayId = ensureStockItem({
-    code:'ELE-REL-001',
-    name:'Relay de arranque DAF XF',
-    cat:'Eléctrico', unit:'un', qty:2, min:1, reorder:2, cost:18500, supplier:'Electro Sur'
-  });
-  const fusibleId = ensureStockItem({
-    code:'ELE-FUS-080',
-    name:'Fusible principal 80A',
-    cat:'Eléctrico', unit:'un', qty:10, min:4, reorder:6, cost:4200, supplier:'Electro Sur'
-  });
-  const bujeId = ensureStockItem({
-    code:'MEC-BUJ-024',
-    name:'Buje dirección delantero',
-    cat:'Mecánico', unit:'un', qty:6, min:2, reorder:4, cost:22000, supplier:'Mec-Parts'
-  });
-
-  App.data.workOrders.forEach(function(ot) {
-    (ot.parts || []).forEach(function(part) {
-      if (part.origin !== 'stock') return;
-      if (part.name === 'Relay de arranque DAF XF') part.stockId = relayId;
-      if (part.name === 'Fusible principal 80A') part.stockId = fusibleId;
-      if (part.name === 'Buje dirección delantero') part.stockId = bujeId;
-      if (part.name === 'Filtro separador agua combustible') part.stockId = App.data.stock.find(function(item){ return item.name === 'Filtro separador agua combustible'; })?.id || part.stockId;
-    });
-  });
-}
-
-repairSeedData();
 
 // ── NAVEGACIÓN ──
 function navigate(page) {
@@ -369,16 +266,16 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', contador_panel:'Panel contable' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:'Vista ejecutiva · Flota 45 unidades', fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', contador_panel:'Costos · reportes · KPIs' };
+  const s = { dashboard:'Vista ejecutiva · Flota 45 unidades', fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo' };
   return s[p] || '';
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance };
   if (fns[page]) fns[page]();
 }
 
@@ -2657,7 +2554,66 @@ function saveManualMove(vehicleCode) {
 function renderStock() {
   const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
   const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
-  const isDueno  = userHasRole('dueno','gerencia');
+  document.getElementById('page-stock').innerHTML = `
+    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
+      <div class="kpi-card ${critical===0?'ok':'danger'}"><div class="kpi-label">Ítems en stock crítico</div><div class="kpi-value ${critical===0?'ok':'danger'}">${critical}</div><div class="kpi-trend">debajo del mínimo</div></div>
+      <div class="kpi-card info"><div class="kpi-label">Total ítems registrados</div><div class="kpi-value white">${App.data.stock.length}</div><div class="kpi-trend">en el pañol</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Valor stock total</div><div class="kpi-value ok">$${Math.round(totalVal/1000)}K</div><div class="kpi-trend">valorización al costo actual</div></div>
+    </div>
+    <div class="section-header">
+      <div><div class="section-title">Inventario de repuestos e insumos</div></div>
+      <button class="btn btn-primary" onclick="openNewStockModal()">+ Registrar ítem</button>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table><thead><tr><th>Código</th><th>Descripción</th><th>Categoría</th><th>Stock actual</th><th>Mínimo</th><th>Punto pedido</th><th>Costo unit.</th><th>Valorización</th><th>Proveedor</th><th>Estado</th></tr></thead>
+        <tbody>${App.data.stock.map(s=>{
+          const pct = s.qty/s.min;
+          const st = pct<=1?'danger':pct<=1.5?'warn':'ok';
+          return `<tr>
+            <td class="td-mono td-main">${s.code}</td>
+            <td>${s.name}</td>
+            <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${s.cat}</span></td>
+            <td class="td-mono" style="color:var(--${st})">${s.qty} ${s.unit}</td>
+            <td class="td-mono">${s.min} ${s.unit}</td>
+            <td class="td-mono">${s.reorder} ${s.unit}</td>
+            <td class="td-mono">$${s.cost.toLocaleString()}</td>
+            <td class="td-mono">$${(s.qty*s.cost).toLocaleString()}</td>
+            <td>${s.supplier}</td>
+            <td><span class="badge ${st==='ok'?'badge-ok':st==='warn'?'badge-warn':'badge-danger'}">${st==='ok'?'Normal':st==='warn'?'Bajo':'Crítico'}</span></td>
+          </tr>`;
+        }).join('')}</tbody></table>
+      </div>
+    </div>
+  `;
+}
+
+function openNewStockModal() {
+  openModal('Registrar nuevo ítem de stock', `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Código</label><input class="form-input" placeholder="FLT-XXX-001" id="ns-code"></div>
+      <div class="form-group"><label class="form-label">Categoría</label><select class="form-select" id="ns-cat"><option>Filtros</option><option>Lubricantes</option><option>Mecánico</option><option>Frenos</option><option>Eléctrico</option><option>Tornillería</option></select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Descripción</label><input class="form-input" placeholder="Nombre completo del repuesto" id="ns-name"></div>
+    <div class="form-row form-row-3">
+      <div class="form-group"><label class="form-label">Stock actual</label><input class="form-input" type="number" placeholder="0" id="ns-qty"></div>
+      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min"></div>
+      <div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="5000" id="ns-cost"></div>
+    </div>
+  `, [
+    { label:'Guardar ítem', cls:'btn-primary', fn: () => { closeModal(); showToast('ok','Ítem registrado en stock'); } },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+// ── DOCUMENTOS ──
+// ── STOCK ──
+if (!App.data.stockHistory) App.data.stockHistory = [];
+
+function renderStock() {
+  const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
+  const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
+  const isDueno  = ['dueno','gerencia'].includes(App.currentUser&&App.currentUser.role);
 
   // Construir filas de la tabla sin template literals anidados
   let tableRows = '';
@@ -2688,7 +2644,7 @@ function renderStock() {
 
   // Construir filas del historial
   let histRows = '';
-  (App.data.stockHistory || []).slice(0,15).forEach(function(h) {
+  App.data.stockHistory.slice(0,15).forEach(function(h) {
     const tc   = h.type==='Baja'?'badge-danger':h.type==='Egreso'?'badge-warn':h.type==='Ajuste'?'badge-purple':'badge-ok';
     const sign = (h.type==='Baja'||h.type==='Egreso') ? '-' : '+';
     const cc   = (h.type==='Baja'||h.type==='Egreso') ? 'danger' : 'ok';
@@ -2792,7 +2748,7 @@ function saveStockEgreso(stockId) {
   const ref = document.getElementById('eg-ref').value || '—';
   if (qty > s.qty) { showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
   s.qty -= qty;
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
+  App.data.stockHistory.unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name, unit: s.unit, qty, type: 'Egreso',
     motivo: ref,
@@ -2805,7 +2761,7 @@ function saveStockEgreso(stockId) {
 
 // ── BAJA de stock — SOLO DUEÑO / GERENCIA ──
 function openStockBajaModal() {
-  if (!userHasRole('dueno','gerencia')) {
+  if (!['dueno','gerencia'].includes(App.currentUser && App.currentUser.role)) {
     showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
     return;
   }
@@ -2879,7 +2835,7 @@ function updateBajaSummary() {
 }
 
 function saveStockBaja() {
-  if (!userHasRole('dueno','gerencia')) {
+  if (!['dueno','gerencia'].includes(App.currentUser && App.currentUser.role)) {
     showToast('warn','Sin permiso para realizar esta operación');
     return;
   }
@@ -2896,7 +2852,7 @@ function saveStockBaja() {
 
   s.qty -= qty;
 
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
+  App.data.stockHistory.unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name,
     unit:   s.unit,
@@ -2943,7 +2899,7 @@ function saveStockAjuste() {
   if (!s || isNaN(newQty)) { showToast('warn','Completá todos los campos'); return; }
   const diff = newQty - s.qty;
   s.qty = newQty;
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
+  App.data.stockHistory.unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name, unit: s.unit,
     qty:    Math.abs(diff),
@@ -3013,7 +2969,7 @@ function saveNewStockItem() {
     supplier: (document.getElementById('ns-supplier')||{}).value || '—',
   });
   if (qty > 0) {
-    (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
+    App.data.stockHistory.unshift({
       date:   new Date().toISOString().split('T')[0],
       name: name, unit: unit, qty: qty,
       type: 'Ingreso', motivo: 'Alta de ítem nuevo',
@@ -3676,8 +3632,8 @@ function showToast(type, msg) {
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
-  // Arrancar el login (definido en roles.js que carga primero)
-  if (typeof initLogin === 'function') {
-    initLogin();
-  }
+  document.querySelector('.user-info .user-name').textContent  = App.currentUser.name;
+  document.querySelector('.user-info .user-role').textContent  = App.currentUser.role;
+  document.querySelector('.user-avatar').textContent           = App.currentUser.initials;
+  navigate('dashboard');
 });
