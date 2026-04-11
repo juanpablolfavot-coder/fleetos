@@ -40,7 +40,7 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       if (!t.rows[0] || t.rows[0].current_l < liters) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Combustible insuficiente' }); }
       await client.query('UPDATE tanks SET current_l=current_l-$1,updated_at=NOW() WHERE id=$2',[liters,tank_id]);
     }
-    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETUPÂ®ING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,odometer_km||null,location||null,notes||null]);
+    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,odometer_km||null,location||null,notes||null]);
     if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: 'Error carga' }); } finally { client.release(); }
@@ -72,7 +72,7 @@ tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_ma
   const km=veh?.rows[0]?.km_current||0;
   await client.query(`INSERT INTO tire_movements(tire_id,type,from_pos,to_pos,vehicle_id,km_at_move,tread_at_move,user_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[req.params.id,type||'RotaciÃÂ³n',tire.rows[0].current_position,to_position,to_vehicle_id||tire.rows[0].current_vehicle_id,km,tread_depth||tire.rows[0].tread_depth,req.user.id,notes||null]);
   const ns=to_vehicle_id?'montada':(to_position==='Stock'?'stock':'baja');
-  await client.query(`UPDATE tires SET current_vehicle_id=$1,current_position=$2,status=$3,tread_depth=COALESCE Å 4%Ã´read_depth),km_total=km_total+$5 WHERE id=$6`,[to_vehicle_id||null,to_position,ns,tread_depth||null,km,req.params.id]);
+  await client.query(`UPDATE tires SET current_vehicle_id=$1,current_position=$2,status=$3,tread_depth=COALESCE($4,tread_depth),km_total=km_total+$5 WHERE id=$6`,[to_vehicle_id||null,to_position,ns,tread_depth||null,km,req.params.id]);
   await client.query('COMMIT');res.json({message:'Movimiento registrado'});}catch(err){await client.query('ROLLBACK');res.status(500).json({error:'Error mover cubierta'});}finally{client.release();}
 });
 
@@ -97,7 +97,7 @@ userRouter.post('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=
   try{const{name,email,password,role,vehicle_code}=req.body;
   if(!name||!email||!password||!role) return res.status(400).json({error:'name,email,password,role requeridos'});
   const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
-  const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code) VALUES($1,$2,$3,$4,$5) RETUPÂ®ING id,name,email,role,active`,[name,email.toLowerCase(),hash,role,vehicle_code||null]);
+  const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,active`,[name,email.toLowerCase(),hash,role,vehicle_code||null]);
   res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'Email existe'});res.status(500).json({error:'Error usuario'});}
 });
 userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID('id'),async(req,res)=>{
