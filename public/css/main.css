@@ -20,6 +20,23 @@
   --radius:  12px;
   --radius-s: 6px;
   --shadow:  0 4px 24px rgba(0,0,0,.3);
+  /* ── Aliases usados por app.js ── */
+  --ok:       #10b981;
+  --warn:     #f59e0b;
+  --accent:   #2563eb;
+  --mono:     'IBM Plex Mono', 'Courier New', monospace;
+  --font:     'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --bg2:      #0a0e14;
+  --bg3:      #1a263e;
+  --bg4:      #22324e;
+  --border2:  #2a3f5f;
+  --radius-lg: 14px;
+  --text2:    #adbed3;
+  --text3:    #64748b;
+  --ok-bg:    rgba(16,185,129,.08);
+  --warn-bg:  rgba(245,158,11,.08);
+  --danger-bg:rgba(239,68,68,.08);
+  --info-bg:  rgba(59,130,246,.08);
 }
 
 body {
@@ -373,3 +390,75 @@ tr:hover td { background: rgba(26,38,62,.5); }
 .warn    { color: var(--warning) !important; }
 .danger  { color: var(--danger) !important; }
 .info    { color: var(--info) !important; }
+
+/* ── Badges completos ── */
+.badge-ok      { background: rgba(16,185,129,.15); color: #10b981; }
+.badge-warn    { background: rgba(245,158,11,.15);  color: #f59e0b; }
+.badge-danger  { background: rgba(239,68,68,.15);   color: #ef4444; }
+.badge-gray    { background: rgba(100,116,139,.15); color: #94a3b8; }
+.badge-purple  { background: rgba(139,92,246,.15);  color: #a78bfa; }
+.badge-info    { background: rgba(59,130,246,.15);  color: #3b82f6; }
+.badge-ok, .badge-warn, .badge-danger, .badge-gray, .badge-purple, .badge-info {
+  display: inline-flex; align-items: center; padding: 3px 8px;
+  border-radius: 20px; font-size: 11px; font-weight: 600;
+}
+
+/* ── Modal: también responde a .open (el JS usa classList.add('open')) ── */
+.modal-overlay.open { display: flex !important; }
+
+/* ── Fleet mini grid ── */
+.fleet-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.fleet-unit {
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; font-family: monospace;
+  cursor: pointer;
+  transition: transform .1s;
+}
+.fleet-unit:hover { transform: scale(1.15); }
+.fleet-unit.ok      { background: rgba(16,185,129,.2);  color: #10b981; border: 1px solid rgba(16,185,129,.4); }
+.fleet-unit.warn    { background: rgba(245,158,11,.2);  color: #f59e0b; border: 1px solid rgba(245,158,11,.4); }
+.fleet-unit.danger  { background: rgba(239,68,68,.2);   color: #ef4444; border: 1px solid rgba(239,68,68,.4); }
+
+/* ── Tags ── */
+.tag {
+  display: inline-flex; padding: 2px 8px;
+  border-radius: 4px; font-size: 11px; font-weight: 500;
+}
+
+/* ── Tire map slots ── */
+.tire-slot {
+  width: 64px; height: 70px;
+  border-radius: 8px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 2px; border: 1px solid var(--border);
+  background: var(--bg3); cursor: pointer;
+  transition: all .15s;
+}
+.tire-slot.empty { border-color: rgba(59,130,246,.3); background: rgba(59,130,246,.04); }
+.tire-slot.drag-over { border-color: var(--accent); background: rgba(37,99,235,.15); transform: scale(1.05); }
+
+/* ── Chofer panel ── */
+.chofer-view { max-width: 480px; margin: 0 auto; }
+.chofer-header { text-align: center; padding: 20px; background: var(--bg3); border-radius: var(--radius); border: 1px solid var(--border); }
+.chofer-unit  { font-size: 28px; font-weight: 700; font-family: monospace; color: var(--accent); }
+.chofer-plate { font-size: 13px; color: var(--text2); margin-top: 4px; }
+.chofer-btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.chofer-btn {
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  cursor: pointer; transition: all .15s;
+}
+.chofer-btn:hover { border-color: var(--accent); }
+.chofer-btn.danger { border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.06); }
+.chofer-btn.info   { border-color: rgba(59,130,246,.4); background: rgba(59,130,246,.06); }
+.chofer-btn.ok     { border-color: rgba(16,185,129,.4); background: rgba(16,185,129,.06); }
+.cb-icon  { font-size: 24px; }
+.cb-label { font-size: 12px; font-weight: 600; color: var(--text2); text-align: center; }
+
+/* ── Contador panel ── */
+.export-bar  { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.contador-kpis { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 20px; }
