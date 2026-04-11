@@ -147,8 +147,15 @@ tr:hover td { background: rgba(26,38,62,.5); }
 .form-textarea { width: 100%; padding: 9px 12px; background: var(--bg-m); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-s); font-size: 13px; resize: vertical; }
 
 /* MODAL */
-.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.65); display: flex; align-items: center; justify-content: center; z-index: 1000; display: none; }
-.modal-overlay.active { display: flex; }
+.modal-overlay {
+  position: fixed; top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(0,0,0,.65);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 9999;
+}
+.modal-overlay.active,
 .modal { background: var(--bg-s); border: 1px solid var(--border); border-radius: var(--radius); width: 90%; max-width: 640px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
 .modal-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
 .modal-title { font-size: 15px; font-weight: 600; }
@@ -412,7 +419,6 @@ tr:hover td { background: rgba(26,38,62,.5); }
 }
 
 /* ── Modal: también responde a .open (el JS usa classList.add('open')) ── */
-.modal-overlay.open { display: flex !important; }
 
 /* ── Fleet mini grid ── */
 .fleet-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -470,3 +476,16 @@ tr:hover td { background: rgba(26,38,62,.5); }
 /* ── Contador panel ── */
 .export-bar  { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
 .contador-kpis { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-bottom: 20px; }
+
+/* ── Modal content ── */
+.modal {
+  background: var(--bg-m);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 720px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
