@@ -7,8 +7,8 @@
   <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FleetOS — Sistema de gestión de flota</title>
-  <link rel="stylesheet" href="css/main.css?v=1775929540">
-  <link rel="stylesheet" href="css/login.css?v=1775929540">
+  <link rel="stylesheet" href="css/main.css?v=1775929937">
+  <link rel="stylesheet" href="css/login.css?v=1775929937">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 
   <style>
@@ -137,48 +137,8 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<script src="js/app.js?v=1775929540"></script>
-<script src="js/roles.js?v=1775929540"></script>
-<script>
-// Parchear navigate para soportar roles y páginas especiales
-const _coreNavigate = navigate;
-navigate = function(page) {
-  const role = App.currentUser && App.currentUser.roleData;
-  if (role) {
-    const allowed = role.modules.includes('all') || role.modules.includes(page);
-    if (!allowed) {
-      _setActivePage(page);
-      document.getElementById('page-'+page).innerHTML = `
-        <div class="locked-overlay">
-          <div class="locked-icon">◻</div>
-          <div class="locked-title">Acceso restringido</div>
-          <div class="locked-desc">Tu rol (${role.label}) no tiene acceso a este módulo.</div>
-        </div>`;
-      document.querySelector('.topbar-title').textContent = getPageTitle(page);
-      document.querySelector('.topbar-sub').textContent   = '';
-      return;
-    }
-  }
-  if (page === 'chofer_panel')   { _setActivePage(page); _updateTopbar(page); renderChoferPanel();   return; }
-  if (page === 'contador_panel') { _setActivePage(page); _updateTopbar(page); renderContadorPanel(); return; }
-  _coreNavigate(page);
-};
+<script src="js/roles.js?v=1775929937"></script>
+<script src="js/app.js?v=1775929937"></script>
 
-function _setActivePage(page) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const el  = document.getElementById('page-'+page);
-  const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
-  if (el)  el.classList.add('active');
-  if (nav) nav.classList.add('active');
-  App.currentPage = page;
-}
-function _updateTopbar(page) {
-  document.querySelector('.topbar-title').textContent = getPageTitle(page);
-  document.querySelector('.topbar-sub').textContent   = getPageSub(page);
-}
-
-document.addEventListener('DOMContentLoaded', () => { initLogin(); });
-</script>
 </body>
 </html>
