@@ -250,7 +250,36 @@ App.data.documents = [
   { id:9, vehicle:'INT-41', plate:'QRS 061', type:'VTV',     expiry:'2026-04-08', status:'danger', file:'vtv_int41.pdf' },
   { id:10,vehicle:'INT-03', plate:'ABC 103', type:'Habilitación',expiry:'2026-05-31',status:'ok',  file:'hab_int03.pdf' },
 ];
+// ═══════════════════════════════════════════
+//  FleetOS — PATCH: inicialización faltante
+//  Agregar esto AL INICIO de app.js,
+//  justo después de la declaración de App.data.documents
+// ═══════════════════════════════════════════
 
+// PROBLEMA: App.data.stockHistory nunca se inicializa,
+// pero renderStock() lo usa con .unshift() y .slice()
+// lo que causa un TypeError que rompe toda la navegación.
+
+// SOLUCIÓN: agregar esta línea en la sección "DATOS DE LA FLOTA"
+// de app.js, después de App.data.documents = [...]:
+
+App.data.stockHistory = [
+  { date:'2026-04-09', name:'Filtro aceite motor MB Actros',    unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Filtro combustible primario MB',   unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Relay de arranque DAF XF',         unit:'un', qty:1, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
+  { date:'2026-04-09', name:'Fusible principal 80A',            unit:'un', qty:2, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
+  { date:'2026-04-08', name:'Grasa EP2 multiuso 20kg balde',    unit:'kg', qty:2, type:'Egreso',  motivo:'OT-0279 — Engrase INT-05',            user:'Rubén M.' },
+  { date:'2026-04-07', name:'Rulemán masa delantera MB',        unit:'un', qty:2, type:'Egreso',  motivo:'OT-0278 — Cambio rulemanes INT-22',   user:'Carlos R.' },
+  { date:'2026-04-06', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-06', name:'Aceite caja Meritor manual',       unit:'L',  qty:9, type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-06', name:'Aceite diferencial 85W-140',       unit:'L',  qty:14,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-01', name:'Filtro aceite motor MB Actros',    unit:'un', qty:5, type:'Ingreso', motivo:'Reposición mensual — AutoRep SA',      user:'Norberto V.' },
+  { date:'2026-04-01', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:200,type:'Ingreso',motivo:'Reposición mensual — Lubricor',        user:'Norberto V.' },
+  { date:'2026-03-28', name:'Batería 12V 150Ah Bosch',          unit:'un', qty:2, type:'Ingreso', motivo:'Compra nueva — Electro Sur',           user:'Norberto V.' },
+  { date:'2026-03-20', name:'Zapatas freno eje trasero MB',     unit:'jgo',qty:2, type:'Ingreso', motivo:'Reposición — Mec-Parts',              user:'Norberto V.' },
+  { date:'2026-03-15', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT correctivo INT-03',                user:'Carlos R.' },
+];
 // ── NAVEGACIÓN ──
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
