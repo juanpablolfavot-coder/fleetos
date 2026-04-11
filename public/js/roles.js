@@ -130,38 +130,34 @@ const DEMO_USERS = [
 ];
 
 // ── LOGIN ──
+let __selectedRole = null; // scope global
+
 function initLogin() {
   const screen = document.getElementById('login-screen');
   const roleGrid = document.getElementById('role-grid');
   const userSelect = document.getElementById('user-select');
   const btnLogin = document.getElementById('btn-login');
-  let selectedRole = null;
 
   // Renderizar tarjetas de roles
   const rolesShow = ['dueno','gerencia','jefe_mantenimiento','mecanico','chofer','encargado_combustible','paniol','contador'];
   roleGrid.innerHTML = rolesShow.map(rk => {
     const r = ROLES[rk];
-    return `<div class="role-card" data-role="${rk}" onclick="selectRole('${rk}')">
+    return `<div class="role-card" data-role="${rk}">
       <span class="rc-icon">${r.icon}</span>
       <span class="rc-name">${r.label}</span>
       <span class="rc-desc">${r.desc}</span>
     </div>`;
   }).join('');
+  // Agregar click listeners a las cards
+  roleGrid.querySelectorAll('.role-card').forEach(card => {
+    card.addEventListener('click', () => selectRole(card.dataset.role));
+  });
 
-  window.selectRole = function(roleKey) {
-    selectedRole = roleKey;
-    document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
-    document.querySelector(`.role-card[data-role="${roleKey}"]`).classList.add('selected');
-    // Llenar usuarios de ese rol
-    const users = DEMO_USERS.filter(u => u.role === roleKey);
-    userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.vehicle ? ' — ' + u.vehicle : ''}</option>`).join('');
-    userSelect.style.display = 'block';
-    const lbl1 = document.getElementById('user-select-label'); if(lbl1) lbl1.style.display = 'block';
-    btnLogin.disabled = false;
-  };
+  // selectRole definida globalmente abajo
+;
 
   btnLogin.onclick = function() {
-    if (!selectedRole) return;
+    if (!_selectedRole) return;
     const uid = parseInt(userSelect.value);
     const user = DEMO_USERS.find(u => u.id === uid);
     if (!user) return;
@@ -180,7 +176,7 @@ function initLogin() {
 
   // Enter key
   document.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && selectedRole) btnLogin.click();
+    if (e.key === 'Enter' && _selectedRole) btnLogin.click();
   });
 }
 
@@ -622,3 +618,15 @@ function renderContadorPanel() {
     });
   }, 100);
 }
+
+window.selectRole = function(roleKey) {
+    _selectedRole = roleKey;
+    document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
+    document.querySelector(`.role-card[data-role="${roleKey}"]`).classList.add('selected');
+    // Llenar usuarios de ese rol
+    const users = DEMO_USERS.filter(u => u.role === roleKey);
+    userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.vehicle ? ' — ' + u.vehicle : ''}</option>`).join('');
+    userSelect.style.display = 'block';
+    const lbl1 = document.getElementById('user-select-label'); if(lbl1) lbl1.style.display = 'block';
+    btnLogin.disabled = false;
+  }
