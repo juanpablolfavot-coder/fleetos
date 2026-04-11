@@ -156,7 +156,7 @@ function initLogin() {
     const users = DEMO_USERS.filter(u => u.role === roleKey);
     userSelect.innerHTML = users.map(u => `<option value="${u.id}">${u.name}${u.vehicle ? ' — ' + u.vehicle : ''}</option>`).join('');
     userSelect.style.display = 'block';
-    document.getElementById('user-select-label').style.display = 'block';
+    const lbl1 = document.getElementById('user-select-label'); if(lbl1) lbl1.style.display = 'block';
     btnLogin.disabled = false;
   };
 
@@ -213,7 +213,7 @@ function bootApp() {
       // Reset selección
       document.querySelectorAll('.role-card').forEach(c => c.classList.remove('selected'));
       document.getElementById('user-select').style.display = 'none';
-      document.getElementById('user-select-label').style.display = 'none';
+      const lbl2 = document.getElementById('user-select-label'); if(lbl2) lbl2.style.display = 'none';
       document.getElementById('btn-login').disabled = true;
     };
   }
