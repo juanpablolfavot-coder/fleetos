@@ -185,10 +185,10 @@ function bootApp() {
   const role = u.roleData;
 
   // Actualizar topbar y sidebar
-  document.querySelector('.user-info .user-name').textContent = u.name;
-  document.querySelector('.user-info .user-role').textContent = role.label;
-  document.querySelector('.user-avatar').textContent = u.initials;
-  document.querySelector('.user-avatar').style.background = getRoleColor(u.role);
+  const un = document.querySelector('.user-info .user-name'); if(un) un.textContent = u.name;
+  const ur = document.querySelector('.user-info .user-role'); if(ur) ur.textContent = role.label;
+  const av = document.querySelector('.user-avatar'); if(av) av.textContent = u.initials;
+  if(av) av.style.background = getRoleColor(u.role);
 
   // Badge de rol en topbar
   const existing = document.getElementById('role-badge-topbar');
@@ -197,7 +197,7 @@ function bootApp() {
   badge.id = 'role-badge-topbar';
   badge.className = `role-badge ${role.badge}`;
   badge.textContent = role.label;
-  document.querySelector('.topbar-actions').prepend(badge);
+  const ta = document.querySelector('.topbar-actions'); if(ta) ta.prepend(badge);
 
   // Botón logout
   const logoutBtn = document.getElementById('btn-logout');
