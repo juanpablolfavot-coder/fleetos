@@ -153,8 +153,7 @@ function initLogin() {
     card.addEventListener('click', () => selectRole(card.dataset.role));
   });
 
-  // selectRole definida globalmente abajo
-;
+  // selectRole se define al final del archivo (scope global)
 
   btnLogin.onclick = function() {
     if (!_selectedRole) return;
