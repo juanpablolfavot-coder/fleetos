@@ -3632,8 +3632,8 @@ function showToast(type, msg) {
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelector('.user-info .user-name').textContent  = App.currentUser.name;
-  document.querySelector('.user-info .user-role').textContent  = App.currentUser.role;
-  document.querySelector('.user-avatar').textContent           = App.currentUser.initials;
-  navigate('dashboard');
+  // Arrancar el login (definido en roles.js que carga primero)
+  if (typeof initLogin === 'function') {
+    initLogin();
+  }
 });
