@@ -12,6 +12,9 @@ function initLogin() {
   const btnLogin      = document.getElementById('btn-login');
   const errorDiv      = document.getElementById('login-error');
 
+  // Click en botón de login
+  if (btnLogin) btnLogin.addEventListener('click', doLogin);
+
   // Enter key para login
   [emailInput, passwordInput].forEach(el => {
     if (el) el.addEventListener('keydown', e => {
