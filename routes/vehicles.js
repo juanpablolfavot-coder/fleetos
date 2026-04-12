@@ -8,7 +8,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { status, type, base } = req.query;
     let sql = `
-      SELECT v.*, u.name AS driver_name
+      SELECT v.*, COALESCE(v.driver_name, u.name, '—') AS driver_name
       FROM vehicles v
       LEFT JOIN users u ON u.id = v.driver_id
       WHERE v.active = TRUE

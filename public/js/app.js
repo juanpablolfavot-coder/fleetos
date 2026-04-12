@@ -804,8 +804,20 @@ async function saveEditVehicle(id) {
   });
   if (!res.ok) { const e=await res.json(); showToast('error',e.error||'Error al guardar'); return; }
 
-  closeModal(); showToast('ok',`Unidad ${code} actualizada`);
-  await loadInitialData(); renderFleet();
+  const updated = await res.json();
+  // Actualizar directamente en App.data sin recargar todo
+  const idx = App.data.vehicles.findIndex(v=>v.id===id);
+  if (idx>=0) {
+    App.data.vehicles[idx] = Object.assign(App.data.vehicles[idx], {
+      code, plate, brand, model, year, type, base, status,
+      km: km, driver: driver||'—', vin, engine_no: engine, cost_center: cc
+    });
+  }
+  closeModal();
+  showToast('ok',`Unidad ${code} actualizada`);
+  renderFleet();
+  // Refrescar datos en background
+  loadInitialData().then(()=>renderFleet());
 }
 
 async function saveNewOT() {
@@ -830,7 +842,7 @@ async function saveNewOT() {
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
 
   closeModal(); showToast('ok','OT creada correctamente');
-  await loadInitialData(); renderWorkOrders();
+  renderWorkOrders(); loadInitialData().then(()=>renderWorkOrders());
 }
 
 
@@ -1394,7 +1406,7 @@ async function saveFuelLoad() {
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al registrar carga'); return; }
 
   closeModal(); showToast('ok','Carga de combustible registrada');
-  await loadInitialData(); renderFuel();
+  renderFuel(); loadInitialData().then(()=>renderFuel());
 }
 
 
@@ -2482,7 +2494,7 @@ async function saveNewStockItem() {
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al guardar stock'); return; }
 
   closeModal(); showToast('ok','Ítem de stock creado');
-  await loadInitialData(); renderStock();
+  renderStock(); loadInitialData().then(()=>renderStock());
 }
 
 
@@ -3301,7 +3313,7 @@ async function saveNewUser() {
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear usuario'); return; }
 
   closeModal(); showToast('ok',`Usuario ${name} creado`);
-  await loadInitialData(); renderUsers();
+  renderUsers(); loadInitialData().then(()=>renderUsers());
 }
 
 
@@ -3516,10 +3528,20 @@ async function saveNewVehicle() {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar unidad'); return; }
 
+  const newV = await res.json();
+  // Agregar directamente a App.data para actualización inmediata
+  if (!App.data.vehicles) App.data.vehicles = [];
+  App.data.vehicles.push({
+    id: newV.id, code, plate, brand, model, year, type, base, status,
+    km: km, driver: driver||'—', vin, engine_no: engine, cost_center: cc,
+    cost_km: 0, gps_status: 'unknown', tech_spec: {}
+  });
   closeModal();
   showToast('ok', `Unidad ${code} registrada correctamente`);
-  await loadInitialData();
   renderFleet();
+  renderDashboard();
+  // Refrescar en background para sincronizar con DB
+  loadInitialData().then(()=>{ renderFleet(); renderDashboard(); });
 }
 
 function openNewOTModal(preselectedVehicle) {
@@ -3576,12 +3598,39 @@ function openNewOTModal(preselectedVehicle) {
   ]);
 }
 
-function syncGPSNow(btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...'; }
-  setTimeout(() => {
+async function syncGPSNow(btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Sincronizando...'; }
+  try {
+    // Recargar vehículos con datos actualizados
+    const res = await apiFetch('/api/vehicles');
+    if (res.ok) {
+      const vehicles = await res.json();
+      // Mapear igual que en loadInitialData
+      App.data.vehicles = vehicles.map(v => ({
+        id: v.id, code: v.code, plate: v.plate, brand: v.brand, model: v.model,
+        year: v.year, type: v.type, status: v.status || 'ok',
+        km: v.km_current || 0, base: v.base || 'Central',
+        driver: v.driver_name || '—', cost_km: parseFloat(v.cost_km) || 0,
+        vin: v.vin, engine_no: v.engine_no, cost_center: v.cost_center,
+        driver_id: v.driver_id,
+        gps_lat: parseFloat(v.gps_lat) || null,
+        gps_lng: parseFloat(v.gps_lng) || null,
+        gps_speed: parseFloat(v.gps_speed) || 0,
+        gps_status: v.gps_status || 'unknown',
+        gps_updated: v.gps_updated_at || null,
+        tech_spec: v.tech_spec || {},
+      }));
+      renderFleet();
+      renderDashboard();
+      showToast('ok', `Datos actualizados — ${App.data.vehicles.length} unidades`);
+    } else {
+      showToast('warn', 'No se pudieron actualizar los datos');
+    }
+  } catch(e) {
+    showToast('warn', 'Error al sincronizar');
+  } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Sync GPS'; }
-    showToast('ok', 'GPS sincronizado. Sin dispositivos conectados actualmente.');
-  }, 1500);
+  }
 }
 
 function openEditTechSpecModal(id) {
