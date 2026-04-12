@@ -8,6 +8,13 @@ const App = {
   currentUser: null,
   data: {}
 };
+// Helper para verificar rol del usuario actual
+function userHasRole(...roles) {
+  const role = App.currentUser?.role;
+  return roles.includes(role);
+}
+
+
 
 
 App.data.users = [
