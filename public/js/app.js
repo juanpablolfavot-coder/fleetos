@@ -458,7 +458,37 @@ function getTechSpec(brand, model, type) {
       fuel_cap: '200–300 L',
     },
   };
-  return specs[brand] || specs['Mercedes-Benz'];
+  // Buscar case-insensitive
+  const brandKey = Object.keys(specs).find(k => k.toLowerCase() === (brand||'').toLowerCase());
+  if (brandKey) return specs[brandKey];
+  // Fallback genérico vacío para marcas no registradas
+  return {
+    engine: 'No registrado — completar desde "Editar datos generales"',
+    power: 'No registrado',
+    transmission: 'No registrado',
+    differential: 'No registrado',
+    oil_engine: 'No registrado',
+    oil_gearbox: 'No registrado',
+    oil_diff: 'No registrado',
+    coolant: 'No registrado',
+    filter_oil: 'No registrado',
+    filter_fuel_p: 'No registrado',
+    filter_fuel_s: 'No registrado',
+    filter_air: 'No registrado',
+    filter_sep: 'No registrado',
+    filter_cabin: 'No registrado',
+    grease: 'No registrado',
+    battery: 'No registrado',
+    urea: 'No registrado',
+    service_km: 'No registrado',
+    service_engage: 'No registrado',
+    service_major: 'No registrado',
+    tire_size: 'No registrado',
+    tire_pressure_steer: '—',
+    tire_pressure_drive: '—',
+    wheel_torque: 'No registrado',
+    fuel_cap: 'No registrado',
+  };
 }
 
 function openVehicleDetail(id) {
