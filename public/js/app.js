@@ -327,23 +327,6 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div class="two-col">
-      <div class="card">
-        <div class="section-header">
-          <div><div class="section-title">Órdenes de trabajo abiertas</div></div>
-          <button class="btn btn-secondary btn-sm" onclick="navigate('workorders')">Ver todas</button>
-        </div>
-        <div id="dash-ot"></div>
-      </div>
-      <div class="card">
-        <div class="section-header">
-          <div><div class="section-title">Últimas cargas de combustible</div></div>
-          <button class="btn btn-secondary btn-sm" onclick="navigate('fuel')">Ver todas</button>
-        </div>
-        <div id="dash-fuel"></div>
-      </div>
-    </div>
-  `;
 
   // Fleet grid
   const grid = document.getElementById('fleet-grid-mini');
