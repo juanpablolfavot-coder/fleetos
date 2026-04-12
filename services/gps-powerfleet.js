@@ -72,20 +72,21 @@ async function getToken() {
   if (_token && _tokenExp && Date.now() < _tokenExp) return true;
 
   console.log('[GPS] Obteniendo token Bearer...');
+  console.log('[GPS] URL token: https://'+PF_HOST+PF_BASE+'/token');
 
   // OAuth2 password grant — formato application/x-www-form-urlencoded
   const body = `grant_type=password&username=${encodeURIComponent(PF_USER)}&password=${encodeURIComponent(PF_PASS)}`;
+
+  // Guardar y limpiar token actual para que no se incluya en el request de login
+  const savedToken = _token;
+  _token = null;
 
   const res = await httpsRequest('/token', {
     method:      'POST',
     body,
     contentType: 'application/x-www-form-urlencoded',
-    headers:     { 'Authorization': '' },  // sin token para el login
     timeout:     12000,
   }).catch(e => ({ status: 0, body: '', error: e.message }));
-
-  // Limpiar el Bearer para esta request específica
-  _token = null;
 
   console.log('[GPS] Token status:', res.status, '| body:', res.body.slice(0, 200));
 
@@ -114,10 +115,12 @@ async function getToken() {
   if (res2.status === 200) {
     try {
       const d = JSON.parse(res2.body);
-      if (d.access_token) {
-        _token    = d.access_token;
-        _tokenExp = Date.now() + ((d.expires_in || 3600) * 1000) - 60000;
-        console.log('[GPS] Token JSON OK');
+      const tk = d.access_token || d.token || d.accessToken || d.bearer;
+      console.log('[GPS] Token keys:', Object.keys(d).join(', '));
+      if (tk) {
+        _token    = tk;
+        _tokenExp = Date.now() + ((d.expires_in || d.expiresIn || 3600) * 1000) - 60000;
+        console.log('[GPS] Token OK! Primeros 30 chars:', tk.slice(0,30));
         return true;
       }
     } catch(e) {}
