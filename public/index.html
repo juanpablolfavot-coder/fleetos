@@ -1,168 +1,343 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FleetOS — Sistema de gestión de flota</title>
-  <link rel="stylesheet" href="css/main.css">
-  <link rel="stylesheet" href="css/login.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <link rel="stylesheet" href="css/main.css" />
+  <link rel="stylesheet" href="css/login.css" />
 </head>
 <body>
 
-<!-- ═══ LOGIN ═══ -->
-<div class="login-screen" id="login-screen">
-  <div class="login-box">
-    <div class="login-logo">
-      <div class="login-logo-mark">FO</div>
-      <div>
-        <div class="login-logo-text">FleetOS</div>
-        <div class="login-logo-sub">Gestión de flota pesada · 45 unidades</div>
-      </div>
-    </div>
-    <div class="login-title">Seleccioná tu rol</div>
-    <div class="login-sub">Cada rol tiene una vista adaptada a sus tareas.</div>
-    <div class="role-grid" id="role-grid"></div>
-    <div class="login-divider">usuario</div>
-    <div class="login-form">
-      <label class="form-label" id="user-select-label" style="display:none">Seleccioná tu usuario</label>
-      <select class="form-select" id="user-select" style="display:none;margin-bottom:16px"></select>
-    </div>
-    <button class="btn-login" id="btn-login" disabled>Ingresar al sistema</button>
-    <div class="login-footer">
-      Sistema de demostración · Todos los datos son simulados<br>
-      FleetOS v1.0 · Flota de 45 unidades
-    </div>
-  </div>
-</div>
-
-<!-- ═══ APP ═══ -->
-<div id="app-shell" style="display:none">
-
-  <nav class="sidebar">
-    <div class="sidebar-logo">
-      <div class="logo-mark">FO</div>
-      <div>
-        <div class="logo-text">FleetOS</div>
-        <div class="logo-sub">v1.0 · 45 unidades</div>
-      </div>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Principal</div>
-      <a class="nav-item" data-page="dashboard"      onclick="navigate('dashboard')"><span class="nav-icon">◈</span><span>Panel general</span></a>
-      <a class="nav-item" data-page="fleet"          onclick="navigate('fleet')"><span class="nav-icon">⊡</span><span>Flota y vehículos</span></a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Operaciones</div>
-      <a class="nav-item" data-page="chofer_panel"   onclick="navigate('chofer_panel')"><span class="nav-icon">◎</span><span>Panel chofer</span></a>
-      <a class="nav-item" data-page="workorders"     onclick="navigate('workorders')"><span class="nav-icon">◎</span><span>Órdenes de trabajo</span><span class="nav-badge">5</span></a>
-      <a class="nav-item" data-page="maintenance"    onclick="navigate('maintenance')"><span class="nav-icon">◷</span><span>Mantenimiento</span></a>
-      <a class="nav-item" data-page="fuel"           onclick="navigate('fuel')"><span class="nav-icon">◈</span><span>Combustible y urea</span></a>
-      <a class="nav-item" data-page="tires"          onclick="navigate('tires')"><span class="nav-icon">○</span><span>Cubiertas</span></a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Administración</div>
-      <a class="nav-item" data-page="stock"          onclick="navigate('stock')"><span class="nav-icon">▦</span><span>Stock y pañol</span></a>
-      <a class="nav-item" data-page="documents"      onclick="navigate('documents')"><span class="nav-icon">◻</span><span>Documentación</span><span class="nav-badge">3</span></a>
-      <a class="nav-item" data-page="costs"          onclick="navigate('costs')"><span class="nav-icon">◈</span><span>Costos operativos</span></a>
-      <a class="nav-item" data-page="contador_panel" onclick="navigate('contador_panel')"><span class="nav-icon">◻</span><span>Panel contador</span></a>
-    </div>
-    <div class="sidebar-footer">
-      <div class="user-card">
-        <div class="user-avatar">??</div>
-        <div class="user-info">
-          <div class="user-name">—</div>
-          <div class="user-role">—</div>
+  <!-- ═══ LOGIN ═══ -->
+  <div class="login-screen" id="login-screen">
+    <div class="login-box">
+      <div class="login-logo">
+        <div class="login-logo-mark">FO</div>
+        <div>
+          <div class="login-logo-text">FleetOS</div>
+          <div class="login-logo-sub">Gestión de flota pesada · 45 unidades</div>
         </div>
       </div>
-      <a class="nav-item" id="btn-logout" style="margin-top:4px;cursor:pointer">
-        <span class="nav-icon">←</span><span>Cerrar sesión</span>
-      </a>
-    </div>
-  </nav>
 
-  <main class="main">
-    <div class="topbar">
-      <div>
-        <div class="topbar-title">Panel general</div>
-        <div class="topbar-sub">Vista ejecutiva · Flota 45 unidades</div>
+      <div class="login-title">Seleccioná tu rol</div>
+      <div class="login-sub">Cada rol tiene una vista adaptada a sus tareas.</div>
+
+      <div class="role-grid" id="role-grid"></div>
+
+      <div class="login-divider">usuario</div>
+
+      <div class="login-form">
+        <label class="form-label" id="user-select-label" style="display:none">Seleccioná tu usuario</label>
+        <select class="form-select" id="user-select" style="display:none;margin-bottom:16px"></select>
       </div>
-      <div class="topbar-actions">
-        <button class="btn btn-secondary btn-sm" onclick="navigate('workorders');setTimeout(()=>openNewOTModal(),100)">+ Nueva OT</button>
-        <button class="btn btn-primary btn-sm"   onclick="navigate('fuel');setTimeout(()=>openFuelLoadModal(),100)">+ Cargar combustible</button>
+
+      <button class="btn-login" id="btn-login" disabled>Ingresar al sistema</button>
+
+      <div class="login-footer">
+        Sistema de demostración · Todos los datos son simulados<br />
+        FleetOS v1.0 · Flota de 45 unidades
       </div>
     </div>
-    <div id="page-dashboard"      class="page active"></div>
-    <div id="page-fleet"          class="page"></div>
-    <div id="page-workorders"     class="page"></div>
-    <div id="page-maintenance"    class="page"></div>
-    <div id="page-fuel"           class="page"></div>
-    <div id="page-tires"          class="page"></div>
-    <div id="page-stock"          class="page"></div>
-    <div id="page-documents"      class="page"></div>
-    <div id="page-costs"          class="page"></div>
-    <div id="page-chofer_panel"   class="page"></div>
-    <div id="page-contador_panel" class="page"></div>
-  </main>
-
-</div>
-
-<!-- MODAL -->
-<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="modal-title"></div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-    <div class="modal-body"   id="modal-body"></div>
-    <div class="modal-footer" id="modal-footer"></div>
   </div>
-</div>
 
-<div class="toast-container" id="toast-container"></div>
+  <!-- ═══ APP ═══ -->
+  <div id="app-shell" style="display:none">
 
-<script src="js/app.js"></script>
-<script src="js/roles.js"></script>
-<script>
-// Parchear navigate para soportar roles y páginas especiales
-const _coreNavigate = navigate;
-navigate = function(page) {
-  const role = App.currentUser && App.currentUser.roleData;
-  if (role) {
-    const allowed = role.modules.includes('all') || role.modules.includes(page);
-    if (!allowed) {
-      _setActivePage(page);
-      document.getElementById('page-'+page).innerHTML = `
-        <div class="locked-overlay">
-          <div class="locked-icon">◻</div>
-          <div class="locked-title">Acceso restringido</div>
-          <div class="locked-desc">Tu rol (${role.label}) no tiene acceso a este módulo.</div>
-        </div>`;
-      document.querySelector('.topbar-title').textContent = getPageTitle(page);
-      document.querySelector('.topbar-sub').textContent   = '';
-      return;
-    }
-  }
-  if (page === 'chofer_panel')   { _setActivePage(page); _updateTopbar(page); renderChoferPanel();   return; }
-  if (page === 'contador_panel') { _setActivePage(page); _updateTopbar(page); renderContadorPanel(); return; }
-  _coreNavigate(page);
-};
+    <nav class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-mark">FO</div>
+        <div>
+          <div class="logo-text">FleetOS</div>
+          <div class="logo-sub">v1.0 · 45 unidades</div>
+        </div>
+      </div>
 
-function _setActivePage(page) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const el  = document.getElementById('page-'+page);
-  const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
-  if (el)  el.classList.add('active');
-  if (nav) nav.classList.add('active');
-  App.currentPage = page;
-}
-function _updateTopbar(page) {
-  document.querySelector('.topbar-title').textContent = getPageTitle(page);
-  document.querySelector('.topbar-sub').textContent   = getPageSub(page);
-}
+      <div class="nav-section">
+        <div class="nav-section-label">Principal</div>
+        <a href="#" class="nav-item" data-page="dashboard">
+          <span class="nav-icon">◈</span><span>Panel general</span>
+        </a>
+        <a href="#" class="nav-item" data-page="fleet">
+          <span class="nav-icon">⊡</span><span>Flota y vehículos</span>
+        </a>
+      </div>
 
-document.addEventListener('DOMContentLoaded', () => { initLogin(); });
-</script>
+      <div class="nav-section">
+        <div class="nav-section-label">Operaciones</div>
+        <a href="#" class="nav-item" data-page="chofer_panel">
+          <span class="nav-icon">◎</span><span>Panel chofer</span>
+        </a>
+        <a href="#" class="nav-item" data-page="workorders">
+          <span class="nav-icon">◎</span><span>Órdenes de trabajo</span><span class="nav-badge">5</span>
+        </a>
+        <a href="#" class="nav-item" data-page="maintenance">
+          <span class="nav-icon">◷</span><span>Mantenimiento</span>
+        </a>
+        <a href="#" class="nav-item" data-page="fuel">
+          <span class="nav-icon">◈</span><span>Combustible y urea</span>
+        </a>
+        <a href="#" class="nav-item" data-page="tires">
+          <span class="nav-icon">○</span><span>Cubiertas</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Administración</div>
+        <a href="#" class="nav-item" data-page="stock">
+          <span class="nav-icon">▦</span><span>Stock y pañol</span>
+        </a>
+        <a href="#" class="nav-item" data-page="documents">
+          <span class="nav-icon">◻</span><span>Documentación</span><span class="nav-badge">3</span>
+        </a>
+        <a href="#" class="nav-item" data-page="costs">
+          <span class="nav-icon">◈</span><span>Costos operativos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="contador_panel">
+          <span class="nav-icon">◻</span><span>Panel contador</span>
+        </a>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-card">
+          <div class="user-avatar">??</div>
+          <div class="user-info">
+            <div class="user-name">—</div>
+            <div class="user-role">—</div>
+          </div>
+        </div>
+
+        <a href="#" class="nav-item" id="btn-logout" style="margin-top:4px;cursor:pointer">
+          <span class="nav-icon">←</span><span>Cerrar sesión</span>
+        </a>
+      </div>
+    </nav>
+
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="topbar-title">Panel general</div>
+          <div class="topbar-sub">Vista ejecutiva · Flota 45 unidades</div>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-new-ot">+ Nueva OT</button>
+          <button class="btn btn-primary btn-sm" id="btn-new-fuel">+ Cargar combustible</button>
+        </div>
+      </div>
+
+      <div id="page-dashboard" class="page active"></div>
+      <div id="page-fleet" class="page"></div>
+      <div id="page-workorders" class="page"></div>
+      <div id="page-maintenance" class="page"></div>
+      <div id="page-fuel" class="page"></div>
+      <div id="page-tires" class="page"></div>
+      <div id="page-stock" class="page"></div>
+      <div id="page-documents" class="page"></div>
+      <div id="page-costs" class="page"></div>
+      <div id="page-chofer_panel" class="page"></div>
+      <div id="page-contador_panel" class="page"></div>
+    </main>
+
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title"></div>
+        <button class="modal-close" id="modal-close-btn" type="button">✕</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="js/app.js"></script>
+  <script src="js/roles.js"></script>
+
+  <script>
+    (function () {
+      const originalNavigate = window.navigate;
+
+      window.navigate = function (page) {
+        const role = window.App && App.currentUser && App.currentUser.roleData;
+
+        if (role) {
+          const allowed = role.modules.includes('all') || role.modules.includes(page);
+
+          if (!allowed) {
+            setActivePage(page);
+            const lockedPage = document.getElementById('page-' + page);
+
+            if (lockedPage) {
+              lockedPage.innerHTML = `
+                <div class="locked-overlay">
+                  <div class="locked-icon">◻</div>
+                  <div class="locked-title">Acceso restringido</div>
+                  <div class="locked-desc">Tu rol (${role.label}) no tiene acceso a este módulo.</div>
+                </div>
+              `;
+            }
+
+            updateTopbar(page);
+            return;
+          }
+        }
+
+        if (page === 'chofer_panel') {
+          setActivePage(page);
+          updateTopbar(page);
+          if (typeof window.renderChoferPanel === 'function') window.renderChoferPanel();
+          return;
+        }
+
+        if (page === 'contador_panel') {
+          setActivePage(page);
+          updateTopbar(page);
+          if (typeof window.renderContadorPanel === 'function') window.renderContadorPanel();
+          return;
+        }
+
+        if (typeof originalNavigate === 'function') {
+          originalNavigate(page);
+        }
+      };
+
+      function setActivePage(page) {
+        document.querySelectorAll('.page').forEach(function (p) {
+          p.classList.remove('active');
+        });
+
+        document.querySelectorAll('.nav-item').forEach(function (n) {
+          n.classList.remove('active');
+        });
+
+        const pageEl = document.getElementById('page-' + page);
+        const navEl = document.querySelector('.nav-item[data-page="' + page + '"]');
+
+        if (pageEl) pageEl.classList.add('active');
+        if (navEl) navEl.classList.add('active');
+
+        if (window.App) {
+          App.currentPage = page;
+        }
+      }
+
+      function updateTopbar(page) {
+        const titleEl = document.querySelector('.topbar-title');
+        const subEl = document.querySelector('.topbar-sub');
+
+        if (titleEl && typeof window.getPageTitle === 'function') {
+          titleEl.textContent = window.getPageTitle(page);
+        }
+
+        if (subEl && typeof window.getPageSub === 'function') {
+          subEl.textContent = window.getPageSub(page);
+        }
+      }
+
+      function bindNavigation() {
+        document.querySelectorAll('.nav-item[data-page]').forEach(function (item) {
+          item.addEventListener('click', function (event) {
+            event.preventDefault();
+            const page = item.getAttribute('data-page');
+            if (page) window.navigate(page);
+          });
+        });
+      }
+
+      function bindTopbarActions() {
+        const btnNewOT = document.getElementById('btn-new-ot');
+        const btnNewFuel = document.getElementById('btn-new-fuel');
+
+        if (btnNewOT) {
+          btnNewOT.addEventListener('click', function () {
+            window.navigate('workorders');
+            setTimeout(function () {
+              if (typeof window.openNewOTModal === 'function') {
+                window.openNewOTModal();
+              }
+            }, 100);
+          });
+        }
+
+        if (btnNewFuel) {
+          btnNewFuel.addEventListener('click', function () {
+            window.navigate('fuel');
+            setTimeout(function () {
+              if (typeof window.openFuelLoadModal === 'function') {
+                window.openFuelLoadModal();
+              }
+            }, 100);
+          });
+        }
+      }
+
+      function bindModal() {
+        const overlay = document.getElementById('modal-overlay');
+        const closeBtn = document.getElementById('modal-close-btn');
+
+        if (overlay) {
+          overlay.addEventListener('click', function (event) {
+            if (event.target === overlay && typeof window.closeModal === 'function') {
+              window.closeModal();
+            }
+          });
+        }
+
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function () {
+            if (typeof window.closeModal === 'function') {
+              window.closeModal();
+            }
+          });
+        }
+      }
+
+      function bindLogout() {
+        const btnLogout = document.getElementById('btn-logout');
+
+        if (!btnLogout) return;
+
+        btnLogout.addEventListener('click', function (event) {
+          event.preventDefault();
+
+          if (typeof window.logout === 'function') {
+            window.logout();
+            return;
+          }
+
+          try {
+            localStorage.removeItem('fleetos_current_user');
+            localStorage.removeItem('fleetos_current_role');
+          } catch (e) {}
+
+          const appShell = document.getElementById('app-shell');
+          const loginScreen = document.getElementById('login-screen');
+
+          if (appShell) appShell.style.display = 'none';
+          if (loginScreen) loginScreen.style.display = '';
+
+          if (typeof window.showToast === 'function') {
+            window.showToast('ok', 'Sesión cerrada');
+          }
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', function () {
+        bindNavigation();
+        bindTopbarActions();
+        bindModal();
+        bindLogout();
+
+        if (typeof window.initLogin === 'function') {
+          window.initLogin();
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
