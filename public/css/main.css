@@ -248,6 +248,7 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 }
 .modal-overlay.open { display: flex; }
 .modal {
+  display: block;
   background: var(--bg2); border: 1px solid var(--border2);
   border-radius: var(--radius-lg); width: 100%; max-width: 780px;
   max-height: 92vh; overflow-y: auto;

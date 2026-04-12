@@ -3082,11 +3082,13 @@ function createPreventiveOT(vehicle, task) {
 // ── MODAL HELPER ──
 function openModal(title, bodyHTML, actions=[]) {
   const overlay = document.getElementById('modal-overlay');
+  const modal = overlay.querySelector('.modal');
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHTML;
   const footer = document.getElementById('modal-footer');
   footer.innerHTML = actions.map((a,i)=>`<button class="btn ${a.cls}" id="modal-action-${i}">${a.label}</button>`).join('');
   actions.forEach((a,i) => { document.getElementById('modal-action-'+i).onclick = a.fn; });
+  if (modal) modal.style.display = 'block';
   overlay.classList.add('open');
   overlay.style.display = 'flex';
 }
@@ -3094,7 +3096,7 @@ function closeModal() {
   const overlay = document.getElementById('modal-overlay');
   if (overlay) {
     overlay.classList.remove('open');
-    overlay.style.display = '';
+    overlay.style.display = 'none';
   }
   // Limpiar contenido del modal
   const body = document.getElementById('modal-body');
