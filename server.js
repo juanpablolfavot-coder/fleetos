@@ -17,7 +17,20 @@ const woRoutes=require('./routes/workorders');
 const stockRoutes=require('./routes/stock');
 const {fuelRouter,tireRouter,docRouter,userRouter}=require('./routes/others');
 const app=express();
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "cdnjs.cloudflare.com"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
+      fontSrc: ["'self'", "fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(cors({origin:(o,cb)=>cb(null,true),credentials:true}));
 app.use(cookieParser());
 app.use(express.json({limit:'1mb'}));
