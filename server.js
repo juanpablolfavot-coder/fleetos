@@ -10,6 +10,7 @@ const morgan=require('morgan');
 const path=require('path');
 const cookieParser=require('cookie-parser');
 const {apiLimiter}=require('./middleware/security');
+const { startGPSSync, syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
 const {sanitize}=require('./middleware/security');
 const authRoutes=require('./routes/auth');
 const vehicleRoutes=require('./routes/vehicles');
@@ -78,6 +79,16 @@ app.get(/^(?!\/api).*/, (req, res) => {
 });
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
+// ── Endpoints GPS ──
+app.get('/api/gps/status', async (req, res) => {
+  res.json(getGPSStatus());
+});
+
+app.post('/api/gps/sync', async (req, res) => {
+  syncGPSData();
+  res.json({ ok: true, message: 'Sync iniciado' });
+});
+
 // TEMPORAL: endpoint de migraciÃÂÃÂÃÂÃÂ³n (eliminar despuÃÂÃÂÃÂÃÂ©s)
 app.get('/api/migrate-now', async(req,res)=>{
   const secret = req.query.secret;
@@ -103,7 +114,11 @@ app.get('/api/migrate-now', async(req,res)=>{
 });
 
 const PORT=process.env.PORT||3000;
-app.listen(PORT,()=>console.log('FleetOS OK port',PORT));
+app.listen(PORT, () => {
+  console.log('FleetOS OK port', PORT);
+  // Iniciar sync GPS con Powerfleet cada 5 minutos
+  startGPSSync(5);
+});
 
 
 // TEMP: Migration endpoint

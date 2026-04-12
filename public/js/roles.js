@@ -198,7 +198,12 @@ async function loadInitialData() {
       vin:      v.vin,
       engine_no:v.engine_no,
       cost_center: v.cost_center,
-      driver_id: v.driver_id,
+      driver_id:  v.driver_id,
+      gps_lat:    parseFloat(v.gps_lat)    || null,
+      gps_lng:    parseFloat(v.gps_lng)    || null,
+      gps_speed:  parseFloat(v.gps_speed)  || 0,
+      gps_status: v.gps_status || 'unknown',
+      gps_updated: v.gps_updated_at || null,
     }));
 
     App.data.workOrders = App.data.workOrders.map(o => ({

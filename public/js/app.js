@@ -220,7 +220,7 @@ function renderFleet() {
           <thead><tr>
             <th>Código</th><th>Patente</th><th>Marca / Modelo</th><th>Tipo</th>
             <th>Año</th><th>Km actuales</th><th>Base</th><th>Chofer</th>
-            <th>Costo/km</th><th>Estado</th><th></th>
+            <th>Costo/km</th><th>Estado</th><th>GPS</th><th></th>
           </tr></thead>
           <tbody id="fleet-tbody"></tbody>
         </table>
@@ -249,6 +249,11 @@ function renderFleetTable(data) {
       <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
+      <td>
+        ${v.gps_speed !== undefined ? `<span style="font-size:11px;color:var(--${v.gps_status==='moving'?'ok':'text3'})" title="${v.gps_status==='moving'?'En movimiento: '+Math.round(v.gps_speed||0)+' km/h':'Detenido'}">
+          ${v.gps_status==='moving'?'● '+Math.round(v.gps_speed||0)+' km/h':'◌ Det'}
+        </span>` : '<span style="font-size:11px;color:var(--text3)">— Sin GPS</span>'}
+      </td>
       <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail(${v.id})">Ver ficha</button></td>
     </tr>`;
   }).join('');
