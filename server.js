@@ -39,7 +39,16 @@ app.get('/api/health',async(req,res)=>{
   try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
   catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
 });
-app.use(express.static(path.join(__dirname,'public'),{maxAge:'0'}));
+// Forzar no-cache en archivos JS y CSS
+app.use((req, res, next) => {
+  if (req.path.match(/\.(js|css)$/)) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+app.use(express.static(path.join(__dirname,'public'),{maxAge:'0', etag:false, lastModified:false}));
 app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
