@@ -3411,22 +3411,36 @@ async function renderUsers() {
 }
 
 async function approveUser(id) {
-  const res = await apiFetch(`/api/users/${id}`, {
+  // Buscar el usuario para tener todos sus datos
+  const res = await apiFetch('/api/users');
+  if (!res.ok) { showToast('error', 'Error al obtener usuarios'); return; }
+  const users = await res.json();
+  const u = users.find(x => x.id === id);
+  if (!u) { showToast('error', 'Usuario no encontrado'); return; }
+
+  const res2 = await apiFetch(`/api/users/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ active: true })
+    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, active: true })
   });
-  if (res.ok) { showToast('ok', 'Chofer aprobado — ya puede ingresar al sistema'); renderUsers(); }
-  else showToast('error', 'Error al aprobar usuario');
+  if (res2.ok) { showToast('ok', `✓ ${u.name} aprobado — ya puede ingresar al sistema`); renderUsers(); }
+  else { const e = await res2.json(); showToast('error', e.error || 'Error al aprobar'); }
 }
 
 async function rejectUser(id, name) {
-  if (!confirm(`¿Rechazar y eliminar la solicitud de ${name}?`)) return;
-  const res = await apiFetch(`/api/users/${id}`, {
+  if (!confirm(`¿Rechazar y desactivar la solicitud de ${name}?`)) return;
+
+  const res = await apiFetch('/api/users');
+  if (!res.ok) { showToast('error', 'Error al obtener usuarios'); return; }
+  const users = await res.json();
+  const u = users.find(x => x.id === id);
+  if (!u) { showToast('error', 'Usuario no encontrado'); return; }
+
+  const res2 = await apiFetch(`/api/users/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ active: false })
+    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, active: false })
   });
-  if (res.ok) { showToast('ok', 'Solicitud rechazada'); renderUsers(); }
-  else showToast('error', 'Error al rechazar usuario');
+  if (res2.ok) { showToast('ok', 'Solicitud rechazada'); renderUsers(); }
+  else { const e = await res2.json(); showToast('error', e.error || 'Error al rechazar'); }
 }
 
 
