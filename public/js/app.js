@@ -65,7 +65,7 @@ function getPageSub(p) {
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel, users: renderUsers };
   if (fns[page]) fns[page]();
 }
 
@@ -3360,6 +3360,220 @@ function showToast(type, msg) {
   container.appendChild(el);
   setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(10px)'; el.style.transition='all .3s'; setTimeout(()=>el.remove(),300); }, 3500);
 }
+// ══════════════════════════════════════════════════
+//  MÓDULO: GESTIÓN DE USUARIOS
+// ══════════════════════════════════════════════════
+
+const ROLES_LIST = [
+  { value:'dueno',                 label:'Dueño / Dirección' },
+  { value:'gerencia',              label:'Gerencia operativa' },
+  { value:'jefe_mantenimiento',    label:'Jefe de mantenimiento' },
+  { value:'mecanico',              label:'Mecánico' },
+  { value:'chofer',                label:'Chofer' },
+  { value:'encargado_combustible', label:'Encargado combustible' },
+  { value:'paniol',                label:'Pañol / Stock' },
+  { value:'contador',              label:'Contador / Administración' },
+  { value:'auditor',               label:'Auditor' },
+];
+
+async function renderUsers() {
+  const root = document.getElementById('page-users');
+  if (!root) return;
+
+  root.innerHTML = `
+    <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:var(--text1);margin:0">Gestión de usuarios</h2>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Crear y administrar accesos al sistema</p>
+      </div>
+      <button class="btn btn-primary" onclick="openNewUserModal()">+ Nuevo usuario</button>
+    </div>
+    <div id="users-table-wrap"><div style="text-align:center;padding:40px;color:var(--text3)">Cargando usuarios...</div></div>
+  `;
+
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res || !res.ok) { document.getElementById('users-table-wrap').innerHTML = '<div style="color:var(--danger);padding:20px">Error cargando usuarios</div>'; return; }
+    const users = await res.json();
+
+    document.getElementById('users-table-wrap').innerHTML = `
+      <div class="card" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--bg3);border-bottom:1px solid var(--border1)">
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Nombre</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Email</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Rol</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Unidad</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Estado</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Último acceso</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+              <tr style="border-bottom:1px solid var(--border1)">
+                <td style="padding:12px 16px;font-weight:600;color:var(--text1)">${u.name}</td>
+                <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
+                <td style="padding:12px 16px">
+                  <span style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--text2)">
+                    ${ROLES_LIST.find(r=>r.value===u.role)?.label || u.role}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.vehicle_code || '—'}</td>
+                <td style="padding:12px 16px">
+                  <span style="background:${u.active ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${u.active ? '#22c55e' : '#ef4444'};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600">
+                    ${u.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
+                <td style="padding:12px 16px">
+                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}','${u.name.replace(/'/g,"\'")}','${u.email}','${u.role}','${u.vehicle_code||''}',${u.active})">Editar</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-top:12px">${users.length} usuario${users.length !== 1 ? 's' : ''} registrado${users.length !== 1 ? 's' : ''}</p>
+    `;
+  } catch(e) {
+    document.getElementById('users-table-wrap').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function openNewUserModal() {
+  const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}">${v.code} · ${v.plate}</option>`).join('');
+
+  openModal('Nuevo usuario', `
+    <div class="form-grid">
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Nombre completo *</label>
+        <input class="form-input" id="nu-name" type="text" placeholder="Juan Pérez">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email *</label>
+        <input class="form-input" id="nu-email" type="email" placeholder="juan@empresa.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contraseña *</label>
+        <input class="form-input" id="nu-pass" type="password" placeholder="Mínimo 8 caracteres">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Rol *</label>
+        <select class="form-select" id="nu-role">
+          <option value="">— Seleccioná un rol —</option>
+          ${rolesOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unidad asignada <span style="color:var(--text3)">(solo choferes)</span></label>
+        <select class="form-select" id="nu-vehicle">
+          <option value="">— Sin unidad —</option>
+          ${vehiclesOpts}
+        </select>
+      </div>
+    </div>
+    <div id="nu-error" style="color:#ef4444;font-size:12px;margin-top:8px;min-height:16px"></div>
+  `, [
+    { label:'Crear usuario', cls:'btn-primary', fn: saveNewUser },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
+  ]);
+}
+
+async function saveNewUser() {
+  const name     = document.getElementById('nu-name')?.value?.trim();
+  const email    = document.getElementById('nu-email')?.value?.trim();
+  const password = document.getElementById('nu-pass')?.value;
+  const role     = document.getElementById('nu-role')?.value;
+  const vehicle  = document.getElementById('nu-vehicle')?.value;
+  const errDiv   = document.getElementById('nu-error');
+
+  if (!name || !email || !password || !role) { if(errDiv) errDiv.textContent = 'Completá todos los campos obligatorios'; return; }
+  if (password.length < 8) { if(errDiv) errDiv.textContent = 'La contraseña debe tener al menos 8 caracteres'; return; }
+
+  try {
+    const res = await apiFetch('/api/users', {
+      method: 'POST',
+      body: JSON.stringify({ name, email, password, role, vehicle_code: vehicle || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) { if(errDiv) errDiv.textContent = data.error || 'Error al crear usuario'; return; }
+
+    closeModal();
+    showToast('ok', `Usuario ${name} creado`);
+    renderUsers();
+  } catch(e) {
+    if(errDiv) errDiv.textContent = 'Error de conexión';
+  }
+}
+
+function openEditUserModal(id, name, email, role, vehicle, active) {
+  const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate}</option>`).join('');
+
+  openModal(`Editar: ${name}`, `
+    <div class="form-grid">
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Nombre completo</label>
+        <input class="form-input" id="eu-name" type="text" value="${name}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Rol</label>
+        <select class="form-select" id="eu-role">${rolesOpts}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unidad asignada</label>
+        <select class="form-select" id="eu-vehicle">
+          <option value="">— Sin unidad —</option>
+          ${vehiclesOpts}
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Nueva contraseña <span style="color:var(--text3)">(dejá vacío para no cambiar)</span></label>
+        <input class="form-input" id="eu-pass" type="password" placeholder="••••••••">
+      </div>
+      <div class="form-group" style="grid-column:1/-1;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="eu-active" ${active?'checked':''} style="width:16px;height:16px">
+        <label for="eu-active" style="font-size:13px;color:var(--text2);cursor:pointer">Usuario activo</label>
+      </div>
+    </div>
+    <div id="eu-error" style="color:#ef4444;font-size:12px;margin-top:8px;min-height:16px"></div>
+  `, [
+    { label:'Guardar cambios', cls:'btn-primary', fn: () => saveEditUser(id) },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
+  ]);
+}
+
+async function saveEditUser(id) {
+  const name     = document.getElementById('eu-name')?.value?.trim();
+  const role     = document.getElementById('eu-role')?.value;
+  const vehicle  = document.getElementById('eu-vehicle')?.value;
+  const password = document.getElementById('eu-pass')?.value;
+  const active   = document.getElementById('eu-active')?.checked;
+  const errDiv   = document.getElementById('eu-error');
+
+  if (!name || !role) { if(errDiv) errDiv.textContent = 'Nombre y rol son obligatorios'; return; }
+  if (password && password.length < 8) { if(errDiv) errDiv.textContent = 'La contraseña debe tener al menos 8 caracteres'; return; }
+
+  try {
+    const body = { name, role, vehicle_code: vehicle || null, active };
+    if (password) body.password = password;
+
+    const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    const data = await res.json();
+    if (!res.ok) { if(errDiv) errDiv.textContent = data.error || 'Error al guardar'; return; }
+
+    closeModal();
+    showToast('ok', `Usuario ${name} actualizado`);
+    renderUsers();
+  } catch(e) {
+    if(errDiv) errDiv.textContent = 'Error de conexión';
+  }
+}
+
+
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof initLogin === 'function') {
