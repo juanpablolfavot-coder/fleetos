@@ -352,7 +352,7 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-/* ── RESPONSIVE ── */
+/* ── RESPONSIVE TABLET (≤900px) ── */
 @media (max-width: 900px) {
   .sidebar { width: 60px; }
   .sidebar-logo .logo-text, .sidebar-logo .logo-sub,
@@ -362,6 +362,116 @@ tr:hover td { background: var(--bg3); color: var(--text); }
   .kpi-row { grid-template-columns: 1fr 1fr; }
   .two-col, .three-col { grid-template-columns: 1fr; }
 }
+
+/* ── RESPONSIVE MOBILE (≤600px) ── */
+@media (max-width: 600px) {
+  /* Sidebar se convierte en bottom nav */
+  .sidebar {
+    width: 100% !important;
+    height: 56px !important;
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    z-index: 9999 !important;
+    padding: 0 !important;
+    border-top: 1px solid var(--border) !important;
+    border-right: none !important;
+    display: flex !important;
+    align-items: center !important;
+  }
+  .sidebar-logo { display: none !important; }
+  .sidebar-footer { display: none !important; }
+  .nav-section { display: contents !important; padding: 0 !important; }
+  .nav-section-label { display: none !important; }
+  .nav-item {
+    flex-direction: column !important;
+    min-width: 56px !important;
+    height: 56px !important;
+    border-radius: 0 !important;
+    padding: 6px 4px 4px !important;
+    font-size: 9px !important;
+    gap: 2px !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+  }
+  .nav-item span:not(.nav-icon) {
+    display: block !important;
+    font-size: 8px !important;
+    text-align: center !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 52px !important;
+  }
+  .nav-item .nav-icon { width: auto !important; font-size: 16px !important; }
+
+  /* Main con padding-bottom para el bottom nav */
+  .main {
+    margin-left: 0 !important;
+    padding-bottom: 70px !important;
+  }
+  .page { padding: 12px !important; }
+
+  /* KPIs en columna única */
+  .kpi-row,
+  .kpi-row-3 { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+  .kpi-card { padding: 12px !important; }
+  .kpi-value { font-size: 24px !important; }
+  .kpi-label { font-size: 10px !important; }
+
+  /* Cards y grids */
+  .two-col,
+  .three-col,
+  .form-row,
+  .form-row-3 { grid-template-columns: 1fr !important; gap: 8px !important; }
+
+  /* Tablas scrolleables */
+  .table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
+  table { min-width: 500px !important; }
+
+  /* Section header apilado */
+  .section-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .section-header > div:last-child {
+    width: 100% !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+  .section-header .btn { flex: 1 !important; min-width: 120px !important; }
+
+  /* Modal full screen en mobile */
+  .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
+  .modal-overlay.open .modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    border-radius: 16px 16px 0 0 !important;
+    overflow-y: auto !important;
+  }
+
+  /* Topbar */
+  .topbar { padding: 0 12px !important; }
+  .topbar-title { font-size: 14px !important; }
+  .topbar-sub { display: none !important; }
+  .topbar-actions { gap: 6px !important; }
+  .topbar-actions .btn { font-size: 11px !important; padding: 5px 10px !important; }
+
+  /* Fleet grid más pequeño */
+  .fleet-unit { font-size: 8px !important; padding: 4px 2px !important; }
+
+  /* Botones en tablas */
+  .btn-sm { font-size: 10px !important; padding: 3px 6px !important; }
+}
+
 
 /* ── TIRE MAP DRAG & DROP ── */
 .tire-axle-block {

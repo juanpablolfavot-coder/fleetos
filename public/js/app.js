@@ -139,7 +139,7 @@ function renderDashboard() {
     const cls = {ok:'ok',warn:'warn',taller:'danger',detenida:'danger'}[vc.status]||'ok';
     const el = document.createElement('div');
     el.className = `fleet-unit ${cls}`;
-    el.textContent = vc.id;
+    el.textContent = vc.code;
     el.title = `${vc.code} — ${vc.brand} ${vc.model} — ${vc.status.toUpperCase()}`;
     el.addEventListener('click', () => { navigate('fleet'); setTimeout(()=>filterVehicle(vc.code),100); });
     grid.appendChild(el);
