@@ -212,6 +212,10 @@ function renderFleet() {
       <div style="display:flex;gap:8px">
         <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" oninput="filterFleetTable(this.value)">
         <button class="btn btn-primary" onclick="openNewVehicleModal()">+ Nueva unidad</button>
+        <button class="btn btn-secondary" onclick="syncGPSNow(this)" id="btn-gps-sync" style="margin-left:8px">
+          <span>⚡ Sync GPS</span>
+        </button>
+        <span id="gps-sync-status" style="font-size:12px;color:var(--text3);margin-left:8px"></span>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -250,7 +254,7 @@ function renderFleetTable(data) {
       <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
       <td>
-        ${v.gps_speed !== undefined ? `<span style="font-size:11px;color:var(--${v.gps_status==='moving'?'ok':'text3'})" title="${v.gps_status==='moving'?'En movimiento: '+Math.round(v.gps_speed||0)+' km/h':'Detenido'}">
+        ${v.gps_updated ? `<span style="font-size:11px;color:var(--${v.gps_status==='moving'?'ok':'text3'})" title="Actualizado: ${v.gps_updated ? new Date(v.gps_updated).toLocaleString('es-AR') : '-'}">
           ${v.gps_status==='moving'?'● '+Math.round(v.gps_speed||0)+' km/h':'◌ Det'}
         </span>` : '<span style="font-size:11px;color:var(--text3)">— Sin GPS</span>'}
       </td>
