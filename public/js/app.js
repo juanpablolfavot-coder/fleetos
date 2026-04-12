@@ -3233,23 +3233,6 @@ async function saveMaintConfig(vehicleId) {
 }
 
 
-  root.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-      <div><h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2><p style="font-size:13px;color:var(--text3);margin:4px 0 0">Basado en km actuales de la flota</p></div>
-    </div>
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Unidad</th><th>Tarea</th><th>Tipo</th>
-            <th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
 function openNewMaintModal() {
   openModal('Nueva tarea de mantenimiento', `
     <div class="form-row">
