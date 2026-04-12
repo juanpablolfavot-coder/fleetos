@@ -266,6 +266,12 @@ async function loadInitialData() {
 
     showToast('ok', `${App.data.vehicles.length} vehículos · ${App.data.workOrders.length} OTs cargadas`);
 
+    // Actualizar contador de unidades en el sidebar
+    const logoSub = document.querySelector('.logo-sub');
+    if (logoSub) logoSub.textContent = `v2.0 · ${App.data.vehicles.length} unidades`;
+    const logoSubApp = document.getElementById('sidebar-fleet-count');
+    if (logoSubApp) logoSubApp.textContent = `${App.data.vehicles.length} unidades`;
+
   } catch(err) {
     console.error('Error cargando datos:', err);
     showToast('warn', 'Error cargando datos de la API');

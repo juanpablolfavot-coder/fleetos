@@ -17,17 +17,8 @@ function userHasRole(...roles) {
 
 
 
-App.data.users = [
-  { id:'usr-owner', name:'Roberto Méndez', role:'dueno', initials:'RM', home:'dashboard' },
-  { id:'usr-ger', name:'Gerencia Operativa', role:'gerencia', initials:'GO', home:'dashboard' },
-  { id:'usr-cont', name:'Norberto V.', role:'contador', initials:'NV', home:'contador_panel' },
-  { id:'usr-mant', name:'Rubén M.', role:'mantenimiento', initials:'RM', home:'maintenance' },
-  { id:'usr-mec1', name:'Carlos R.', role:'mecanico', initials:'CR', home:'workorders' },
-  { id:'usr-mec2', name:'Jorge P.', role:'mecanico', initials:'JP', home:'workorders' },
-  { id:'usr-ch1', name:'Juan Pérez', role:'chofer', initials:'JP', home:'chofer_panel', vehicle:'INT-01' },
-  { id:'usr-ch2', name:'Diego Flores', role:'chofer', initials:'DF', home:'chofer_panel', vehicle:'INT-23' },
-  { id:'usr-ch3', name:'Marcos Ibáñez', role:'chofer', initials:'MI', home:'chofer_panel', vehicle:'INT-15' }
-];
+// usuarios cargados desde la API
+
 
 window.FleetRoles = {
   dueno:         { code:'dueno',         label:'Dueño / Dirección', modules:['all'] },
@@ -67,7 +58,7 @@ function getPageTitle(p) {
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:'Vista ejecutiva · Flota 45 unidades', fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', contador_panel:'Costos · reportes · KPIs' };
+  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', contador_panel:'Costos · reportes · KPIs' };
   return s[p] || '';
 }
 
@@ -112,7 +103,7 @@ function renderDashboard() {
 
     <div class="two-col" style="margin-bottom:20px">
       <div class="card">
-        <div class="card-title">Estado de la flota — 45 unidades</div>
+        <div class="card-title">Estado de la flota — ${(App.data.vehicles||[]).length} unidades</div>
         <div class="fleet-grid" id="fleet-grid-mini"></div>
         <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono)">
           <span>● Verde: operativo</span><span>● Naranja: alerta</span><span>● Rojo: taller/detenida</span>
@@ -1376,13 +1367,8 @@ function openFuelEntryModal() {
 
 // ── CUBIERTAS ──
 if (!App.data.tireHistory) {
-  App.data.tireHistory = [
-    { date:'2026-03-15', serial:'MI-1102', fromPos:'2-TDD', toPos:'2-TIE', vehicle:'INT-12', km:108000, type:'Rotación', user:'Carlos R.', obs:'Rotación programada 100.000 km' },
-    { date:'2026-03-15', serial:'MI-1105', fromPos:'2-TIE', toPos:'2-TDD', vehicle:'INT-12', km:108000, type:'Rotación', user:'Carlos R.', obs:'Rotación programada 100.000 km' },
-    { date:'2026-01-20', serial:'MI-1103', fromPos:'1-DD',  toPos:'2-TII', vehicle:'INT-12', km:95000,  type:'Reubicación', user:'Rubén M.', obs:'Pasada de dirección a tracción' },
-    { date:'2025-11-10', serial:'BT-0441', fromPos:'Stock', toPos:'1-DI',  vehicle:'INT-12', km:50000,  type:'Montaje',  user:'Carlos R.', obs:'Cubierta nueva — ingreso a servicio' },
-    { date:'2025-11-10', serial:'BT-0442', fromPos:'Stock', toPos:'1-DD',  vehicle:'INT-12', km:50000,  type:'Montaje',  user:'Carlos R.', obs:'Cubierta nueva — ingreso a servicio' },
-  ];
+  App.data.tireHistory = [];
+
 }
 
 const AXLE_CONFIGS = {
@@ -3102,8 +3088,20 @@ function openModal(title, bodyHTML, actions=[]) {
   footer.innerHTML = actions.map((a,i)=>`<button class="btn ${a.cls}" id="modal-action-${i}">${a.label}</button>`).join('');
   actions.forEach((a,i) => { document.getElementById('modal-action-'+i).onclick = a.fn; });
   overlay.classList.add('open');
+  overlay.style.display = 'flex';
 }
-function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+function closeModal() {
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.style.display = '';
+  }
+  // Limpiar contenido del modal
+  const body = document.getElementById('modal-body');
+  const footer = document.getElementById('modal-footer');
+  if (body) body.innerHTML = '';
+  if (footer) footer.innerHTML = '';
+}
 
 // ── TOAST ──
 function showToast(type, msg) {
@@ -3322,6 +3320,12 @@ async function saveEditUser(id) {
 
 // ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
+  // Asegurar que el modal esté cerrado al iniciar
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.style.display = 'none';
+  }
   if (typeof initLogin === 'function') {
     initLogin();
   }
