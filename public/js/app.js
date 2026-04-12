@@ -249,7 +249,7 @@ function renderFleetTable(data) {
           ${v.gps_status==='moving'?'● '+Math.round(v.gps_speed||0)+' km/h':'◌ Det'}
         </span>` : '<span style="font-size:11px;color:var(--text3)">— Sin GPS</span>'}
       </td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail(${v.id})">Ver ficha</button></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail('${v.id}')">Ver ficha</button></td>
     </tr>`;
   }).join('');
 }
@@ -492,7 +492,7 @@ function showVehicleFicha(id, tab) {
   ];
 
   const tabBar = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
-    ${tabs.map(t=>`<button onclick="showVehicleFicha(${id},'${t.id}')"
+    ${tabs.map(t=>`<button onclick="showVehicleFicha('${id}','${t.id}')"
       style="padding:6px 14px;font-size:12px;border-radius:var(--radius);border:1px solid ${t.id===tab?'var(--accent)':'var(--border)'};
       background:${t.id===tab?'rgba(59,130,246,.15)':'transparent'};
       color:${t.id===tab?'var(--accent)':'var(--text2)'};cursor:pointer;font-family:var(--font)">
@@ -545,7 +545,7 @@ function showVehicleFicha(id, tab) {
           </div>`).join('')}
       </div>
       <div style="margin-top:4px">
-        <button class="btn btn-secondary btn-sm" onclick="openEditVehicleModal(${id})">✎ Editar datos generales</button>
+        <button class="btn btn-secondary btn-sm" onclick="openEditVehicleModal('${id}')">✎ Editar datos generales</button>
       </div>`;
   }
 
