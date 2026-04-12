@@ -2,24 +2,24 @@
 //  FleetOS — Autenticación real con JWT
 // ═══════════════════════════════════════════
 
-// Token JWT — en memoria + sessionStorage para sobrevivir recargas
+// Token JWT — en memoria + localStorage para sobrevivir recargas y deploys
 let _accessToken = null;
 
 function _saveToken(token) {
   _accessToken = token;
   window._getToken = () => _accessToken;
-  try { sessionStorage.setItem('_fleet_tok', token); } catch(e) {}
+  try { localStorage.setItem('_fleet_tok', token); } catch(e) {}
 }
 
 function _clearToken() {
   _accessToken = null;
   window._getToken = () => null;
-  try { sessionStorage.removeItem('_fleet_tok'); } catch(e) {}
+  try { localStorage.removeItem('_fleet_tok'); } catch(e) {}
 }
 
 function _loadToken() {
   try {
-    const t = sessionStorage.getItem('_fleet_tok');
+    const t = localStorage.getItem('_fleet_tok');
     if (t) { _accessToken = t; window._getToken = () => _accessToken; return t; }
   } catch(e) {}
   return null;
@@ -32,7 +32,7 @@ function initLogin() {
   const btnLogin      = document.getElementById('btn-login');
   const errorDiv      = document.getElementById('login-error');
 
-  // Intentar restaurar sesión desde sessionStorage
+  // Intentar restaurar sesión desde localStorage
   const savedToken = _loadToken();
   if (savedToken) {
     _tryRestoreSession();
@@ -118,7 +118,7 @@ async function doLogin() {
       return;
     }
 
-    // Guardar token en memoria Y sessionStorage
+    // Guardar token en memoria Y localStorage
     _saveToken(data.accessToken);
 
     // Configurar usuario
