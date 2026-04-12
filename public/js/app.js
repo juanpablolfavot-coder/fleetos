@@ -456,14 +456,14 @@ function renderDashboard() {
       <div class="card">
         <div class="section-header">
           <div><div class="section-title">Órdenes de trabajo abiertas</div></div>
-          <button class="btn btn-secondary btn-sm" data-click="navigate('workorders')">Ver todas</button>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('workorders')">Ver todas</button>
         </div>
         <div id="dash-ot"></div>
       </div>
       <div class="card">
         <div class="section-header">
           <div><div class="section-title">Últimas cargas de combustible</div></div>
-          <button class="btn btn-secondary btn-sm" data-click="navigate('fuel')">Ver todas</button>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('fuel')">Ver todas</button>
         </div>
         <div id="dash-fuel"></div>
       </div>
@@ -539,7 +539,7 @@ function renderFleet() {
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" data-input="filterFleetTable(this.value)">
-        <button class="btn btn-primary" data-click="openNewVehicleModal()">+ Nueva unidad</button>
+        <button class="btn btn-primary" onclick="openNewVehicleModal()">+ Nueva unidad</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -577,7 +577,7 @@ function renderFleetTable(data) {
       <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
-      <td><button class="btn btn-secondary btn-sm" data-click="openVehicleDetail(${v.id})">Ver ficha</button></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail(${v.id})">Ver ficha</button></td>
     </tr>`;
   }).join('');
 }
@@ -820,7 +820,7 @@ function showVehicleFicha(id, tab) {
   ];
 
   const tabBar = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
-    ${tabs.map(t=>`<button data-click="showVehicleFicha(${id},'${t.id}')"
+    ${tabs.map(t=>`<button onclick="showVehicleFicha(${id},'${t.id}')"
       style="padding:6px 14px;font-size:12px;border-radius:var(--radius);border:1px solid ${t.id===tab?'var(--accent)':'var(--border)'};
       background:${t.id===tab?'rgba(59,130,246,.15)':'transparent'};
       color:${t.id===tab?'var(--accent)':'var(--text2)'};cursor:pointer;font-family:var(--font)">
@@ -873,7 +873,7 @@ function showVehicleFicha(id, tab) {
           </div>`).join('')}
       </div>
       <div style="margin-top:4px">
-        <button class="btn btn-secondary btn-sm" data-click="openEditVehicleModal(${id})">✎ Editar datos generales</button>
+        <button class="btn btn-secondary btn-sm" onclick="openEditVehicleModal(${id})">✎ Editar datos generales</button>
       </div>`;
   }
 
@@ -973,7 +973,7 @@ function showVehicleFicha(id, tab) {
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
             <td class="td-mono">${(o.parts_cost+o.labor_cost)>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
-            <td><button class="btn btn-secondary btn-sm" data-click="printOT('${o.id}')">🖨</button></td>
+            <td><button class="btn btn-secondary btn-sm" onclick="printOT('${o.id}')">🖨</button></td>
           </tr>`).join('')}</tbody></table>`
       : `<div style="color:var(--text3);font-size:13px;padding:24px 0;text-align:center">Sin órdenes de trabajo registradas para esta unidad.</div>`;
   }
@@ -1126,7 +1126,7 @@ function renderWorkOrders() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Órdenes de trabajo</div></div>
-      <button class="btn btn-primary" data-click="openNewOTModal()">+ Nueva OT</button>
+      <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -1148,8 +1148,8 @@ function renderWorkOrders() {
             <td class="td-mono">${o.parts_cost+o.labor_cost>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
             <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
-              <button class="btn btn-secondary btn-sm" title="Imprimir OT" data-click="printOT('${o.id}')">🖨</button>
-              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" data-click="openEditOTModal('${o.id}')">Editar</button> <button class="btn btn-primary btn-sm" data-click="openCloseOTModal('${o.id}')">Cerrar</button>`:''}
+              <button class="btn btn-secondary btn-sm" title="Imprimir OT" onclick="printOT('${o.id}')">🖨</button>
+              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id}')">Editar</button> <button class="btn btn-primary btn-sm" onclick="openCloseOTModal('${o.id}')">Cerrar</button>`:''}
             </td>
           </tr>`).join('')}</tbody>
         </table>
@@ -1237,7 +1237,7 @@ function openNewOTModal(preVehicle='') {
             <input class="form-input" type="number" placeholder="0" id="p-cost" data-input="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
           </div>
           <div style="display:flex;align-items:flex-end;padding-bottom:1px">
-            <button class="btn btn-secondary" style="height:38px;padding:0 14px" data-click="addPartToOT()">+ Agregar</button>
+            <button class="btn btn-secondary" style="height:38px;padding:0 14px" onclick="addPartToOT()">+ Agregar</button>
           </div>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px;font-family:var(--mono)">
@@ -1336,7 +1336,7 @@ function renderOTPartsList() {
         </td>
         <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
         <td style="padding:5px 4px;text-align:center">
-          <button data-click="removePartFromOT(${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
+          <button onclick="removePartFromOT(${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
         </td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -1544,7 +1544,7 @@ function openCloseOTModal(id) {
           <label class="form-label">Costo unit. ($)</label>
           <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" data-input="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
         </div>
-        <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" data-click="addCloseOTPart('${id}')">+ Agregar</button>
+        <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" onclick="addCloseOTPart('${id}')">+ Agregar</button>
       </div>
     </div>
 
@@ -1632,7 +1632,7 @@ function renderCloseOTPartsList(otId) {
         <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'Compra'}</span></td>
         <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
         <td style="padding:5px 4px;text-align:center">
-          <button data-click="removeCloseOTPart('${otId}',${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
+          <button onclick="removeCloseOTPart('${otId}',${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
         </td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -1869,7 +1869,7 @@ function renderFuel() {
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span style="color:var(--warn)">Urea / AdBlue</span><span class="td-mono" style="color:var(--warn)">${ureaTank} / ${ureaCap} L ⚠</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(ureaTank/ureaCap*100)}%;background:var(--warn)"></div></div>
         </div>
-        <div style="margin-top:16px"><button class="btn btn-primary" data-click="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
+        <div style="margin-top:16px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
       </div>
       <div class="card">
         <div class="card-title">Consumo por unidad (últimos 30 días)</div>
@@ -1878,7 +1878,7 @@ function renderFuel() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
-      <button class="btn btn-primary" data-click="openFuelLoadModal()">+ Registrar carga</button>
+      <button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -2056,7 +2056,7 @@ function renderTires() {
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div class="card-title" style="margin:0">Cubiertas de la unidad seleccionada</div>
-          <button class="btn btn-primary btn-sm" data-click="openMountTireModal()">+ Montar cubierta</button>
+          <button class="btn btn-primary btn-sm" onclick="openMountTireModal()">+ Montar cubierta</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -2070,7 +2070,7 @@ function renderTires() {
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div class="card-title" style="margin:0">Stock de cubiertas disponibles para montar</div>
-        <button class="btn btn-secondary btn-sm" data-click="openNewTireToStockModal()">+ Agregar al stock</button>
+        <button class="btn btn-secondary btn-sm" onclick="openNewTireToStockModal()">+ Agregar al stock</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -2083,7 +2083,7 @@ function renderTires() {
             <td class="td-mono" style="color:var(--ok)">${t.depth}/${t.maxDepth}mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
             <td class="td-mono">$${t.purchase.toLocaleString()}</td>
-            <td><button class="btn btn-primary btn-sm" data-click="openMountFromStockModal('${t.serial}')">Montar</button></td>
+            <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
           </tbody>
         </table>
@@ -2100,7 +2100,7 @@ function renderTires() {
             <option value="">Todas las cubiertas</option>
             ${App.data.tires.map(t=>`<option value="${t.serial}">${t.serial}</option>`).join('')}
           </select>
-          <button class="btn btn-secondary btn-sm" data-click="openManualMoveModal()">+ Registrar movimiento</button>
+          <button class="btn btn-secondary btn-sm" onclick="openManualMoveModal()">+ Registrar movimiento</button>
         </div>
       </div>
       <div id="tire-history-table"></div>
@@ -2147,7 +2147,7 @@ function renderTireMapDnD(vehicleCode, config) {
           data-dragover="onTireDragOver(event)"
           data-dragleave="onTireDragLeave(event)"
           data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          data-click="openTireDetail('${t.serial}')"
+          onclick="openTireDetail('${t.serial}')"
           style="background:${bg};border-color:${bc};cursor:grab"
           title="${t.serial} · ${t.brand} · Clic: detalle · Arrastrar: cambiar posición">
           <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:${c}">${t.depth}mm</span>
@@ -2160,7 +2160,7 @@ function renderTireMapDnD(vehicleCode, config) {
           data-dragover="onTireDragOver(event)"
           data-dragleave="onTireDragLeave(event)"
           data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          data-click="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
+          onclick="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
           title="Posición vacía — clic o soltá una cubierta aquí">
           <span style="font-size:20px;color:var(--text3);line-height:1">+</span>
           <span style="font-size:9px;font-family:var(--mono);color:var(--text3)">${pos}</span>
@@ -2257,13 +2257,13 @@ function renderTireTableBody(vehicleCode) {
     return;
   }
   tbody.innerHTML = tires.map(t=>`<tr>
-    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" data-click="openTireDetail('${t.serial}')">${t.serial}</td>
+    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${t.serial}')">${t.serial}</td>
     <td class="td-mono">${t.pos}</td>
     <td style="font-size:12px">${t.brand.split(' ')[0]} ${t.brand.split(' ')[1]||''}</td>
     <td class="td-mono">${t.km.toLocaleString()}</td>
     <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.depth}/${t.maxDepth}mm</td>
     <td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td>
-    <td><button class="btn btn-secondary btn-sm" data-click="openTireDetail('${t.serial}')">Ver</button></td>
+    <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Ver</button></td>
   </tr>`).join('');
 }
 
@@ -2283,7 +2283,7 @@ function renderTireHistory() {
     <thead><tr><th>Fecha</th><th>Cubierta</th><th>Desde</th><th>Hacia</th><th>Tipo</th><th>Unidad</th><th>Km</th><th>Operario</th><th>Observación</th></tr></thead>
     <tbody>${hist.map(h=>`<tr>
       <td class="td-mono" style="font-size:11px">${h.date}</td>
-      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" data-click="openTireDetail('${h.serial}')">${h.serial}</td>
+      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${h.serial}')">${h.serial}</td>
       <td class="td-mono" style="color:var(--text3)">${h.fromPos}</td>
       <td class="td-mono" style="color:var(--accent)">→ ${h.toPos}</td>
       <td><span class="badge ${h.type.includes('Rotación')?'badge-info':h.type==='Montaje'?'badge-ok':h.type.includes('Baja')?'badge-danger':'badge-gray'}">${h.type}</span></td>
@@ -2688,7 +2688,7 @@ function renderStock() {
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
     const bajaBtn = isDueno
-      ? '<button class="btn btn-danger btn-sm" data-click="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
+      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Solo dueño puede dar de baja">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+s.code+'</td>'
@@ -2702,7 +2702,7 @@ function renderStock() {
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
-      +   '<button class="btn btn-secondary btn-sm" data-click="openStockEgresoModal('+s.id+')">Egreso</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal('+s.id+')">Egreso</button>'
       +   bajaBtn
       + '</td>'
       + '</tr>';
@@ -2734,7 +2734,7 @@ function renderStock() {
     : '';
 
   const bajaBtnHeader = isDueno
-    ? '<button class="btn btn-danger btn-sm" data-click="openStockBajaModal()">✕ Dar de baja</button>'
+    ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Dar de baja</button>'
     : '';
 
   document.getElementById('page-stock').innerHTML =
@@ -2759,8 +2759,8 @@ function renderStock() {
     +   '<div><div class="section-title">Inventario de repuestos e insumos</div></div>'
     +   '<div style="display:flex;gap:8px">'
     +   bajaBtnHeader
-    +   '<button class="btn btn-secondary btn-sm" data-click="openStockAjusteModal()">± Ajuste inventario</button>'
-    +   '<button class="btn btn-primary btn-sm" data-click="openNewStockModal()">+ Registrar ítem</button>'
+    +   '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
+    +   '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
     +   '</div>'
     + '</div>'
     + '<div class="card" style="padding:0">'
@@ -3058,7 +3058,7 @@ function renderDocuments() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Control de vencimientos</div></div>
-      <button class="btn btn-primary" data-click="openNewDocModal()">+ Cargar documento</button>
+      <button class="btn btn-primary" onclick="openNewDocModal()">+ Cargar documento</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -3077,8 +3077,8 @@ function renderDocuments() {
               <td style="font-size:11px;color:var(--text3)">${d.ref||'—'}</td>
               <td><span class="badge ${d.status==='ok'?'badge-ok':d.status==='warn'?'badge-warn':'badge-danger'}">${d.status==='ok'?'Vigente':d.status==='warn'?'Por vencer':'Vencido'}</span></td>
               <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
-                <button class="btn btn-primary btn-sm"   data-click="openRenewDocModal(${idx})">Renovar</button>
-                <button class="btn btn-secondary btn-sm" data-click="openEditDocModal(${idx})">Editar</button>
+                <button class="btn btn-primary btn-sm"   onclick="openRenewDocModal(${idx})">Renovar</button>
+                <button class="btn btn-secondary btn-sm" onclick="openEditDocModal(${idx})">Editar</button>
               </td>
             </tr>`;
           }).join('')}
@@ -3338,7 +3338,7 @@ function renderCosts() {
       <div class="kpi-card danger">
         <div class="kpi-label">Unidad más costosa</div>
         <div class="kpi-value danger">$${sorted[0].cost_km.toFixed(3)}</div>
-        <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" data-click="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
+        <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
       </div>
       <div class="kpi-card ok">
         <div class="kpi-label">Unidad más eficiente</div>
@@ -3372,7 +3372,7 @@ function renderCosts() {
     <div class="section-header">
       <div><div class="section-title">Detalle por unidad — clic en una fila para el desglose completo</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" data-click="showToast('ok','Exportando costos en Excel...')">↓ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="showToast('ok','Exportando costos en Excel...')">↓ Exportar Excel</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -3387,7 +3387,7 @@ function renderCosts() {
             const d = getCostDetail(v.code);
             if (!d) return '';
             const ev = v.cost_km>0.25?['danger','Alto']:v.cost_km>0.20?['warn','Revisar']:['ok','Eficiente'];
-            return `<tr style="cursor:pointer" data-click="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
+            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${v.code}</td>
               <td>${v.brand} ${v.model}</td>
               <td class="td-mono">${d.kmMes.toLocaleString()}</td>
@@ -3399,7 +3399,7 @@ function renderCosts() {
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">$${v.cost_km.toFixed(3)}</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
-              <td><button class="btn btn-primary btn-sm" data-click="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
+              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
             </tr>`;
           }).join('')}
           </tbody>
@@ -3477,7 +3477,7 @@ function openCostDrillDown(vehicleCode) {
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">
       ${d.rubros.map(r=>`
         <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 8px;text-align:center;border:1px solid var(--border);cursor:pointer;transition:all .15s"
-          data-click="toggleCostRubro('${vehicleCode}','${r.id}')"
+          onclick="toggleCostRubro('${vehicleCode}','${r.id}')"
           id="rubro-card-${r.id}">
           <div style="width:8px;height:8px;border-radius:50%;background:${r.color};margin:0 auto 5px"></div>
           <div style="font-size:11px;color:var(--text3);margin-bottom:3px;line-height:1.3">${r.label.split(' ')[0]}</div>
@@ -3623,7 +3623,7 @@ function renderMaintenance() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Plan de mantenimiento preventivo</div></div>
-      <button class="btn btn-primary" data-click="openNewMaintModal()">+ Nueva tarea</button>
+      <button class="btn btn-primary" onclick="openNewMaintModal()">+ Nueva tarea</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -3639,7 +3639,7 @@ function renderMaintenance() {
             <div style="font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${p.pct}% del intervalo</div>
           </td>
           <td><span class="badge ${p.status==='warn'?'badge-warn':'badge-ok'}">${p.status==='warn'?'Próximo':'OK'}</span></td>
-          <td><button class="btn btn-secondary btn-sm" data-click="createPreventiveOT('${p.vehicle}','${p.task}')">Generar OT</button></td>
+          <td><button class="btn btn-secondary btn-sm" onclick="createPreventiveOT('${p.vehicle}','${p.task}')">Generar OT</button></td>
         </tr>`).join('')}</tbody></table>
       </div>
     </div>
