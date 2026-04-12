@@ -3319,6 +3319,75 @@ async function saveEditUser(id) {
 
 
 // ── INIT ──
+
+// ── ÓRDENES DE TRABAJO ──
+function renderWorkOrders() {
+  const open   = App.data.workOrders.filter(o=>o.status!=='Cerrada');
+  const closed = App.data.workOrders.filter(o=>o.status==='Cerrada');
+  document.getElementById('page-workorders').innerHTML = `
+    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
+      <div class="kpi-card ${open.length<5?'ok':'warn'}"><div class="kpi-label">OT abiertas</div><div class="kpi-value ${open.length<5?'ok':'warn'}">${open.length}</div><div class="kpi-trend">requieren atención</div></div>
+      <div class="kpi-card info"><div class="kpi-label">En proceso hoy</div><div class="kpi-value info">${open.filter(o=>o.status==='En proceso').length}</div><div class="kpi-trend">en ejecución activa</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Cerradas este mes</div><div class="kpi-value ok">${closed.length}</div><div class="kpi-trend">completadas con éxito</div></div>
+    </div>
+    <div class="section-header">
+      <div><div class="section-title">Órdenes de trabajo</div></div>
+      <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Vehículo</th><th>Tipo</th><th>Descripción</th><th>Mecánico</th><th>Estado</th><th>Prioridad</th><th>Costo total</th><th>Fecha</th><th></th></tr></thead>
+          <tbody>${App.data.workOrders.length === 0 ? '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:32px">Sin órdenes de trabajo registradas</td></tr>' :
+            App.data.workOrders.map(o=>`<tr>
+            <td class="td-mono td-main">${o.id||o._id||'—'}</td>
+            <td class="td-main">${o.vehicle||'—'}<br><span style="color:var(--text3);font-size:11px;font-family:var(--mono)">${o.plate||'—'}</span></td>
+            <td><span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-danger'}">${o.type||'—'}</span></td>
+            <td style="max-width:180px;color:var(--text2)">${o.desc||o.title||'—'}</td>
+            <td>${o.mechanic||'—'}</td>
+            <td><span class="badge ${
+              o.status==='Cerrada'?'badge-ok':
+              o.status==='En proceso'?'badge-info':
+              o.status==='Esperando repuesto'?'badge-warn':'badge-gray'
+            }">${o.status||'—'}</span></td>
+            <td><span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}">${o.priority||'—'}</span></td>
+            <td class="td-mono">${(o.parts_cost||0)+(o.labor_cost||0)>0?'$'+Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString():'—'}</td>
+            <td class="td-mono" style="font-size:11px">${(o.opened||'—').toString().split('T')[0]}</td>
+            <td style="white-space:nowrap">
+              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Editar</button>`:''}
+            </td>
+          </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ── PANEL CHOFER ──
+function renderChoferPanel() {
+  const u = App.currentUser;
+  const myOTs = App.data.workOrders.filter(o => o.mechanic === u?.name && o.status !== 'Cerrada');
+  document.getElementById('page-chofer_panel').innerHTML = `
+    <div class="section-title" style="margin-bottom:16px">Panel del chofer — ${u?.name||'—'}</div>
+    <div class="card"><div class="card-title">Mis órdenes activas (${myOTs.length})</div>
+      ${myOTs.length === 0 ? '<p style="color:var(--text3)">Sin OTs asignadas.</p>' :
+        myOTs.map(o=>`<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <b>${o.id}</b> — ${o.vehicle} — ${o.desc||o.title||'—'} <span class="badge badge-info">${o.status}</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ── PANEL CONTADOR ──
+function renderContadorPanel() {
+  document.getElementById('page-contador_panel').innerHTML = `
+    <div class="section-title" style="margin-bottom:16px">Panel contable</div>
+    <div class="card"><div class="card-title">Costos del mes</div>
+      <p style="color:var(--text3)">Módulo contable en desarrollo.</p>
+    </div>`;
+}
+
+
 document.addEventListener('DOMContentLoaded', () => {
   // Asegurar que el modal esté cerrado al iniciar
   const overlay = document.getElementById('modal-overlay');
