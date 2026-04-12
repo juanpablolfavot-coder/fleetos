@@ -580,26 +580,41 @@ function showVehicleFicha(id, tab) {
   }
 
   if (tab === 'tecnica') {
+    // Mezclar: datos del fabricante como base + datos guardados del vehículo encima
+    const saved = v.tech_spec || {};
+    const merged = Object.assign({}, spec, saved);
+    const fields = [
+      { key:'engine',              label:'Motor' },
+      { key:'power',               label:'Potencia / Torque' },
+      { key:'transmission',        label:'Transmisión / Caja' },
+      { key:'differential',        label:'Diferencial' },
+      { key:'urea',                label:'Usa urea / AdBlue' },
+      { key:'fuel_cap',            label:'Capacidad combustible' },
+      { key:'tire_size',           label:'Medida cubiertas' },
+      { key:'tire_pressure_steer', label:'Presión dirección' },
+      { key:'tire_pressure_drive', label:'Presión tracción' },
+      { key:'wheel_torque',        label:'Torque de ruedas' },
+      { key:'battery',             label:'Baterías' },
+      { key:'grease',              label:'Puntos de engrase' },
+    ];
+    const hasCustom = Object.keys(saved).length > 0;
     content = `
-      <div style="margin-bottom:12px;font-size:12px;color:var(--text3)">Datos técnicos según marca/modelo. Editables desde "Editar datos generales".</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="font-size:12px;color:var(--text3)">${hasCustom ? '✏️ Ficha con datos personalizados guardados.' : 'Datos del fabricante. Podés editarlos para este vehículo.'}</div>
+        <button class="btn btn-secondary btn-sm" onclick="openEditTechSpecModal('${id}')">✏️ Editar ficha técnica</button>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        ${[
-          ['Motor',              spec.engine],
-          ['Potencia / Torque',  spec.power],
-          ['Transmisión / Caja', spec.transmission],
-          ['Diferencial',        spec.differential],
-          ['Usa urea / AdBlue',  spec.urea],
-          ['Capacidad combustible', spec.fuel_cap],
-          ['Medida cubiertas',   spec.tire_size],
-          ['Presión dir./tracci.',spec.tire_pressure_steer+' / '+spec.tire_pressure_drive],
-          ['Torque de ruedas',   spec.wheel_torque],
-          ['Baterías',           spec.battery],
-          ['Puntos de engrase',  spec.grease],
-        ].map(([l,val])=>`
-          <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border)">
-            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">${l}</div>
-            <div style="font-size:12px;font-weight:500;color:var(--text);line-height:1.4">${val}</div>
-          </div>`).join('')}
+        ${fields.map(f => {
+          const isCustom = saved[f.key] !== undefined;
+          return `
+          <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;border:1px solid ${isCustom ? 'rgba(59,130,246,.4)' : 'var(--border)'}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+              <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.4px">${f.label}</div>
+              ${isCustom ? '<span style="font-size:9px;color:var(--accent);font-family:var(--mono)">EDITADO</span>' : ''}
+            </div>
+            <div style="font-size:12px;font-weight:500;color:var(--text);line-height:1.4">${merged[f.key] || '—'}</div>
+          </div>`;
+        }).join('')}
       </div>`;
   }
 
@@ -3568,6 +3583,82 @@ function syncGPSNow(btn) {
     if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Sync GPS'; }
     showToast('ok', 'GPS sincronizado. Sin dispositivos conectados actualmente.');
   }, 1500);
+}
+
+function openEditTechSpecModal(id) {
+  const v = App.data.vehicles.find(x => x.id === id);
+  if (!v) return;
+  const spec = getTechSpec(v.brand, v.model, v.type);
+  const saved = v.tech_spec || {};
+  const merged = Object.assign({}, spec, saved);
+  const fields = [
+    { key:'engine',              label:'Motor' },
+    { key:'power',               label:'Potencia / Torque' },
+    { key:'transmission',        label:'Transmisión / Caja' },
+    { key:'differential',        label:'Diferencial' },
+    { key:'urea',                label:'Usa urea / AdBlue' },
+    { key:'fuel_cap',            label:'Capacidad combustible' },
+    { key:'tire_size',           label:'Medida cubiertas' },
+    { key:'tire_pressure_steer', label:'Presión dirección' },
+    { key:'tire_pressure_drive', label:'Presión tracción' },
+    { key:'wheel_torque',        label:'Torque de ruedas' },
+    { key:'battery',             label:'Baterías' },
+    { key:'grease',              label:'Puntos de engrase' },
+  ];
+  openModal(`Editar ficha técnica — ${v.code}`, `
+    <div style="margin-bottom:12px;font-size:12px;color:var(--text3)">
+      Los datos del fabricante se cargan como base. Podés modificar cualquier campo para este vehículo específico.
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${fields.map(f => `
+        <div class="form-group" style="margin:0">
+          <label class="form-label">${f.label}</label>
+          <input class="form-input" id="ts-${f.key}" value="${(merged[f.key]||'').replace(/"/g,'&quot;')}" placeholder="${spec[f.key]||''}">
+        </div>`).join('')}
+    </div>
+    <div style="margin-top:12px;padding:10px 12px;background:var(--bg3);border-radius:var(--radius);font-size:11px;color:var(--text3)">
+      💡 Los campos marcados en azul son datos que ya modificaste antes. Los demás vienen del fabricante.
+    </div>
+  `, [
+    { label: 'Guardar ficha', cls: 'btn-primary',   fn: () => saveTechSpec(id) },
+    { label: 'Restaurar fábrica', cls: 'btn-secondary', fn: () => resetTechSpec(id) },
+    { label: 'Cancelar',      cls: 'btn-secondary', fn: () => showVehicleFicha(id, 'tecnica') },
+  ]);
+}
+
+async function saveTechSpec(id) {
+  const fields = ['engine','power','transmission','differential','urea','fuel_cap',
+                  'tire_size','tire_pressure_steer','tire_pressure_drive','wheel_torque','battery','grease'];
+  const data = {};
+  fields.forEach(k => {
+    const val = document.getElementById('ts-' + k)?.value?.trim();
+    if (val) data[k] = val;
+  });
+  const res = await apiFetch(`/api/vehicles/${id}/techspec`, {
+    method: 'PATCH',
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al guardar'); return; }
+  const updated = await res.json();
+  // Actualizar en App.data
+  const v = App.data.vehicles.find(x => x.id === id);
+  if (v) v.tech_spec = updated.tech_spec;
+  closeModal();
+  showToast('ok', 'Ficha técnica guardada correctamente');
+  showVehicleFicha(id, 'tecnica');
+}
+
+async function resetTechSpec(id) {
+  const res = await apiFetch(`/api/vehicles/${id}/techspec`, {
+    method: 'PATCH',
+    body: JSON.stringify({})
+  });
+  if (!res.ok) return;
+  const v = App.data.vehicles.find(x => x.id === id);
+  if (v) v.tech_spec = {};
+  closeModal();
+  showToast('ok', 'Ficha técnica restaurada a datos de fábrica');
+  showVehicleFicha(id, 'tecnica');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

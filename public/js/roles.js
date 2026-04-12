@@ -207,6 +207,7 @@ async function loadInitialData() {
       gps_speed:  parseFloat(v.gps_speed)  || 0,
       gps_status: v.gps_status || 'unknown',
       gps_updated: v.gps_updated_at || null,
+      tech_spec:  v.tech_spec || {},
     }));
 
     App.data.workOrders = App.data.workOrders.map(o => ({

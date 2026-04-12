@@ -108,3 +108,22 @@ router.delete('/:id', authenticate, requireRole('dueno'), sensitiveLimiter, vali
 });
 
 module.exports = router;
+
+// PATCH /api/vehicles/:id/techspec — guardar ficha técnica editable
+router.patch('/:id/techspec', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), validateUUID('id'), async (req, res) => {
+  try {
+    // Guardar en columna tech_spec (JSONB). Si no existe la columna, la crea primero.
+    await query(`
+      ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_spec JSONB DEFAULT '{}'
+    `);
+    const result = await query(
+      `UPDATE vehicles SET tech_spec = $1 WHERE id = $2 AND active = TRUE RETURNING id, tech_spec`,
+      [JSON.stringify(req.body), req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('techspec error:', err.message);
+    res.status(500).json({ error: 'Error al guardar ficha técnica' });
+  }
+});
