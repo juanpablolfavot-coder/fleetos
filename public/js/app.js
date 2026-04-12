@@ -3824,67 +3824,10 @@ function __fleetDispatch(expr, ctx = {}) {
   return fn(...parsedArgs);
 }
 
-function bindDynamicActions(root = document) {
-  root.querySelectorAll('[data-nav-page]').forEach(el => {
-    if (el.__fleetBoundNav) return;
-    el.__fleetBoundNav = true;
-    el.addEventListener('click', (event) => {
-      event.preventDefault();
-      const page = el.getAttribute('data-nav-page');
-      if (page) navigate(page);
-    });
-  });
-  root.querySelectorAll('[data-click]').forEach(el => {
-    if (el.__fleetBoundClick) return;
-    el.__fleetBoundClick = true;
-    el.addEventListener('click', (event) => {
-      event.preventDefault();
-      __fleetDispatch(el.getAttribute('data-click'), { el, event });
-    });
-  });
-  root.querySelectorAll('[data-change]').forEach(el => {
-    if (el.__fleetBoundChange) return;
-    el.__fleetBoundChange = true;
-    el.addEventListener('change', (event) => __fleetDispatch(el.getAttribute('data-change'), { el, event }));
-  });
-  root.querySelectorAll('[data-input]').forEach(el => {
-    if (el.__fleetBoundInput) return;
-    el.__fleetBoundInput = true;
-    el.addEventListener('input', (event) => __fleetDispatch(el.getAttribute('data-input'), { el, event }));
-  });
-  root.querySelectorAll('[data-dragover]').forEach(el => {
-    if (el.__fleetBoundDragOver) return;
-    el.__fleetBoundDragOver = true;
-    el.addEventListener('dragover', (event) => __fleetDispatch(el.getAttribute('data-dragover'), { el, event }));
-  });
-  root.querySelectorAll('[data-dragleave]').forEach(el => {
-    if (el.__fleetBoundDragLeave) return;
-    el.__fleetBoundDragLeave = true;
-    el.addEventListener('dragleave', (event) => __fleetDispatch(el.getAttribute('data-dragleave'), { el, event }));
-  });
-  root.querySelectorAll('[data-drop]').forEach(el => {
-    if (el.__fleetBoundDrop) return;
-    el.__fleetBoundDrop = true;
-    el.addEventListener('drop', (event) => __fleetDispatch(el.getAttribute('data-drop'), { el, event }));
-  });
-  root.querySelectorAll('[data-dragstart]').forEach(el => {
-    if (el.__fleetBoundDragStart) return;
-    el.__fleetBoundDragStart = true;
-    el.addEventListener('dragstart', (event) => __fleetDispatch(el.getAttribute('data-dragstart'), { el, event }));
-  });
-}
 
-const __fleetOriginalRenderPage = renderPage;
-renderPage = function(page) {
-  __fleetOriginalRenderPage(page);
-  bindDynamicActions(document.getElementById('page-' + page) || document);
-};
-
+// ── INIT ──
 document.addEventListener('DOMContentLoaded', () => {
-  bindDynamicActions(document);
   if (typeof initLogin === 'function') {
     initLogin();
-  } else {
-    navigate('dashboard');
   }
 });
