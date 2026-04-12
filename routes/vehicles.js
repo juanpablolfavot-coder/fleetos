@@ -66,17 +66,23 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 // PUT /api/vehicles/:id
 router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), validateUUID('id'), auditAction('UPDATE','vehicles'), async (req, res) => {
   try {
-    const { brand, model, year, type, status, base, driver_id, km_current, vin, engine_no, cost_center, plate } = req.body;
+    const { brand, model, year, type, status, base, driver_id, driver, km_current, vin, engine_no, cost_center, plate, code } = req.body;
+    // Agregar columna driver_name si no existe
+    await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT`).catch(()=>{});
     const result = await query(
       `UPDATE vehicles SET brand=$1,model=$2,year=$3,type=$4,status=$5,base=$6,
-       driver_id=$7,km_current=$8,vin=$9,engine_no=$10,cost_center=$11,plate=$12
-       WHERE id=$13 AND active=TRUE RETURNING *`,
-      [brand, model, year, type, status, base, driver_id||null, km_current, vin||null, engine_no||null, cost_center||null, plate, req.params.id]
+       driver_id=$7,km_current=$8,vin=$9,engine_no=$10,cost_center=$11,plate=$12,
+       driver_name=$13,code=$14
+       WHERE id=$15 AND active=TRUE RETURNING *`,
+      [brand, model, year, type, status, base, driver_id||null, km_current,
+       vin||null, engine_no||null, cost_center||null, plate,
+       driver||null, code, req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
     res.locals.recordId = result.rows[0].id;
     res.json(result.rows[0]);
   } catch (err) {
+    console.error('PUT vehicle error:', err.message);
     res.status(500).json({ error: 'Error al actualizar vehículo' });
   }
 });

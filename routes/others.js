@@ -108,4 +108,31 @@ userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID(
   res.json(r.rows[0]);}catch(err){res.status(500).json({error:'Error actualizar'});}
 });
 
-module.exports = { fuelRouter, tireRouter, docRouter, userRouter };
+// ======= CONFIGURACIÓN (bases y tipos) =======
+const configRouter = express.Router();
+const DEFAULT_BASES = ['Central','Norte','Sur'];
+const DEFAULT_VTYPES = ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
+
+configRouter.get('/', authenticate, async (req, res) => {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
+    const bases = await query(`SELECT value FROM app_config WHERE key='bases'`);
+    const vtypes = await query(`SELECT value FROM app_config WHERE key='vehicle_types'`);
+    res.json({
+      bases:  bases.rows[0]  ? bases.rows[0].value  : DEFAULT_BASES,
+      vehicle_types: vtypes.rows[0] ? vtypes.rows[0].value : DEFAULT_VTYPES,
+    });
+  } catch (err) { res.status(500).json({ error: 'Error config' }); }
+});
+
+configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
+    const { bases, vehicle_types } = req.body;
+    if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
+    if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(vehicle_types)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: 'Error guardar config' }); }
+});
+
+module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter };

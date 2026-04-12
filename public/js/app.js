@@ -63,7 +63,7 @@ function getPageSub(p) {
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel, users: renderUsers };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel, users: renderUsers, config: renderConfig };
   if (fns[page]) fns[page]();
 }
 
@@ -239,7 +239,7 @@ function renderFleetTable(data) {
       <td class="td-main">${v.brand} ${v.model}</td>
       <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${v.type}</span></td>
       <td class="td-mono">${v.year}</td>
-      <td class="td-mono">${v.km.toLocaleString()} km</td>
+      <td class="td-mono">${v.km.toLocaleString()} ${v.type==='autoelevador'?'hs':'km'}</td>
       <td>${v.base}</td>
       <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
@@ -565,7 +565,7 @@ function showVehicleFicha(id, tab) {
           ['Base operativa', v.base],
           ['Centro de costo', v.cost_center||'Sin asignar'],
           ['Chofer habitual', v.driver],
-          ['Km actuales',  v.km.toLocaleString()+' km'],
+          ['Km actuales',  v.km.toLocaleString()+(v.type==='autoelevador'?' hs':' km')],
           ['Costo/km',     '$'+v.cost_km.toFixed(3)],
           ['Combustible',  spec.fuel_cap],
         ].map(([l,val])=>`
@@ -749,20 +749,20 @@ function openEditVehicleModal(id) {
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" id="ev-year" value="${v.year}"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
         <select class="form-select" id="ev-type">
-          ${['tractor','camion','semirremolque','acoplado'].map(t=>`<option ${t===v.type?'selected':''}>${t}</option>`).join('')}
+          ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option ${t===v.type?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Base operativa</label>
         <select class="form-select" id="ev-base">
-          ${['Central','Norte','Sur'].map(b=>`<option ${b===v.base?'selected':''}>${b}</option>`).join('')}
+          ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option ${b===v.base?'selected':''}>${b}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" id="ev-driver" value="${v.driver}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
+      <div class="form-group"><label class="form-label">${v.type==='autoelevador'?'Horas actuales':'Km actuales'}</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
       <div class="form-group"><label class="form-label">Estado</label>
         <select class="form-select" id="ev-status">
           ${['ok','warn','taller','detenida'].map(s=>`<option ${s===v.status?'selected':''}>${s}</option>`).join('')}
@@ -781,21 +781,26 @@ function openEditVehicleModal(id) {
 }
 
 async function saveEditVehicle(id) {
-  const code  = (document.getElementById('ev-code')?.value  || '').trim();
-  const plate = (document.getElementById('ev-plate')?.value || '').trim();
-  const brand = (document.getElementById('ev-brand')?.value || '').trim();
-  const model = (document.getElementById('ev-model')?.value || '').trim();
-  const year  = parseInt(document.getElementById('ev-year')?.value) || new Date().getFullYear();
-  const type  = document.getElementById('ev-type')?.value;
-  const base  = (document.getElementById('ev-base')?.value  || '').trim();
-  const km    = parseInt(document.getElementById('ev-km')?.value) || 0;
-  const status= document.getElementById('ev-status')?.value || 'ok';
+  const code   = (document.getElementById('ev-code')?.value   || '').trim();
+  const plate  = (document.getElementById('ev-plate')?.value  || '').trim();
+  const brand  = (document.getElementById('ev-brand')?.value  || '').trim();
+  const model  = (document.getElementById('ev-model')?.value  || '').trim();
+  const year   = parseInt(document.getElementById('ev-year')?.value)  || new Date().getFullYear();
+  const type   = document.getElementById('ev-type')?.value;
+  const base   = (document.getElementById('ev-base')?.value   || '').trim();
+  const km     = parseInt(document.getElementById('ev-km')?.value)    || 0;
+  const status = document.getElementById('ev-status')?.value  || 'ok';
+  const driver = (document.getElementById('ev-driver')?.value || '').trim();
+  const vin    = (document.getElementById('ev-vin')?.value    || '').trim();
+  const engine = (document.getElementById('ev-engine')?.value || '').trim();
+  const cc     = (document.getElementById('ev-cc')?.value     || '').trim();
 
   if (!code || !plate) { showToast('error','Código y patente son obligatorios'); return; }
 
   const res = await apiFetch(`/api/vehicles/${id}`, {
     method:'PUT',
-    body: JSON.stringify({ code,plate,brand,model,year,type,base,km_current:km,status })
+    body: JSON.stringify({ code, plate, brand, model, year, type, base, km_current: km,
+                           status, driver, vin, engine_no: engine, cost_center: cc })
   });
   if (!res.ok) { const e=await res.json(); showToast('error',e.error||'Error al guardar'); return; }
 
@@ -3451,11 +3456,7 @@ function openNewVehicleModal() {
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" placeholder="Ej: 2019" id="nv-year"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
         <select class="form-select" id="nv-type">
-          <option value="tractor">Tractor</option>
-          <option value="camion">Camión</option>
-          <option value="semirremolque">Semirremolque</option>
-          <option value="acoplado">Acoplado</option>
-          <option value="utilitario">Utilitario</option>
+          ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -3463,9 +3464,7 @@ function openNewVehicleModal() {
       <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000" id="nv-km"></div>
       <div class="form-group"><label class="form-label">Base operativa</label>
         <select class="form-select" id="nv-base">
-          <option value="Central">Central</option>
-          <option value="Norte">Norte</option>
-          <option value="Sur">Sur</option>
+          ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option value="${b}">${b}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -3659,6 +3658,92 @@ async function resetTechSpec(id) {
   closeModal();
   showToast('ok', 'Ficha técnica restaurada a datos de fábrica');
   showVehicleFicha(id, 'tecnica');
+}
+
+function renderConfig() {
+  const bases  = (App.config?.bases  || ['Central','Norte','Sur']);
+  const vtypes = (App.config?.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']);
+  document.getElementById('page-config').innerHTML = `
+    <div class="section-header">
+      <div>
+        <div class="section-title">Configuración del sistema</div>
+        <div class="section-sub">Bases operativas y tipos de vehículos</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:900px">
+
+      <!-- BASES -->
+      <div class="card">
+        <div class="card-title">Bases / Centrales operativas</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Estas son las bases que aparecen en el formulario de vehículos.</div>
+        <div id="cfg-bases-list" style="margin-bottom:12px">
+          ${bases.map((b,i)=>`
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <input class="form-input" value="${b}" id="cfg-base-${i}" style="flex:1">
+              <button class="btn btn-secondary btn-sm" onclick="removeCfgBase(${i})" style="color:var(--danger)">✕</button>
+            </div>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="addCfgBase()" style="margin-bottom:16px">+ Agregar base</button>
+        <button class="btn btn-primary" onclick="saveConfig()">Guardar cambios</button>
+      </div>
+
+      <!-- TIPOS DE VEHÍCULO -->
+      <div class="card">
+        <div class="card-title">Tipos de vehículos</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Los autoelevadores usan horas en lugar de km.</div>
+        <div id="cfg-types-list" style="margin-bottom:12px">
+          ${vtypes.map((t,i)=>`
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <input class="form-input" value="${t}" id="cfg-type-${i}" style="flex:1">
+              <button class="btn btn-secondary btn-sm" onclick="removeCfgType(${i})" style="color:var(--danger)">✕</button>
+            </div>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="addCfgType()" style="margin-bottom:16px">+ Agregar tipo</button>
+        <button class="btn btn-primary" onclick="saveConfig()">Guardar cambios</button>
+      </div>
+
+    </div>`;
+}
+
+function addCfgBase() {
+  const list = document.getElementById('cfg-bases-list');
+  const i = list.querySelectorAll('input').length;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
+  div.innerHTML = `<input class="form-input" placeholder="Nombre de la base" id="cfg-base-${i}" style="flex:1">
+    <button class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="color:var(--danger)">✕</button>`;
+  list.appendChild(div);
+}
+
+function removeCfgBase(i) {
+  document.getElementById('cfg-base-'+i)?.closest('div')?.remove();
+}
+
+function addCfgType() {
+  const list = document.getElementById('cfg-types-list');
+  const i = list.querySelectorAll('input').length;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
+  div.innerHTML = `<input class="form-input" placeholder="Ej: autoelevador" id="cfg-type-${i}" style="flex:1">
+    <button class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="color:var(--danger)">✕</button>`;
+  list.appendChild(div);
+}
+
+function removeCfgType(i) {
+  document.getElementById('cfg-type-'+i)?.closest('div')?.remove();
+}
+
+async function saveConfig() {
+  const bases  = Array.from(document.querySelectorAll('[id^="cfg-base-"]')).map(el=>el.value.trim()).filter(Boolean);
+  const vtypes = Array.from(document.querySelectorAll('[id^="cfg-type-"]')).map(el=>el.value.trim()).filter(Boolean);
+  if (!bases.length)  { showToast('error','Necesitás al menos una base'); return; }
+  if (!vtypes.length) { showToast('error','Necesitás al menos un tipo de vehículo'); return; }
+  const res = await apiFetch('/api/config', { method:'PUT', body: JSON.stringify({ bases, vehicle_types: vtypes }) });
+  if (!res.ok) { showToast('error','Error al guardar configuración'); return; }
+  App.config.bases = bases;
+  App.config.vehicle_types = vtypes;
+  showToast('ok', 'Configuración guardada correctamente');
+  renderConfig();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -160,12 +160,13 @@ async function loadInitialData() {
   try {
     showToast('info', 'Cargando datos...');
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
       apiFetch('/api/stock'),
       apiFetch('/api/documents'),
+      apiFetch('/api/config'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -173,6 +174,12 @@ async function loadInitialData() {
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
     if (stockRes?.ok)       App.data.stock       = await stockRes.json();
     if (docsRes?.ok)        App.data.documents   = await docsRes.json();
+    if (configRes?.ok) {
+      const cfg = await configRes.json();
+      App.config = App.config || {};
+      App.config.bases        = cfg.bases        || ['Central','Norte','Sur'];
+      App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
+    }
 
     // Inicializar arrays si alguna API falló
     if (!App.data.vehicles)   App.data.vehicles   = [];
@@ -183,6 +190,7 @@ async function loadInitialData() {
     if (!App.data.tires)      App.data.tires      = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];
+    if (!App.config)          App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'] };
 
     // Normalizar campos de la API al formato que usa el frontend
     App.data.vehicles = App.data.vehicles.map(v => ({
@@ -196,7 +204,7 @@ async function loadInitialData() {
       status:   v.status || 'ok',
       km:       v.km_current || 0,
       base:     v.base || 'Central',
-      driver:   v.driver_name || '—',
+      driver:   v.driver_name || v.driver_name_joined || '—',
       cost_km:  parseFloat(v.cost_km) || 0,
       vin:      v.vin,
       engine_no:v.engine_no,
