@@ -744,335 +744,55 @@ function openEditVehicleModal(id) {
   ]);
 }
 
-function saveEditVehicle(id) {
-  const v = App.data.vehicles.find(x=>x.id===id);
-  if (!v) return;
-  v.code       = document.getElementById('ev-code').value   || v.code;
-  v.plate      = document.getElementById('ev-plate').value  || v.plate;
-  v.brand      = document.getElementById('ev-brand').value  || v.brand;
-  v.model      = document.getElementById('ev-model').value  || v.model;
-  v.year       = parseInt(document.getElementById('ev-year').value) || v.year;
-  v.type       = document.getElementById('ev-type').value;
-  v.base       = document.getElementById('ev-base').value;
-  v.driver     = document.getElementById('ev-driver').value || v.driver;
-  v.km         = parseInt(document.getElementById('ev-km').value)   || v.km;
-  v.status     = document.getElementById('ev-status').value;
-  v.vin        = document.getElementById('ev-vin').value;
-  v.engine_no  = document.getElementById('ev-engine').value;
-  v.cost_center= document.getElementById('ev-cc').value;
-  closeModal();
-  renderFleet();
-  showToast('ok', `${v.code} actualizado correctamente`);
-}
+async function saveEditVehicle(id) {
+  const code  = (document.getElementById('ev-code')?.value  || '').trim();
+  const plate = (document.getElementById('ev-plate')?.value || '').trim();
+  const brand = (document.getElementById('ev-brand')?.value || '').trim();
+  const model = (document.getElementById('ev-model')?.value || '').trim();
+  const year  = parseInt(document.getElementById('ev-year')?.value) || new Date().getFullYear();
+  const type  = document.getElementById('ev-type')?.value;
+  const base  = (document.getElementById('ev-base')?.value  || '').trim();
+  const km    = parseInt(document.getElementById('ev-km')?.value) || 0;
+  const status= document.getElementById('ev-status')?.value || 'ok';
 
-function openNewVehicleModal() {
-  openModal('Registrar nueva unidad', `
-    <div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="INT-46" id="nv-code"></div>
-    <div class="form-group"><label class="form-label">Patente</label><input class="form-input" placeholder="ABC 001" id="nv-plate"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Marca</label><input class="form-input" placeholder="Mercedes-Benz" id="nv-brand"></div>
-    <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" placeholder="Actros 2651" id="nv-model"></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" placeholder="2024" id="nv-year"></div>
-    <div class="form-group"><label class="form-label">Tipo</label><select class="form-select" id="nv-type"><option>tractor</option><option>camion</option><option>semirremolque</option><option>acoplado</option></select></div></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Base operativa</label><select class="form-select" id="nv-base"><option>Central</option><option>Norte</option><option>Sur</option></select></div>
-    <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" placeholder="0" id="nv-km"></div></div>
-  `, [
-    { label:'Registrar unidad', cls:'btn-primary', fn: saveNewVehicle },
-    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
-  ]);
-}
+  if (!code || !plate) { showToast('error','Código y patente son obligatorios'); return; }
 
-function saveNewVehicle() {
-  const code  = document.getElementById('nv-code').value || 'INT-46';
-  const plate = document.getElementById('nv-plate').value || '---';
-  const brand = document.getElementById('nv-brand').value || 'Sin definir';
-  const model = document.getElementById('nv-model').value || '';
-  const year  = parseInt(document.getElementById('nv-year').value) || 2024;
-  const type  = document.getElementById('nv-type').value;
-  const base  = document.getElementById('nv-base').value;
-  const km    = parseInt(document.getElementById('nv-km').value) || 0;
-  App.data.vehicles.push({ id:App.data.vehicles.length+1, code, plate, brand, model, year, type, status:'ok', km, base, driver:'Sin asignar', cost_km:0.18 });
-  closeModal(); renderFleet();
-  showToast('ok', `Unidad ${code} registrada correctamente`);
-}
-
-// ── ÓRDENES DE TRABAJO ──
-function renderWorkOrders() {
-  const open   = App.data.workOrders.filter(o=>o.status!=='Cerrada');
-  const closed = App.data.workOrders.filter(o=>o.status==='Cerrada');
-  document.getElementById('page-workorders').innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
-      <div class="kpi-card ${open.length<5?'ok':'warn'}"><div class="kpi-label">OT abiertas</div><div class="kpi-value ${open.length<5?'ok':'warn'}">${open.length}</div><div class="kpi-trend">requieren atención</div></div>
-      <div class="kpi-card info"><div class="kpi-label">En proceso hoy</div><div class="kpi-value info">${open.filter(o=>o.status==='En proceso').length}</div><div class="kpi-trend">en ejecución activa</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Cerradas este mes</div><div class="kpi-value ok">${closed.length}</div><div class="kpi-trend">completadas con éxito</div></div>
-    </div>
-    <div class="section-header">
-      <div><div class="section-title">Órdenes de trabajo</div></div>
-      <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
-    </div>
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Vehículo</th><th>Tipo</th><th>Descripción</th><th>Mecánico</th><th>Estado</th><th>Prioridad</th><th>Repuestos</th><th>Costo total</th><th>Fecha</th><th></th></tr></thead>
-          <tbody>${App.data.workOrders.map(o=>`<tr>
-            <td class="td-mono td-main">${o.id}</td>
-            <td class="td-main">${o.vehicle}<br><span style="color:var(--text3);font-size:11px;font-family:var(--mono)">${o.plate||'—'}</span></td>
-            <td><span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-danger'}">${o.type}</span></td>
-            <td style="max-width:180px;color:var(--text2)">${o.desc}</td>
-            <td>${o.mechanic}</td>
-            <td><span class="badge ${
-              o.status==='Cerrada'?'badge-ok':
-              o.status==='En proceso'?'badge-info':
-              o.status==='Esperando repuesto'?'badge-warn':'badge-gray'
-            }">${o.status}</span></td>
-            <td><span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}">${o.priority}</span></td>
-            <td style="font-size:11px;color:var(--text3)">${(o.parts||[]).length>0 ? (o.parts||[]).length+' ítem/s' : '—'}</td>
-            <td class="td-mono">${o.parts_cost+o.labor_cost>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
-            <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
-            <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
-              <button class="btn btn-secondary btn-sm" title="Imprimir OT" onclick="printOT('${o.id}')">🖨</button>
-              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id}')">Editar</button> <button class="btn btn-primary btn-sm" onclick="openCloseOTModal('${o.id}')">Cerrar</button>`:''}
-            </td>
-          </tr>`).join('')}</tbody>
-        </table>
-      </div>
-    </div>
-  `;
-}
-
-// ── REPUESTOS TEMPORALES en modal ──
-let _otParts = [];
-
-function openNewOTModal(preVehicle='') {
-  _otParts = [];
-  const stockOpts = App.data.stock.map(s=>
-    `<option value="${s.id}" data-cost="${s.cost}" data-name="${s.name}">${s.name} — Stock: ${s.qty} ${s.unit} — $${s.cost.toLocaleString()}</option>`
-  ).join('');
-  openModal('Nueva orden de trabajo', `
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Vehículo (código interno)</label>
-        <select class="form-select" id="ot-vehicle">
-          <option value="">— Seleccioná una unidad —</option>
-          ${App.data.vehicles.map(v=>`<option value="${v.code}" ${v.code===preVehicle?'selected':''}>${v.code} · ${v.plate} · ${v.brand} ${v.model}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Tipo de trabajo</label>
-        <select class="form-select" id="ot-type">
-          <option>Correctivo</option><option>Preventivo</option><option>Predictivo</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Prioridad</label>
-        <select class="form-select" id="ot-priority">
-          <option>Normal</option><option>Media</option><option>Urgente</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Mecánico asignado</label>
-        <input class="form-input" placeholder="Nombre del mecánico" id="ot-mech">
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Descripción del trabajo</label>
-      <textarea class="form-textarea" placeholder="Describí el trabajo a realizar, síntoma observado, diagnóstico..." id="ot-desc"></textarea>
-    </div>
-
-    <div style="border-top:1px solid var(--border);margin:14px 0 12px;padding-top:12px">
-      <div style="font-size:12px;font-weight:500;color:var(--text2);margin-bottom:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px">
-        Repuestos e insumos utilizados
-      </div>
-      <div id="ot-parts-list" style="margin-bottom:10px"></div>
-
-      <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border)">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px;font-family:var(--mono)">AGREGAR REPUESTO</div>
-        <div class="form-row" style="margin-bottom:8px">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Origen</label>
-            <select class="form-select" id="p-origin" onchange="onPartOriginChange()">
-              <option value="stock">Del stock / pañol</option>
-              <option value="compra">Compra externa</option>
-            </select>
-          </div>
-          <div class="form-group" style="margin:0" id="p-stock-group">
-            <label class="form-label">Ítem del stock</label>
-            <select class="form-select" id="p-stock-id" onchange="onStockItemSelect()">
-              <option value="">— Seleccioná un ítem —</option>
-              ${stockOpts}
-            </select>
-          </div>
-          <div class="form-group" style="margin:0;display:none" id="p-name-group">
-            <label class="form-label">Descripción del repuesto</label>
-            <input class="form-input" placeholder="Nombre del repuesto comprado" id="p-name-ext">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Cantidad</label>
-            <input class="form-input" type="number" value="1" min="1" id="p-qty" style="width:80px" oninput="previewPartTotal()">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Costo unitario ($)</label>
-            <input class="form-input" type="number" placeholder="0" id="p-cost" oninput="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
-          </div>
-          <div style="display:flex;align-items:flex-end;padding-bottom:1px">
-            <button class="btn btn-secondary" style="height:38px;padding:0 14px" onclick="addPartToOT()">+ Agregar</button>
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:6px;font-family:var(--mono)">
-          Los ítems del pañol se descuentan automáticamente del inventario al guardar la OT.
-        </div>
-      </div>
-    </div>
-
-    <div class="form-row" style="margin-top:4px">
-      <div class="form-group"><label class="form-label">Costo mano de obra ($)</label><input class="form-input" type="number" placeholder="0" id="ot-labor"></div>
-      <div class="form-group"><label class="form-label">Total repuestos</label><input class="form-input" id="ot-parts-total" readonly style="background:var(--bg4);color:var(--text3)" value="$0"></div>
-    </div>
-  `, [
-    { label:'Guardar OT', cls:'btn-primary',   fn: saveNewOT },
-    { label:'Cancelar',   cls:'btn-secondary', fn: closeModal }
-  ]);
-  renderOTPartsList();
-}
-
-function onPartOriginChange() {
-  const origin = document.getElementById('p-origin').value;
-  const stockG = document.getElementById('p-stock-group');
-  const nameG  = document.getElementById('p-name-group');
-  if (!stockG || !nameG) return;
-  if (origin === 'stock') {
-    stockG.style.display = ''; nameG.style.display = 'none';
-  } else {
-    stockG.style.display = 'none'; nameG.style.display = '';
-    document.getElementById('p-cost').value = '';
-  }
-}
-
-function onStockItemSelect() {
-  const sel = document.getElementById('p-stock-id');
-  if (!sel) return;
-  const opt = sel.options[sel.selectedIndex];
-  if (opt && opt.value) {
-    document.getElementById('p-cost').value = opt.dataset.cost || '';
-  }
-}
-
-function addPartToOT() {
-  const origin  = document.getElementById('p-origin').value;
-  const qty     = parseInt(document.getElementById('p-qty').value) || 1;
-  const cost    = parseFloat(document.getElementById('p-cost').value) || 0;
-
-  if (origin === 'stock') {
-    const sel     = document.getElementById('p-stock-id');
-    const stockId = parseInt(sel?.value);
-    if (!stockId) { showToast('warn','Seleccioná un ítem del stock'); return; }
-    const item    = App.data.stock.find(s=>s.id===stockId);
-    if (!item)    { showToast('warn','Ítem no encontrado'); return; }
-    if (item.qty < qty) { showToast('warn',`Stock insuficiente. Disponible: ${item.qty} ${item.unit}`); return; }
-    _otParts.push({ name:item.name, origin:'stock', stockId:item.id, qty, cost:cost||item.cost, unit:item.unit });
-  } else {
-    const name = document.getElementById('p-name-ext')?.value.trim();
-    if (!name) { showToast('warn','Escribí el nombre del repuesto'); return; }
-    _otParts.push({ name, origin:'compra', stockId:null, qty, cost });
-    document.getElementById('p-name-ext').value = '';
-  }
-
-  document.getElementById('p-qty').value  = '1';
-  document.getElementById('p-cost').value = '';
-  const sel = document.getElementById('p-stock-id');
-  if (sel) sel.value = '';
-  renderOTPartsList();
-}
-
-function removePartFromOT(i) {
-  _otParts.splice(i, 1);
-  renderOTPartsList();
-}
-
-function renderOTPartsList() {
-  const list  = document.getElementById('ot-parts-list');
-  const total = document.getElementById('ot-parts-total');
-  if (!list) return;
-  if (_otParts.length === 0) {
-    list.innerHTML = '<div style="font-size:12px;color:var(--text3);padding:4px 0">Sin repuestos cargados aún.</div>';
-  } else {
-    list.innerHTML = `<table style="width:100%;font-size:12px;margin-bottom:4px">
-      <thead><tr>
-        <th style="text-align:left;padding:4px 6px;color:var(--text3)">Repuesto</th>
-        <th style="text-align:center;padding:4px 6px;color:var(--text3)">Cant.</th>
-        <th style="text-align:left;padding:4px 6px;color:var(--text3)">Origen</th>
-        <th style="text-align:right;padding:4px 6px;color:var(--text3)">Subtotal</th>
-        <th></th>
-      </tr></thead>
-      <tbody>${_otParts.map((p,i)=>`<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:5px 6px;color:var(--text)">${p.name}</td>
-        <td style="padding:5px 6px;text-align:center;font-family:var(--mono)">${p.qty||1} ${p.unit||''}</td>
-        <td style="padding:5px 6px">
-          <span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">
-            ${p.origin==='stock'?'Pañol':'Compra'}
-          </span>
-        </td>
-        <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
-        <td style="padding:5px 4px;text-align:center">
-          <button onclick="removePartFromOT(${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
-        </td>
-      </tr>`).join('')}</tbody>
-    </table>`;
-  }
-  const sum = _otParts.reduce((a,b)=>a+(b.cost||0)*(b.qty||1),0);
-  if (total) total.value = '$' + sum.toLocaleString();
-}
-
-// Preview total en tiempo real (modal nueva OT)
-function previewPartTotal() {
-  const qty  = parseFloat(document.getElementById('p-qty')?.value) || 1;
-  const cost = parseFloat(document.getElementById('p-cost')?.value) || 0;
-  const prev = document.getElementById('p-preview-total');
-  if (prev) prev.textContent = cost > 0 ? 'Subtotal: $' + Math.round(qty*cost).toLocaleString() : '';
-}
-
-// Preview total en tiempo real (modal cierre OT)
-function previewClosePartTotal() {
-  const qty  = parseFloat(document.getElementById('cl-qty')?.value) || 1;
-  const cost = parseFloat(document.getElementById('cl-unit-cost')?.value) || 0;
-  const prev = document.getElementById('cl-preview-total');
-  if (prev) prev.textContent = cost > 0 ? 'Subtotal: $' + Math.round(qty*cost).toLocaleString() : '';
-}
-
-function saveNewOT() {
-  const vehicle   = document.getElementById('ot-vehicle').value || '—';
-  const newId     = 'OT-0' + (285 + App.data.workOrders.length);
-  const partsCost = _otParts.reduce((a,b)=>a+(b.cost||0)*(b.qty||1),0);
-  const laborCost = parseInt(document.getElementById('ot-labor').value)||0;
-  let descuentos  = 0;
-  _otParts.filter(p=>p.origin==='stock' && p.stockId).forEach(p=>{
-    const item = App.data.stock.find(s=>s.id===p.stockId);
-    if (item && item.qty > 0) {
-      item.qty = Math.max(0, item.qty - (p.qty||1));
-      descuentos++;
-    }
+  const res = await apiFetch(`/api/vehicles/${id}`, {
+    method:'PUT',
+    body: JSON.stringify({ code,plate,brand,model,year,type,base,km_current:km,status })
   });
-  App.data.workOrders.unshift({
-    id: newId, vehicle,
-    plate:      App.data.vehicles.find(v=>v.code===vehicle)?.plate || '—',
-    type:       document.getElementById('ot-type').value,
-    status:     'En proceso',
-    priority:   document.getElementById('ot-priority').value,
-    desc:       document.getElementById('ot-desc').value || 'Sin descripción',
-    mechanic:   document.getElementById('ot-mech').value || '—',
-    opened:     new Date().toISOString().slice(0,16).replace('T',' '),
-    parts:      [..._otParts], parts_cost:partsCost, labor_cost:laborCost,
+  if (!res.ok) { const e=await res.json(); showToast('error',e.error||'Error al guardar'); return; }
+
+  closeModal(); showToast('ok',`Unidad ${code} actualizada`);
+  await loadInitialData(); renderFleet();
+}
+
+async function saveNewOT() {
+  const vehicle_id= document.getElementById('ot-vehicle')?.value || '';
+  const title     = (document.getElementById('ot-title')?.value || document.getElementById('ot-type')?.value || 'Nueva OT').trim();
+  const priority  = document.getElementById('ot-priority')?.value || 'media';
+  const assigned  = (document.getElementById('ot-assigned')?.value || '').trim();
+  const due_date  = document.getElementById('ot-due')?.value || null;
+  const notes     = (document.getElementById('ot-notes')?.value || '').trim();
+
+  // Partes/repuestos del formulario
+  const parts = typeof _otParts !== 'undefined' ? _otParts : [];
+  const labor_cost = parseInt(document.getElementById('ot-labor')?.value) || 0;
+
+  if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
+  if (!title)      { showToast('error','Ingresá un título para la OT'); return; }
+
+  const res = await apiFetch('/api/workorders', {
+    method: 'POST',
+    body: JSON.stringify({ vehicle_id, title, priority, assigned_to: assigned, due_date, notes, parts, labor_cost })
   });
-  closeModal(); renderWorkOrders();
-  showToast('ok', `${newId} creada${descuentos>0?' · '+descuentos+' ítems descontados del stock':''}`);
-  _otParts = [];
+  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
+
+  closeModal(); showToast('ok','OT creada correctamente');
+  await loadInitialData(); renderWorkOrders();
 }
 
 
-// ── EDITAR OT ──
 function openEditOTModal(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
@@ -1614,23 +1334,28 @@ function openFuelLoadModal() {
   ]);
 }
 
-function saveFuelLoad() {
-  const liters = parseInt(document.getElementById('fl-liters').value)||0;
-  const ppu    = parseInt(document.getElementById('fl-ppu').value)||1250;
-  App.data.fuelLogs.unshift({
-    id: App.data.fuelLogs.length+1,
-    vehicle: document.getElementById('fl-vehicle').value||'—',
-    plate:'—',
-    driver: document.getElementById('fl-driver').value||'—',
-    liters, km: parseInt(document.getElementById('fl-km').value)||0,
-    ppu, total: liters*ppu,
-    date: new Date().toISOString().slice(0,16).replace('T',' '),
-    place: document.getElementById('fl-place').value,
-    status:'OK'
+async function saveFuelLoad() {
+  const vehicle_id = document.getElementById('fl-vehicle')?.value || '';
+  const liters     = parseFloat(document.getElementById('fl-liters')?.value) || 0;
+  const ppu        = parseFloat(document.getElementById('fl-ppu')?.value)    || 0;
+  const km         = parseInt(document.getElementById('fl-km')?.value)       || 0;
+  const driver     = (document.getElementById('fl-driver')?.value || '').trim();
+  const date       = document.getElementById('fl-date')?.value || new Date().toISOString().slice(0,10);
+  const type       = document.getElementById('fl-type')?.value || 'diesel';
+
+  if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
+  if (liters <= 0) { showToast('error','Ingresá los litros cargados'); return; }
+
+  const res = await apiFetch('/api/fuel', {
+    method: 'POST',
+    body: JSON.stringify({ vehicle_id, liters, price_per_liter: ppu, km_at_load: km, driver, date, fuel_type: type, total_cost: liters*ppu })
   });
-  closeModal(); renderFuel();
-  showToast('ok', `Carga de ${liters}L registrada — cisterna actualizada`);
+  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al registrar carga'); return; }
+
+  closeModal(); showToast('ok','Carga de combustible registrada');
+  await loadInitialData(); renderFuel();
 }
+
 
 function openFuelEntryModal() {
   openModal('Ingreso a cisterna', `
@@ -2702,38 +2427,28 @@ function openNewStockModal() {
   ]);
 }
 
-function saveNewStockItem() {
-  const name = ((document.getElementById('ns-name')||{}).value || '').trim();
-  const code = ((document.getElementById('ns-code')||{}).value || '').trim();
-  if (!name) { showToast('warn','La descripción es obligatoria'); return; }
-  const qty  = parseInt((document.getElementById('ns-qty')||{}).value)  || 0;
-  const min  = parseInt((document.getElementById('ns-min')||{}).value)  || 1;
-  const cost = parseInt((document.getElementById('ns-cost')||{}).value) || 0;
-  const unit = (document.getElementById('ns-unit')||{}).value || 'un';
-  const ids  = App.data.stock.map(function(s){ return s.id; }).concat([0]);
-  const newId= Math.max.apply(null, ids) + 1;
-  App.data.stock.push({
-    id: newId,
-    code: code || 'IT-'+newId,
-    name: name,
-    cat:  (document.getElementById('ns-cat')||{}).value || 'Mecánico',
-    unit: unit, qty: qty, min: min,
-    reorder: Math.ceil(min * 1.5),
-    cost: cost,
-    supplier: (document.getElementById('ns-supplier')||{}).value || '—',
+async function saveNewStockItem() {
+  const code     = (document.getElementById('si-code')?.value  || '').trim();
+  const name     = (document.getElementById('si-name')?.value  || '').trim();
+  const category = document.getElementById('si-cat')?.value    || 'general';
+  const unit     = document.getElementById('si-unit')?.value   || 'un';
+  const qty      = parseFloat(document.getElementById('si-qty')?.value)   || 0;
+  const min_qty  = parseFloat(document.getElementById('si-min')?.value)   || 0;
+  const cost     = parseFloat(document.getElementById('si-cost')?.value)  || 0;
+  const location = (document.getElementById('si-loc')?.value   || '').trim();
+
+  if (!name) { showToast('error','Ingresá el nombre del ítem'); return; }
+
+  const res = await apiFetch('/api/stock', {
+    method: 'POST',
+    body: JSON.stringify({ code, name, category, unit, qty, min_qty, unit_cost: cost, location })
   });
-  if (qty > 0) {
-    (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
-      date:   new Date().toISOString().split('T')[0],
-      name: name, unit: unit, qty: qty,
-      type: 'Ingreso', motivo: 'Alta de ítem nuevo',
-      user: (App.currentUser && App.currentUser.name) || 'Sistema',
-    });
-  }
-  closeModal();
-  renderStock();
-  showToast('ok', name+' registrado en stock');
+  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al guardar stock'); return; }
+
+  closeModal(); showToast('ok','Ítem de stock creado');
+  await loadInitialData(); renderStock();
 }
+
 
 function renderDocuments() {
   const expired = App.data.documents.filter(d=>d.status==='danger').length;
@@ -3522,31 +3237,23 @@ function openNewUserModal() {
 }
 
 async function saveNewUser() {
-  const name     = document.getElementById('nu-name')?.value?.trim();
-  const email    = document.getElementById('nu-email')?.value?.trim();
-  const password = document.getElementById('nu-pass')?.value;
-  const role     = document.getElementById('nu-role')?.value;
-  const vehicle  = document.getElementById('nu-vehicle')?.value;
-  const errDiv   = document.getElementById('nu-error');
+  const name  = (document.getElementById('nu-name')?.value  || '').trim();
+  const email = (document.getElementById('nu-email')?.value || '').trim();
+  const role  = document.getElementById('nu-role')?.value   || 'operario';
+  const pass  = (document.getElementById('nu-pass')?.value  || '').trim();
 
-  if (!name || !email || !password || !role) { if(errDiv) errDiv.textContent = 'Completá todos los campos obligatorios'; return; }
-  if (password.length < 8) { if(errDiv) errDiv.textContent = 'La contraseña debe tener al menos 8 caracteres'; return; }
+  if (!name || !email || !pass) { showToast('error','Nombre, email y contraseña son obligatorios'); return; }
 
-  try {
-    const res = await apiFetch('/api/users', {
-      method: 'POST',
-      body: JSON.stringify({ name, email, password, role, vehicle_code: vehicle || null }),
-    });
-    const data = await res.json();
-    if (!res.ok) { if(errDiv) errDiv.textContent = data.error || 'Error al crear usuario'; return; }
+  const res = await apiFetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, role, password: pass })
+  });
+  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear usuario'); return; }
 
-    closeModal();
-    showToast('ok', `Usuario ${name} creado`);
-    renderUsers();
-  } catch(e) {
-    if(errDiv) errDiv.textContent = 'Error de conexión';
-  }
+  closeModal(); showToast('ok',`Usuario ${name} creado`);
+  await loadInitialData(); renderUsers();
 }
+
 
 function openEditUserModal(id, name, email, role, vehicle, active) {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');

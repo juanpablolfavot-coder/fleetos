@@ -77,6 +77,63 @@ app.get(/^(?!\/api).*/, (req, res) => {
   
   res.send(html);
 });
+
+// ── Reset total de la DB (solo dueno) ──────────────────────
+app.post('/api/admin/reset-db', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({error:'No autorizado'});
+    
+    // Verificar que sea admin/dueno
+    const token = auth.replace('Bearer ','');
+    const jwt = require('jsonwebtoken');
+    let decoded;
+    try { decoded = jwt.verify(token, process.env.JWT_SECRET); }
+    catch(e) { return res.status(401).json({error:'Token inválido'}); }
+    
+    if (decoded.role !== 'dueno' && decoded.role !== 'admin') {
+      return res.status(403).json({error:'Solo el dueño puede hacer esto'});
+    }
+
+    const { query } = require('./db/pool');
+    
+    // Borrar TODOS los datos en orden correcto (por FK)
+    const tables = [
+      'tire_moves', 'tire_assets',
+      'tires',
+      'maintenance_logs',
+      'fuel_logs',
+      'stock_movements', 'stock_items',
+      'documents',
+      'work_orders',
+      'drivers',
+      'vehicles',
+    ];
+    
+    const results = [];
+    for (const table of tables) {
+      try {
+        const r = await query(`DELETE FROM ${table}`);
+        results.push({ table, deleted: r.rowCount });
+      } catch(e) {
+        results.push({ table, error: e.message });
+      }
+    }
+
+    // Resetear secuencias de IDs
+    const seqTables = ['vehicles','work_orders','fuel_logs','stock_items','drivers','documents'];
+    for (const t of seqTables) {
+      try {
+        await query(`ALTER SEQUENCE IF EXISTS ${t}_id_seq RESTART WITH 1`);
+      } catch(e) {}
+    }
+    
+    res.json({ ok: true, message: 'DB limpiada. Sistema listo para empezar.', results });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
 // ── Endpoints GPS ──
