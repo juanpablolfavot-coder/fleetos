@@ -1,15 +1,15 @@
 // ═══════════════════════════════════════════════════════════
 //  FleetOS — Integración GPS Powerfleet (Rusegur)
-//  Auth: POST /token → Bearer
-//  Vehículos: GET /api/fleetview/vehicles → IDs
-//  Datos: GET /api/io/{vehicleId} → odometer + hourMeter
+//  Basado en código Python que ya funcionaba con esta misma API
+//  Auth:  POST /Fleetcore.Api/token {username, password, langId:1}
+//  Fleet: GET  /Fleetcore.Api/api/fleetview/vehicles
+//         → data.fleet.groups[].vehicles[] con licensePlate, odometer, hourMeter
 // ═══════════════════════════════════════════════════════════
 
 const https  = require('https');
 const { query } = require('../db/pool');
 
 const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
-const PF_BASE = '/fleetcore.api';
 const PF_USER = process.env.GPS_USER     || 'EBiletta';
 const PF_PASS = process.env.GPS_PASSWORD || 'EBiletta26';
 
@@ -19,74 +19,76 @@ let _lastSync = null;
 let _lastResult = null;
 let _running  = false;
 
-// ── Request HTTPS ───────────────────────────────────────────
-function req(path, opts = {}) {
+// ── HTTPS helper ────────────────────────────────────────────
+function httpsReq(path, opts = {}) {
   return new Promise((resolve, reject) => {
-    const bodyStr = opts.body || null;
+    const bodyStr = opts.body ? JSON.stringify(opts.body) : null;
     const headers = {
-      'Accept':     'application/json',
-      'User-Agent': 'FleetOS/1.0',
-      ...(opts.headers || {}),
+      'Content-Type': 'application/json',
+      'Accept':       'application/json',
+      'User-Agent':   'GF360/1.0',
     };
-    if (bodyStr) {
-      headers['Content-Type']   = opts.contentType || 'application/json';
-      headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    }
+    if (bodyStr) headers['Content-Length'] = Buffer.byteLength(bodyStr);
     if (_token && !opts.noAuth) headers['Authorization'] = `Bearer ${_token}`;
 
     const options = {
       hostname: PF_HOST, port: 443,
-      path: PF_BASE + path,
-      method: opts.method || 'GET',
+      path, method: opts.method || 'GET',
       headers, rejectUnauthorized: false,
     };
 
     let data = '';
-    const request = https.request(options, res => {
+    const req = https.request(options, res => {
       res.on('data', c => { data += c; });
       res.on('end', () => resolve({ status: res.statusCode, body: data }));
     });
 
+    // Timeout total: para long-poll cortamos a los 10s y usamos lo que llegó
     const timer = setTimeout(() => {
-      request.destroy();
-      resolve({ status: 408, body: data || '', timeout: true });
-    }, opts.timeout || 10000);
+      req.destroy();
+      if (data.length > 5) {
+        resolve({ status: 200, body: data, partial: true });
+      } else {
+        resolve({ status: 408, body: '', timeout: true });
+      }
+    }, opts.timeout || 15000);
 
-    request.on('error', e => {
+    req.on('error', e => {
       clearTimeout(timer);
-      data.length > 5 ? resolve({ status: 200, body: data, partial: true }) : reject(e);
+      if (data.length > 5) resolve({ status: 200, body: data, partial: true });
+      else reject(e);
     });
-    request.on('close', () => clearTimeout(timer));
-
-    if (bodyStr) request.write(bodyStr);
-    request.end();
+    req.on('close', () => clearTimeout(timer));
+    if (bodyStr) req.write(bodyStr);
+    req.end();
   });
 }
 
-// ── Login → Bearer token ────────────────────────────────────
+// ── Login: POST /Fleetcore.Api/token ───────────────────────
+// Exactamente igual al código Python que ya funcionaba:
+// payload = {username, password, langId: 1}
+// respuesta: {token: "eyJ...", expire: "ISO date"}
 async function login() {
   if (_token && _tokenExp && Date.now() < _tokenExp) return true;
-
   _token = null;
-  console.log('[GPS] Login Powerfleet...');
 
-  // Según la documentación: POST /token con JSON body
-  const res = await req('/token', {
+  console.log('[GPS] Login Powerfleet...');
+  const res = await httpsReq('/Fleetcore.Api/token', {
     method:  'POST',
-    body:    JSON.stringify({ username: PF_USER, password: PF_PASS, langId: 1 }),
+    body:    { username: PF_USER, password: PF_PASS, langId: 1 },
     noAuth:  true,
-    timeout: 12000,
+    timeout: 15000,
   }).catch(e => ({ status: 0, body: '' }));
 
-  console.log('[GPS] Token status:', res.status, '| body:', res.body.slice(0, 150));
+  console.log('[GPS] Login status:', res.status, '| body:', res.body.slice(0, 150));
 
   if (res.status === 200) {
     try {
       const d = JSON.parse(res.body);
-      const tk = d.token || d.access_token || d.accessToken;
+      const tk = d.token || d.access_token;
       if (tk) {
-        _token    = tk;
-        // Calcular expiración desde el campo "expire" (ISO) o expires_in (seg)
+        _token = tk;
+        // expire es ISO date, igual que en el Python
         if (d.expire) {
           _tokenExp = new Date(d.expire).getTime() - 60000;
         } else {
@@ -95,48 +97,110 @@ async function login() {
         console.log('[GPS] Token OK. Expira:', new Date(_tokenExp).toISOString());
         return true;
       }
-    } catch(e) { console.log('[GPS] Parse error:', e.message); }
+    } catch(e) { console.log('[GPS] Parse error token:', e.message); }
+  }
+
+  // Fallback: probar también con /fleetcore.api/token (minúsculas)
+  const res2 = await httpsReq('/fleetcore.api/token', {
+    method: 'POST',
+    body:   { username: PF_USER, password: PF_PASS, langId: 1 },
+    noAuth: true,
+    timeout: 15000,
+  }).catch(e => ({ status: 0, body: '' }));
+
+  console.log('[GPS] Login fallback status:', res2.status, '| body:', res2.body.slice(0,100));
+
+  if (res2.status === 200) {
+    try {
+      const d = JSON.parse(res2.body);
+      const tk = d.token || d.access_token;
+      if (tk) {
+        _token = tk;
+        _tokenExp = d.expire
+          ? new Date(d.expire).getTime() - 60000
+          : Date.now() + 3600000 - 60000;
+        console.log('[GPS] Token fallback OK');
+        return true;
+      }
+    } catch(e) {}
   }
 
   return false;
 }
 
-// ── Obtener lista de vehículos (IDs y patentes) ─────────────
-async function getVehicleList() {
-  console.log('[GPS] Obteniendo lista de vehículos...');
+// ── Obtener flota: GET /Fleetcore.Api/api/fleetview/vehicles
+// Estructura de respuesta (del código Python):
+//   data.fleet.groups[].vehicles[]
+//   cada vehicle: { licensePlate, odometer, hourMeter, serialNumber, speed, ... }
+async function fetchFleet() {
+  // Probar con mayúsculas primero (igual que el Python) y luego minúsculas
+  const paths = [
+    '/Fleetcore.Api/api/fleetview/vehicles',
+    '/fleetcore.api/api/fleetview/vehicles',
+  ];
 
-  // fleetview/vehicles con timeout corto — solo quiero los IDs
-  // si hace long-poll, vamos a AEMP que es estático
-  const res = await req('/api/fleetview/vehicles', { timeout: 8000 });
+  for (const path of paths) {
+    console.log('[GPS] GET', path);
+    const res = await httpsReq(path, { timeout: 12000 });
 
-  console.log('[GPS] Fleet status:', res.status, '| len:', res.body.length, '| timeout:', !!res.timeout);
-  if (res.body.length > 10) console.log('[GPS] Fleet preview:', res.body.slice(0,200));
+    console.log('[GPS] Fleet status:', res.status, '| len:', res.body.length, '| partial:', !!res.partial);
+    if (res.body.length > 0) console.log('[GPS] Fleet preview:', res.body.slice(0, 300));
 
-  if (res.status === 200 && res.body.length > 5) {
-    try {
-      const d = JSON.parse(res.body);
-      const arr = d.Vehicles || d.vehicles || d.data || (Array.isArray(d) ? d : []);
-      if (arr.length > 0) {
-        console.log('[GPS] Fleet:', arr.length, 'vehículos. Keys:', Object.keys(arr[0]).join(',').slice(0,80));
-        return arr;
+    if (res.status === 200 && res.body.length > 5) {
+      try {
+        const d = JSON.parse(res.body);
+
+        // Estructura del Python: data.fleet.groups[].vehicles[]
+        const groups = d?.data?.fleet?.groups || [];
+        const vehicles = [];
+        for (const g of groups) {
+          for (const v of (g.vehicles || [])) {
+            vehicles.push(v);
+          }
+        }
+        if (vehicles.length > 0) {
+          console.log('[GPS] Vehículos encontrados:', vehicles.length);
+          console.log('[GPS] Keys 1er vehículo:', Object.keys(vehicles[0]).join(', '));
+          return vehicles;
+        }
+
+        // Estructura alternativa: array directo o Vehicles[]
+        const alt = d.Vehicles || d.vehicles || d.data || (Array.isArray(d) ? d : []);
+        if (alt.length > 0) {
+          console.log('[GPS] Vehículos (alt):', alt.length);
+          return alt;
+        }
+
+        console.log('[GPS] JSON recibido pero sin vehículos. Keys:', Object.keys(d).join(', '));
+      } catch(e) {
+        console.log('[GPS] Error parseando fleet:', e.message, '| raw:', res.body.slice(0,100));
       }
-    } catch(e) {}
+    }
   }
-
   return [];
 }
 
-// ── Obtener datos IO de un vehículo (odómetro + horómetro) ──
-async function getVehicleIO(vehicleId) {
-  const res = await req(`/api/io/${vehicleId}`, { timeout: 8000 });
-  if (res.status !== 200 || !res.body) return null;
-  try {
-    const d = JSON.parse(res.body);
-    return d.data?.vehicle || d.vehicle || d.data || d;
-  } catch(e) { return null; }
+// ── Obtener IO de un vehículo individual ───────────────────
+// GET /Fleetcore.Api/api/io/{vehicleId}
+// Respuesta: { data: { vehicle: { odometer, hourMeter, licensePlate, speed, ... } } }
+async function fetchIO(vehicleId) {
+  const paths = [
+    `/Fleetcore.Api/api/io/${vehicleId}`,
+    `/fleetcore.api/api/io/${vehicleId}`,
+  ];
+  for (const path of paths) {
+    const res = await httpsReq(path, { timeout: 8000 });
+    if (res.status === 200 && res.body.length > 5) {
+      try {
+        const d = JSON.parse(res.body);
+        return d?.data?.vehicle || d?.vehicle || d?.data || null;
+      } catch(e) {}
+    }
+  }
+  return null;
 }
 
-// ── Asegurar columnas GPS ───────────────────────────────────
+// ── Asegurar columnas GPS en vehicles ──────────────────────
 async function ensureColumns() {
   try {
     await query(`ALTER TABLE vehicles
@@ -146,7 +210,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS gps_status      VARCHAR(20)  DEFAULT 'unknown',
       ADD COLUMN IF NOT EXISTS gps_hour_meter  NUMERIC(10,2),
       ADD COLUMN IF NOT EXISTS gps_updated_at  TIMESTAMPTZ`);
-  } catch(e) {}
+  } catch(e) { /* ya existen */ }
 }
 
 // ── Sync principal ──────────────────────────────────────────
@@ -155,20 +219,18 @@ async function syncGPSData() {
   _running = true;
 
   try {
-    console.log('[GPS] === Sync inicio ===');
+    console.log('[GPS] === Inicio sync ===');
 
     if (!(await login())) {
       _lastResult = { ok: false, error: 'Login fallido' };
       return;
     }
 
-    // Obtener lista de vehículos
-    const fleetList = await getVehicleList();
+    const fleet = await fetchFleet();
 
-    if (fleetList.length === 0) {
-      // Sin lista de vehículos — no podemos hacer nada
+    if (fleet.length === 0) {
       _lastResult = { ok: true, received: 0, updated: 0, note: 'Sin lista de vehículos de la API' };
-      console.log('[GPS] Sin vehículos en la lista — verificar API');
+      console.log('[GPS] Sin vehículos — verificar respuesta arriba');
       return;
     }
 
@@ -177,69 +239,69 @@ async function syncGPSData() {
     let updated = 0;
     const log = [];
 
-    for (const v of fleetList) {
-      // Datos básicos de la lista
-      const vehicleId = v.VehicleId || v.vehicleId || v.Id || v.id || v.AssetId;
-      const plate     = (v.Plate || v.PlateNo || v.LicensePlate || v.plate || v.Description || '').toString().trim();
-      const speed     = parseFloat(v.Speed || v.CurrentSpeed || 0) || 0;
-      const lat       = parseFloat(v.Latitude  || v.lat  || 0) || null;
-      const lng       = parseFloat(v.Longitude || v.lng  || 0) || null;
+    for (const v of fleet) {
+      // Campo licensePlate (del Python que ya funcionaba)
+      const plate     = (v.licensePlate || v.Plate || v.PlateNo || v.plate || '').toString().trim();
+      const vehicleId = v.vehicleId || v.VehicleId || v.id || v.Id || v.AssetId;
+      let   km        = parseFloat(v.odometer || v.Odometer || v.OdometerKm || 0) || 0;
+      let   hourMeter = parseFloat(v.hourMeter || v.HourMeter || v.hours || 0) || 0;
+      const speed     = parseFloat(v.speed || v.Speed || v.CurrentSpeed || 0) || 0;
+      const lat       = parseFloat(v.latitude  || v.Latitude  || v.lat  || 0) || null;
+      const lng       = parseFloat(v.longitude || v.Longitude || v.lng  || 0) || null;
 
-      if (!plate && !vehicleId) continue;
-
-      // Obtener odómetro y horómetro del endpoint /api/io/{vehicleId}
-      let km = parseFloat(v.Odometer || v.odometer || v.OdometerKm || 0) || 0;
-      let hourMeter = 0;
-
-      if (vehicleId && km === 0) {
-        // Si la lista no trae el odómetro, consultar el endpoint IO
-        const io = await getVehicleIO(vehicleId);
+      // Si la lista no trae km/horas y tenemos vehicleId, consultar /api/io/{vehicleId}
+      if (vehicleId && (km === 0 || hourMeter === 0)) {
+        const io = await fetchIO(vehicleId);
         if (io) {
-          km        = parseFloat(io.odometer || io.Odometer || 0) || 0;
-          hourMeter = parseFloat(io.hourMeter || io.HourMeter || io.hours || 0) || 0;
-          if (!plate && io.licensePlate) plate = io.licensePlate;
-          console.log(`[GPS] IO ${vehicleId}: plate=${io.licensePlate} km=${km} h=${hourMeter}`);
+          km        = parseFloat(io.odometer || io.Odometer || km) || km;
+          hourMeter = parseFloat(io.hourMeter || io.HourMeter || hourMeter) || hourMeter;
+          console.log(`[GPS] IO ${vehicleId}: km=${km} h=${hourMeter}`);
         }
       }
 
-      const status = speed > 2 ? 'moving' : 'stopped';
-      const searchPlate = plate || (vehicleId?.toString() || '');
-
+      const searchPlate = plate || '';
       if (!searchPlate) continue;
+
+      const status = speed > 2 ? 'moving' : 'stopped';
 
       const r = await query(`
         UPDATE vehicles
         SET
-          km_current       = CASE WHEN $1 > 0 THEN GREATEST(km_current, $1) ELSE km_current END,
-          gps_lat          = COALESCE(NULLIF($2::text,'0')::numeric, gps_lat),
-          gps_lng          = COALESCE(NULLIF($3::text,'0')::numeric, gps_lng),
-          gps_speed        = $4,
-          gps_status       = $5,
-          gps_hour_meter   = CASE WHEN $6 > 0 THEN $6 ELSE gps_hour_meter END,
-          gps_updated_at   = NOW()
+          km_current      = CASE WHEN $1 > 0 THEN GREATEST(km_current, $1) ELSE km_current END,
+          hours_current   = CASE WHEN $2 > 0 THEN GREATEST(COALESCE(hours_current,0), $2::int) ELSE hours_current END,
+          gps_lat         = COALESCE(NULLIF($3::text,'0')::numeric, gps_lat),
+          gps_lng         = COALESCE(NULLIF($4::text,'0')::numeric, gps_lng),
+          gps_speed       = $5,
+          gps_status      = $6,
+          gps_hour_meter  = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
+          gps_updated_at  = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
-        RETURNING id, code, plate, km_current
-      `, [km, lat, lng, speed, status, hourMeter, searchPlate]);
+        RETURNING id, code, plate, km_current, hours_current
+      `, [km, hourMeter, lat, lng, speed, status, searchPlate]);
 
       if (r.rows.length > 0) {
         updated++;
-        log.push(`${r.rows[0].code}(${km}km)`);
+        log.push(`${r.rows[0].code}(${km}km/${Math.round(hourMeter)}h)`);
       }
     }
 
     _lastSync   = new Date();
     _lastResult = {
       ok:       true,
-      received: fleetList.length,
+      received: fleet.length,
       updated,
-      keys:     Object.keys(fleetList[0] || {}).join(',').slice(0,100),
+      sample:   fleet[0] ? {
+        licensePlate: fleet[0].licensePlate,
+        odometer:     fleet[0].odometer,
+        hourMeter:    fleet[0].hourMeter,
+      } : null,
     };
-    console.log(`[GPS] Sync OK: ${updated}/${fleetList.length} actualizados`);
+    console.log(`[GPS] Sync OK: ${updated}/${fleet.length} actualizados`);
     if (log.length) console.log('[GPS]', log.join(', '));
 
   } catch(e) {
-    console.log('[GPS] Error:', e.message);
+    console.log('[GPS] Error sync:', e.message);
     _lastResult = { ok: false, error: e.message };
   } finally {
     _running = false;
