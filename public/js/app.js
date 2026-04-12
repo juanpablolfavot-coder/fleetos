@@ -3388,6 +3388,158 @@ function renderContadorPanel() {
 }
 
 
+// ── FUNCIONES FALTANTES ──────────────────────────────────────────────────────
+
+function openNewVehicleModal() {
+  openModal('Registrar nueva unidad', `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="Ej: INT-46" id="nv-code"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" placeholder="Ej: ABC 001" id="nv-plate"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Marca</label><input class="form-input" placeholder="Ej: Mercedes-Benz" id="nv-brand"></div>
+      <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" placeholder="Ej: Actros 2651" id="nv-model"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" placeholder="Ej: 2019" id="nv-year"></div>
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-select" id="nv-type">
+          <option value="tractor">Tractor</option>
+          <option value="camion">Camión</option>
+          <option value="semirremolque">Semirremolque</option>
+          <option value="acoplado">Acoplado</option>
+          <option value="utilitario">Utilitario</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000" id="nv-km"></div>
+      <div class="form-group"><label class="form-label">Base operativa</label>
+        <select class="form-select" id="nv-base">
+          <option value="Central">Central</option>
+          <option value="Norte">Norte</option>
+          <option value="Sur">Sur</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" placeholder="Ej: Juan Pérez" id="nv-driver"></div>
+      <div class="form-group"><label class="form-label">Estado</label>
+        <select class="form-select" id="nv-status">
+          <option value="ok">Operativo</option>
+          <option value="warn">Con alerta</option>
+          <option value="taller">En taller</option>
+          <option value="detenida">Detenida</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">VIN / Chasis</label><input class="form-input" placeholder="Ej: 9BM..." id="nv-vin"></div>
+      <div class="form-group"><label class="form-label">Número de motor</label><input class="form-input" placeholder="Ej: OM471..." id="nv-engine"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Centro de costo</label><input class="form-input" placeholder="Ej: CC-01" id="nv-cc"></div>
+  `, [
+    { label: 'Registrar unidad', cls: 'btn-primary',   fn: saveNewVehicle },
+    { label: 'Cancelar',         cls: 'btn-secondary', fn: closeModal }
+  ]);
+}
+
+async function saveNewVehicle() {
+  const code   = (document.getElementById('nv-code')?.value   || '').trim();
+  const plate  = (document.getElementById('nv-plate')?.value  || '').trim();
+  const brand  = (document.getElementById('nv-brand')?.value  || '').trim();
+  const model  = (document.getElementById('nv-model')?.value  || '').trim();
+  const year   = parseInt(document.getElementById('nv-year')?.value)  || new Date().getFullYear();
+  const km     = parseInt(document.getElementById('nv-km')?.value)    || 0;
+  const type   = document.getElementById('nv-type')?.value            || 'camion';
+  const base   = document.getElementById('nv-base')?.value            || 'Central';
+  const driver = (document.getElementById('nv-driver')?.value || '').trim();
+  const status = document.getElementById('nv-status')?.value          || 'ok';
+  const vin    = (document.getElementById('nv-vin')?.value    || '').trim();
+  const engine = (document.getElementById('nv-engine')?.value || '').trim();
+  const cc     = (document.getElementById('nv-cc')?.value     || '').trim();
+
+  if (!code)  { showToast('error', 'El código interno es obligatorio'); return; }
+  if (!plate) { showToast('error', 'La patente es obligatoria'); return; }
+  if (!brand || !model) { showToast('error', 'Marca y modelo son obligatorios'); return; }
+
+  const res = await apiFetch('/api/vehicles', {
+    method: 'POST',
+    body: JSON.stringify({ code, plate, brand, model, year, type, base, km_current: km,
+                           driver, status, vin, engine_no: engine, cost_center: cc })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar unidad'); return; }
+
+  closeModal();
+  showToast('ok', `Unidad ${code} registrada correctamente`);
+  await loadInitialData();
+  renderFleet();
+}
+
+function openNewOTModal(preselectedVehicle) {
+  const vehicleOpts = (App.data.vehicles || [])
+    .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${v.code} — ${v.brand} ${v.model} (${v.plate})</option>`)
+    .join('');
+
+  openModal('Nueva orden de trabajo', `
+    <div class="form-group">
+      <label class="form-label">Unidad</label>
+      <select class="form-select" id="ot-vehicle">
+        <option value="">— Seleccioná una unidad —</option>
+        ${vehicleOpts}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-select" id="ot-type">
+          <option value="Correctivo">Correctivo</option>
+          <option value="Preventivo">Preventivo</option>
+          <option value="Predictivo">Predictivo</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Prioridad</label>
+        <select class="form-select" id="ot-priority">
+          <option value="Normal">Normal</option>
+          <option value="Media">Media</option>
+          <option value="Urgente">Urgente</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Título / Descripción del trabajo</label>
+      <input class="form-input" placeholder="Ej: Cambio de aceite y filtros" id="ot-title">
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Mecánico asignado</label>
+        <input class="form-input" placeholder="Nombre del mecánico" id="ot-assigned">
+      </div>
+      <div class="form-group"><label class="form-label">Fecha límite</label>
+        <input class="form-input" type="date" id="ot-due">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Mano de obra ($)</label>
+        <input class="form-input" type="number" placeholder="0" id="ot-labor">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Notas adicionales</label>
+      <textarea class="form-input" rows="3" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
+    </div>
+  `, [
+    { label: 'Crear OT', cls: 'btn-primary',   fn: saveNewOT },
+    { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
+  ]);
+}
+
+function syncGPSNow(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...'; }
+  setTimeout(() => {
+    if (btn) { btn.disabled = false; btn.innerHTML = '⚡ Sync GPS'; }
+    showToast('ok', 'GPS sincronizado. Sin dispositivos conectados actualmente.');
+  }, 1500);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', () => {
   // Asegurar que el modal esté cerrado al iniciar
   const overlay = document.getElementById('modal-overlay');
