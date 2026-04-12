@@ -3312,57 +3312,6 @@ async function rejectUser(id, name) {
 }
 
 
-  try {
-    const res = await apiFetch('/api/users');
-    if (!res || !res.ok) { document.getElementById('users-table-wrap').innerHTML = '<div style="color:var(--danger);padding:20px">Error cargando usuarios</div>'; return; }
-    const users = await res.json();
-
-    document.getElementById('users-table-wrap').innerHTML = `
-      <div class="card" style="padding:0;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:var(--bg3);border-bottom:1px solid var(--border1)">
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Nombre</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Email</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Rol</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Unidad</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Estado</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Último acceso</th>
-              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${users.map(u => `
-              <tr style="border-bottom:1px solid var(--border1)">
-                <td style="padding:12px 16px;font-weight:600;color:var(--text1)">${u.name}</td>
-                <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
-                <td style="padding:12px 16px">
-                  <span style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--text2)">
-                    ${ROLES_LIST.find(r=>r.value===u.role)?.label || u.role}
-                  </span>
-                </td>
-                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.vehicle_code || '—'}</td>
-                <td style="padding:12px 16px">
-                  <span style="background:${u.active ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${u.active ? '#22c55e' : '#ef4444'};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600">
-                    ${u.active ? 'Activo' : 'Inactivo'}
-                  </span>
-                </td>
-                <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
-                <td style="padding:12px 16px">
-                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}','${u.name.replace(/'/g,"\'")}','${u.email}','${u.role}','${u.vehicle_code||''}',${u.active})">Editar</button>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </div>
-      <p style="font-size:12px;color:var(--text3);margin-top:12px">${users.length} usuario${users.length !== 1 ? 's' : ''} registrado${users.length !== 1 ? 's' : ''}</p>
-    `;
-  } catch(e) {
-    document.getElementById('users-table-wrap').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
-  }
-}
-
 function openNewUserModal() {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
   const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}">${v.code} · ${v.plate}</option>`).join('');
