@@ -21,12 +21,17 @@ function initLogin() {
   _tryAutoLogin();
 }
 
-async function _tryAutoLogin() {
-  // Mostrar spinner mientras intenta reconectar
+async function _tryAutoLogin(attempt = 1) {
+  const MAX_ATTEMPTS = 4;
   const errDiv = document.getElementById('login-error');
   const btn    = document.getElementById('btn-login');
   if (errDiv) errDiv.textContent = '';
-  if (btn) { btn.disabled = true; btn.textContent = 'Reconectando...'; }
+
+  if (attempt === 1) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Conectando...'; }
+  } else {
+    if (btn) btn.textContent = `Conectando... (${attempt}/${MAX_ATTEMPTS})`;
+  }
 
   try {
     const res = await fetch('/api/auth/refresh', {
@@ -64,10 +69,18 @@ async function _tryAutoLogin() {
     bootApp();
 
   } catch(e) {
-    // Error de red — mostrar login limpio sin mensaje de error
-    if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
-    if (errDiv) errDiv.textContent = '';
-    _showLoginForm();
+    // Error de red — puede ser que Render está despertando (plan gratuito duerme)
+    if (attempt < MAX_ATTEMPTS) {
+      // Reintentar con backoff: 3s, 6s, 10s
+      const delay = attempt * 3000;
+      if (btn) btn.textContent = `Servidor iniciando, esperando ${delay/1000}s...`;
+      setTimeout(() => _tryAutoLogin(attempt + 1), delay);
+    } else {
+      // Agotó los reintentos — mostrar login limpio
+      if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
+      if (errDiv) errDiv.textContent = '';
+      _showLoginForm();
+    }
   }
 }
 
@@ -251,6 +264,14 @@ function bootApp() {
   if (logoutBtn) logoutBtn.onclick = logout;
 
   buildNavForRole(role);
+
+  // Keepalive: ping cada 10 min para que Render no duerma el servidor
+  if (!window._keepaliveInterval) {
+    window._keepaliveInterval = setInterval(() => {
+      fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + (window._getToken ? window._getToken() : '') } })
+        .catch(() => {});
+    }, 10 * 60 * 1000);
+  }
 
   // Cargar datos iniciales desde la API
   loadInitialData().then(() => {
