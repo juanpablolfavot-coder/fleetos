@@ -22,19 +22,27 @@ function initLogin() {
 }
 
 async function _tryAutoLogin() {
+  // Mostrar spinner mientras intenta reconectar
+  const errDiv = document.getElementById('login-error');
+  const btn    = document.getElementById('btn-login');
+  if (errDiv) errDiv.textContent = '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Reconectando...'; }
+
   try {
     const res = await fetch('/api/auth/refresh', {
       method: 'POST',
-      credentials: 'include'   // <-- envía la cookie automáticamente
+      credentials: 'include'
     });
 
     if (!res.ok) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
       _showLoginForm();
       return;
     }
 
     const data = await res.json();
     if (!data.accessToken || !data.user) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
       _showLoginForm();
       return;
     }
@@ -56,6 +64,9 @@ async function _tryAutoLogin() {
     bootApp();
 
   } catch(e) {
+    // Error de red — mostrar login limpio sin mensaje de error
+    if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
+    if (errDiv) errDiv.textContent = '';
     _showLoginForm();
   }
 }
