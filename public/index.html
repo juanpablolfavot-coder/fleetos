@@ -32,9 +32,13 @@
   width: 90% !important;
   max-width: 720px !important;
   max-height: 88vh !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   position: relative !important;
   z-index: 100000 !important;
+}
+.modal-overlay.open .modal .modal-body {
+  overflow-y: auto !important;
+  max-height: calc(88vh - 120px) !important;
 }
 .modal-header {
   padding: 16px 20px !important;
