@@ -82,7 +82,7 @@ function renderDashboard() {
       <div class="kpi-card ${ok>=40?'ok':'warn'}">
         <div class="kpi-label">Unidades operativas</div>
         <div class="kpi-value ${ok>=40?'ok':'warn'}">${ok}</div>
-        <div class="kpi-trend">de 45 en flota</div>
+        <div class="kpi-trend">de ${App.data.vehicles.length} en flota</div>
       </div>
       <div class="kpi-card ${taller+detenida===0?'ok':'warn'}">
         <div class="kpi-label">En taller / detenidas</div>

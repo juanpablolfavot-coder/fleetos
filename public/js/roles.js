@@ -197,7 +197,7 @@ async function loadInitialData() {
       km:       v.km_current || 0,
       base:     v.base || 'Central',
       driver:   v.driver_name || '—',
-      cost_km:  parseFloat(v.cost_km) || 0.18,
+      cost_km:  parseFloat(v.cost_km) || 0,
       vin:      v.vin,
       engine_no:v.engine_no,
       cost_center: v.cost_center,
