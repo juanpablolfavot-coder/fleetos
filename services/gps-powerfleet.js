@@ -1,172 +1,256 @@
 // ═══════════════════════════════════════════════════════════
 //  FleetOS — Integración GPS Powerfleet (Rusegur)
-//  Actualiza km y posición de vehículos desde la API de Powerfleet
+//  Estrategia: login con cookie + streaming con timeout
 // ═══════════════════════════════════════════════════════════
 
 const https  = require('https');
+const http   = require('http');
 const { query } = require('../db/pool');
 
-const PF_BASE = 'rusegur.monitoreodeflotas.com.ar';
+const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
 const PF_USER = process.env.GPS_USER     || 'EBiletta';
 const PF_PASS = process.env.GPS_PASSWORD || 'EBiletta26';
 
-let _sessionCookies = null;
-let _lastSync       = null;
-let _lastResult     = null;
-let _syncRunning    = false;
+let _cookies     = '';   // cookies de sesión
+let _lastSync    = null;
+let _lastResult  = null;
+let _running     = false;
 
-// ── Request HTTPS con cookies de sesión ─────────────────────
-function pfRequest(path, method = 'GET', body = null, extraHeaders = {}) {
+// ── Hacer request HTTPS con cookies ────────────────────────
+function makeRequest(path, opts = {}) {
   return new Promise((resolve, reject) => {
-    const bodyStr = body ? JSON.stringify(body) : null;
-    const opts = {
-      hostname: PF_BASE,
+    const options = {
+      hostname: PF_HOST,
+      port: 443,
       path,
-      method,
+      method: opts.method || 'GET',
       rejectUnauthorized: false,
       headers: {
-        'Content-Type':  'application/json',
-        'Accept':        'application/json',
-        'User-Agent':    'Mozilla/5.0 (FleetOS GPS Sync)',
-        ...(_sessionCookies ? { Cookie: _sessionCookies } : {}),
-        ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
-        ...extraHeaders,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Origin': `https://${PF_HOST}`,
+        'Referer': `https://${PF_HOST}/FLEET/Connect.aspx/fleet`,
+        ...(_cookies ? { 'Cookie': _cookies } : {}),
+        ...(opts.headers || {}),
       },
     };
 
-    const req = https.request(opts, (res) => {
-      // Acumular cookies
+    const bodyStr = opts.body ? JSON.stringify(opts.body) : null;
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+
+    let data = '';
+    const req = https.request(options, (res) => {
+      // Capturar cookies
       const sc = res.headers['set-cookie'];
-      if (sc && sc.length) {
+      if (sc) {
         const newCookies = sc.map(c => c.split(';')[0]).join('; ');
-        _sessionCookies = _sessionCookies
-          ? _sessionCookies + '; ' + newCookies
-          : newCookies;
+        _cookies = _cookies ? `${_cookies}; ${newCookies}` : newCookies;
       }
-      let data = '';
-      res.on('data', c => data += c);
+
+      // Para long-poll: leer datos con timeout
+      const timer = opts.streamTimeout ? setTimeout(() => req.destroy(), opts.streamTimeout) : null;
+
+      res.on('data', chunk => { data += chunk; });
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data), headers: res.headers }); }
-        catch(e) { resolve({ status: res.statusCode, body: data, headers: res.headers }); }
+        if (timer) clearTimeout(timer);
+        resolve({ status: res.status || res.statusCode, body: data, headers: res.headers });
       });
     });
 
-    req.on('error', reject);
-    req.setTimeout(20000, () => { req.destroy(); reject(new Error('Timeout GPS')); });
+    req.on('error', (e) => {
+      // 'socket hang up' o 'ECONNRESET' pueden venir de streamTimeout — eso es OK
+      if (data.length > 0) {
+        resolve({ status: 200, body: data, partial: true });
+      } else {
+        reject(e);
+      }
+    });
+
+    const totalTimer = setTimeout(() => {
+      req.destroy();
+      if (data.length > 0) {
+        resolve({ status: 200, body: data, partial: true });
+      } else {
+        resolve({ status: 408, body: '', timeout: true });
+      }
+    }, opts.timeout || 30000);
+
+    req.on('close', () => clearTimeout(totalTimer));
+
     if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
 
-// ── Login en Powerfleet ──────────────────────────────────────
-async function pfLogin() {
+// ── Parsear JSON posiblemente parcial/streaming ─────────────
+function parseVehiclesResponse(raw) {
+  if (!raw || !raw.trim()) return [];
+
+  // Intentar JSON normal primero
   try {
-    console.log('[GPS] Iniciando sesión en Powerfleet...');
+    const d = JSON.parse(raw);
+    return d.Vehicles || d.vehicles || d.data || d.Items || 
+           (Array.isArray(d) ? d : []);
+  } catch(e) {}
 
-    // Obtener cookies iniciales
-    await pfRequest('/FLEET/Connect.aspx/', 'GET').catch(() => {});
+  // JSON parcial — buscar el array de Vehicles
+  const match = raw.match(/"Vehicles"\s*:\s*(\[[\s\S]*)/);
+  if (match) {
+    try {
+      // Intentar cerrar el JSON parcial
+      let arr = match[1];
+      // Encontrar el último objeto completo
+      let depth = 0, lastComplete = 0;
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i] === '{') depth++;
+        if (arr[i] === '}') { depth--; if (depth === 0) lastComplete = i; }
+      }
+      if (lastComplete > 0) {
+        const completed = arr.slice(0, lastComplete + 1) + ']';
+        return JSON.parse(completed);
+      }
+    } catch(e2) {}
+  }
 
-    // Login vía API interna
-    const r1 = await pfRequest('/fleetcore.api/api/user/login', 'POST',
-      { Username: PF_USER, Password: PF_PASS, RememberMe: false });
+  return [];
+}
 
-    if (r1.status === 200) {
-      console.log('[GPS] Login OK');
+// ── Login en Powerfleet ─────────────────────────────────────
+async function login() {
+  _cookies = '';
+  console.log('[GPS] Conectando a Powerfleet...');
+
+  try {
+    // Paso 1: GET página login para obtener cookies iniciales
+    const page = await makeRequest('/FLEET/Connect.aspx/', { timeout: 10000 });
+    console.log('[GPS] Página login status:', page.status, '| Cookies:', _cookies.length, 'chars');
+
+    // Paso 2: POST login
+    const loginRes = await makeRequest('/fleetcore.api/api/user/login', {
+      method: 'POST',
+      body: { Username: PF_USER, Password: PF_PASS, RememberMe: false },
+      timeout: 10000,
+    });
+    console.log('[GPS] Login status:', loginRes.status, '| Cookies:', _cookies.length, 'chars');
+    console.log('[GPS] Login body:', loginRes.body.slice(0, 200));
+
+    if (loginRes.status === 200 && _cookies.length > 20) {
       return true;
     }
 
-    // Fallback: login vía web form
-    const r2 = await pfRequest('/FLEET/Connect.aspx/Login', 'POST',
-      { user: PF_USER, password: PF_PASS });
+    // Paso 3: Intentar login vía endpoint alternativo
+    const login2 = await makeRequest('/fleetcore.api/api/user/authenticate', {
+      method: 'POST',
+      body: { Username: PF_USER, Password: PF_PASS },
+      timeout: 10000,
+    });
+    console.log('[GPS] Login2 status:', login2.status, '| body:', login2.body.slice(0,100));
 
-    if (r2.status === 200 || r2.status === 302) {
-      console.log('[GPS] Login alternativo OK');
-      return true;
-    }
-
-    console.log('[GPS] Login fallido. Status:', r1.status);
-    return false;
+    return _cookies.length > 20;
   } catch(e) {
     console.log('[GPS] Error login:', e.message);
     return false;
   }
 }
 
-// ── Obtener vehículos desde Powerfleet ──────────────────────
-async function pfGetVehicles() {
-  const r = await pfRequest(
-    '/fleetcore.api/api/fleetview/vehicles?isUpdate=0&vehicles=0&alertCount=1&si=1&lastEventIdReceived=0'
-  );
-  if (r.status !== 200) return null;
-  return r.body.Vehicles || r.body.vehicles || r.body.data || [];
-}
+// ── Obtener vehículos con streaming ────────────────────────
+async function fetchVehicles() {
+  // El endpoint usa long-poll — leer con timeout de 10s
+  // isUpdate=0 pide todos los vehículos, no solo cambios
+  const paths = [
+    '/fleetcore.api/api/fleetview/vehicles?isUpdate=0&vehicles=0&alertCount=1&si=1&lastEventIdReceived=0',
+    '/fleetcore.api/api/fleetview/vehicles?alertCount=0&si=1',
+    '/fleetcore.api/api/fleetview/assets',
+  ];
 
-// ── Asegurar columnas GPS en la tabla vehicles ───────────────
-async function ensureGPSColumns() {
-  try {
-    await query(`
-      ALTER TABLE vehicles
-        ADD COLUMN IF NOT EXISTS gps_lat        NUMERIC(10,7),
-        ADD COLUMN IF NOT EXISTS gps_lng        NUMERIC(10,7),
-        ADD COLUMN IF NOT EXISTS gps_speed      NUMERIC(6,1) DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS gps_status     VARCHAR(20)  DEFAULT 'unknown',
-        ADD COLUMN IF NOT EXISTS gps_updated_at TIMESTAMPTZ;
-    `);
-  } catch(e) {
-    // Columnas ya existen — OK
+  for (const path of paths) {
+    try {
+      console.log('[GPS] Probando:', path);
+      const res = await makeRequest(path, {
+        timeout:       12000,  // 12 segundos máximo
+        streamTimeout: 10000,  // cortar stream a los 10s
+      });
+
+      console.log(`[GPS] Status: ${res.status} | Len: ${res.body.length} | Partial: ${!!res.partial} | Timeout: ${!!res.timeout}`);
+
+      if (res.body.length > 10) {
+        console.log('[GPS] Body preview:', res.body.slice(0, 300));
+        const vehicles = parseVehiclesResponse(res.body);
+        if (vehicles.length > 0) {
+          console.log(`[GPS] ${vehicles.length} vehículos encontrados via ${path}`);
+          return vehicles;
+        }
+      }
+    } catch(e) {
+      console.log(`[GPS] Error en ${path}:`, e.message);
+    }
   }
+
+  return [];
 }
 
-// ── Sync principal ───────────────────────────────────────────
+// ── Asegurar columnas GPS en vehicles ──────────────────────
+async function ensureColumns() {
+  try {
+    await query(`ALTER TABLE vehicles
+      ADD COLUMN IF NOT EXISTS gps_lat        NUMERIC(10,7),
+      ADD COLUMN IF NOT EXISTS gps_lng        NUMERIC(10,7),
+      ADD COLUMN IF NOT EXISTS gps_speed      NUMERIC(6,1) DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS gps_status     VARCHAR(20)  DEFAULT 'unknown',
+      ADD COLUMN IF NOT EXISTS gps_updated_at TIMESTAMPTZ`);
+  } catch(e) { /* ya existen */ }
+}
+
+// ── Sync principal ─────────────────────────────────────────
 async function syncGPSData() {
-  if (_syncRunning) return;
-  _syncRunning = true;
+  if (_running) return;
+  _running = true;
 
   try {
-    console.log('[GPS] Sincronizando con Powerfleet...');
+    console.log('[GPS] === Inicio sync ===');
 
-    if (!_sessionCookies) {
-      if (!(await pfLogin())) {
-        _lastResult = { ok: false, error: 'Login fallido' };
+    // Login si no tenemos cookies
+    if (!_cookies || _cookies.length < 20) {
+      const ok = await login();
+      if (!ok) {
+        _lastResult = { ok: false, error: 'Login fallido', cookies: _cookies.length };
         return;
       }
     }
 
-    let vehicles = await pfGetVehicles();
+    // Obtener vehículos
+    let vehicles = await fetchVehicles();
 
-    if (!vehicles) {
-      // Sesión expirada — reintentar
-      _sessionCookies = null;
-      if (!(await pfLogin())) {
-        _lastResult = { ok: false, error: 'Login fallido en reintento' };
-        return;
-      }
-      vehicles = await pfGetVehicles();
+    // Re-login si falló
+    if (vehicles.length === 0) {
+      console.log('[GPS] 0 vehículos — re-login...');
+      _cookies = '';
+      const ok = await login();
+      if (ok) vehicles = await fetchVehicles();
     }
 
-    if (!vehicles || vehicles.length === 0) {
+    if (vehicles.length === 0) {
       console.log('[GPS] Sin vehículos recibidos');
-      _lastResult = { ok: true, received: 0, updated: 0 };
+      _lastResult = { ok: true, received: 0, updated: 0, note: 'API no devolvió vehículos' };
       return;
     }
 
-    await ensureGPSColumns();
+    await ensureColumns();
 
     let updated = 0;
-    const details = [];
+    const log = [];
 
     for (const v of vehicles) {
-      // Normalizar campos de Powerfleet (distintas versiones usan distintos nombres)
-      const plate  = (v.Plate || v.PlateNo || v.LicensePlate || v.plate || '').trim();
-      const km     = parseFloat(v.Odometer || v.OdometerKm || v.TotalDistance || v.km || 0) || 0;
+      const plate  = (v.Plate || v.PlateNo || v.LicensePlate || v.plate || '').toString().trim();
+      const km     = parseFloat(v.Odometer || v.OdometerKm || v.TotalDistance || v.odometer || v.km || 0) || 0;
       const speed  = parseFloat(v.Speed || v.CurrentSpeed || v.speed || 0) || 0;
       const lat    = parseFloat(v.Latitude  || v.lat  || 0) || null;
       const lng    = parseFloat(v.Longitude || v.lng  || 0) || null;
-      const status = speed > 3 ? 'moving' : 'stopped';
+      const status = speed > 2 ? 'moving' : 'stopped';
 
       if (!plate) continue;
 
-      // Actualizar vehículo por patente (normalizada sin espacios ni guiones)
       const r = await query(`
         UPDATE vehicles
         SET
@@ -183,39 +267,39 @@ async function syncGPSData() {
 
       if (r.rows.length > 0) {
         updated++;
-        details.push({ plate, km, speed, status, code: r.rows[0].code });
+        log.push(`${r.rows[0].code}(${km}km/${Math.round(speed)}kmh)`);
       }
     }
 
     _lastSync   = new Date();
-    _lastResult = { ok: true, received: vehicles.length, updated, details };
-    console.log(`[GPS] Sync OK: ${updated}/${vehicles.length} vehículos actualizados`);
-    if (details.length) console.log('[GPS] Actualizados:', details.map(d => `${d.code}(${d.km}km)`).join(', '));
+    _lastResult = { ok: true, received: vehicles.length, updated, keys: Object.keys(vehicles[0] || {}).join(',') };
+    console.log(`[GPS] Sync OK: ${updated}/${vehicles.length} actualizados`);
+    if (log.length) console.log('[GPS]', log.join(', '));
 
   } catch(e) {
     console.log('[GPS] Error sync:', e.message);
     _lastResult = { ok: false, error: e.message };
   } finally {
-    _syncRunning = false;
+    _running = false;
   }
 }
 
-// ── Arrancar el sync periódico ───────────────────────────────
-function startGPSSync(intervalMinutes = 5) {
-  console.log(`[GPS] Servicio iniciado. Intervalo: ${intervalMinutes} min`);
-  setTimeout(syncGPSData, 15000);                              // primer sync a los 15 seg
-  setInterval(syncGPSData, intervalMinutes * 60 * 1000);       // luego cada N minutos
+// ── Arrancar el sync periódico ─────────────────────────────
+function startGPSSync(intervalMin = 5) {
+  console.log(`[GPS] Servicio GPS iniciado. Sync cada ${intervalMin} min`);
+  setTimeout(syncGPSData, 12000);   // primer sync 12s después de arrancar
+  setInterval(syncGPSData, intervalMin * 60 * 1000);
 }
 
-// ── Status para el endpoint de API ──────────────────────────
 function getGPSStatus() {
   return {
     provider:   'Powerfleet Unity (Rusegur)',
     lastSync:   _lastSync,
     lastResult: _lastResult,
-    hasSession: !!_sessionCookies,
-    running:    _syncRunning,
+    hasSession: _cookies.length > 20,
+    running:    _running,
     interval:   '5 min',
+    cookiesLen: _cookies.length,
   };
 }
 

@@ -84,6 +84,15 @@ app.get('/api/gps/status', async (req, res) => {
   res.json(getGPSStatus());
 });
 
+// Debug: forzar sync y esperar resultado
+app.post('/api/gps/force-sync', async (req, res) => {
+  const { syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
+  syncGPSData();
+  // Esperar 20s y devolver el resultado
+  await new Promise(r => setTimeout(r, 20000));
+  res.json(getGPSStatus());
+});
+
 app.post('/api/gps/sync', async (req, res) => {
   syncGPSData();
   res.json({ ok: true, message: 'Sync iniciado' });
