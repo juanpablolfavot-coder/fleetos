@@ -2,8 +2,28 @@
 //  FleetOS — Autenticación real con JWT
 // ═══════════════════════════════════════════
 
-// Token JWT en memoria (no en localStorage)
+// Token JWT — en memoria + sessionStorage para sobrevivir recargas
 let _accessToken = null;
+
+function _saveToken(token) {
+  _accessToken = token;
+  window._getToken = () => _accessToken;
+  try { sessionStorage.setItem('_fleet_tok', token); } catch(e) {}
+}
+
+function _clearToken() {
+  _accessToken = null;
+  window._getToken = () => null;
+  try { sessionStorage.removeItem('_fleet_tok'); } catch(e) {}
+}
+
+function _loadToken() {
+  try {
+    const t = sessionStorage.getItem('_fleet_tok');
+    if (t) { _accessToken = t; window._getToken = () => _accessToken; return t; }
+  } catch(e) {}
+  return null;
+}
 
 // ── LOGIN REAL ──
 function initLogin() {
@@ -11,6 +31,13 @@ function initLogin() {
   const passwordInput = document.getElementById('login-password');
   const btnLogin      = document.getElementById('btn-login');
   const errorDiv      = document.getElementById('login-error');
+
+  // Intentar restaurar sesión desde sessionStorage
+  const savedToken = _loadToken();
+  if (savedToken) {
+    _tryRestoreSession();
+    return;
+  }
 
   // Click en botón de login
   if (btnLogin) btnLogin.addEventListener('click', doLogin);
@@ -20,6 +47,45 @@ function initLogin() {
     if (el) el.addEventListener('keydown', e => {
       if (e.key === 'Enter') doLogin();
     });
+  });
+}
+
+async function _tryRestoreSession() {
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: { 'Authorization': `Bearer ${_accessToken}` }
+    });
+    if (!res.ok) {
+      _clearToken();
+      _showLoginScreen();
+      return;
+    }
+    const u = await res.json();
+    App.currentUser = {
+      id:       u.id,
+      name:     u.name,
+      email:    u.email,
+      role:     u.role,
+      vehicle:  u.vehicle_code,
+      initials: u.name.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase(),
+      roleData: getRoleData(u.role),
+    };
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-shell').style.display = '';
+    bootApp();
+  } catch(e) {
+    _clearToken();
+    _showLoginScreen();
+  }
+}
+
+function _showLoginScreen() {
+  const btnLogin  = document.getElementById('btn-login');
+  const emailInput = document.getElementById('login-email');
+  const passwordInput = document.getElementById('login-password');
+  if (btnLogin) btnLogin.addEventListener('click', doLogin);
+  [emailInput, passwordInput].forEach(el => {
+    if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
   });
 }
 
@@ -52,9 +118,8 @@ async function doLogin() {
       return;
     }
 
-    // Guardar token en memoria
-    _accessToken = data.accessToken;
-    window._getToken = () => _accessToken;
+    // Guardar token en memoria Y sessionStorage
+    _saveToken(data.accessToken);
 
     // Configurar usuario
     const u = data.user;
@@ -94,7 +159,7 @@ window.apiFetch = async function(url, options = {}) {
 };
 
 function logout() {
-  _accessToken = null;
+  _clearToken();
   App.currentUser = null;
   App.data = {};
   document.getElementById('app-shell').style.display = 'none';
