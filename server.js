@@ -49,7 +49,20 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.static(path.join(__dirname,'public'),{maxAge:'0', etag:false, lastModified:false}));
-app.get(/^(?!\/api).*/,(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+app.get(/^(?!\/api).*/, (req, res) => {
+  const fs = require('fs');
+  const filePath = require('path').join(__dirname, 'public', 'index.html');
+  let html = fs.readFileSync(filePath, 'utf8');
+  
+  // Forzar que el browser nunca use cache del HTML
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  
+  res.send(html);
+});
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
 // TEMPORAL: endpoint de migraciÃÂÃÂÃÂÃÂ³n (eliminar despuÃÂÃÂÃÂÃÂ©s)
