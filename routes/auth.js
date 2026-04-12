@@ -123,7 +123,13 @@ router.post('/refresh', async (req, res) => {
       expiresIn: process.env.JWT_EXPIRES_IN || '8h'
     });
 
-    res.json({ accessToken });
+    // Traer datos del usuario para restaurar sesión
+    const userRow = await query(
+      'SELECT id, name, email, role, vehicle_code FROM users WHERE id = $1',
+      [user_id]
+    );
+
+    res.json({ accessToken, user: userRow.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Error del servidor' });
   }
