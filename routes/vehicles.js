@@ -46,19 +46,23 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
 // POST /api/vehicles
 router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), auditAction('CREATE','vehicles'), async (req, res) => {
   try {
-    const { code, plate, brand, model, year, type, base, driver_id, km_current, vin, engine_no, cost_center } = req.body;
+    const { code, plate, brand, model, year, type, base, driver_id, driver, km_current, vin, engine_no, cost_center, status } = req.body;
     if (!code || !plate || !brand || !model || !year || !type) {
       return res.status(400).json({ error: 'Campos requeridos: code, plate, brand, model, year, type' });
     }
+    // Asegurar que driver_name existe
+    await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT`).catch(()=>{});
     const result = await query(
-      `INSERT INTO vehicles (code,plate,brand,model,year,type,base,driver_id,km_current,vin,engine_no,cost_center)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [code, plate, brand, model, year, type, base, driver_id||null, km_current||0, vin||null, engine_no||null, cost_center||null]
+      `INSERT INTO vehicles (code,plate,brand,model,year,type,base,driver_id,km_current,vin,engine_no,cost_center,driver_name,status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      [code, plate, brand, model, year, type, base, driver_id||null, km_current||0,
+       vin||null, engine_no||null, cost_center||null, driver||null, status||'ok']
     );
     res.locals.recordId = result.rows[0].id;
     res.status(201).json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Código o patente ya existe' });
+    console.error('POST vehicle error:', err.message);
     res.status(500).json({ error: 'Error al crear vehículo' });
   }
 });

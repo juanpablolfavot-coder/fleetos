@@ -810,7 +810,9 @@ async function saveEditVehicle(id) {
   if (idx>=0) {
     App.data.vehicles[idx] = Object.assign(App.data.vehicles[idx], {
       code, plate, brand, model, year, type, base, status,
-      km: km, driver: driver||'—', vin, engine_no: engine, cost_center: cc
+      km: km,
+      driver: updated.driver_name || driver || '—',
+      vin, engine_no: engine, cost_center: cc
     });
   }
   closeModal();
@@ -3529,11 +3531,15 @@ async function saveNewVehicle() {
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar unidad'); return; }
 
   const newV = await res.json();
-  // Agregar directamente a App.data para actualización inmediata
+  // Agregar directamente a App.data usando datos del servidor
   if (!App.data.vehicles) App.data.vehicles = [];
   App.data.vehicles.push({
-    id: newV.id, code, plate, brand, model, year, type, base, status,
-    km: km, driver: driver||'—', vin, engine_no: engine, cost_center: cc,
+    id: newV.id, code: newV.code, plate: newV.plate, brand: newV.brand,
+    model: newV.model, year: newV.year, type: newV.type,
+    base: newV.base || base, status: newV.status || status,
+    km: newV.km_current || km,
+    driver: newV.driver_name || driver || '—',
+    vin: newV.vin, engine_no: newV.engine_no, cost_center: newV.cost_center,
     cost_km: 0, gps_status: 'unknown', tech_spec: {}
   });
   closeModal();
