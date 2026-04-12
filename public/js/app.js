@@ -3202,12 +3202,115 @@ async function renderUsers() {
     <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div>
         <h2 style="font-size:18px;font-weight:700;color:var(--text1);margin:0">Gestión de usuarios</h2>
-        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Crear y administrar accesos al sistema</p>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Crear, administrar y aprobar accesos al sistema</p>
       </div>
       <button class="btn btn-primary" onclick="openNewUserModal()">+ Nuevo usuario</button>
     </div>
+    <div id="pending-wrap"></div>
     <div id="users-table-wrap"><div style="text-align:center;padding:40px;color:var(--text3)">Cargando usuarios...</div></div>
   `;
+
+  try {
+    const res = await apiFetch('/api/users');
+    if (!res || !res.ok) { document.getElementById('users-table-wrap').innerHTML = '<div style="color:var(--danger);padding:20px">Error cargando usuarios</div>'; return; }
+    const users = await res.json();
+
+    // Separar pendientes de aprobación
+    const pending = users.filter(u => !u.active && u.role === 'chofer');
+    const active  = users.filter(u => u.active || u.role !== 'chofer');
+
+    // Sección de pendientes
+    if (pending.length > 0) {
+      document.getElementById('pending-wrap').innerHTML = `
+        <div class="card" style="border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.06);margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+            <span style="font-size:18px">⏳</span>
+            <div>
+              <div style="font-weight:700;color:var(--warn)">Choferes pendientes de aprobación (${pending.length})</div>
+              <div style="font-size:12px;color:var(--text3)">Estos choferes se registraron y esperan que les apruebes el acceso.</div>
+            </div>
+          </div>
+          ${pending.map(u=>`
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-radius:var(--radius);margin-bottom:8px;border:1px solid var(--border)">
+              <div>
+                <div style="font-weight:600;color:var(--text)">${u.name}</div>
+                <div style="font-size:12px;color:var(--text3)">${u.email} ${u.vehicle_code?'· Unidad: '+u.vehicle_code:''}</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-primary btn-sm" onclick="approveUser('${u.id}')">✓ Aprobar</button>
+                <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="rejectUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">✕ Rechazar</button>
+              </div>
+            </div>`).join('')}
+        </div>`;
+    } else {
+      document.getElementById('pending-wrap').innerHTML = '';
+    }
+
+    document.getElementById('users-table-wrap').innerHTML = `
+      <div class="card" style="padding:0;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--bg3);border-bottom:1px solid var(--border1)">
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Nombre</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Email</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Rol</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Unidad</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Estado</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Último acceso</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${active.map(u => `
+              <tr style="border-bottom:1px solid var(--border1)">
+                <td style="padding:12px 16px;font-weight:600;color:var(--text1)">${u.name}</td>
+                <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
+                <td style="padding:12px 16px">
+                  <span style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--text2)">
+                    ${ROLES_LIST.find(r=>r.value===u.role)?.label || u.role}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.vehicle_code || '—'}</td>
+                <td style="padding:12px 16px">
+                  <span style="background:${u.active ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${u.active ? '#22c55e' : '#ef4444'};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600">
+                    ${u.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
+                <td style="padding:12px 16px">
+                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}','${u.name.replace(/'/g,"\\'")}','${u.email}','${u.role}','${u.vehicle_code||''}',${u.active})">Editar</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-top:12px">${active.length} usuario${active.length !== 1 ? 's' : ''} activo${active.length !== 1 ? 's' : ''}</p>
+    `;
+  } catch(e) {
+    document.getElementById('users-table-wrap').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+async function approveUser(id) {
+  const res = await apiFetch(`/api/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ active: true })
+  });
+  if (res.ok) { showToast('ok', 'Chofer aprobado — ya puede ingresar al sistema'); renderUsers(); }
+  else showToast('error', 'Error al aprobar usuario');
+}
+
+async function rejectUser(id, name) {
+  if (!confirm(`¿Rechazar y eliminar la solicitud de ${name}?`)) return;
+  const res = await apiFetch(`/api/users/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ active: false })
+  });
+  if (res.ok) { showToast('ok', 'Solicitud rechazada'); renderUsers(); }
+  else showToast('error', 'Error al rechazar usuario');
+}
+
 
   try {
     const res = await apiFetch('/api/users');
@@ -3799,6 +3902,47 @@ async function saveConfig() {
   App.config.vehicle_types = vtypes;
   showToast('ok', 'Configuración guardada correctamente');
   renderConfig();
+}
+
+function openAccountConfigModal() {
+  if (!userHasRole('dueno')) { showToast('error', 'Solo el dueño puede acceder a la configuración'); return; }
+  const bases  = App.config?.bases  || ['Central'];
+  const vtypes = App.config?.vehicle_types || ['tractor','camion','semirremolque'];
+
+  openModal('⚙ Configuración de la cuenta', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <div style="font-weight:600;color:var(--text);margin-bottom:10px;font-size:13px">🏢 Bases / Centrales operativas</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Aparecen en el formulario de vehículos.</div>
+        <div id="cfg-bases-list">
+          ${bases.map((b,i)=>`
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <input class="form-input" value="${b}" id="cfg-base-${i}" style="flex:1">
+              <button class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="color:var(--danger);padding:4px 8px">✕</button>
+            </div>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="addCfgBase()" style="margin-top:4px">+ Agregar base</button>
+      </div>
+      <div>
+        <div style="font-weight:600;color:var(--text);margin-bottom:10px;font-size:13px">🚛 Tipos de vehículos</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Los autoelevadores usan horas en lugar de km.</div>
+        <div id="cfg-types-list">
+          ${vtypes.map((t,i)=>`
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+              <input class="form-input" value="${t}" id="cfg-type-${i}" style="flex:1">
+              <button class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="color:var(--danger);padding:4px 8px">✕</button>
+            </div>`).join('')}
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="addCfgType()" style="margin-top:4px">+ Agregar tipo</button>
+      </div>
+    </div>
+    <div style="margin-top:16px;padding:10px 14px;background:var(--bg3);border-radius:var(--radius);font-size:11px;color:var(--text3)">
+      🔒 Esta configuración solo es visible para el rol <strong>Dueño / Dirección</strong>.
+    </div>
+  `, [
+    { label: '💾 Guardar cambios', cls: 'btn-primary',   fn: saveConfig },
+    { label: 'Cancelar',           cls: 'btn-secondary', fn: closeModal },
+  ]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

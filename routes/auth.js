@@ -180,4 +180,38 @@ router.post('/change-password', authenticate, async (req, res) => {
   }
 });
 
+// POST /api/auth/register — registro público solo para choferes (requiere aprobación del dueño)
+router.post('/register', loginLimiter, async (req, res) => {
+  try {
+    const { name, email, password, vehicle_code } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    if (existing.rows[0]) {
+      return res.status(409).json({ error: 'Ya existe una cuenta con ese email' });
+    }
+
+    const hash = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS) || 12);
+    // active=FALSE: el dueño debe aprobar antes de que pueda entrar
+    const result = await query(
+      `INSERT INTO users (name, email, password_hash, role, vehicle_code, active)
+       VALUES ($1, $2, $3, 'chofer', $4, FALSE) RETURNING id, name, email, role, active`,
+      [name.trim(), email.toLowerCase().trim(), hash, vehicle_code || null]
+    );
+
+    res.status(201).json({
+      message: 'Solicitud enviada. El administrador debe aprobar tu cuenta antes de que puedas ingresar.',
+      user: { id: result.rows[0].id, name: result.rows[0].name, email: result.rows[0].email }
+    });
+  } catch (err) {
+    console.error('Register error:', err.message);
+    res.status(500).json({ error: 'Error al registrar usuario' });
+  }
+});
+
 module.exports = router;

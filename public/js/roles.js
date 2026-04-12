@@ -70,6 +70,57 @@ function _showLoginForm() {
   });
 }
 
+let _authMode = 'login'; // 'login' | 'register'
+
+function toggleAuthMode(e) {
+  if (e) e.preventDefault();
+  _authMode = _authMode === 'login' ? 'register' : 'login';
+  const isReg = _authMode === 'register';
+  document.getElementById('auth-title').textContent    = isReg ? 'Registrarse como chofer' : 'Iniciar sesión';
+  document.getElementById('auth-sub').textContent      = isReg ? 'Tu cuenta quedará pendiente de aprobación.' : 'Ingresá con tu email y contraseña.';
+  document.getElementById('login-form').style.display  = isReg ? 'none' : '';
+  document.getElementById('register-form').style.display = isReg ? '' : 'none';
+  document.getElementById('auth-toggle-text').textContent  = isReg ? '¿Ya tenés cuenta?' : '¿Sos chofer y no tenés cuenta?';
+  document.getElementById('auth-toggle-link').textContent  = isReg ? 'Iniciá sesión' : 'Registrate acá';
+  const btn = document.getElementById('btn-login');
+  btn.textContent = isReg ? 'Solicitar acceso' : 'Ingresar al sistema';
+  btn.onclick = isReg ? doRegister : doLogin;
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('reg-error').textContent = '';
+}
+
+async function doRegister() {
+  const name     = document.getElementById('reg-name')?.value?.trim();
+  const email    = document.getElementById('reg-email')?.value?.trim();
+  const password = document.getElementById('reg-password')?.value;
+  const vehicle  = document.getElementById('reg-vehicle')?.value?.trim();
+  const errDiv   = document.getElementById('reg-error');
+  const okDiv    = document.getElementById('reg-success');
+  const btn      = document.getElementById('btn-login');
+
+  errDiv.textContent = ''; okDiv.style.display = 'none';
+  if (!name || !email || !password) { errDiv.textContent = 'Completá todos los campos obligatorios'; return; }
+  if (password.length < 6) { errDiv.textContent = 'La contraseña debe tener al menos 6 caracteres'; return; }
+
+  btn.disabled = true; btn.textContent = 'Enviando solicitud...';
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password, vehicle_code: vehicle || null })
+    });
+    const data = await res.json();
+    if (!res.ok) { errDiv.textContent = data.error || 'Error al registrarse'; btn.disabled=false; btn.textContent='Solicitar acceso'; return; }
+    okDiv.textContent = '✓ Solicitud enviada. El administrador debe aprobar tu cuenta antes de que puedas ingresar.';
+    okDiv.style.display = 'block';
+    btn.textContent = 'Solicitud enviada';
+    setTimeout(()=>{ toggleAuthMode(null); btn.disabled=false; }, 4000);
+  } catch(e) {
+    errDiv.textContent = 'Error de conexión'; btn.disabled=false; btn.textContent='Solicitar acceso';
+  }
+}
+
+
 async function doLogin() {
   const email    = document.getElementById('login-email')?.value?.trim();
   const password = document.getElementById('login-password')?.value;

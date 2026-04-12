@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FleetOS — Sistema de gestión de flota</title>
-  <link rel="stylesheet" href="css/main.css?v=1776028709">
-  <link rel="stylesheet" href="css/login.css?v=1776028709">
+  <link rel="stylesheet" href="css/main.css?v=1776034539">
+  <link rel="stylesheet" href="css/login.css?v=1776034539">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 /* MODAL - CSS crítico inline para evitar problemas de cache */
@@ -142,20 +142,44 @@ html, body {
         <div class="login-logo-sub">Sistema de gestión de flota pesada</div>
       </div>
     </div>
-    <div class="login-title">Iniciar sesión</div>
-    <div class="login-sub">Ingresá con tu email y contraseña.</div>
-    <div class="login-form">
+    <div class="login-title" id="auth-title">Iniciar sesión</div>
+    <div class="login-sub" id="auth-sub">Ingresá con tu email y contraseña.</div>
+    <div class="login-form" id="login-form">
       <div style="margin-bottom:14px">
         <label class="form-label">Email</label>
-        <input class="form-input" type="email" id="login-email" autocomplete="email" placeholder="admin@fleetos.com" autocomplete="email">
+        <input class="form-input" type="email" id="login-email" autocomplete="email" placeholder="admin@fleetos.com">
       </div>
       <div style="margin-bottom:6px">
         <label class="form-label">Contraseña</label>
-        <input class="form-input" type="password" id="login-password" autocomplete="current-password" placeholder="••••••••" autocomplete="current-password">
+        <input class="form-input" type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
       </div>
       <div id="login-error" style="color:#ef4444;font-size:12px;min-height:18px;margin-bottom:8px"></div>
     </div>
+    <div class="login-form" id="register-form" style="display:none">
+      <div style="margin-bottom:10px">
+        <label class="form-label">Nombre completo</label>
+        <input class="form-input" type="text" id="reg-name" placeholder="Juan Pérez">
+      </div>
+      <div style="margin-bottom:10px">
+        <label class="form-label">Email</label>
+        <input class="form-input" type="email" id="reg-email" placeholder="chofer@email.com">
+      </div>
+      <div style="margin-bottom:10px">
+        <label class="form-label">Contraseña</label>
+        <input class="form-input" type="password" id="reg-password" placeholder="Mínimo 6 caracteres">
+      </div>
+      <div style="margin-bottom:6px">
+        <label class="form-label">Patente del vehículo asignado (opcional)</label>
+        <input class="form-input" type="text" id="reg-vehicle" placeholder="Ej: AD235FE">
+      </div>
+      <div id="reg-error" style="color:#ef4444;font-size:12px;min-height:18px;margin-bottom:8px"></div>
+      <div id="reg-success" style="color:#22c55e;font-size:12px;min-height:18px;margin-bottom:8px;display:none"></div>
+    </div>
     <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar al sistema</button>
+    <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text3)">
+      <span id="auth-toggle-text">¿Sos chofer y no tenés cuenta?</span>
+      <a href="#" id="auth-toggle-link" onclick="toggleAuthMode(event)" style="color:var(--accent);text-decoration:none;margin-left:4px;font-weight:500">Registrate acá</a>
+    </div>
     <div class="login-footer">FleetOS v2.0 · Sistema de gestión de flota pesada</div>
   </div>
 </div>
@@ -197,6 +221,7 @@ html, body {
           <div class="user-role" id="user-role">—</div>
         </div>
       </div>
+      <a class="nav-item" id="btn-account-config" style="cursor:pointer" onclick="openAccountConfigModal()"><span class="nav-icon">⚙</span><span>Config. cuenta</span></a>
       <a class="nav-item" id="btn-logout" style="cursor:pointer"><span class="nav-icon">←</span><span>Cerrar sesión</span></a>
     </div>
   </nav>
@@ -237,8 +262,8 @@ html, body {
 
 <div class="toast-container" id="toast-container"></div>
 
-<script src="js/roles.js?v=1776027638"></script>
-<script src="js/app.js?v=1776027638"></script>
+<script src="js/roles.js?v=1776034539"></script>
+<script src="js/app.js?v=1776034539"></script>
 
 </body>
 </html>
