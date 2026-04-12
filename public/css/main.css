@@ -393,7 +393,11 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 }
 .tire-dnd-slot.empty {
   background: var(--bg); border: 2px dashed var(--border);
-  cursor: default; opacity: .6;
+  cursor: pointer; opacity: .7; transition: all .15s;
+}
+.tire-dnd-slot.empty:hover {
+  border-color: var(--accent); opacity: 1;
+  background: rgba(59,130,246,.08); transform: translateY(-2px);
 }
 .tire-dnd-slot.drag-over {
   border-color: var(--accent) !important;

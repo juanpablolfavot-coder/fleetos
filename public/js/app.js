@@ -203,7 +203,7 @@ function renderFleet() {
         <div class="section-sub">${App.data.vehicles.length} unidades · tractores, camiones, semirremolques</div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" data-input="filterFleetTable(this.value)">
+        <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" oninput="filterFleetTable(this.value)">
         <button class="btn btn-primary" onclick="openNewVehicleModal()">+ Nueva unidad</button>
       </div>
     </div>
@@ -875,14 +875,14 @@ function openNewOTModal(preVehicle='') {
         <div class="form-row" style="margin-bottom:8px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Origen</label>
-            <select class="form-select" id="p-origin" data-change="onPartOriginChange()">
+            <select class="form-select" id="p-origin" onchange="onPartOriginChange()">
               <option value="stock">Del stock / pañol</option>
               <option value="compra">Compra externa</option>
             </select>
           </div>
           <div class="form-group" style="margin:0" id="p-stock-group">
             <label class="form-label">Ítem del stock</label>
-            <select class="form-select" id="p-stock-id" data-change="onStockItemSelect()">
+            <select class="form-select" id="p-stock-id" onchange="onStockItemSelect()">
               <option value="">— Seleccioná un ítem —</option>
               ${stockOpts}
             </select>
@@ -895,11 +895,11 @@ function openNewOTModal(preVehicle='') {
         <div class="form-row">
           <div class="form-group" style="margin:0">
             <label class="form-label">Cantidad</label>
-            <input class="form-input" type="number" value="1" min="1" id="p-qty" style="width:80px" data-input="previewPartTotal()">
+            <input class="form-input" type="number" value="1" min="1" id="p-qty" style="width:80px" oninput="previewPartTotal()">
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Costo unitario ($)</label>
-            <input class="form-input" type="number" placeholder="0" id="p-cost" data-input="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
+            <input class="form-input" type="number" placeholder="0" id="p-cost" oninput="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
           </div>
           <div style="display:flex;align-items:flex-end;padding-bottom:1px">
             <button class="btn btn-secondary" style="height:38px;padding:0 14px" onclick="addPartToOT()">+ Agregar</button>
@@ -1183,14 +1183,14 @@ function openCloseOTModal(id) {
       <div class="form-row" style="margin-bottom:6px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Origen</label>
-          <select class="form-select" id="cl-origin" data-change="onClosePartOriginChange()">
+          <select class="form-select" id="cl-origin" onchange="onClosePartOriginChange()">
             <option value="stock">Del stock / pañol</option>
             <option value="compra">Compra externa</option>
           </select>
         </div>
         <div class="form-group" style="margin:0" id="cl-stock-grp">
           <label class="form-label">Ítem del stock</label>
-          <select class="form-select" id="cl-stock-id" data-change="onCloseStockSelect()">
+          <select class="form-select" id="cl-stock-id" onchange="onCloseStockSelect()">
             <option value="">— Seleccioná —</option>
             ${stockOpts}
           </select>
@@ -1203,11 +1203,11 @@ function openCloseOTModal(id) {
       <div style="display:flex;gap:8px;align-items:flex-end">
         <div class="form-group" style="margin:0;width:80px">
           <label class="form-label">Cant.</label>
-          <input class="form-input" type="number" value="1" min="1" id="cl-qty" data-input="previewClosePartTotal()">
+          <input class="form-input" type="number" value="1" min="1" id="cl-qty" oninput="previewClosePartTotal()">
         </div>
         <div class="form-group" style="margin:0;flex:1">
           <label class="form-label">Costo unit. ($)</label>
-          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" data-input="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
+          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" oninput="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
         </div>
         <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" onclick="addCloseOTPart('${id}')">+ Agregar</button>
       </div>
@@ -1512,10 +1512,14 @@ function printOT(id) {
 // ── COMBUSTIBLE ──
 function renderFuel() {
   const totalLiters = App.data.fuelLogs.reduce((a,b)=>a+b.liters,0);
-  const tankLevel = 6840;
+  // Calcular nivel de cisterna desde los registros de combustible
   const tankCap = 10000;
-  const ureaTank = 380;
   const ureaCap = 2000;
+  // Sumar ingresos menos egresos para estimar nivel actual
+  const entradas = App.data.fuelLogs.filter(f=>f.status==='ingreso').reduce((a,b)=>a+(b.liters||0),0);
+  const salidas  = App.data.fuelLogs.filter(f=>f.status!=='ingreso').reduce((a,b)=>a+(b.liters||0),0);
+  const tankLevel = Math.max(0, entradas - salidas);
+  const ureaTank  = 0; // Sin datos de urea aún
   document.getElementById('page-fuel').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
       <div class="kpi-card info"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value info">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${Math.round(tankLevel/tankCap*100)}% de capacidad (${tankCap.toLocaleString()} L)</div></div>
@@ -1702,7 +1706,7 @@ function renderTires() {
           <div class="card-title" style="margin:0">Mapa por eje — drag & drop</div>
           <select class="form-select" id="tire-vehicle-sel"
             style="width:auto;padding:5px 10px;font-size:12px"
-            data-change="refreshTireMap()">
+            onchange="refreshTireMap()">
             ${vehicleOpts.map(v=>`<option value="${v.code}">${v.code} · ${v.brand.split('-')[0]} · ${v.type}</option>`).join('')}
           </select>
         </div>
@@ -1761,7 +1765,7 @@ function renderTires() {
         <div style="display:flex;gap:8px">
           <select class="form-select" id="hist-filter"
             style="width:auto;padding:5px 10px;font-size:12px"
-            data-change="renderTireHistory()">
+            onchange="renderTireHistory()">
             <option value="">Todas las cubiertas</option>
             ${App.data.tires.map(t=>`<option value="${t.serial}">${t.serial}</option>`).join('')}
           </select>
@@ -1805,13 +1809,13 @@ function renderTireMapDnD(vehicleCode, config) {
         const c = t.status==='danger'?'var(--danger)':t.status==='warn'?'var(--warn)':'var(--ok)';
         const bg= t.status==='danger'?'var(--danger-bg)':t.status==='warn'?'var(--warn-bg)':'var(--ok-bg)';
         const bc= t.status==='danger'?'rgba(239,68,68,.5)':t.status==='warn'?'rgba(245,158,11,.5)':'rgba(34,197,94,.4)';
-        return `<div class="tire-slot occupied"
+        return `<div class="tire-dnd-slot occupied"
           data-pos="${pos}" data-serial="${t.serial}" data-vehicle="${vehicleCode}"
           draggable="true"
-          data-dragstart="onTireDragStart(event,'${t.serial}','${pos}')"
-          data-dragover="onTireDragOver(event)"
-          data-dragleave="onTireDragLeave(event)"
-          data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
+          ondragstart="onTireDragStart(event,'${t.serial}','${pos}')"
+          ondragover="onTireDragOver(event)"
+          ondragleave="onTireDragLeave(event)"
+          ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
           onclick="openTireDetail('${t.serial}')"
           style="background:${bg};border-color:${bc};cursor:grab"
           title="${t.serial} · ${t.brand} · Clic: detalle · Arrastrar: cambiar posición">
@@ -1820,11 +1824,11 @@ function renderTireMapDnD(vehicleCode, config) {
           <span style="font-size:9px;font-family:var(--mono);background:rgba(0,0,0,.2);padding:1px 4px;border-radius:3px;color:${c}">${pos}</span>
         </div>`;
       } else {
-        return `<div class="tire-slot empty"
+        return `<div class="tire-dnd-slot empty"
           data-pos="${pos}" data-vehicle="${vehicleCode}"
-          data-dragover="onTireDragOver(event)"
-          data-dragleave="onTireDragLeave(event)"
-          data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
+          ondragover="onTireDragOver(event)"
+          ondragleave="onTireDragLeave(event)"
+          ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
           onclick="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
           title="Posición vacía — clic o soltá una cubierta aquí">
           <span style="font-size:20px;color:var(--text3);line-height:1">+</span>
@@ -2348,6 +2352,9 @@ function renderStock() {
 
   // Construir filas de la tabla sin template literals anidados
   let tableRows = '';
+  if (App.data.stock.length === 0) {
+    tableRows = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Sin ítems en stock. Usá el botón <strong>+ Registrar ítem</strong> para agregar.</td></tr>';
+  }
   App.data.stock.forEach(function(s) {
     const pct   = s.qty / s.min;
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
@@ -2505,13 +2512,13 @@ function openStockBajaModal() {
     + 'por robo, pérdida, daño o vencimiento. Queda registrado con usuario, fecha y motivo detallado.'
     + '</div>'
     + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label>'
-    + '<select class="form-select" id="bj-id" data-change="onBajaItemSelect()">'
+    + '<select class="form-select" id="bj-id" onchange="onBajaItemSelect()">'
     + '<option value="">— Seleccioná un ítem —</option>'+opts
     + '</select></div>'
     + '<div id="baja-detail" style="display:none">'
     +   '<div class="form-row">'
     +     '<div class="form-group"><label class="form-label">Cantidad a dar de baja</label>'
-    +     '<input class="form-input" type="number" id="bj-qty" value="1" min="1" data-input="updateBajaSummary()"></div>'
+    +     '<input class="form-input" type="number" id="bj-qty" value="1" min="1" oninput="updateBajaSummary()"></div>'
     +     '<div class="form-group"><label class="form-label">Motivo de la baja</label>'
     +     '<select class="form-select" id="bj-motivo">'
     +       '<option value="robo">Robo</option>'
@@ -3266,49 +3273,65 @@ function toggleCostRubro(vehicleCode, rubroId) {
 
 // ── MANTENIMIENTO ──
 function renderMaintenance() {
-  const plans = [
-    { vehicle:'INT-01', task:'Cambio aceite 15W-40 + filtros', type:'km',    due:'285.000 km', current:'284.500 km', pct:98, status:'warn' },
-    { vehicle:'INT-05', task:'Engrase general 30.000 km',       type:'km',    due:'420.000 km', current:'412.600 km', pct:95, status:'warn' },
-    { vehicle:'INT-08', task:'Revisión frenos eje trasero',     type:'km',    due:'525.000 km', current:'521.000 km', pct:97, status:'warn' },
-    { vehicle:'INT-03', task:'Cambio aceite caja y diferencial',type:'km',    due:'350.000 km', current:'341.200 km', pct:94, status:'warn' },
-    { vehicle:'INT-15', task:'Revisión suspensión y dirección', type:'km',    due:'450.000 km', current:'445.200 km', pct:96, status:'warn' },
-    { vehicle:'INT-02', task:'Filtro separador agua combustible',type:'km',   due:'200.000 km', current:'198.300 km', pct:92, status:'warn' },
-    { vehicle:'INT-04', task:'Cambio aceite motor + filtros',   type:'km',    due:'140.000 km', current:'122.800 km', pct:72, status:'ok' },
-    { vehicle:'INT-07', task:'Service 100.000 km',              type:'km',    due:'100.000 km', current:'98.200 km',  pct:96, status:'warn' },
-    { vehicle:'INT-09', task:'Service inicial 50.000 km',       type:'km',    due:'50.000 km',  current:'45.800 km',  pct:73, status:'ok' },
-    { vehicle:'INT-11', task:'Cambio filtros combustible',      type:'km',    due:'180.000 km', current:'176.400 km', pct:93, status:'warn' },
-    { vehicle:'INT-13', task:'Revisión sistema neumático',      type:'cal',   due:'Oct 2026',   current:'Abr 2026',   pct:40, status:'ok' },
-    { vehicle:'INT-16', task:'Revisión eléctrica completa',     type:'cal',   due:'Abr 2027',   current:'Abr 2026',   pct:10, status:'ok' },
-  ];
-  document.getElementById('page-maintenance').innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
-      <div class="kpi-card warn"><div class="kpi-label">Mantenimientos próximos</div><div class="kpi-value warn">${plans.filter(p=>p.status==='warn').length}</div><div class="kpi-trend">en los próximos 7 días o 500 km</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Plan preventivo activo</div><div class="kpi-value ok">${plans.length}</div><div class="kpi-trend">tareas programadas</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Cumplimiento preventivo</div><div class="kpi-value ok">94%</div><div class="kpi-trend">sobre el objetivo del 90%</div></div>
-    </div>
-    <div class="section-header">
-      <div><div class="section-title">Plan de mantenimiento preventivo</div></div>
-      <button class="btn btn-primary" onclick="openNewMaintModal()">+ Nueva tarea</button>
-    </div>
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table><thead><tr><th>Vehículo</th><th>Tarea</th><th>Tipo</th><th>Próximo vencimiento</th><th>Estado actual</th><th>Progreso</th><th>Alerta</th><th></th></tr></thead>
-        <tbody>${plans.map(p=>`<tr>
-          <td class="td-main">${p.vehicle}</td>
-          <td>${p.task}</td>
-          <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${p.type==='km'?'Por km':'Calendárico'}</span></td>
-          <td class="td-mono">${p.due}</td>
-          <td class="td-mono">${p.current}</td>
-          <td style="min-width:100px">
-            <div class="progress-bar"><div class="progress-fill" style="width:${p.pct}%;background:var(--${p.pct>=95?'danger':p.pct>=80?'warn':'ok'})"></div></div>
-            <div style="font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${p.pct}% del intervalo</div>
-          </td>
-          <td><span class="badge ${p.status==='warn'?'badge-warn':'badge-ok'}">${p.status==='warn'?'Próximo':'OK'}</span></td>
-          <td><button class="btn btn-secondary btn-sm" onclick="createPreventiveOT('${p.vehicle}','${p.task}')">Generar OT</button></td>
-        </tr>`).join('')}</tbody></table>
+  const root = document.getElementById('page-maintenance');
+  if (!root) return;
+
+  // Calcular planes de mantenimiento desde vehículos reales
+  const vehicles = App.data.vehicles || [];
+
+  if (vehicles.length === 0) {
+    root.innerHTML = `
+      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+        <div><h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2></div>
       </div>
+      <div class="card" style="text-align:center;padding:40px;color:var(--text3)">
+        <div style="font-size:32px;margin-bottom:12px">🔧</div>
+        <div style="font-weight:600;margin-bottom:8px">Sin vehículos registrados</div>
+        <div style="font-size:13px">Agregá vehículos desde Flota y vehículos para ver el plan de mantenimiento</div>
+      </div>`;
+    return;
+  }
+
+  // Generar planes basados en OTs y km actuales
+  const plans = vehicles.map(v => {
+    const km = v.km || 0;
+    const nextOil = Math.ceil(km / 15000) * 15000;
+    const pct = km % 15000 / 15000 * 100;
+    const status = pct >= 95 ? 'danger' : pct >= 80 ? 'warn' : 'ok';
+    return { vehicle: v.code, task: 'Cambio aceite + filtros (c/15.000 km)', type:'km', due: nextOil.toLocaleString()+' km', current: km.toLocaleString()+' km', pct: Math.round(pct), status };
+  });
+
+  const rows = plans.map(p => `
+    <tr>
+      <td class="td-mono td-main">${p.vehicle}</td>
+      <td>${p.task}</td>
+      <td><span class="badge badge-${p.type==='km'?'info':'ok'}">${p.type==='km'?'Por km':'Por fecha'}</span></td>
+      <td class="td-mono">${p.due}</td>
+      <td class="td-mono">${p.current}</td>
+      <td style="width:120px">
+        <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
+          <div style="background:var(--${p.status});width:${p.pct}%;height:100%"></div>
+        </div>
+        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}%</div>
+      </td>
+      <td><span class="badge badge-${p.status}">${p.status==='ok'?'Al día':p.status==='warn'?'Próximo':'Vencido'}</span></td>
+    </tr>`).join('');
+
+  root.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div><h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2><p style="font-size:13px;color:var(--text3);margin:4px 0 0">Basado en km actuales de la flota</p></div>
     </div>
-  `;
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Unidad</th><th>Tarea</th><th>Tipo</th>
+            <th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function openNewMaintModal() {
