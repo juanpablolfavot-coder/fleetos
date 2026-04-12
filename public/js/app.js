@@ -5,8 +5,30 @@
 // ── ESTADO GLOBAL ──
 const App = {
   currentPage: 'dashboard',
-  currentUser: { name: 'Roberto Méndez', role: 'Dueño / Dirección', initials: 'RM' },
+  currentUser: null,
   data: {}
+};
+
+
+App.data.users = [
+  { id:'usr-owner', name:'Roberto Méndez', role:'dueno', initials:'RM', home:'dashboard' },
+  { id:'usr-ger', name:'Gerencia Operativa', role:'gerencia', initials:'GO', home:'dashboard' },
+  { id:'usr-cont', name:'Norberto V.', role:'contador', initials:'NV', home:'contador_panel' },
+  { id:'usr-mant', name:'Rubén M.', role:'mantenimiento', initials:'RM', home:'maintenance' },
+  { id:'usr-mec1', name:'Carlos R.', role:'mecanico', initials:'CR', home:'workorders' },
+  { id:'usr-mec2', name:'Jorge P.', role:'mecanico', initials:'JP', home:'workorders' },
+  { id:'usr-ch1', name:'Juan Pérez', role:'chofer', initials:'JP', home:'chofer_panel', vehicle:'INT-01' },
+  { id:'usr-ch2', name:'Diego Flores', role:'chofer', initials:'DF', home:'chofer_panel', vehicle:'INT-23' },
+  { id:'usr-ch3', name:'Marcos Ibáñez', role:'chofer', initials:'MI', home:'chofer_panel', vehicle:'INT-15' }
+];
+
+window.FleetRoles = {
+  dueno:         { code:'dueno',         label:'Dueño / Dirección', modules:['all'] },
+  gerencia:      { code:'gerencia',      label:'Gerencia',          modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','chofer_panel','contador_panel'] },
+  mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
+  mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
+  contador:      { code:'contador',      label:'Contador',          modules:['dashboard','costs','documents','contador_panel'] },
+  chofer:        { code:'chofer',        label:'Chofer',            modules:['dashboard','fuel','documents','chofer_panel'] }
 };
 
 // ── DATOS DE LA FLOTA ──
@@ -250,6 +272,109 @@ App.data.documents = [
   { id:9, vehicle:'INT-41', plate:'QRS 061', type:'VTV',     expiry:'2026-04-08', status:'danger', file:'vtv_int41.pdf' },
   { id:10,vehicle:'INT-03', plate:'ABC 103', type:'Habilitación',expiry:'2026-05-31',status:'ok',  file:'hab_int03.pdf' },
 ];
+// ── HISTORIAL DE STOCK ──
+App.data.stockHistory = [
+  { date:'2026-04-09', name:'Filtro aceite motor MB Actros',    unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Filtro combustible primario MB',   unit:'un', qty:1, type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0283 — Service 20.000 km',         user:'Rubén M.' },
+  { date:'2026-04-09', name:'Relay de arranque DAF XF',         unit:'un', qty:1, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
+  { date:'2026-04-09', name:'Fusible principal 80A',            unit:'un', qty:2, type:'Egreso',  motivo:'OT-0284 — Falla eléctrica INT-31',    user:'Carlos R.' },
+  { date:'2026-04-08', name:'Grasa EP2 multiuso 20kg balde',    unit:'kg', qty:2, type:'Egreso',  motivo:'OT-0279 — Engrase INT-05',            user:'Rubén M.' },
+  { date:'2026-04-07', name:'Rulemán masa delantera MB',        unit:'un', qty:2, type:'Egreso',  motivo:'OT-0278 — Cambio rulemanes INT-22',   user:'Carlos R.' },
+  { date:'2026-04-06', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-06', name:'Aceite caja Meritor manual',       unit:'L',  qty:9, type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-06', name:'Aceite diferencial 85W-140',       unit:'L',  qty:14,type:'Egreso',  motivo:'OT-0276 — Service mayor INT-08',      user:'Rubén M.' },
+  { date:'2026-04-01', name:'Filtro aceite motor MB Actros',    unit:'un', qty:5, type:'Ingreso', motivo:'Reposición mensual — AutoRep SA',      user:'Norberto V.' },
+  { date:'2026-04-01', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:200,type:'Ingreso',motivo:'Reposición mensual — Lubricor',        user:'Norberto V.' },
+  { date:'2026-03-28', name:'Batería 12V 150Ah Bosch',          unit:'un', qty:2, type:'Ingreso', motivo:'Compra nueva — Electro Sur',           user:'Norberto V.' },
+  { date:'2026-03-20', name:'Zapatas freno eje trasero MB',     unit:'jgo',qty:2, type:'Ingreso', motivo:'Reposición — Mec-Parts',              user:'Norberto V.' },
+  { date:'2026-03-15', name:'Aceite motor 15W-40 bulk',         unit:'L',  qty:38,type:'Egreso',  motivo:'OT correctivo INT-03',                user:'Carlos R.' },
+];
+
+function normalizeRole(role) {
+  return String(role || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function userHasRole() {
+  const role = normalizeRole(App.currentUser && App.currentUser.role);
+  const aliases = {
+    dueno: ['dueno', 'dueño', 'dueño / direccion', 'dueno / direccion', 'direccion', 'owner'],
+    gerencia: ['gerencia', 'gerente', 'management'],
+  };
+
+  for (let i = 0; i < arguments.length; i++) {
+    const expected = normalizeRole(arguments[i]);
+    const valid = aliases[expected] || [expected];
+    if (valid.includes(role)) return true;
+  }
+  return false;
+}
+
+function ensureStockItem(seed) {
+  const byName = App.data.stock.find(function(item){ return item.name === seed.name; });
+  if (byName) return byName.id;
+
+  const ids = App.data.stock.map(function(item){ return item.id; }).concat([0]);
+  const id = Math.max.apply(null, ids) + 1;
+  App.data.stock.push({
+    id: id,
+    code: seed.code,
+    name: seed.name,
+    cat: seed.cat || 'Mecánico',
+    unit: seed.unit || 'un',
+    qty: seed.qty || 0,
+    min: seed.min || 0,
+    reorder: seed.reorder || seed.min || 0,
+    cost: seed.cost || 0,
+    supplier: seed.supplier || '—',
+  });
+  return id;
+}
+
+function repairSeedData() {
+  if (!Array.isArray(App.data.stockHistory)) App.data.stockHistory = [];
+  if (!Array.isArray(App.data.stock)) App.data.stock = [];
+
+  const aliasMap = {
+    'Separador agua combustible MB': 'Filtro separador agua combustible',
+  };
+
+  App.data.stock.forEach(function(item) {
+    if (aliasMap[item.name]) item.name = aliasMap[item.name];
+  });
+
+  const relayId = ensureStockItem({
+    code:'ELE-REL-001',
+    name:'Relay de arranque DAF XF',
+    cat:'Eléctrico', unit:'un', qty:2, min:1, reorder:2, cost:18500, supplier:'Electro Sur'
+  });
+  const fusibleId = ensureStockItem({
+    code:'ELE-FUS-080',
+    name:'Fusible principal 80A',
+    cat:'Eléctrico', unit:'un', qty:10, min:4, reorder:6, cost:4200, supplier:'Electro Sur'
+  });
+  const bujeId = ensureStockItem({
+    code:'MEC-BUJ-024',
+    name:'Buje dirección delantero',
+    cat:'Mecánico', unit:'un', qty:6, min:2, reorder:4, cost:22000, supplier:'Mec-Parts'
+  });
+
+  App.data.workOrders.forEach(function(ot) {
+    (ot.parts || []).forEach(function(part) {
+      if (part.origin !== 'stock') return;
+      if (part.name === 'Relay de arranque DAF XF') part.stockId = relayId;
+      if (part.name === 'Fusible principal 80A') part.stockId = fusibleId;
+      if (part.name === 'Buje dirección delantero') part.stockId = bujeId;
+      if (part.name === 'Filtro separador agua combustible') part.stockId = App.data.stock.find(function(item){ return item.name === 'Filtro separador agua combustible'; })?.id || part.stockId;
+    });
+  });
+}
+
+repairSeedData();
 
 // ── NAVEGACIÓN ──
 function navigate(page) {
@@ -266,16 +391,16 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', contador_panel:'Panel contable' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:'Vista ejecutiva · Flota 45 unidades', fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo' };
+  const s = { dashboard:'Vista ejecutiva · Flota 45 unidades', fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', contador_panel:'Costos · reportes · KPIs' };
   return s[p] || '';
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel };
   if (fns[page]) fns[page]();
 }
 
@@ -327,6 +452,23 @@ function renderDashboard() {
       </div>
     </div>
 
+    <div class="two-col">
+      <div class="card">
+        <div class="section-header">
+          <div><div class="section-title">Órdenes de trabajo abiertas</div></div>
+          <button class="btn btn-secondary btn-sm" data-click="navigate('workorders')">Ver todas</button>
+        </div>
+        <div id="dash-ot"></div>
+      </div>
+      <div class="card">
+        <div class="section-header">
+          <div><div class="section-title">Últimas cargas de combustible</div></div>
+          <button class="btn btn-secondary btn-sm" data-click="navigate('fuel')">Ver todas</button>
+        </div>
+        <div id="dash-fuel"></div>
+      </div>
+    </div>
+  `;
 
   // Fleet grid
   const grid = document.getElementById('fleet-grid-mini');
@@ -336,7 +478,7 @@ function renderDashboard() {
     el.className = `fleet-unit ${cls}`;
     el.textContent = vc.id;
     el.title = `${vc.code} — ${vc.brand} ${vc.model} — ${vc.status.toUpperCase()}`;
-    el.onclick = () => { navigate('fleet'); setTimeout(()=>filterVehicle(vc.code),100); };
+    el.addEventListener('click', () => { navigate('fleet'); setTimeout(()=>filterVehicle(vc.code),100); });
     grid.appendChild(el);
   });
 
@@ -396,8 +538,8 @@ function renderFleet() {
         <div class="section-sub">${App.data.vehicles.length} unidades · tractores, camiones, semirremolques</div>
       </div>
       <div style="display:flex;gap:8px">
-        <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" oninput="filterFleetTable(this.value)">
-        <button class="btn btn-primary" onclick="openNewVehicleModal()">+ Nueva unidad</button>
+        <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" data-input="filterFleetTable(this.value)">
+        <button class="btn btn-primary" data-click="openNewVehicleModal()">+ Nueva unidad</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -435,7 +577,7 @@ function renderFleetTable(data) {
       <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail(${v.id})">Ver ficha</button></td>
+      <td><button class="btn btn-secondary btn-sm" data-click="openVehicleDetail(${v.id})">Ver ficha</button></td>
     </tr>`;
   }).join('');
 }
@@ -678,7 +820,7 @@ function showVehicleFicha(id, tab) {
   ];
 
   const tabBar = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px;border-bottom:1px solid var(--border);padding-bottom:12px">
-    ${tabs.map(t=>`<button onclick="showVehicleFicha(${id},'${t.id}')"
+    ${tabs.map(t=>`<button data-click="showVehicleFicha(${id},'${t.id}')"
       style="padding:6px 14px;font-size:12px;border-radius:var(--radius);border:1px solid ${t.id===tab?'var(--accent)':'var(--border)'};
       background:${t.id===tab?'rgba(59,130,246,.15)':'transparent'};
       color:${t.id===tab?'var(--accent)':'var(--text2)'};cursor:pointer;font-family:var(--font)">
@@ -731,7 +873,7 @@ function showVehicleFicha(id, tab) {
           </div>`).join('')}
       </div>
       <div style="margin-top:4px">
-        <button class="btn btn-secondary btn-sm" onclick="openEditVehicleModal(${id})">✎ Editar datos generales</button>
+        <button class="btn btn-secondary btn-sm" data-click="openEditVehicleModal(${id})">✎ Editar datos generales</button>
       </div>`;
   }
 
@@ -831,7 +973,7 @@ function showVehicleFicha(id, tab) {
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
             <td class="td-mono">${(o.parts_cost+o.labor_cost)>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
-            <td><button class="btn btn-secondary btn-sm" onclick="printOT('${o.id}')">🖨</button></td>
+            <td><button class="btn btn-secondary btn-sm" data-click="printOT('${o.id}')">🖨</button></td>
           </tr>`).join('')}</tbody></table>`
       : `<div style="color:var(--text3);font-size:13px;padding:24px 0;text-align:center">Sin órdenes de trabajo registradas para esta unidad.</div>`;
   }
@@ -984,7 +1126,7 @@ function renderWorkOrders() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Órdenes de trabajo</div></div>
-      <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
+      <button class="btn btn-primary" data-click="openNewOTModal()">+ Nueva OT</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -1006,8 +1148,8 @@ function renderWorkOrders() {
             <td class="td-mono">${o.parts_cost+o.labor_cost>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
             <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
-              <button class="btn btn-secondary btn-sm" title="Imprimir OT" onclick="printOT('${o.id}')">🖨</button>
-              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id}')">Editar</button> <button class="btn btn-primary btn-sm" onclick="openCloseOTModal('${o.id}')">Cerrar</button>`:''}
+              <button class="btn btn-secondary btn-sm" title="Imprimir OT" data-click="printOT('${o.id}')">🖨</button>
+              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" data-click="openEditOTModal('${o.id}')">Editar</button> <button class="btn btn-primary btn-sm" data-click="openCloseOTModal('${o.id}')">Cerrar</button>`:''}
             </td>
           </tr>`).join('')}</tbody>
         </table>
@@ -1068,14 +1210,14 @@ function openNewOTModal(preVehicle='') {
         <div class="form-row" style="margin-bottom:8px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Origen</label>
-            <select class="form-select" id="p-origin" onchange="onPartOriginChange()">
+            <select class="form-select" id="p-origin" data-change="onPartOriginChange()">
               <option value="stock">Del stock / pañol</option>
               <option value="compra">Compra externa</option>
             </select>
           </div>
           <div class="form-group" style="margin:0" id="p-stock-group">
             <label class="form-label">Ítem del stock</label>
-            <select class="form-select" id="p-stock-id" onchange="onStockItemSelect()">
+            <select class="form-select" id="p-stock-id" data-change="onStockItemSelect()">
               <option value="">— Seleccioná un ítem —</option>
               ${stockOpts}
             </select>
@@ -1088,14 +1230,14 @@ function openNewOTModal(preVehicle='') {
         <div class="form-row">
           <div class="form-group" style="margin:0">
             <label class="form-label">Cantidad</label>
-            <input class="form-input" type="number" value="1" min="1" id="p-qty" style="width:80px" oninput="previewPartTotal()">
+            <input class="form-input" type="number" value="1" min="1" id="p-qty" style="width:80px" data-input="previewPartTotal()">
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Costo unitario ($)</label>
-            <input class="form-input" type="number" placeholder="0" id="p-cost" oninput="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
+            <input class="form-input" type="number" placeholder="0" id="p-cost" data-input="previewPartTotal()"><div id="p-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
           </div>
           <div style="display:flex;align-items:flex-end;padding-bottom:1px">
-            <button class="btn btn-secondary" style="height:38px;padding:0 14px" onclick="addPartToOT()">+ Agregar</button>
+            <button class="btn btn-secondary" style="height:38px;padding:0 14px" data-click="addPartToOT()">+ Agregar</button>
           </div>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px;font-family:var(--mono)">
@@ -1194,7 +1336,7 @@ function renderOTPartsList() {
         </td>
         <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
         <td style="padding:5px 4px;text-align:center">
-          <button onclick="removePartFromOT(${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
+          <button data-click="removePartFromOT(${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
         </td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -1376,14 +1518,14 @@ function openCloseOTModal(id) {
       <div class="form-row" style="margin-bottom:6px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Origen</label>
-          <select class="form-select" id="cl-origin" onchange="onClosePartOriginChange()">
+          <select class="form-select" id="cl-origin" data-change="onClosePartOriginChange()">
             <option value="stock">Del stock / pañol</option>
             <option value="compra">Compra externa</option>
           </select>
         </div>
         <div class="form-group" style="margin:0" id="cl-stock-grp">
           <label class="form-label">Ítem del stock</label>
-          <select class="form-select" id="cl-stock-id" onchange="onCloseStockSelect()">
+          <select class="form-select" id="cl-stock-id" data-change="onCloseStockSelect()">
             <option value="">— Seleccioná —</option>
             ${stockOpts}
           </select>
@@ -1396,13 +1538,13 @@ function openCloseOTModal(id) {
       <div style="display:flex;gap:8px;align-items:flex-end">
         <div class="form-group" style="margin:0;width:80px">
           <label class="form-label">Cant.</label>
-          <input class="form-input" type="number" value="1" min="1" id="cl-qty" oninput="previewClosePartTotal()">
+          <input class="form-input" type="number" value="1" min="1" id="cl-qty" data-input="previewClosePartTotal()">
         </div>
         <div class="form-group" style="margin:0;flex:1">
           <label class="form-label">Costo unit. ($)</label>
-          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" oninput="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
+          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" data-input="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
         </div>
-        <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" onclick="addCloseOTPart('${id}')">+ Agregar</button>
+        <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" data-click="addCloseOTPart('${id}')">+ Agregar</button>
       </div>
     </div>
 
@@ -1490,7 +1632,7 @@ function renderCloseOTPartsList(otId) {
         <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'Compra'}</span></td>
         <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
         <td style="padding:5px 4px;text-align:center">
-          <button onclick="removeCloseOTPart('${otId}',${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
+          <button data-click="removeCloseOTPart('${otId}',${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
         </td>
       </tr>`).join('')}</tbody>
     </table>`;
@@ -1727,7 +1869,7 @@ function renderFuel() {
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span style="color:var(--warn)">Urea / AdBlue</span><span class="td-mono" style="color:var(--warn)">${ureaTank} / ${ureaCap} L ⚠</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(ureaTank/ureaCap*100)}%;background:var(--warn)"></div></div>
         </div>
-        <div style="margin-top:16px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
+        <div style="margin-top:16px"><button class="btn btn-primary" data-click="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
       </div>
       <div class="card">
         <div class="card-title">Consumo por unidad (últimos 30 días)</div>
@@ -1736,7 +1878,7 @@ function renderFuel() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
-      <button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>
+      <button class="btn btn-primary" data-click="openFuelLoadModal()">+ Registrar carga</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -1895,7 +2037,7 @@ function renderTires() {
           <div class="card-title" style="margin:0">Mapa por eje — drag & drop</div>
           <select class="form-select" id="tire-vehicle-sel"
             style="width:auto;padding:5px 10px;font-size:12px"
-            onchange="refreshTireMap()">
+            data-change="refreshTireMap()">
             ${vehicleOpts.map(v=>`<option value="${v.code}">${v.code} · ${v.brand.split('-')[0]} · ${v.type}</option>`).join('')}
           </select>
         </div>
@@ -1914,7 +2056,7 @@ function renderTires() {
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div class="card-title" style="margin:0">Cubiertas de la unidad seleccionada</div>
-          <button class="btn btn-primary btn-sm" onclick="openMountTireModal()">+ Montar cubierta</button>
+          <button class="btn btn-primary btn-sm" data-click="openMountTireModal()">+ Montar cubierta</button>
         </div>
         <div class="table-wrap">
           <table>
@@ -1928,7 +2070,7 @@ function renderTires() {
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div class="card-title" style="margin:0">Stock de cubiertas disponibles para montar</div>
-        <button class="btn btn-secondary btn-sm" onclick="openNewTireToStockModal()">+ Agregar al stock</button>
+        <button class="btn btn-secondary btn-sm" data-click="openNewTireToStockModal()">+ Agregar al stock</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -1941,7 +2083,7 @@ function renderTires() {
             <td class="td-mono" style="color:var(--ok)">${t.depth}/${t.maxDepth}mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
             <td class="td-mono">$${t.purchase.toLocaleString()}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
+            <td><button class="btn btn-primary btn-sm" data-click="openMountFromStockModal('${t.serial}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
           </tbody>
         </table>
@@ -1954,11 +2096,11 @@ function renderTires() {
         <div style="display:flex;gap:8px">
           <select class="form-select" id="hist-filter"
             style="width:auto;padding:5px 10px;font-size:12px"
-            onchange="renderTireHistory()">
+            data-change="renderTireHistory()">
             <option value="">Todas las cubiertas</option>
             ${App.data.tires.map(t=>`<option value="${t.serial}">${t.serial}</option>`).join('')}
           </select>
-          <button class="btn btn-secondary btn-sm" onclick="openManualMoveModal()">+ Registrar movimiento</button>
+          <button class="btn btn-secondary btn-sm" data-click="openManualMoveModal()">+ Registrar movimiento</button>
         </div>
       </div>
       <div id="tire-history-table"></div>
@@ -2001,11 +2143,11 @@ function renderTireMapDnD(vehicleCode, config) {
         return `<div class="tire-slot occupied"
           data-pos="${pos}" data-serial="${t.serial}" data-vehicle="${vehicleCode}"
           draggable="true"
-          ondragstart="onTireDragStart(event,'${t.serial}','${pos}')"
-          ondragover="onTireDragOver(event)"
-          ondragleave="onTireDragLeave(event)"
-          ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          onclick="openTireDetail('${t.serial}')"
+          data-dragstart="onTireDragStart(event,'${t.serial}','${pos}')"
+          data-dragover="onTireDragOver(event)"
+          data-dragleave="onTireDragLeave(event)"
+          data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
+          data-click="openTireDetail('${t.serial}')"
           style="background:${bg};border-color:${bc};cursor:grab"
           title="${t.serial} · ${t.brand} · Clic: detalle · Arrastrar: cambiar posición">
           <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:${c}">${t.depth}mm</span>
@@ -2015,10 +2157,10 @@ function renderTireMapDnD(vehicleCode, config) {
       } else {
         return `<div class="tire-slot empty"
           data-pos="${pos}" data-vehicle="${vehicleCode}"
-          ondragover="onTireDragOver(event)"
-          ondragleave="onTireDragLeave(event)"
-          ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          onclick="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
+          data-dragover="onTireDragOver(event)"
+          data-dragleave="onTireDragLeave(event)"
+          data-drop="onTireDrop(event,'${pos}','${vehicleCode}')"
+          data-click="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
           title="Posición vacía — clic o soltá una cubierta aquí">
           <span style="font-size:20px;color:var(--text3);line-height:1">+</span>
           <span style="font-size:9px;font-family:var(--mono);color:var(--text3)">${pos}</span>
@@ -2115,13 +2257,13 @@ function renderTireTableBody(vehicleCode) {
     return;
   }
   tbody.innerHTML = tires.map(t=>`<tr>
-    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${t.serial}')">${t.serial}</td>
+    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" data-click="openTireDetail('${t.serial}')">${t.serial}</td>
     <td class="td-mono">${t.pos}</td>
     <td style="font-size:12px">${t.brand.split(' ')[0]} ${t.brand.split(' ')[1]||''}</td>
     <td class="td-mono">${t.km.toLocaleString()}</td>
     <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.depth}/${t.maxDepth}mm</td>
     <td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td>
-    <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Ver</button></td>
+    <td><button class="btn btn-secondary btn-sm" data-click="openTireDetail('${t.serial}')">Ver</button></td>
   </tr>`).join('');
 }
 
@@ -2141,7 +2283,7 @@ function renderTireHistory() {
     <thead><tr><th>Fecha</th><th>Cubierta</th><th>Desde</th><th>Hacia</th><th>Tipo</th><th>Unidad</th><th>Km</th><th>Operario</th><th>Observación</th></tr></thead>
     <tbody>${hist.map(h=>`<tr>
       <td class="td-mono" style="font-size:11px">${h.date}</td>
-      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${h.serial}')">${h.serial}</td>
+      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" data-click="openTireDetail('${h.serial}')">${h.serial}</td>
       <td class="td-mono" style="color:var(--text3)">${h.fromPos}</td>
       <td class="td-mono" style="color:var(--accent)">→ ${h.toPos}</td>
       <td><span class="badge ${h.type.includes('Rotación')?'badge-info':h.type==='Montaje'?'badge-ok':h.type.includes('Baja')?'badge-danger':'badge-gray'}">${h.type}</span></td>
@@ -2537,66 +2679,7 @@ function saveManualMove(vehicleCode) {
 function renderStock() {
   const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
   const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
-  document.getElementById('page-stock').innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
-      <div class="kpi-card ${critical===0?'ok':'danger'}"><div class="kpi-label">Ítems en stock crítico</div><div class="kpi-value ${critical===0?'ok':'danger'}">${critical}</div><div class="kpi-trend">debajo del mínimo</div></div>
-      <div class="kpi-card info"><div class="kpi-label">Total ítems registrados</div><div class="kpi-value white">${App.data.stock.length}</div><div class="kpi-trend">en el pañol</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Valor stock total</div><div class="kpi-value ok">$${Math.round(totalVal/1000)}K</div><div class="kpi-trend">valorización al costo actual</div></div>
-    </div>
-    <div class="section-header">
-      <div><div class="section-title">Inventario de repuestos e insumos</div></div>
-      <button class="btn btn-primary" onclick="openNewStockModal()">+ Registrar ítem</button>
-    </div>
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table><thead><tr><th>Código</th><th>Descripción</th><th>Categoría</th><th>Stock actual</th><th>Mínimo</th><th>Punto pedido</th><th>Costo unit.</th><th>Valorización</th><th>Proveedor</th><th>Estado</th></tr></thead>
-        <tbody>${App.data.stock.map(s=>{
-          const pct = s.qty/s.min;
-          const st = pct<=1?'danger':pct<=1.5?'warn':'ok';
-          return `<tr>
-            <td class="td-mono td-main">${s.code}</td>
-            <td>${s.name}</td>
-            <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${s.cat}</span></td>
-            <td class="td-mono" style="color:var(--${st})">${s.qty} ${s.unit}</td>
-            <td class="td-mono">${s.min} ${s.unit}</td>
-            <td class="td-mono">${s.reorder} ${s.unit}</td>
-            <td class="td-mono">$${s.cost.toLocaleString()}</td>
-            <td class="td-mono">$${(s.qty*s.cost).toLocaleString()}</td>
-            <td>${s.supplier}</td>
-            <td><span class="badge ${st==='ok'?'badge-ok':st==='warn'?'badge-warn':'badge-danger'}">${st==='ok'?'Normal':st==='warn'?'Bajo':'Crítico'}</span></td>
-          </tr>`;
-        }).join('')}</tbody></table>
-      </div>
-    </div>
-  `;
-}
-
-function openNewStockModal() {
-  openModal('Registrar nuevo ítem de stock', `
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Código</label><input class="form-input" placeholder="FLT-XXX-001" id="ns-code"></div>
-      <div class="form-group"><label class="form-label">Categoría</label><select class="form-select" id="ns-cat"><option>Filtros</option><option>Lubricantes</option><option>Mecánico</option><option>Frenos</option><option>Eléctrico</option><option>Tornillería</option></select></div>
-    </div>
-    <div class="form-group"><label class="form-label">Descripción</label><input class="form-input" placeholder="Nombre completo del repuesto" id="ns-name"></div>
-    <div class="form-row form-row-3">
-      <div class="form-group"><label class="form-label">Stock actual</label><input class="form-input" type="number" placeholder="0" id="ns-qty"></div>
-      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min"></div>
-      <div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="5000" id="ns-cost"></div>
-    </div>
-  `, [
-    { label:'Guardar ítem', cls:'btn-primary', fn: () => { closeModal(); showToast('ok','Ítem registrado en stock'); } },
-    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
-  ]);
-}
-
-// ── DOCUMENTOS ──
-// ── STOCK ──
-if (!App.data.stockHistory) App.data.stockHistory = [];
-
-function renderStock() {
-  const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
-  const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
-  const isDueno  = ['dueno','gerencia'].includes(App.currentUser&&App.currentUser.role);
+  const isDueno  = userHasRole('dueno','gerencia');
 
   // Construir filas de la tabla sin template literals anidados
   let tableRows = '';
@@ -2605,7 +2688,7 @@ function renderStock() {
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
     const bajaBtn = isDueno
-      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
+      ? '<button class="btn btn-danger btn-sm" data-click="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Solo dueño puede dar de baja">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+s.code+'</td>'
@@ -2619,7 +2702,7 @@ function renderStock() {
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
-      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal('+s.id+')">Egreso</button>'
+      +   '<button class="btn btn-secondary btn-sm" data-click="openStockEgresoModal('+s.id+')">Egreso</button>'
       +   bajaBtn
       + '</td>'
       + '</tr>';
@@ -2627,7 +2710,7 @@ function renderStock() {
 
   // Construir filas del historial
   let histRows = '';
-  App.data.stockHistory.slice(0,15).forEach(function(h) {
+  (App.data.stockHistory || []).slice(0,15).forEach(function(h) {
     const tc   = h.type==='Baja'?'badge-danger':h.type==='Egreso'?'badge-warn':h.type==='Ajuste'?'badge-purple':'badge-ok';
     const sign = (h.type==='Baja'||h.type==='Egreso') ? '-' : '+';
     const cc   = (h.type==='Baja'||h.type==='Egreso') ? 'danger' : 'ok';
@@ -2651,7 +2734,7 @@ function renderStock() {
     : '';
 
   const bajaBtnHeader = isDueno
-    ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Dar de baja</button>'
+    ? '<button class="btn btn-danger btn-sm" data-click="openStockBajaModal()">✕ Dar de baja</button>'
     : '';
 
   document.getElementById('page-stock').innerHTML =
@@ -2676,8 +2759,8 @@ function renderStock() {
     +   '<div><div class="section-title">Inventario de repuestos e insumos</div></div>'
     +   '<div style="display:flex;gap:8px">'
     +   bajaBtnHeader
-    +   '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
-    +   '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    +   '<button class="btn btn-secondary btn-sm" data-click="openStockAjusteModal()">± Ajuste inventario</button>'
+    +   '<button class="btn btn-primary btn-sm" data-click="openNewStockModal()">+ Registrar ítem</button>'
     +   '</div>'
     + '</div>'
     + '<div class="card" style="padding:0">'
@@ -2731,7 +2814,7 @@ function saveStockEgreso(stockId) {
   const ref = document.getElementById('eg-ref').value || '—';
   if (qty > s.qty) { showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
   s.qty -= qty;
-  App.data.stockHistory.unshift({
+  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name, unit: s.unit, qty, type: 'Egreso',
     motivo: ref,
@@ -2744,7 +2827,7 @@ function saveStockEgreso(stockId) {
 
 // ── BAJA de stock — SOLO DUEÑO / GERENCIA ──
 function openStockBajaModal() {
-  if (!['dueno','gerencia'].includes(App.currentUser && App.currentUser.role)) {
+  if (!userHasRole('dueno','gerencia')) {
     showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
     return;
   }
@@ -2757,13 +2840,13 @@ function openStockBajaModal() {
     + 'por robo, pérdida, daño o vencimiento. Queda registrado con usuario, fecha y motivo detallado.'
     + '</div>'
     + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label>'
-    + '<select class="form-select" id="bj-id" onchange="onBajaItemSelect()">'
+    + '<select class="form-select" id="bj-id" data-change="onBajaItemSelect()">'
     + '<option value="">— Seleccioná un ítem —</option>'+opts
     + '</select></div>'
     + '<div id="baja-detail" style="display:none">'
     +   '<div class="form-row">'
     +     '<div class="form-group"><label class="form-label">Cantidad a dar de baja</label>'
-    +     '<input class="form-input" type="number" id="bj-qty" value="1" min="1" oninput="updateBajaSummary()"></div>'
+    +     '<input class="form-input" type="number" id="bj-qty" value="1" min="1" data-input="updateBajaSummary()"></div>'
     +     '<div class="form-group"><label class="form-label">Motivo de la baja</label>'
     +     '<select class="form-select" id="bj-motivo">'
     +       '<option value="robo">Robo</option>'
@@ -2818,7 +2901,7 @@ function updateBajaSummary() {
 }
 
 function saveStockBaja() {
-  if (!['dueno','gerencia'].includes(App.currentUser && App.currentUser.role)) {
+  if (!userHasRole('dueno','gerencia')) {
     showToast('warn','Sin permiso para realizar esta operación');
     return;
   }
@@ -2835,7 +2918,7 @@ function saveStockBaja() {
 
   s.qty -= qty;
 
-  App.data.stockHistory.unshift({
+  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name,
     unit:   s.unit,
@@ -2882,7 +2965,7 @@ function saveStockAjuste() {
   if (!s || isNaN(newQty)) { showToast('warn','Completá todos los campos'); return; }
   const diff = newQty - s.qty;
   s.qty = newQty;
-  App.data.stockHistory.unshift({
+  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
     date:   new Date().toISOString().split('T')[0],
     name:   s.name, unit: s.unit,
     qty:    Math.abs(diff),
@@ -2952,7 +3035,7 @@ function saveNewStockItem() {
     supplier: (document.getElementById('ns-supplier')||{}).value || '—',
   });
   if (qty > 0) {
-    App.data.stockHistory.unshift({
+    (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
       date:   new Date().toISOString().split('T')[0],
       name: name, unit: unit, qty: qty,
       type: 'Ingreso', motivo: 'Alta de ítem nuevo',
@@ -2975,7 +3058,7 @@ function renderDocuments() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Control de vencimientos</div></div>
-      <button class="btn btn-primary" onclick="openNewDocModal()">+ Cargar documento</button>
+      <button class="btn btn-primary" data-click="openNewDocModal()">+ Cargar documento</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -2994,8 +3077,8 @@ function renderDocuments() {
               <td style="font-size:11px;color:var(--text3)">${d.ref||'—'}</td>
               <td><span class="badge ${d.status==='ok'?'badge-ok':d.status==='warn'?'badge-warn':'badge-danger'}">${d.status==='ok'?'Vigente':d.status==='warn'?'Por vencer':'Vencido'}</span></td>
               <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
-                <button class="btn btn-primary btn-sm"   onclick="openRenewDocModal(${idx})">Renovar</button>
-                <button class="btn btn-secondary btn-sm" onclick="openEditDocModal(${idx})">Editar</button>
+                <button class="btn btn-primary btn-sm"   data-click="openRenewDocModal(${idx})">Renovar</button>
+                <button class="btn btn-secondary btn-sm" data-click="openEditDocModal(${idx})">Editar</button>
               </td>
             </tr>`;
           }).join('')}
@@ -3255,7 +3338,7 @@ function renderCosts() {
       <div class="kpi-card danger">
         <div class="kpi-label">Unidad más costosa</div>
         <div class="kpi-value danger">$${sorted[0].cost_km.toFixed(3)}</div>
-        <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
+        <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" data-click="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
       </div>
       <div class="kpi-card ok">
         <div class="kpi-label">Unidad más eficiente</div>
@@ -3289,7 +3372,7 @@ function renderCosts() {
     <div class="section-header">
       <div><div class="section-title">Detalle por unidad — clic en una fila para el desglose completo</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="showToast('ok','Exportando costos en Excel...')">↓ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" data-click="showToast('ok','Exportando costos en Excel...')">↓ Exportar Excel</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -3304,7 +3387,7 @@ function renderCosts() {
             const d = getCostDetail(v.code);
             if (!d) return '';
             const ev = v.cost_km>0.25?['danger','Alto']:v.cost_km>0.20?['warn','Revisar']:['ok','Eficiente'];
-            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
+            return `<tr style="cursor:pointer" data-click="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${v.code}</td>
               <td>${v.brand} ${v.model}</td>
               <td class="td-mono">${d.kmMes.toLocaleString()}</td>
@@ -3316,7 +3399,7 @@ function renderCosts() {
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">$${v.cost_km.toFixed(3)}</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
-              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
+              <td><button class="btn btn-primary btn-sm" data-click="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
             </tr>`;
           }).join('')}
           </tbody>
@@ -3394,7 +3477,7 @@ function openCostDrillDown(vehicleCode) {
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">
       ${d.rubros.map(r=>`
         <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 8px;text-align:center;border:1px solid var(--border);cursor:pointer;transition:all .15s"
-          onclick="toggleCostRubro('${vehicleCode}','${r.id}')"
+          data-click="toggleCostRubro('${vehicleCode}','${r.id}')"
           id="rubro-card-${r.id}">
           <div style="width:8px;height:8px;border-radius:50%;background:${r.color};margin:0 auto 5px"></div>
           <div style="font-size:11px;color:var(--text3);margin-bottom:3px;line-height:1.3">${r.label.split(' ')[0]}</div>
@@ -3540,7 +3623,7 @@ function renderMaintenance() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Plan de mantenimiento preventivo</div></div>
-      <button class="btn btn-primary" onclick="openNewMaintModal()">+ Nueva tarea</button>
+      <button class="btn btn-primary" data-click="openNewMaintModal()">+ Nueva tarea</button>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -3556,7 +3639,7 @@ function renderMaintenance() {
             <div style="font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${p.pct}% del intervalo</div>
           </td>
           <td><span class="badge ${p.status==='warn'?'badge-warn':'badge-ok'}">${p.status==='warn'?'Próximo':'OK'}</span></td>
-          <td><button class="btn btn-secondary btn-sm" onclick="createPreventiveOT('${p.vehicle}','${p.task}')">Generar OT</button></td>
+          <td><button class="btn btn-secondary btn-sm" data-click="createPreventiveOT('${p.vehicle}','${p.task}')">Generar OT</button></td>
         </tr>`).join('')}</tbody></table>
       </div>
     </div>
@@ -3613,10 +3696,195 @@ function showToast(type, msg) {
   setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(10px)'; el.style.transition='all .3s'; setTimeout(()=>el.remove(),300); }, 3500);
 }
 
-// ── INIT ──
+
+
+function renderChoferPanel() {
+  const root = document.getElementById('page-chofer_panel');
+  if (!root) return;
+  const user = App.currentUser || {};
+  const vehicle = (App.data.vehicles || []).find(v => v.code === user.vehicle || v.driver === user.name);
+  const fuel = (App.data.fuelLogs || []).filter(f => !vehicle || f.vehicle === vehicle.code).slice(0, 8);
+  const docs = (App.data.documents || []).filter(d => !vehicle || d.vehicle === vehicle.code);
+  root.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card info">
+        <div class="kpi-label">Chofer</div>
+        <div class="kpi-value info">${user.name || '—'}</div>
+        <div class="kpi-trend">${(user.roleData && user.roleData.label) || user.role || 'Usuario'}</div>
+      </div>
+      <div class="kpi-card ok">
+        <div class="kpi-label">Unidad asignada</div>
+        <div class="kpi-value ok">${vehicle ? vehicle.code : 'Sin unidad'}</div>
+        <div class="kpi-trend">${vehicle ? `${vehicle.plate} · ${vehicle.brand} ${vehicle.model}` : 'Sin asignación'}</div>
+      </div>
+      <div class="kpi-card warn">
+        <div class="kpi-label">Kilometraje</div>
+        <div class="kpi-value warn">${vehicle ? vehicle.km.toLocaleString() : '—'}</div>
+        <div class="kpi-trend">${vehicle ? vehicle.base : '—'}</div>
+      </div>
+    </div>
+    <div class="two-col" style="margin-top:20px">
+      <div class="card">
+        <div class="section-title">Últimas cargas</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Fecha</th><th>Litros</th><th>Km</th><th>Lugar</th></tr></thead>
+            <tbody>
+              ${fuel.map(f => `<tr><td>${f.date}</td><td>${f.liters} L</td><td>${f.km.toLocaleString()}</td><td>${f.place}</td></tr>`).join('') || '<tr><td colspan="4">Sin movimientos</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-title">Documentación</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Tipo</th><th>Vence</th><th>Estado</th></tr></thead>
+            <tbody>
+              ${docs.map(d => `<tr><td>${d.type}</td><td>${d.expiry}</td><td>${d.status}</td></tr>`).join('') || '<tr><td colspan="3">Sin documentos</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderContadorPanel() {
+  const root = document.getElementById('page-contador_panel');
+  if (!root) return;
+  const fuelTotal = (App.data.fuelLogs || []).reduce((acc, f) => acc + (f.total || 0), 0);
+  const otTotal = (App.data.workOrders || []).reduce((acc, o) => acc + (o.parts_cost || 0) + (o.labor_cost || 0), 0);
+  const top = [...(App.data.vehicles || [])].sort((a,b) => (b.cost_km||0) - (a.cost_km||0)).slice(0,10);
+  root.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card warn"><div class="kpi-label">Combustible registrado</div><div class="kpi-value warn">$${fuelTotal.toLocaleString()}</div><div class="kpi-trend">${(App.data.fuelLogs||[]).length} cargas</div></div>
+      <div class="kpi-card danger"><div class="kpi-label">Costo OT acumulado</div><div class="kpi-value danger">$${otTotal.toLocaleString()}</div><div class="kpi-trend">${(App.data.workOrders||[]).length} órdenes</div></div>
+      <div class="kpi-card info"><div class="kpi-label">Usuario</div><div class="kpi-value info">${App.currentUser ? App.currentUser.initials : 'CT'}</div><div class="kpi-trend">${App.currentUser ? App.currentUser.name : 'Contador'}</div></div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <div class="section-title">Mayor costo por km</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Unidad</th><th>Patente</th><th>Modelo</th><th>Costo/km</th><th>Km</th></tr></thead>
+          <tbody>
+            ${top.map(v => `<tr><td>${v.code}</td><td>${v.plate}</td><td>${v.brand} ${v.model}</td><td>$${Number(v.cost_km||0).toFixed(3)}</td><td>${v.km.toLocaleString()}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function __fleetDispatch(expr, ctx = {}) {
+  if (!expr) return;
+  expr = String(expr).trim();
+  if (expr.startsWith('event.stopPropagation();')) {
+    if (ctx.event && typeof ctx.event.stopPropagation === 'function') ctx.event.stopPropagation();
+    expr = expr.replace('event.stopPropagation();', '').trim();
+  }
+  const noArgMatch = expr.match(/^([A-Za-z_$][\w$]*)\(\)$/);
+  if (noArgMatch) {
+    const fn = window[noArgMatch[1]];
+    if (typeof fn === 'function') return fn();
+  }
+  const match = expr.match(/^([A-Za-z_$][\w$]*)\((.*)\)$/);
+  if (!match) return;
+  const fnName = match[1];
+  const rawArgs = match[2].trim();
+  const fn = window[fnName];
+  if (typeof fn !== 'function') return;
+  const args = [];
+  let current = '';
+  let inQuote = null;
+  let depth = 0;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const ch = rawArgs[i];
+    if (inQuote) {
+      current += ch;
+      if (ch === inQuote && rawArgs[i-1] !== '\\') inQuote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { inQuote = ch; current += ch; continue; }
+    if (ch === '(') { depth++; current += ch; continue; }
+    if (ch === ')') { depth--; current += ch; continue; }
+    if (ch === ',' && depth === 0) { args.push(current.trim()); current = ''; continue; }
+    current += ch;
+  }
+  if (current.trim()) args.push(current.trim());
+  const parsedArgs = args.map(a => {
+    if (a === 'this.value') return ctx.el ? ctx.el.value : undefined;
+    if (a === 'this.files') return ctx.el ? ctx.el.files : undefined;
+    if (a === 'event') return ctx.event;
+    if (/^['"].*['"]$/.test(a)) return a.slice(1, -1).replace(/\\'/g, "'").replace(/\\"/g, '"');
+    if (/^\d+(\.\d+)?$/.test(a)) return Number(a);
+    if (a === 'true') return true;
+    if (a === 'false') return false;
+    if (a === 'null') return null;
+    return a;
+  });
+  return fn(...parsedArgs);
+}
+
+function bindDynamicActions(root = document) {
+  root.querySelectorAll('[data-nav-page]').forEach(el => {
+    if (el.__fleetBoundNav) return;
+    el.__fleetBoundNav = true;
+    el.addEventListener('click', (event) => {
+      event.preventDefault();
+      const page = el.getAttribute('data-nav-page');
+      if (page) navigate(page);
+    });
+  });
+  root.querySelectorAll('[data-click]').forEach(el => {
+    if (el.__fleetBoundClick) return;
+    el.__fleetBoundClick = true;
+    el.addEventListener('click', (event) => {
+      event.preventDefault();
+      __fleetDispatch(el.getAttribute('data-click'), { el, event });
+    });
+  });
+  root.querySelectorAll('[data-change]').forEach(el => {
+    if (el.__fleetBoundChange) return;
+    el.__fleetBoundChange = true;
+    el.addEventListener('change', (event) => __fleetDispatch(el.getAttribute('data-change'), { el, event }));
+  });
+  root.querySelectorAll('[data-input]').forEach(el => {
+    if (el.__fleetBoundInput) return;
+    el.__fleetBoundInput = true;
+    el.addEventListener('input', (event) => __fleetDispatch(el.getAttribute('data-input'), { el, event }));
+  });
+  root.querySelectorAll('[data-dragover]').forEach(el => {
+    if (el.__fleetBoundDragOver) return;
+    el.__fleetBoundDragOver = true;
+    el.addEventListener('dragover', (event) => __fleetDispatch(el.getAttribute('data-dragover'), { el, event }));
+  });
+  root.querySelectorAll('[data-dragleave]').forEach(el => {
+    if (el.__fleetBoundDragLeave) return;
+    el.__fleetBoundDragLeave = true;
+    el.addEventListener('dragleave', (event) => __fleetDispatch(el.getAttribute('data-dragleave'), { el, event }));
+  });
+  root.querySelectorAll('[data-drop]').forEach(el => {
+    if (el.__fleetBoundDrop) return;
+    el.__fleetBoundDrop = true;
+    el.addEventListener('drop', (event) => __fleetDispatch(el.getAttribute('data-drop'), { el, event }));
+  });
+  root.querySelectorAll('[data-dragstart]').forEach(el => {
+    if (el.__fleetBoundDragStart) return;
+    el.__fleetBoundDragStart = true;
+    el.addEventListener('dragstart', (event) => __fleetDispatch(el.getAttribute('data-dragstart'), { el, event }));
+  });
+}
+
+const __fleetOriginalRenderPage = renderPage;
+renderPage = function(page) {
+  __fleetOriginalRenderPage(page);
+  bindDynamicActions(document.getElementById('page-' + page) || document);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
-  document.querySelector('.user-info .user-name').textContent  = App.currentUser.name;
-  document.querySelector('.user-info .user-role').textContent  = App.currentUser.role;
-  document.querySelector('.user-avatar').textContent           = App.currentUser.initials;
-  navigate('dashboard');
+  bindDynamicActions(document);
+  if (typeof initLogin === 'function') {
+    initLogin();
+  } else {
+    navigate('dashboard');
+  }
 });
