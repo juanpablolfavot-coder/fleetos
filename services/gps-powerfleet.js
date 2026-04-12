@@ -267,17 +267,16 @@ async function syncGPSData() {
       const r = await query(`
         UPDATE vehicles
         SET
-          km_current      = CASE WHEN $1 > 0 THEN GREATEST(km_current, $1) ELSE km_current END,
-          hours_current   = CASE WHEN $2 > 0 THEN GREATEST(COALESCE(hours_current,0), $2::int) ELSE hours_current END,
-          gps_lat         = COALESCE(NULLIF($3::text,'0')::numeric, gps_lat),
-          gps_lng         = COALESCE(NULLIF($4::text,'0')::numeric, gps_lng),
-          gps_speed       = $5,
-          gps_status      = $6,
-          gps_hour_meter  = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
-          gps_updated_at  = NOW()
+          km_current     = CASE WHEN $1 > 0 THEN GREATEST(km_current, $1) ELSE km_current END,
+          gps_lat        = COALESCE(NULLIF($3::text,'0')::numeric, gps_lat),
+          gps_lng        = COALESCE(NULLIF($4::text,'0')::numeric, gps_lng),
+          gps_speed      = $5,
+          gps_status     = $6,
+          gps_hour_meter = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
+          gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
-        RETURNING id, code, plate, km_current, hours_current
+        RETURNING id, code, plate, km_current
       `, [km, hourMeter, lat, lng, speed, status, searchPlate]);
 
       if (r.rows.length > 0) {
