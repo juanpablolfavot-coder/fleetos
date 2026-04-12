@@ -8,15 +8,12 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { status, vehicle_id, priority, limit = 50, offset = 0 } = req.query;
     let sql = `
-      SELECT wo.*, v.code AS vehicle_code, v.plate, v.brand, v.model,
-             m.name AS mechanic_name, r.name AS reporter_name,
-             COALESCE(
-               (SELECT SUM(wop.subtotal) FROM work_order_parts wop WHERE wop.wo_id = wo.id), 0
-             ) AS parts_total_real
+      SELECT wo.*,
+             v.code AS vehicle_code, v.plate, v.brand, v.model,
+             m.name AS mechanic_name
       FROM work_orders wo
       JOIN vehicles v ON v.id = wo.vehicle_id
       LEFT JOIN users m ON m.id = wo.mechanic_id
-      LEFT JOIN users r ON r.id = wo.reporter_id
       WHERE 1=1
     `;
     const params = [];
@@ -24,7 +21,8 @@ router.get('/', authenticate, async (req, res) => {
     // Los choferes solo ven sus propias novedades
     if (req.user.role === 'chofer') {
       params.push(req.user.id);
-      sql += ` AND wo.reporter_id = $${params.length}`;
+      // reporter filter
+      sql += ` AND wo.mechanic_id = $${params.length}`;
     }
     if (status)     { params.push(status);     sql += ` AND wo.status = $${params.length}`; }
     if (vehicle_id) { params.push(vehicle_id); sql += ` AND wo.vehicle_id = $${params.length}`; }
@@ -36,7 +34,8 @@ router.get('/', authenticate, async (req, res) => {
     const result = await query(sql, params);
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: 'Error al obtener órdenes de trabajo' });
+    console.error('[WO GET]', err.message, err.stack?.split('\n')[1]);
+    res.status(500).json({ error: 'Error al obtener órdenes de trabajo', detail: err.message });
   }
 });
 
