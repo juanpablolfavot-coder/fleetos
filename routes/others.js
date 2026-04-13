@@ -26,7 +26,7 @@ fuelRouter.get('/', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error combustible' }); }
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
-  try { res.json((await query('SELECT * FROM tanks ORDER BY type')).rows); }
+  try { res.json((await query('SELECT DISTINCT ON (type) * FROM tanks ORDER BY type, created_at ASC')).rows); }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
