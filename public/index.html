@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FleetOS — Sistema de gestión de flota</title>
+  <title>Expreso Biletta — FleetOS</title>
   <link rel="stylesheet" href="css/main.css?v=1776034539">
   <link rel="stylesheet" href="css/login.css?v=1776034539">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -138,7 +138,7 @@ html, body {
     <div class="login-logo">
       <div class="login-logo-mark">FO</div>
       <div>
-        <div class="login-logo-text">FleetOS</div>
+        <div class="login-logo-text">Expreso Biletta</div>
         <div class="login-logo-sub">Sistema de gestión de flota pesada</div>
       </div>
     </div>
@@ -180,7 +180,7 @@ html, body {
       <span id="auth-toggle-text">¿Sos chofer y no tenés cuenta?</span>
       <a href="#" id="auth-toggle-link" onclick="toggleAuthMode(event)" style="color:var(--accent);text-decoration:none;margin-left:4px;font-weight:500">Registrate acá</a>
     </div>
-    <div class="login-footer">FleetOS v2.0 · Sistema de gestión de flota pesada</div>
+    <div class="login-footer">Expreso Biletta · FleetOS v2.0</div>
   </div>
 </div>
 
@@ -189,30 +189,30 @@ html, body {
     <div class="sidebar-logo">
       <div class="logo-mark">FO</div>
       <div>
-        <div class="logo-text">FleetOS</div>
+        <div class="logo-text">Expreso Biletta</div>
         <div class="logo-sub">v2.0 · ${(App&&App.data&&App.data.vehicles)?App.data.vehicles.length:0} unidades</div>
       </div>
     </div>
     <div class="nav-section">
       <div class="nav-section-label">Principal</div>
-      <a class="nav-item" data-page="dashboard"       onclick="navigate('dashboard')"><span class="nav-icon">◈</span><span>Panel general</span></a>
+      <a class="nav-item" data-page="dashboard"       onclick="navigate('dashboard')"><span class="nav-icon">🏠</span><span>Panel general</span></a>
       <a class="nav-item" data-page="encargado_panel" onclick="navigate('encargado_panel')"><span class="nav-icon">📋</span><span>Panel encargado</span></a>
-      <a class="nav-item" data-page="fleet"           onclick="navigate('fleet')"><span class="nav-icon">⊡</span><span>Flota y vehículos</span></a>
+      <a class="nav-item" data-page="fleet"           onclick="navigate('fleet')"><span class="nav-icon">🚛</span><span>Flota y vehículos</span></a>
     </div>
     <div class="nav-section">
       <div class="nav-section-label">Operaciones</div>
-      <a class="nav-item" data-page="workorders"  onclick="navigate('workorders')"><span class="nav-icon">◎</span><span>Órdenes de trabajo</span></a>
-      <a class="nav-item" data-page="maintenance" onclick="navigate('maintenance')"><span class="nav-icon">◷</span><span>Mantenimiento</span></a>
-      <a class="nav-item" data-page="fuel"        onclick="navigate('fuel')"><span class="nav-icon">◈</span><span>Combustible y urea</span></a>
-      <a class="nav-item" data-page="tires"       onclick="navigate('tires')"><span class="nav-icon">○</span><span>Cubiertas</span></a>
+      <a class="nav-item" data-page="workorders"  onclick="navigate('workorders')"><span class="nav-icon">🔧</span><span>Órdenes de trabajo</span></a>
+      <a class="nav-item" data-page="maintenance" onclick="navigate('maintenance')"><span class="nav-icon">⚙️</span><span>Mantenimiento</span></a>
+      <a class="nav-item" data-page="fuel"        onclick="navigate('fuel')"><span class="nav-icon">⛽</span><span>Combustible y urea</span></a>
+      <a class="nav-item" data-page="tires"       onclick="navigate('tires')"><span class="nav-icon">🔘</span><span>Cubiertas</span></a>
     </div>
     <div class="nav-section">
       <div class="nav-section-label">Administración</div>
-      <a class="nav-item" data-page="stock"       onclick="navigate('stock')"><span class="nav-icon">▦</span><span>Stock y pañol</span></a>
-      <a class="nav-item" data-page="documents"   onclick="navigate('documents')"><span class="nav-icon">◻</span><span>Documentación</span></a>
-      <a class="nav-item" data-page="costs"       onclick="navigate('costs')"><span class="nav-icon">◈</span><span>Costos operativos</span></a>
-      <a class="nav-item" id="nav-users"  data-page="users"          onclick="navigate('users')"><span class="nav-icon">◎</span><span>Usuarios</span></a>
-      <a class="nav-item" id="nav-config" data-page="config"         onclick="navigate('config')"><span class="nav-icon">⚙</span><span>Configuración</span></a>
+      <a class="nav-item" data-page="stock"       onclick="navigate('stock')"><span class="nav-icon">📦</span><span>Stock y pañol</span></a>
+      <a class="nav-item" data-page="documents"   onclick="navigate('documents')"><span class="nav-icon">📄</span><span>Documentación</span></a>
+      <a class="nav-item" data-page="costs"       onclick="navigate('costs')"><span class="nav-icon">💰</span><span>Costos operativos</span></a>
+      <a class="nav-item" id="nav-users"  data-page="users"          onclick="navigate('users')"><span class="nav-icon">👥</span><span>Usuarios</span></a>
+      <a class="nav-item" id="nav-config" data-page="config"         onclick="navigate('config')"><span class="nav-icon">🔩</span><span>Configuración</span></a>
       <a class="nav-item"                 data-page="chofer_panel"   onclick="navigate('chofer_panel')"><span class="nav-icon">🚛</span><span>Mi panel</span></a>
       <a class="nav-item"                 data-page="contador_panel" onclick="navigate('contador_panel')"><span class="nav-icon">📊</span><span>Panel contable</span></a>
     </div>
