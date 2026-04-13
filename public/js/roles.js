@@ -363,17 +363,18 @@ async function loadInitialData() {
     }));
 
     App.data.fuelLogs = App.data.fuelLogs.map(f => ({
-      id:      f.id,
-      vehicle: f.vehicle_code || '—',
-      plate:   f.plate || '—',
-      driver:  f.driver_name || '—',
-      liters:  parseFloat(f.liters) || 0,
-      km:      f.odometer_km || 0,
-      ppu:     parseFloat(f.price_per_l) || 0,
-      total:   parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
-      date:    f.logged_at ? f.logged_at.slice(0,16).replace('T',' ') : '—',
-      place:   f.location || 'Cisterna',
-      status:  'OK',
+      id:           f.id,
+      vehicle:      f.vehicle_code || '—',
+      plate:        f.plate || '—',
+      driver:       f.driver_name || '—',
+      liters:       parseFloat(f.liters) || 0,
+      km:           f.odometer_km || 0,
+      ppu:          parseFloat(f.price_per_l) || 0,
+      total:        parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
+      date:         f.logged_at ? f.logged_at.slice(0,16).replace('T',' ') : '—',
+      place:        f.location || 'Cisterna',
+      status:       'OK',
+      ticket_image: f.ticket_image || null,
     }));
 
     App.data.stock = App.data.stock.map(s => ({

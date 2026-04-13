@@ -32,15 +32,17 @@ fuelRouter.get('/tanks', authenticate, async (req, res) => {
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const { vehicle_id, tank_id, fuel_type, liters, price_per_l, odometer_km, location, notes } = req.body;
+    const { vehicle_id, tank_id, fuel_type, liters, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
     if (!vehicle_id || !liters || !price_per_l) return res.status(400).json({ error: 'vehicle_id, liters y price_per_l requeridos' });
     await client.query('BEGIN');
+    // Asegurar que existe la columna ticket_image
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});
     if (tank_id) {
       const t = await client.query('SELECT current_l FROM tanks WHERE id=$1 FOR UPDATE',[tank_id]);
       if (!t.rows[0] || t.rows[0].current_l < liters) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Combustible insuficiente' }); }
       await client.query('UPDATE tanks SET current_l=current_l-$1,updated_at=NOW() WHERE id=$2',[liters,tank_id]);
     }
-    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,odometer_km||null,location||null,notes||null]);
+    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,odometer_km||null,location||null,notes||null,ticket_image||null]);
     if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: 'Error carga' }); } finally { client.release(); }

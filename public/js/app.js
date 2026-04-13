@@ -1360,7 +1360,7 @@ function renderFuel() {
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
-        <table><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th><th>Estado</th></tr></thead>
+        <table><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th><th>Estado</th><th>Ticket</th></tr></thead>
         <tbody>${App.data.fuelLogs.map(f=>`<tr>
           <td class="td-mono" style="font-size:11px">${f.date}</td>
           <td class="td-main">${f.vehicle}</td>
@@ -1371,6 +1371,7 @@ function renderFuel() {
           <td class="td-mono">$${f.total.toLocaleString()}</td>
           <td>${f.place}</td>
           <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
+          <td>${f.ticket_image ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')">📄 Ver</button>` : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
         </tr>`).join('')}</tbody></table>
       </div>
     </div>
@@ -1387,9 +1388,15 @@ function renderFuel() {
 }
 
 function openFuelLoadModal() {
+  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.code}">${v.code} — ${v.plate}</option>`).join('');
   openModal('Registrar carga de combustible', `
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Unidad</label><input class="form-input" placeholder="INT-XX" id="fl-vehicle"></div>
+      <div class="form-group"><label class="form-label">Unidad</label>
+        <select class="form-select" id="fl-vehicle">
+          <option value="">— Seleccioná unidad —</option>
+          ${vehicleOpts}
+        </select>
+      </div>
       <div class="form-group"><label class="form-label">Chofer</label><input class="form-input" placeholder="Nombre del chofer" id="fl-driver"></div>
     </div>
     <div class="form-row">
@@ -1398,13 +1405,48 @@ function openFuelLoadModal() {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
-      <div class="form-group"><label class="form-label">Lugar de carga</label><select class="form-select" id="fl-place"><option>Cisterna central</option><option>Cisterna norte</option><option>Cisterna sur</option><option>Estación externa</option></select></div>
+      <div class="form-group"><label class="form-label">Lugar de carga</label>
+        <select class="form-select" id="fl-place">
+          <option>Cisterna R3</option>
+          <option>Estación de servicio</option>
+          <option>Cisterna central</option>
+          <option>Otra</option>
+        </select>
+      </div>
     </div>
-    <div style="background:var(--warn-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-top:4px">⚠ El sistema descontará los litros automáticamente del stock de cisterna al confirmar.</div>
+    <div class="form-group" style="margin-top:10px">
+      <label class="form-label">📷 Foto del ticket <span style="color:var(--text3);font-weight:400">(opcional pero recomendado)</span></label>
+      <div id="ticket-upload-area" style="border:2px dashed var(--border2);border-radius:var(--radius);padding:16px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg3)" onclick="document.getElementById('fl-ticket-input').click()">
+        <div id="ticket-preview-area">
+          <div style="font-size:28px;margin-bottom:6px">📄</div>
+          <div style="font-size:13px;color:var(--text3)">Tocá para subir foto del ticket</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">JPG, PNG hasta 5MB</div>
+        </div>
+        <input type="file" id="fl-ticket-input" accept="image/*" capture="environment" style="display:none" onchange="previewTicket(this)">
+      </div>
+    </div>
+    <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-top:10px">⚠ Si la carga es de cisterna, el sistema descontará los litros del stock automáticamente.</div>
   `, [
     { label:'Registrar carga', cls:'btn-primary', fn: saveFuelLoad },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+function previewTicket(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  if (file.size > 5 * 1024 * 1024) { showToast('error','La imagen es muy grande (máx 5MB)'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    window._ticketImage = e.target.result; // base64
+    const area = document.getElementById('ticket-preview-area');
+    if (area) area.innerHTML = `
+      <img src="${e.target.result}" style="max-height:120px;max-width:100%;border-radius:6px;object-fit:contain">
+      <div style="font-size:11px;color:var(--ok);margin-top:6px">✓ Ticket cargado — ${(file.size/1024).toFixed(0)} KB</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">Tocá para cambiar</div>
+    `;
+  };
+  reader.readAsDataURL(file);
 }
 
 async function saveFuelLoad() {
@@ -1415,20 +1457,43 @@ async function saveFuelLoad() {
   const driver     = (document.getElementById('fl-driver')?.value || '').trim();
   const date       = document.getElementById('fl-date')?.value || new Date().toISOString().slice(0,10);
   const type       = document.getElementById('fl-type')?.value || 'diesel';
+  const place      = document.getElementById('fl-place')?.value || '';
+  const ticketImg  = window._ticketImage || null;
 
   if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
   if (liters <= 0) { showToast('error','Ingresá los litros cargados'); return; }
 
+  // Limpiar imagen de prueba
+  window._ticketImage = null;
+
   const res = await apiFetch('/api/fuel', {
     method: 'POST',
-    body: JSON.stringify({ vehicle_id, liters, price_per_liter: ppu, km_at_load: km, driver, date, fuel_type: type, total_cost: liters*ppu })
+    body: JSON.stringify({
+      vehicle_id, liters, price_per_liter: ppu, km_at_load: km,
+      driver, date, fuel_type: type, total_cost: liters*ppu,
+      location: place, ticket_image: ticketImg
+    })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al registrar carga'); return; }
 
-  closeModal(); showToast('ok','Carga de combustible registrada');
+  closeModal(); showToast('ok','Carga de combustible registrada' + (ticketImg ? ' con ticket 📄' : ''));
   renderFuel(); loadInitialData().then(()=>renderFuel());
 }
 
+
+function viewTicket(fuelLogId) {
+  const log = App.data.fuelLogs.find(f => f.id === fuelLogId);
+  if (!log?.ticket_image) { showToast('warn','No hay ticket guardado para esta carga'); return; }
+  openModal(`📄 Ticket — ${log.vehicle} (${log.date})`, `
+    <div style="text-align:center">
+      <img src="${log.ticket_image}" style="max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain;box-shadow:0 4px 20px rgba(0,0,0,.4)">
+      <div style="margin-top:10px;font-size:12px;color:var(--text3)">${log.liters} L · ${log.place} · $${log.total.toLocaleString()}</div>
+    </div>
+    <div style="text-align:center;margin-top:12px">
+      <a href="${log.ticket_image}" download="ticket-${log.vehicle}-${log.date?.replace(/[: ]/g,'-')}.jpg" class="btn btn-secondary btn-sm">⬇ Descargar</a>
+    </div>
+  `, [{ label:'Cerrar', cls:'btn-secondary', fn: closeModal }]);
+}
 
 function openFuelEntryModal() {
   openModal('Ingreso a cisterna', `
@@ -1447,11 +1512,6 @@ function openFuelEntryModal() {
   ]);
 }
 
-// ── CUBIERTAS ──
-if (!App.data.tireHistory) {
-  App.data.tireHistory = [];
-
-}
 
 const AXLE_CONFIGS = {
   tractor: [
