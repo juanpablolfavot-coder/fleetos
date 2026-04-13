@@ -1402,13 +1402,14 @@ function renderFuel() {
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
-        <table><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th><th>Estado</th><th>Ticket</th></tr></thead>
+        <table><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer</th><th>Tipo</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th><th>Estado</th><th>Ticket</th></tr></thead>
         <tbody>${App.data.fuelLogs.map(f=>`<tr>
           <td class="td-mono" style="font-size:11px">${f.date}</td>
           <td class="td-main">${f.vehicle}</td>
           <td>${f.driver}</td>
+          <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
           <td class="td-mono">${f.liters} L</td>
-          <td class="td-mono">${f.km.toLocaleString()} km</td>
+          <td class="td-mono">${f.km > 0 ? f.km.toLocaleString()+' km' : '—'}</td>
           <td class="td-mono">$${f.ppu.toLocaleString()}</td>
           <td class="td-mono">$${f.total.toLocaleString()}</td>
           <td>${f.place}</td>
@@ -1431,7 +1432,7 @@ function renderFuel() {
 
 function openFuelLoadModal() {
   const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.code}">${v.code} — ${v.plate}</option>`).join('');
-  openModal('Registrar carga de combustible', `
+  openModal('Registrar carga de combustible / urea', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Unidad</label>
         <select class="form-select" id="fl-vehicle">
@@ -1439,7 +1440,23 @@ function openFuelLoadModal() {
           ${vehicleOpts}
         </select>
       </div>
+      <div class="form-group"><label class="form-label">Tipo de carga</label>
+        <select class="form-select" id="fl-type" onchange="updateFuelPlaceOpts()">
+          <option value="diesel">🟡 Gasoil / Diesel</option>
+          <option value="urea">🔵 Urea / AdBlue</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">Chofer</label><input class="form-input" placeholder="Nombre del chofer" id="fl-driver"></div>
+      <div class="form-group"><label class="form-label">Lugar de carga</label>
+        <select class="form-select" id="fl-place" onchange="updateFuelPlaceNote()">
+          <option value="Cisterna R3">Cisterna R3 (descuenta stock)</option>
+          <option value="Estación de servicio">Estación de servicio</option>
+          <option value="Bidón / Sucursal">Bidón / Sucursal</option>
+          <option value="Otra">Otra</option>
+        </select>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Litros cargados</label><input class="form-input" type="number" placeholder="400" id="fl-liters"></div>
@@ -1447,14 +1464,9 @@ function openFuelLoadModal() {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
-      <div class="form-group"><label class="form-label">Lugar de carga</label>
-        <select class="form-select" id="fl-place">
-          <option>Cisterna R3</option>
-          <option>Estación de servicio</option>
-          <option>Cisterna central</option>
-          <option>Otra</option>
-        </select>
-      </div>
+    </div>
+    <div id="fl-place-note" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-top:4px">
+      ⚠ Los litros se descontarán del stock de cisterna al confirmar.
     </div>
     <div class="form-group" style="margin-top:10px">
       <label class="form-label">📷 Foto del ticket <span style="color:var(--text3);font-weight:400">(opcional pero recomendado)</span></label>
@@ -1467,11 +1479,49 @@ function openFuelLoadModal() {
         <input type="file" id="fl-ticket-input" accept="image/*" capture="environment" style="display:none" onchange="previewTicket(this)">
       </div>
     </div>
-    <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-top:10px">⚠ Si la carga es de cisterna, el sistema descontará los litros del stock automáticamente.</div>
   `, [
     { label:'Registrar carga', cls:'btn-primary', fn: saveFuelLoad },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+function updateFuelPlaceOpts() {
+  const tipo = document.getElementById('fl-type')?.value;
+  const placeEl = document.getElementById('fl-place');
+  if (!placeEl) return;
+  if (tipo === 'urea') {
+    placeEl.innerHTML = `
+      <option value="Cisterna urea R3">Cisterna urea R3 (descuenta stock)</option>
+      <option value="Bidón / Sucursal">Bidón / Sucursal</option>
+      <option value="Proveedor externo">Proveedor externo</option>
+    `;
+  } else {
+    placeEl.innerHTML = `
+      <option value="Cisterna R3">Cisterna R3 (descuenta stock)</option>
+      <option value="Estación de servicio">Estación de servicio</option>
+      <option value="Bidón / Sucursal">Bidón / Sucursal</option>
+      <option value="Otra">Otra</option>
+    `;
+  }
+  updateFuelPlaceNote();
+}
+
+function updateFuelPlaceNote() {
+  const place = document.getElementById('fl-place')?.value || '';
+  const noteEl = document.getElementById('fl-place-note');
+  if (!noteEl) return;
+  const descuenta = place.includes('Cisterna');
+  if (descuenta) {
+    noteEl.style.background = 'rgba(245,158,11,.1)';
+    noteEl.style.borderColor = 'rgba(245,158,11,.3)';
+    noteEl.style.color = 'var(--warn)';
+    noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna al confirmar.';
+  } else {
+    noteEl.style.background = 'rgba(99,102,241,.1)';
+    noteEl.style.borderColor = 'rgba(99,102,241,.3)';
+    noteEl.style.color = 'var(--info, #60a5fa)';
+    noteEl.textContent = '📦 Carga externa — no descuenta del stock de cisterna. Solo registra el consumo y costo.';
+  }
 }
 
 function previewTicket(input) {
@@ -1497,7 +1547,6 @@ async function saveFuelLoad() {
   const ppu        = parseFloat(document.getElementById('fl-ppu')?.value)    || 0;
   const km         = parseInt(document.getElementById('fl-km')?.value)       || 0;
   const driver     = (document.getElementById('fl-driver')?.value || '').trim();
-  const date       = document.getElementById('fl-date')?.value || new Date().toISOString().slice(0,10);
   const type       = document.getElementById('fl-type')?.value || 'diesel';
   const place      = document.getElementById('fl-place')?.value || '';
   const ticketImg  = window._ticketImage || null;
@@ -1505,21 +1554,35 @@ async function saveFuelLoad() {
   if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
   if (liters <= 0) { showToast('error','Ingresá los litros cargados'); return; }
 
-  // Limpiar imagen de prueba
+  // Solo descontar de cisterna si el lugar es cisterna
+  const esCisterna = place.includes('Cisterna');
+  let tank_id = null;
+  if (esCisterna) {
+    // Buscar la cisterna correspondiente según el tipo
+    const tanks = App.data.tanks || [];
+    const tank = type === 'urea'
+      ? tanks.find(t => t.type === 'urea')
+      : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+    tank_id = tank?.id || null;
+  }
+
   window._ticketImage = null;
 
   const res = await apiFetch('/api/fuel', {
     method: 'POST',
     body: JSON.stringify({
       vehicle_id, liters, price_per_liter: ppu, km_at_load: km,
-      driver, date, fuel_type: type, total_cost: liters*ppu,
-      location: place, ticket_image: ticketImg
+      driver, fuel_type: type, total_cost: liters * ppu,
+      location: place, tank_id, ticket_image: ticketImg
     })
   });
-  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al registrar carga'); return; }
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar carga'); return; }
 
-  closeModal(); showToast('ok','Carga de combustible registrada' + (ticketImg ? ' con ticket 📄' : ''));
-  renderFuel(); loadInitialData().then(()=>renderFuel());
+  const msg = esCisterna
+    ? `Carga registrada — ${liters}L descontados de cisterna`
+    : `Carga registrada — ${place}${ticketImg ? ' · con ticket 📄' : ''}`;
+  closeModal(); showToast('ok', msg);
+  loadInitialData().then(() => renderFuel());
 }
 
 

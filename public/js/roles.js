@@ -369,6 +369,7 @@ async function loadInitialData() {
       vehicle:      f.vehicle_code || '—',
       plate:        f.plate || '—',
       driver:       f.driver_name || '—',
+      fuel_type:    f.fuel_type || 'diesel',
       liters:       parseFloat(f.liters) || 0,
       km:           f.odometer_km || 0,
       ppu:          parseFloat(f.price_per_l) || 0,
