@@ -173,9 +173,8 @@ app.get('/api/migrate-now', async(req,res)=>{
       await pool.query("INSERT INTO users(name,email,password_hash,role) VALUES($1,$2,$3,$4)",
         ['Administrador','admin@fleetos.com',hash,'dueno']);
     }
-    await pool.query("ALTER TABLE tanks DROP CONSTRAINT IF EXISTS tanks_type_unique");
-    await pool.query("ALTER TABLE tanks ADD CONSTRAINT tanks_type_unique UNIQUE (type)");
-    await pool.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,0,'Base Central'),('urea',2000,0,'Base Central') ON CONFLICT (type) DO NOTHING");
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS tanks_type_unique ON tanks(type)");
+    await pool.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,0,'Cisterna R3'),('urea',2000,0,'Cisterna R3') ON CONFLICT (type) DO NOTHING");
     res.json({status:'ok',message:'MigraciÃÂÃÂÃÂÃÂ³n completada. Usuario: admin@fleetos.com / FleetOS2024!'});
   } catch(e) {
     res.status(500).json({error:e.message});
@@ -357,11 +356,9 @@ app.get('/api/run-migrate', async (req, res) => {
       } else { results.push('admin exists'); }
 
       // Initial tanks
-      await client.query("ALTER TABLE tanks DROP CONSTRAINT IF EXISTS tanks_type_unique");
-      await client.query("ALTER TABLE tanks ADD CONSTRAINT tanks_type_unique UNIQUE (type)");
-      await client.query("DELETE FROM tanks WHERE id NOT IN (SELECT DISTINCT ON (type) id FROM tanks ORDER BY type, created_at ASC)");
-      await client.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,0,'Base Central'),('urea',2000,0,'Base Central') ON CONFLICT (type) DO NOTHING");
-      results.push('tanks deduped');
+      await client.query("CREATE UNIQUE INDEX IF NOT EXISTS tanks_type_unique ON tanks(type)");
+      await client.query("INSERT INTO tanks(type,capacity_l,current_l,location) VALUES('fuel',10000,0,'Cisterna R3'),('urea',2000,0,'Cisterna R3') ON CONFLICT (type) DO NOTHING");
+      results.push('tanks ok');
 
       res.json({ok:true,msg:'Migracion completada',steps:results});
     } finally { client.release(); }
