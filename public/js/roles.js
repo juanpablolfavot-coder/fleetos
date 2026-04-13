@@ -438,30 +438,6 @@ function buildNavForRole(role) {
   });
 }
 
-// ── PANEL CHOFER (simplificado para login real) ──
-function renderChoferPanel() {
-  const u = App.currentUser;
-  const root = document.getElementById('page-chofer_panel');
-  if (!root) return;
-  root.innerHTML = `
-    <div style="max-width:480px;margin:0 auto">
-      <div class="card" style="text-align:center;padding:24px;margin-bottom:16px">
-        <div style="font-size:28px;font-weight:700;color:var(--accent);font-family:monospace">${u.vehicle || 'Sin unidad'}</div>
-        <div style="font-size:13px;color:var(--text3);margin-top:4px">${u.name}</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="card" style="cursor:pointer;text-align:center;padding:20px" onclick="navigate('workorders')">
-          <div style="font-size:24px">⚠</div>
-          <div style="font-size:12px;font-weight:600;margin-top:6px">Reportar novedad</div>
-        </div>
-        <div class="card" style="cursor:pointer;text-align:center;padding:20px" onclick="navigate('fuel')">
-          <div style="font-size:24px">⛽</div>
-          <div style="font-size:12px;font-weight:600;margin-top:6px">Cargar combustible</div>
-        </div>
-      </div>
-    </div>`;
-}
-
 // ── PANEL CONTADOR ──
 function renderContadorPanel() {
   navigate('costs');
