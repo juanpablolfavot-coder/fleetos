@@ -234,11 +234,11 @@ function logout() {
 function getRoleData(role) {
   const roles = {
     dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','users','encargado_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','users'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','users'], canEdit:['all'] },
     jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','encargado_panel'], canEdit:['workorders','fleet'] },
-    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['workorders','tires','stock'], canEdit:['workorders'] },
+    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
-    encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['dashboard','fuel'], canEdit:['fuel'] },
+    encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Pañol / Stock',            badge:'role-stock',      modules:['stock','workorders'], canEdit:['stock'] },
     contador:              { label:'Contador / Administración',badge:'role-contador',   modules:['costs','documents','contador_panel'], canEdit:[] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs'], canEdit:[] },
@@ -275,9 +275,13 @@ function bootApp() {
 
   // Cargar datos iniciales desde la API
   loadInitialData().then(() => {
-    if (u.role === 'chofer') navigate('chofer_panel');
-    else if (u.role === 'contador') navigate('contador_panel');
-    else navigate('dashboard');
+    if      (u.role === 'chofer')             navigate('chofer_panel');
+    else if (u.role === 'contador')           navigate('contador_panel');
+    else if (u.role === 'mecanico')           navigate('encargado_panel');
+    else if (u.role === 'jefe_mantenimiento') navigate('encargado_panel');
+    else if (u.role === 'gerencia')           navigate('encargado_panel');
+    else if (u.role === 'dueno')              navigate('encargado_panel');
+    else                                      navigate('dashboard');
   });
 }
 
