@@ -286,13 +286,14 @@ async function loadInitialData() {
   try {
     showToast('info', 'Cargando datos...');
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
       apiFetch('/api/stock'),
       apiFetch('/api/documents'),
       apiFetch('/api/config'),
+      apiFetch('/api/fuel/tanks'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -300,6 +301,7 @@ async function loadInitialData() {
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
     if (stockRes?.ok)       App.data.stock       = await stockRes.json();
     if (docsRes?.ok)        App.data.documents   = await docsRes.json();
+    if (tanksRes?.ok)       App.data.tanks       = await tanksRes.json();
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};

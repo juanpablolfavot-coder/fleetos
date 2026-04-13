@@ -1320,28 +1320,70 @@ function printOT(id) {
 
 // ── COMBUSTIBLE ──
 function renderFuel() {
-  const totalLiters = App.data.fuelLogs.reduce((a,b)=>a+b.liters,0);
-  // Calcular nivel de cisterna desde los registros de combustible
-  const tankCap = 10000;
-  const ureaCap = 2000;
-  // Sumar ingresos menos egresos para estimar nivel actual
-  const entradas = App.data.fuelLogs.filter(f=>f.status==='ingreso').reduce((a,b)=>a+(b.liters||0),0);
-  const salidas  = App.data.fuelLogs.filter(f=>f.status!=='ingreso').reduce((a,b)=>a+(b.liters||0),0);
-  const tankLevel = Math.max(0, entradas - salidas);
-  const ureaTank  = 0; // Sin datos de urea aún
+  // ── Cisternas desde API ──
+  const tanks = App.data.tanks || [];
+  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || { current_l:0, capacity_l:10000 };
+  const ureaTank   = tanks.find(t => t.type === 'urea')                         || { current_l:0, capacity_l:2000 };
+  const tankLevel  = parseFloat(gasoilTank.current_l) || 0;
+  const tankCap    = parseFloat(gasoilTank.capacity_l) || 10000;
+  const ureaLevel  = parseFloat(ureaTank.current_l) || 0;
+  const ureaCap    = parseFloat(ureaTank.capacity_l) || 2000;
+  const gasoilPct  = tankCap > 0 ? Math.round(tankLevel/tankCap*100) : 0;
+  const ureaPct    = ureaCap > 0 ? Math.round(ureaLevel/ureaCap*100) : 0;
+  const gasoilClass = gasoilPct < 20 ? 'warn' : 'info';
+  const ureaClass   = ureaPct   < 20 ? 'warn' : 'info';
+
+  // ── Litros cargados HOY ──
+  const today = new Date().toISOString().slice(0,10);
+  const logsHoy = App.data.fuelLogs.filter(f => f.date && f.date.startsWith(today));
+  const litrosHoy = logsHoy.reduce((a,b) => a + (b.liters||0), 0);
+
+  // ── Rendimiento promedio real ──
+  // Necesita logs con km y litros. Calcular km/litro por vehiculo en últimos 30 días
+  const logsConKm = App.data.fuelLogs.filter(f => f.km > 0 && f.liters > 0);
+  let rendimiento = '—';
+  let rendTrend = 'sin datos suficientes aún';
+  if (logsConKm.length >= 2) {
+    // Agrupar por vehículo y calcular diferencia de km entre cargas
+    const byVehicle = {};
+    logsConKm.forEach(f => {
+      if (!byVehicle[f.vehicle]) byVehicle[f.vehicle] = [];
+      byVehicle[f.vehicle].push(f);
+    });
+    let totalRend = 0, count = 0;
+    Object.values(byVehicle).forEach(logs => {
+      const sorted = logs.sort((a,b) => a.km - b.km);
+      for (let i = 1; i < sorted.length; i++) {
+        const kmDiff = sorted[i].km - sorted[i-1].km;
+        const lts = sorted[i].liters;
+        if (kmDiff > 0 && kmDiff < 5000 && lts > 0) {
+          totalRend += kmDiff / lts;
+          count++;
+        }
+      }
+    });
+    if (count > 0) {
+      rendimiento = (totalRend/count).toFixed(1);
+      rendTrend = `km/litro · basado en ${count} cargas`;
+    }
+  }
   document.getElementById('page-fuel').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
-      <div class="kpi-card info"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value info">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${Math.round(tankLevel/tankCap*100)}% de capacidad (${tankCap.toLocaleString()} L)</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">Stock cisterna urea</div><div class="kpi-value warn">${ureaTank} L</div><div class="kpi-trend">19% — Solicitar reposición</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Litros cargados hoy</div><div class="kpi-value ok">${totalLiters.toLocaleString()}</div><div class="kpi-trend">en ${App.data.fuelLogs.length} registros</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value white">2.7</div><div class="kpi-trend">km/litro · flota promedio</div></div>
+      <div class="kpi-card ${gasoilClass}"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
+      <div class="kpi-card ${ureaClass}"><div class="kpi-label">Stock cisterna urea</div><div class="kpi-value ${ureaClass}">${ureaLevel.toLocaleString()} L</div><div class="kpi-trend">${ureaPct}% de capacidad (${ureaCap.toLocaleString()} L)${ureaPct<20?' · ⚠ Solicitar reposición':''}</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Litros cargados hoy</div><div class="kpi-value ok">${litrosHoy.toLocaleString()}</div><div class="kpi-trend">en ${logsHoy.length} cargas · ${App.data.fuelLogs.length} total historial</div></div>
+      <div class="kpi-card ${rendimiento==='—'?'':'ok'}"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value ${rendimiento==='—'?'white':'ok'}">${rendimiento}</div><div class="kpi-trend">${rendTrend}</div></div>
     </div>
     <div class="two-col" style="margin-bottom:20px">
       <div class="card">
         <div class="card-title">Nivel de cisternas</div>
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span>Gasoil</span><span class="td-mono">${tankLevel.toLocaleString()} / ${tankCap.toLocaleString()} L</span></div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(tankLevel/tankCap*100)}%;background:var(--ok)"></div></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${gasoilPct}%;background:${gasoilPct<20?'var(--warn)':'var(--ok)'}"></div></div>
+        </div>
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span ${ureaPct<20?'style="color:var(--warn)"':''}>Urea / AdBlue</span><span class="td-mono" ${ureaPct<20?'style="color:var(--warn)"':''}>${ureaLevel.toLocaleString()} / ${ureaCap.toLocaleString()} L ${ureaPct<20?'⚠':''}</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:${ureaPct<20?'var(--warn)':'var(--ok)'}"></div></div>
         </div>
         <div>
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span style="color:var(--warn)">Urea / AdBlue</span><span class="td-mono" style="color:var(--warn)">${ureaTank} / ${ureaCap} L ⚠</span></div>
