@@ -145,3 +145,111 @@ configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req,
 });
 
 module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter };
+
+// ======= CHECKLIST =======
+const checklistRouter = express.Router();
+
+// Crear tabla si no existe
+async function ensureChecklistTable() {
+  await query(`CREATE TABLE IF NOT EXISTS checklists (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID REFERENCES vehicles(id),
+    driver_id UUID REFERENCES users(id),
+    driver_name VARCHAR(100),
+    vehicle_code VARCHAR(20),
+    km_at_check INTEGER,
+    items JSONB NOT NULL DEFAULT '[]',
+    observations TEXT,
+    all_ok BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`).catch(()=>{});
+}
+
+// POST — guardar checklist
+checklistRouter.post('/', authenticate, async (req, res) => {
+  try {
+    await ensureChecklistTable();
+    const { vehicle_id, vehicle_code, km_at_check, items, observations, all_ok } = req.body;
+    const r = await query(
+      `INSERT INTO checklists(vehicle_id,driver_id,driver_name,vehicle_code,km_at_check,items,observations,all_ok)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [vehicle_id||null, req.user.id, req.user.name, vehicle_code||null,
+       km_at_check||null, JSON.stringify(items||[]), observations||null, all_ok!==false]
+    );
+    // Si hay ítems críticos fallidos, crear OT automática
+    const critical = (items||[]).filter(i => !i.ok && i.critical);
+    if (critical.length > 0) {
+      const desc = 'Checklist salida: ' + critical.map(i=>i.label).join(', ');
+      await query(
+        `INSERT INTO work_orders(vehicle_id,description,priority,status,type,created_by)
+         VALUES($1,$2,'urgente','Abierta','correctivo',$3)`,
+        [vehicle_id||null, desc, req.user.id]
+      ).catch(()=>{});
+    }
+    // Actualizar km del vehículo
+    if (km_at_check && vehicle_id) {
+      await query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[km_at_check,vehicle_id]).catch(()=>{});
+    }
+    res.status(201).json(r.rows[0]);
+  } catch(err) { console.error('POST checklist:', err.message); res.status(500).json({error:'Error guardar checklist'}); }
+});
+
+// GET — listar checklists (para encargado)
+checklistRouter.get('/', authenticate, async (req, res) => {
+  try {
+    await ensureChecklistTable();
+    const { date, vehicle_id, limit=50 } = req.query;
+    let sql = `SELECT * FROM checklists WHERE 1=1`;
+    const params = [];
+    if (date) { params.push(date); sql += ` AND DATE(created_at)=$${params.length}`; }
+    if (vehicle_id) { params.push(vehicle_id); sql += ` AND vehicle_id=$${params.length}`; }
+    sql += ` ORDER BY created_at DESC LIMIT $${params.length+1}`;
+    params.push(parseInt(limit));
+    const r = await query(sql, params);
+    res.json(r.rows);
+  } catch(err) { res.status(500).json({error:'Error obtener checklists'}); }
+});
+
+// ======= DASHBOARD ENCARGADO =======
+const encargadoRouter = express.Router();
+
+encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  try {
+    await ensureChecklistTable();
+    const today = new Date().toISOString().slice(0,10);
+
+    const [checklists, novedades, sinChecklist, fuelHoy, vehiculos] = await Promise.all([
+      // Checklists de hoy
+      query(`SELECT c.*, v.code as vcode FROM checklists c LEFT JOIN vehicles v ON v.id=c.vehicle_id WHERE DATE(c.created_at)=$1 ORDER BY c.created_at DESC`, [today]),
+      // Novedades abiertas (OTs)
+      query(`SELECT wo.*, v.code as vehicle_code FROM work_orders wo LEFT JOIN vehicles v ON v.id=wo.vehicle_id WHERE wo.status='Abierta' ORDER BY wo.created_at DESC LIMIT 20`),
+      // Vehículos activos que NO hicieron checklist hoy
+      query(`SELECT v.code, v.plate, v.driver_name, v.base FROM vehicles v WHERE v.active=TRUE AND v.id NOT IN (SELECT vehicle_id FROM checklists WHERE DATE(created_at)=$1 AND vehicle_id IS NOT NULL) ORDER BY v.code`, [today]),
+      // Cargas de combustible hoy
+      query(`SELECT fl.*, v.code as vehicle_code FROM fuel_logs fl LEFT JOIN vehicles v ON v.id=fl.vehicle_id WHERE DATE(fl.logged_at)=$1 ORDER BY fl.logged_at DESC`, [today]),
+      // Resumen flota
+      query(`SELECT status, COUNT(*) as cnt FROM vehicles WHERE active=TRUE GROUP BY status`),
+    ]);
+
+    const flotaResumen = {};
+    vehiculos.rows.forEach(r => { flotaResumen[r.status] = parseInt(r.cnt); });
+
+    res.json({
+      fecha: today,
+      flota: flotaResumen,
+      checklists_hoy: checklists.rows,
+      checklists_count: checklists.rows.length,
+      checklists_con_problema: checklists.rows.filter(c=>!c.all_ok).length,
+      novedades_abiertas: novedades.rows,
+      novedades_count: novedades.rows.length,
+      sin_checklist: sinChecklist.rows,
+      sin_checklist_count: sinChecklist.rows.length,
+      cargas_hoy: fuelHoy.rows,
+      cargas_count: fuelHoy.rows.length,
+      litros_hoy: fuelHoy.rows.reduce((a,b)=>a+parseFloat(b.liters||0),0),
+    });
+  } catch(err) { console.error('encargado resumen:', err.message); res.status(500).json({error:'Error resumen'}); }
+});
+
+module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter, checklistRouter, encargadoRouter };
+

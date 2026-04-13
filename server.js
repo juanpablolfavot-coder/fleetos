@@ -16,7 +16,7 @@ const authRoutes=require('./routes/auth');
 const vehicleRoutes=require('./routes/vehicles');
 const woRoutes=require('./routes/workorders');
 const stockRoutes=require('./routes/stock');
-const {fuelRouter,tireRouter,docRouter,userRouter,configRouter}=require('./routes/others');
+const {fuelRouter,tireRouter,docRouter,userRouter,configRouter,checklistRouter,encargadoRouter}=require('./routes/others');
 const app=express();
 app.use(helmet({
   contentSecurityPolicy: {
@@ -46,6 +46,8 @@ app.use('/api/vehicles',vehicleRoutes);
 app.use('/api/workorders',woRoutes);
 app.use('/api/stock',stockRoutes);
 app.use('/api/fuel',fuelRouter);
+app.use('/api/checklists',checklistRouter);
+app.use('/api/encargado',encargadoRouter);
 app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);

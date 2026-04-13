@@ -22,7 +22,7 @@ function userHasRole(...roles) {
 
 window.FleetRoles = {
   dueno:         { code:'dueno',         label:'Dueño / Dirección', modules:['all'] },
-  gerencia:      { code:'gerencia',      label:'Gerencia',          modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','chofer_panel','contador_panel'] },
+  gerencia:      { code:'gerencia',      label:'Gerencia',          modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','encargado_panel','contador_panel'] },
   mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
   contador:      { code:'contador',      label:'Contador',          modules:['dashboard','costs','documents','contador_panel'] },
@@ -54,16 +54,16 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', contador_panel:'Panel contable' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Panel encargado', contador_panel:'Panel contable' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', contador_panel:'Costos · reportes · KPIs' };
+  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Resumen del día · checklists · novedades', contador_panel:'Costos · reportes · KPIs' };
   return s[p] || '';
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, contador_panel: renderContadorPanel, users: renderUsers, config: renderConfig };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, users: renderUsers, config: renderConfig };
   if (fns[page]) fns[page]();
 }
 
@@ -3943,44 +3943,217 @@ async function saveChoferNovedad() {
 function openChoferChecklistModal() {
   const myVehicle = (App.data.vehicles||[]).find(v =>
     v.driver && v.driver.toLowerCase() === App.currentUser?.name?.toLowerCase()
-  );
+  ) || (App.data.vehicles||[]).find(v => v.code === App.currentUser?.vehicle_code);
+
+  const items = [
+    { id:'aceite',    label:'Nivel de aceite OK',                            critical:true },
+    { id:'agua',      label:'Agua del radiador OK',                          critical:true },
+    { id:'neumaticos',label:'Presión de neumáticos OK',                      critical:true },
+    { id:'luces',     label:'Luces funcionando (frontal y trasera)',          critical:false },
+    { id:'frenos',    label:'Frenos OK',                                     critical:true },
+    { id:'docu',      label:'Documentación a bordo (libreta, seguro, VTV)',  critical:false },
+    { id:'extintor',  label:'Extintor vigente',                              critical:false },
+    { id:'perdidas',  label:'Sin pérdidas de fluidos visibles',              critical:true },
+  ];
+
   openModal('✅ Checklist de salida', `
-    <div style="font-size:13px;color:var(--text3);margin-bottom:12px">${myVehicle ? myVehicle.code+' — '+myVehicle.plate : 'Completá el checklist antes de salir'}</div>
-    ${[
-      'Nivel de aceite OK',
-      'Agua del radiador OK',
-      'Presión de neumáticos OK',
-      'Luces funcionando (frontal y trasera)',
-      'Frenos OK',
-      'Documentación a bordo (libreta, seguro, VTV)',
-      'Extintor vigente',
-      'Sin pérdidas de fluidos visibles',
-    ].map((item,i)=>`
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <input type="checkbox" id="chk-${i}" style="width:18px;height:18px;cursor:pointer">
-        <label for="chk-${i}" style="cursor:pointer;font-size:13px">${item}</label>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:12px">
+      ${myVehicle ? myVehicle.code+' — '+myVehicle.plate : 'Completá el checklist antes de salir'}
+    </div>
+    ${items.map(item=>`
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <input type="checkbox" id="chk-${item.id}" style="width:20px;height:20px;cursor:pointer;accent-color:var(--ok)">
+        <label for="chk-${item.id}" style="cursor:pointer;font-size:13px;flex:1">
+          ${item.label}
+          ${item.critical ? '<span style="color:var(--warn);font-size:10px;margin-left:4px">●</span>' : ''}
+        </label>
       </div>
     `).join('')}
-    <div style="margin-top:12px">
+    <div style="margin-top:14px">
       <label class="form-label">Km actuales del vehículo</label>
       <input class="form-input" type="number" id="chk-km" placeholder="${(myVehicle?.km||0).toLocaleString()}">
     </div>
     <div style="margin-top:8px">
-      <label class="form-label">Observaciones</label>
-      <input class="form-input" id="chk-obs" placeholder="Opcional">
+      <label class="form-label">Observaciones <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+      <textarea class="form-input" id="chk-obs" rows="2" placeholder="Ej: ruido leve en motor, cubiertas con poco aire..."></textarea>
     </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text3)">● ítems críticos — si están sin marcar se genera una OT automáticamente</div>
   `, [
-    { label:'Confirmar salida ✅', cls:'btn-primary', fn: () => {
-      const checks = document.querySelectorAll('[id^="chk-"]:not(#chk-km):not(#chk-obs)');
-      const total = checks.length;
-      const ok = Array.from(checks).filter(c=>c.checked).length;
-      if (ok < total) {
-        if (!confirm(`Hay ${total-ok} ítems sin marcar. ¿Confirmar igual?`)) return;
-      }
-      closeModal(); showToast('ok', `Checklist completado (${ok}/${total}) — Buen viaje!`);
-    }},
+    { label:'Confirmar salida ✅', cls:'btn-primary', fn: () => saveChoferChecklist(myVehicle, items) },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+async function saveChoferChecklist(myVehicle, items) {
+  const km = parseInt(document.getElementById('chk-km')?.value) || 0;
+  const obs = document.getElementById('chk-obs')?.value?.trim() || '';
+
+  const checkedItems = items.map(item => ({
+    id: item.id,
+    label: item.label,
+    critical: item.critical,
+    ok: document.getElementById('chk-'+item.id)?.checked || false,
+  }));
+
+  const allOk = checkedItems.every(i => i.ok);
+  const criticalFailed = checkedItems.filter(i => !i.ok && i.critical);
+
+  // Confirmar si hay ítems críticos sin marcar
+  if (criticalFailed.length > 0) {
+    const nombres = criticalFailed.map(i=>i.label).join('\n• ');
+    if (!confirm(`⚠ Hay ${criticalFailed.length} ítem(s) crítico(s) sin marcar:\n• ${nombres}\n\n¿Confirmar de todos modos? Se generará una OT automáticamente.`)) return;
+  }
+
+  const res = await apiFetch('/api/checklists', {
+    method: 'POST',
+    body: JSON.stringify({
+      vehicle_id: myVehicle?.id || null,
+      vehicle_code: myVehicle?.code || null,
+      km_at_check: km || null,
+      items: checkedItems,
+      observations: obs,
+      all_ok: allOk,
+    })
+  });
+
+  if (!res.ok) { showToast('error','Error al guardar checklist'); return; }
+
+  closeModal();
+  const msg = allOk
+    ? '✅ Checklist OK — Buen viaje!'
+    : `⚠ Checklist guardado con ${criticalFailed.length} problema(s) — OT generada automáticamente`;
+  showToast(allOk ? 'ok' : 'warn', msg);
+}
+
+// ── PANEL ENCARGADO ──
+async function renderEncargadoPanel() {
+  const el = document.getElementById('page-encargado_panel');
+  if (!el) return;
+  el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">Cargando resumen del día...</div>`;
+
+  try {
+    const res = await apiFetch('/api/encargado/resumen');
+    if (!res.ok) throw new Error('Error API');
+    const d = await res.json();
+
+    const today = new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long'});
+    const flotaOk    = d.flota?.ok    || 0;
+    const flotaTaller= (d.flota?.taller||0) + (d.flota?.detenida||0);
+    const flotaWarn  = d.flota?.warn  || 0;
+    const flotaTotal = Object.values(d.flota||{}).reduce((a,b)=>a+b,0);
+
+    el.innerHTML = `
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">${today}</div>
+      </div>
+
+      <!-- KPIs del día -->
+      <div class="kpi-row" style="margin-bottom:20px">
+        <div class="kpi-card ${d.sin_checklist_count>0?'warn':'ok'}">
+          <div class="kpi-label">Sin checklist hoy</div>
+          <div class="kpi-value ${d.sin_checklist_count>0?'warn':'ok'}">${d.sin_checklist_count}</div>
+          <div class="kpi-trend">${d.checklists_count} completados hoy</div>
+        </div>
+        <div class="kpi-card ${d.novedades_count>0?'warn':'ok'}">
+          <div class="kpi-label">Novedades abiertas</div>
+          <div class="kpi-value ${d.novedades_count>0?'warn':'ok'}">${d.novedades_count}</div>
+          <div class="kpi-trend">${d.checklists_con_problema} con problemas hoy</div>
+        </div>
+        <div class="kpi-card info">
+          <div class="kpi-label">Cargas combustible hoy</div>
+          <div class="kpi-value info">${d.cargas_count}</div>
+          <div class="kpi-trend">${Math.round(d.litros_hoy).toLocaleString()} litros totales</div>
+        </div>
+        <div class="kpi-card ${flotaTaller>0?'warn':'ok'}">
+          <div class="kpi-label">Flota operativa</div>
+          <div class="kpi-value ${flotaTaller>0?'warn':'ok'}">${flotaOk}/${flotaTotal}</div>
+          <div class="kpi-trend">${flotaTaller>0?flotaTaller+' en taller':'Toda operativa'}${flotaWarn>0?' · '+flotaWarn+' con alerta':''}</div>
+        </div>
+      </div>
+
+      <div class="two-col" style="margin-bottom:20px">
+
+        <!-- Vehículos sin checklist -->
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between">
+            <span>🚛 Sin checklist hoy</span>
+            <span style="color:var(--text3);font-size:11px;font-weight:400">${d.sin_checklist_count} unidades</span>
+          </div>
+          ${d.sin_checklist_count === 0
+            ? '<div style="color:var(--ok);font-size:13px">✓ Todos los vehículos activos hicieron checklist</div>'
+            : `<div style="max-height:200px;overflow-y:auto">
+                ${d.sin_checklist.map(v=>`
+                  <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+                    <span><b>${v.code}</b> ${v.plate}</span>
+                    <span style="color:var(--text3)">${v.driver_name||'Sin chofer'}</span>
+                  </div>`).join('')}
+               </div>`
+          }
+        </div>
+
+        <!-- Novedades abiertas -->
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between">
+            <span>⚠️ Novedades abiertas</span>
+            <span style="color:var(--text3);font-size:11px;font-weight:400">${d.novedades_count} pendientes</span>
+          </div>
+          ${d.novedades_count === 0
+            ? '<div style="color:var(--ok);font-size:13px">✓ Sin novedades abiertas</div>'
+            : `<div style="max-height:200px;overflow-y:auto">
+                ${d.novedades_abiertas.map(o=>`
+                  <div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
+                    <div style="display:flex;justify-content:space-between">
+                      <b>${o.vehicle_code||'—'}</b>
+                      <span class="badge ${o.priority==='critica'?'badge-danger':o.priority==='urgente'?'badge-warn':'badge-info'}">${o.priority||'normal'}</span>
+                    </div>
+                    <div style="color:var(--text3);font-size:12px;margin-top:2px">${(o.description||'').substring(0,60)}${o.description?.length>60?'...':''}</div>
+                  </div>`).join('')}
+               </div>`
+          }
+        </div>
+      </div>
+
+      <!-- Checklists del día con detalle -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title">📋 Checklists de hoy — detalle</div>
+        ${d.checklists_count === 0
+          ? '<div style="color:var(--text3);font-size:13px">No se realizaron checklists hoy.</div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>Hora</th><th>Unidad</th><th>Chofer</th><th>Km</th><th>Estado</th><th>Obs.</th></tr></thead>
+              <tbody>${d.checklists_hoy.map(c=>`<tr>
+                <td class="td-mono" style="font-size:11px">${c.created_at?.slice(11,16)||'—'}</td>
+                <td class="td-main">${c.vehicle_code||'—'}</td>
+                <td>${c.driver_name||'—'}</td>
+                <td class="td-mono">${c.km_at_check?.toLocaleString()||'—'}</td>
+                <td><span class="badge ${c.all_ok?'badge-ok':'badge-warn'}">${c.all_ok?'✓ OK':'⚠ Con prob.'}</span></td>
+                <td style="font-size:11px;color:var(--text3)">${c.observations?c.observations.substring(0,40)+'...':'—'}</td>
+              </tr>`).join('')}</tbody>
+            </table></div>`
+        }
+      </div>
+
+      <!-- Cargas del día -->
+      <div class="card">
+        <div class="card-title">⛽ Cargas de combustible hoy</div>
+        ${d.cargas_count === 0
+          ? '<div style="color:var(--text3);font-size:13px">Sin cargas registradas hoy.</div>'
+          : `<div class="table-wrap"><table>
+              <thead><tr><th>Hora</th><th>Unidad</th><th>Tipo</th><th>Litros</th><th>Lugar</th><th>Ticket</th></tr></thead>
+              <tbody>${d.cargas_hoy.map(f=>`<tr>
+                <td class="td-mono" style="font-size:11px">${f.logged_at?.slice(11,16)||'—'}</td>
+                <td class="td-main">${f.vehicle_code||'—'}</td>
+                <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'Urea':'Gasoil'}</span></td>
+                <td class="td-mono">${parseFloat(f.liters||0).toFixed(0)} L</td>
+                <td>${f.location||'—'}</td>
+                <td>${f.ticket_image?'<span style="color:var(--ok)">✓ Sí</span>':'<span style="color:var(--text3)">No</span>'}</td>
+              </tr>`).join('')}</tbody>
+            </table></div>`
+        }
+      </div>
+    `;
+  } catch(err) {
+    el.innerHTML = `<div style="color:var(--warn);padding:20px">Error al cargar el resumen: ${err.message}</div>`;
+  }
 }
 
 // ── PANEL CONTADOR ──
