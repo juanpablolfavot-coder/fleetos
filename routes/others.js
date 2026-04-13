@@ -103,11 +103,18 @@ userRouter.post('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=
   res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'Email existe'});res.status(500).json({error:'Error usuario'});}
 });
 userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID('id'),async(req,res)=>{
-  try{const{name,role,vehicle_code,active}=req.body;
-  if(req.params.id===req.user.id&&active===false) return res.status(400).json({error:'No puedes desactivarte'});
-  const r=await query('UPDATE users SET name=$1,role=$2,vehicle_code=$3,active=$4 WHERE id=$5 RETURNING id,name,email,role,active',[name,role,vehicle_code||null,active!==false,req.params.id]);
-  if(!r.rows[0]) return res.status(404).json({error:'Usuario no encontrado'});
-  res.json(r.rows[0]);}catch(err){res.status(500).json({error:'Error actualizar'});}
+  try{
+    const{name,role,vehicle_code,active,password}=req.body;
+    if(req.params.id===req.user.id&&active===false) return res.status(400).json({error:'No puedes desactivarte'});
+    // Si viene contraseña nueva la hasheamos
+    if(password && password.length>=8){
+      const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
+      await query('UPDATE users SET password_hash=$1,updated_at=NOW() WHERE id=$2',[hash,req.params.id]);
+    }
+    const r=await query('UPDATE users SET name=$1,role=$2,vehicle_code=$3,active=$4,updated_at=NOW() WHERE id=$5 RETURNING id,name,email,role,active',[name,role,vehicle_code||null,active!==false,req.params.id]);
+    if(!r.rows[0]) return res.status(404).json({error:'Usuario no encontrado'});
+    res.json(r.rows[0]);
+  }catch(err){console.error('PUT user error:',err.message);res.status(500).json({error:'Error actualizar'});}
 });
 
 // ======= CONFIGURACIÓN (bases y tipos) =======
