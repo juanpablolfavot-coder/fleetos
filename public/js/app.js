@@ -3562,6 +3562,7 @@ async function renderUsers() {
                 <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
                 <td style="padding:12px 16px">
                   <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}','${u.name.replace(/'/g,"\\'")}','${u.email}','${u.role}','${u.vehicle_code||''}',${u.active})">Editar</button>
+                  ${userHasRole('dueno') && u.email !== 'admin@fleetos.com' ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);margin-left:6px" onclick="confirmDeleteUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">🗑 Eliminar</button>` : ''}
                 </td>
               </tr>
             `).join('')}
@@ -3573,6 +3574,14 @@ async function renderUsers() {
   } catch(e) {
     document.getElementById('users-table-wrap').innerHTML = `<div style="color:var(--danger);padding:20px">Error: ${e.message}</div>`;
   }
+}
+
+async function confirmDeleteUser(id, name) {
+  if (!confirm(`⚠ ¿Estás seguro que querés eliminar al usuario "${name}"?\n\nEsta acción no se puede deshacer.`)) return;
+  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al eliminar'); return; }
+  showToast('ok', `Usuario "${name}" eliminado`);
+  renderUsers();
 }
 
 async function approveUser(id) {

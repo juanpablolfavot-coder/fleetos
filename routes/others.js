@@ -111,6 +111,18 @@ userRouter.post('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=
   const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,active`,[name,email.toLowerCase(),hash,role,vehicle_code||null]);
   res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'Email existe'});res.status(500).json({error:'Error usuario'});}
 });
+userRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id'), async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) return res.status(400).json({ error: 'No podés eliminar tu propio usuario' });
+    const check = await query('SELECT email FROM users WHERE id=$1', [req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (check.rows[0].email === 'admin@fleetos.com') return res.status(400).json({ error: 'No se puede eliminar el usuario administrador' });
+    await query('DELETE FROM refresh_tokens WHERE user_id=$1', [req.params.id]);
+    await query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch(err) { console.error('DELETE user:', err.message); res.status(500).json({ error: 'Error al eliminar usuario' }); }
+});
+
 userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID('id'),async(req,res)=>{
   try{
     const{name,role,vehicle_code,active,password}=req.body;
