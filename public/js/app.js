@@ -200,7 +200,7 @@ function renderDashboard() {
     ${App.data.fuelLogs.slice(0,5).map(f=>`<tr>
       <td class="td-main">${f.vehicle}</td>
       <td class="td-mono">${f.liters} L</td>
-      <td class="td-mono">2.${Math.floor(Math.random()*3)+6} km/L</td>
+      <td class="td-mono">${(()=>{const logs=App.data.fuelLogs.filter(x=>x.vehicle===f.vehicle&&x.km>0).sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
       <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
     </tr>`).join('')}
   </tbody></table>`;
@@ -859,7 +859,7 @@ async function saveNewOT() {
 
   const res = await apiFetch('/api/workorders', {
     method: 'POST',
-    body: JSON.stringify({ vehicle_id, title, priority, assigned_to: assigned, due_date, notes, parts, labor_cost })
+    body: JSON.stringify({ vehicle_id, description: title, type: document.getElementById('ot-type')?.value||'Correctivo', priority, mechanic_id: null, parts, labor_cost })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
 
