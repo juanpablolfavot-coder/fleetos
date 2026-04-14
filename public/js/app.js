@@ -1418,10 +1418,16 @@ function renderFuel() {
   setTimeout(() => {
     const ctx = document.getElementById('fuelChart');
     if (!ctx) return;
+    // Agrupar litros por vehículo (últimos 30 días)
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
+    const recent = App.data.fuelLogs.filter(f => f.fuel_type !== 'urea' && new Date(f.date) >= cutoff);
+    const byVeh = {};
+    recent.forEach(f => { byVeh[f.vehicle] = (byVeh[f.vehicle] || 0) + f.liters; });
+    const sorted = Object.entries(byVeh).sort((a,b) => b[1]-a[1]).slice(0,15);
     new Chart(ctx, {
       type:'bar',
-      data:{ labels:App.data.fuelLogs.slice(0,6).map(f=>f.vehicle), datasets:[{ label:'Litros', data:App.data.fuelLogs.slice(0,6).map(f=>f.liters), backgroundColor:'rgba(59,130,246,.7)', borderRadius:4, borderColor:'transparent' }] },
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#9ba3be',font:{size:11}}}, y:{ticks:{color:'#9ba3be',font:{size:11}}} } }
+      data:{ labels: sorted.map(e=>e[0]), datasets:[{ label:'Litros 30 días', data: sorted.map(e=>Math.round(e[1])), backgroundColor:'rgba(59,130,246,.7)', borderRadius:4, borderColor:'transparent' }] },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ctx.parsed.y.toLocaleString()+' L' } }}, scales:{ x:{ticks:{color:'#9ba3be',font:{size:11}}}, y:{ticks:{color:'#9ba3be',font:{size:11}, callback: v => v.toLocaleString()+' L'}} } }
     });
   }, 100);
 }
@@ -1456,7 +1462,7 @@ function openFuelLoadModal() {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Litros cargados</label><input class="form-input" type="number" placeholder="400" id="fl-liters"></div>
-      <div class="form-group"><label class="form-label">Odómetro (km)</label><input class="form-input" type="number" placeholder="284500" id="fl-km"></div>
+      <div class="form-group"><label class="form-label" style="color:var(--text3)">🛰 Km tomados del GPS automáticamente</label><input class="form-input" disabled placeholder="Se toma del GPS al guardar" style="opacity:.5"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
@@ -1567,8 +1573,8 @@ async function saveFuelLoad() {
   const res = await apiFetch('/api/fuel', {
     method: 'POST',
     body: JSON.stringify({
-      vehicle_id, liters, price_per_liter: ppu, km_at_load: km,
-      driver, fuel_type: type, total_cost: liters * ppu,
+      vehicle_id, liters, price_per_l: ppu,
+      driver, fuel_type: type,
       location: place, tank_id, ticket_image: ticketImg
     })
   });

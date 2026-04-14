@@ -51,7 +51,10 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       if (!t.rows[0] || t.rows[0].current_l < liters) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Combustible insuficiente' }); }
       await client.query('UPDATE tanks SET current_l=current_l-$1,updated_at=NOW() WHERE id=$2',[liters,tank_id]);
     }
-    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,odometer_km||null,location||null,notes||null,ticket_image||null]);
+    // Tomar km del GPS (km_current del vehículo) si no viene odómetro manual
+    const vehKm = await client.query('SELECT km_current FROM vehicles WHERE id=$1',[vehicle_id]);
+    const kmToSave = odometer_km || vehKm.rows[0]?.km_current || null;
+    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,kmToSave,location||null,notes||null,ticket_image||null]);
     if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: 'Error carga' }); } finally { client.release(); }
