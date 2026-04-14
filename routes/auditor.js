@@ -23,6 +23,12 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     const desde = `${yr}-${String(mo).padStart(2,'0')}-01`;
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-31`;
 
+    // Asegurar que existen las tablas opcionales
+    await query(`CREATE TABLE IF NOT EXISTS fuel_logs (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, tank_id UUID, fuel_type VARCHAR(20), liters NUMERIC, price_per_l NUMERIC, odometer_km INTEGER, location TEXT, notes TEXT, ticket_image TEXT, logged_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+    await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
+    await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+    await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, driver_name VARCHAR(100), vehicle_code VARCHAR(20), km_at_check INTEGER, items JSONB DEFAULT '[]', observations TEXT, all_ok BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+
     const [fuel, ots, stock, checklists, vehiculos, accesos] = await Promise.all([
       // Combustible del mes
       query(`SELECT 
@@ -186,6 +192,9 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
 auditorRouter.get('/anomalias-ots', authenticate, canAudit, async (req, res) => {
   try {
     const anomalias = [];
+    // Asegurar tablas
+    await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
+    await query(`CREATE TABLE IF NOT EXISTS work_order_parts (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), wo_id UUID, stock_id UUID, name TEXT, origin VARCHAR(20), qty NUMERIC, unit VARCHAR(20), unit_cost NUMERIC DEFAULT 0, subtotal NUMERIC GENERATED ALWAYS AS (qty * unit_cost) STORED, added_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
 
     // a) OTs con costo de mano de obra muy alto (> 3x el promedio)
     const costos = await query(`
