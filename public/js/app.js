@@ -1452,7 +1452,12 @@ function renderFuel() {
           <td class="td-mono">$${f.total.toLocaleString()}</td>
           <td>${f.place}</td>
           <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
-          <td>${f.ticket_image ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')">📄 Ver</button>` : '<span style="color:var(--text3);font-size:11px">—</span>'}</td>
+          <td>
+            <div style="display:flex;gap:4px">
+              ${f.ticket_image ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')">📄 Ver</button>` : '<span style="color:var(--text3);font-size:11px">—</span>'}
+              ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar carga" style="padding:4px 8px">🗑</button>` : ''}
+            </div>
+          </td>
         </tr>`).join('')}</tbody></table>
       </div>
     </div>
@@ -1550,7 +1555,7 @@ function updateFuelPlaceOpts() {
   updateFuelPlaceNote();
 }
 
-function updateFuelPlaceNote() {
+async function updateFuelPlaceNote() {
   const place  = document.getElementById('fl-place')?.value || '';
   const type   = document.getElementById('fl-type')?.value  || 'diesel';
   const noteEl = document.getElementById('fl-place-note');
@@ -1563,7 +1568,12 @@ function updateFuelPlaceNote() {
     noteEl.style.borderColor = 'rgba(245,158,11,.3)';
     noteEl.style.color       = 'var(--warn)';
 
-    // Autocompletar precio desde la cisterna si tiene price_per_l cargado
+    // Recargar tanks frescos para tener el precio actualizado
+    try {
+      const tr = await apiFetch('/api/fuel/tanks');
+      if (tr.ok) App.data.tanks = await tr.json();
+    } catch(e) {}
+
     const tanks = App.data.tanks || [];
     const tank  = type === 'urea'
       ? tanks.find(t => t.type === 'urea')
@@ -1572,9 +1582,9 @@ function updateFuelPlaceNote() {
 
     if (ppuEl && precio && precio > 0) {
       ppuEl.value = precio;
-      noteEl.textContent = `⚠ Los litros se descontarán de cisterna · Precio cargado automáticamente: $${precio.toLocaleString('es-AR')}/L`;
+      noteEl.innerHTML = `⚠ Litros se descontarán de cisterna &nbsp;·&nbsp; <strong>Precio: $${Math.round(precio).toLocaleString('es-AR')}/L</strong> (de la última compra)`;
     } else {
-      noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna al confirmar. Verificá el precio por litro.';
+      noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna. Ingresá el precio por litro manualmente.';
     }
   } else {
     noteEl.style.background  = 'rgba(99,102,241,.1)';
@@ -5525,4 +5535,19 @@ async function verificarTicket(id, accion) {
         </div>
       </div>`;
   }
+}
+
+async function deleteFuelLog(id, vehicle, liters) {
+  if (!confirm(`¿Eliminar la carga de ${liters}L para ${vehicle}?\n\nSi la carga provino de cisterna, los litros se reintegrarán al stock.`)) return;
+  try {
+    const res = await apiFetch('/api/fuel/' + id, { method: 'DELETE' });
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    const data = await res.json();
+    const msg = data.liters_devueltos > 0
+      ? `Carga eliminada · ${data.liters_devueltos}L reintegrados a cisterna`
+      : 'Carga eliminada';
+    showToast('ok', msg);
+    await loadInitialData();
+    renderFuel();
+  } catch(err) { showToast('error', err.message||'Error'); }
 }

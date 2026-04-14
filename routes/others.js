@@ -356,6 +356,23 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 });
 
 // ── Cargas pendientes de verificación ────────────────────
+// DELETE /api/fuel/:id — solo dueño puede eliminar cargas
+fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id'), async (req, res) => {
+  try {
+    const fuel = await query('SELECT * FROM fuel_logs WHERE id=$1', [req.params.id]);
+    if (!fuel.rows[0]) return res.status(404).json({ error: 'Carga no encontrada' });
+    
+    // Si tenía cisterna, devolver los litros
+    const fl = fuel.rows[0];
+    if (fl.tank_id && fl.liters) {
+      await query('UPDATE tanks SET current_l = current_l + $1 WHERE id = $2', [fl.liters, fl.tank_id]);
+    }
+    
+    await query('DELETE FROM fuel_logs WHERE id=$1', [req.params.id]);
+    res.json({ ok: true, liters_devueltos: fl.tank_id ? fl.liters : 0 });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), async (req, res) => {
   try {
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
