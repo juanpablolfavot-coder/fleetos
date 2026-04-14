@@ -1322,10 +1322,10 @@ function printOT(id) {
 function renderFuel() {
   // ── Cisternas desde API ──
   const tanks = App.data.tanks || [];
-  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || { current_l:0, capacity_l:10000 };
+  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || { current_l:0, capacity_l:47000 };
   const ureaTank   = tanks.find(t => t.type === 'urea')                         || { current_l:0, capacity_l:2000 };
   const tankLevel  = parseFloat(gasoilTank.current_l) || 0;
-  const tankCap    = parseFloat(gasoilTank.capacity_l) || 10000;
+  const tankCap    = parseFloat(gasoilTank.capacity_l) || 47000;
   const ureaLevel  = parseFloat(ureaTank.current_l) || 0;
   const ureaCap    = parseFloat(ureaTank.capacity_l) || 2000;
   const gasoilPct  = tankCap > 0 ? Math.round(tankLevel/tankCap*100) : 0;

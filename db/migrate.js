@@ -35,8 +35,8 @@ async function migrate() {
     // Crear cisternas iniciales
     await client.query(`
       INSERT INTO tanks (type, capacity_l, current_l, location)
-      VALUES ('fuel', 10000, 6840, 'Base Central'),
-             ('urea', 2000,  380,  'Base Central')
+      VALUES ('fuel', 47000, 0, 'Base Central'),
+             ('urea', 2000, 0,  'Base Central')
       ON CONFLICT DO NOTHING
     `);
     console.log('✓ Cisternas iniciales creadas');
