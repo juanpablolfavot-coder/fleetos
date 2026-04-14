@@ -24,6 +24,7 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-31`;
 
     // Asegurar que existen las tablas opcionales
+    await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT').catch(()=>{});
     await query(`CREATE TABLE IF NOT EXISTS fuel_logs (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, tank_id UUID, fuel_type VARCHAR(20), liters NUMERIC, price_per_l NUMERIC, odometer_km INTEGER, location TEXT, notes TEXT, ticket_image TEXT, logged_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
     await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
     await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
@@ -36,7 +37,7 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
         COALESCE(SUM(liters),0) as litros,
         COALESCE(SUM(liters*price_per_l),0) as costo,
         COUNT(DISTINCT vehicle_id) as unidades,
-        COUNT(CASE WHEN ticket_image IS NULL THEN 1 END) as sin_ticket
+        0 as sin_ticket
         FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta + ' 23:59:59']),
       // OTs del mes
       query(`SELECT 
@@ -88,7 +89,7 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
       FROM fuel_logs fl
       JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id
-      WHERE fl.ticket_image IS NULL
+      WHERE (fl.ticket_image IS NULL OR fl.ticket_image = '')
       ORDER BY fl.logged_at DESC LIMIT 50`);
     
     if (sinTicket.rows.length > 0) {
