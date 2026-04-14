@@ -34,6 +34,15 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
   try {
     const { vehicle_id, tank_id, fuel_type, liters, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
     if (!vehicle_id || !liters || !price_per_l) return res.status(400).json({ error: 'vehicle_id, liters y price_per_l requeridos' });
+    // Validar ticket_image si viene — debe ser JPG o PNG en base64, máx 5MB
+    if (ticket_image) {
+      const validTypes = ['data:image/jpeg','data:image/jpg','data:image/png','data:image/webp'];
+      if (!validTypes.some(t => ticket_image.startsWith(t))) {
+        return res.status(400).json({ error: 'El ticket debe ser una imagen JPG o PNG' });
+      }
+      const sizeKB = Math.round(ticket_image.length * 0.75 / 1024);
+      if (sizeKB > 5120) return res.status(400).json({ error: 'La imagen del ticket no puede superar 5MB' });
+    }
     await client.query('BEGIN');
     // Asegurar que existe la columna ticket_image
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});

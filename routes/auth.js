@@ -187,7 +187,7 @@ router.post('/register', loginLimiter, async (req, res) => {
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
     }
-    if (password.length < 6) {
+    if (password.length < 8) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
