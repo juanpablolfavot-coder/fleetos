@@ -5312,29 +5312,42 @@ async function sendAuditorIA() {
 
   try {
     // Recopilar contexto del sistema para la IA
-    const [resumen, anomFuel, anomOT, comparativo] = await Promise.all([
+    const [resumen, anomFuel, anomOT, comparativo, gpsHoy] = await Promise.all([
       apiFetch('/api/auditor/resumen').then(r=>r.json()).catch(()=>({})),
       apiFetch('/api/auditor/anomalias-combustible').then(r=>r.json()).catch(()=>({})),
       apiFetch('/api/auditor/anomalias-ots').then(r=>r.json()).catch(()=>({})),
       apiFetch('/api/auditor/comparativo').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/auditor/gps-hoy').then(r=>r.json()).catch(()=>({})),
     ]);
 
     const contexto = `
 Sos un auditor experto en empresas de transporte de cargas de Argentina.
 Tenés acceso a los datos en tiempo real del sistema FleetOS de Expreso Biletta.
+Hoy es ${new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}.
 
-DATOS ACTUALES DEL SISTEMA:
+FLOTA HOY (GPS en tiempo real):
+- Total unidades: ${gpsHoy.total_unidades||0}
+- En movimiento ahora: ${gpsHoy.en_movimiento||0}
+- Detenidas: ${gpsHoy.detenidas||0}
+- Unidades y km actuales: ${JSON.stringify(gpsHoy.unidades?.map(v=>({codigo:v.codigo,patente:v.patente,km:v.km_total,velocidad:v.velocidad_actual,estado:v.estado}))||[])}
+- Cargas de combustible hoy: ${JSON.stringify(gpsHoy.cargas_hoy||[])}
+
+RESUMEN DEL MES:
 - Flota: ${JSON.stringify(resumen.flota||{})}
-- Combustible del mes: ${JSON.stringify(resumen.combustible||{})}
-- OTs del mes: ${JSON.stringify(resumen.ordenes||{})}
-- Anomalías combustible detectadas: ${anomFuel.total_anomalias||0}
-${anomFuel.anomalias?.map(a=>`  • ${a.titulo}: ${a.descripcion}`).join('\n')||'  • Ninguna'}
-- Anomalías OTs detectadas: ${anomOT.total_anomalias||0}
-${anomOT.anomalias?.map(a=>`  • ${a.titulo}: ${a.descripcion}`).join('\n')||'  • Ninguna'}
-- Comparativo últimos 6 meses: ${JSON.stringify(comparativo.meses?.map(m=>({periodo:m.periodo,total:m.total,combustible:m.costo_combustible,mantenimiento:m.costo_mantenimiento}))||[])}
+- Combustible: ${JSON.stringify(resumen.combustible||{})}
+- OTs: ${JSON.stringify(resumen.ordenes||{})}
+- Checklists: ${JSON.stringify(resumen.checklists||{})}
 
-Respondé en español, de forma concisa y profesional. Si no hay datos suficientes, indicalo claramente.
-Si detectás algo preocupante, mencionalo. Si todo está bien, confirmalo.`;
+ANOMALÍAS DETECTADAS:
+- Combustible (${anomFuel.total_anomalias||0} anomalías): ${anomFuel.anomalias?.map(a=>`${a.titulo}: ${a.descripcion}`).join(' | ')||'Ninguna'}
+- OTs (${anomOT.total_anomalias||0} anomalías): ${anomOT.anomalias?.map(a=>`${a.titulo}: ${a.descripcion}`).join(' | ')||'Ninguna'}
+
+COMPARATIVO ÚLTIMOS 6 MESES:
+${JSON.stringify(comparativo.meses?.map(m=>({periodo:m.periodo,combustible:Math.round(m.costo_combustible),mantenimiento:Math.round(m.costo_mantenimiento),total:Math.round(m.total)}))||[])}
+
+Respondé en español, de forma concisa y profesional.
+Para preguntas sobre km del día, usá los datos de GPS de cada unidad.
+Si no hay datos suficientes, indicalo claramente. Si detectás algo preocupante, mencionalo.`;
 
     // Llamar a Claude via proxy del backend (protege la API key)
     const resp = await apiFetch('/api/auditor/ia', {

@@ -398,6 +398,54 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
 
 module.exports = auditorRouter;
 
+// ── 7. Datos GPS del día para contexto IA ───────────────
+auditorRouter.get('/gps-hoy', authenticate, canAudit, async (req, res) => {
+  try {
+    const vehicles = await query(`
+      SELECT code, plate, km_current, gps_speed, gps_status, 
+             gps_updated_at, gps_lat, gps_lng, brand, type, base,
+             km_current - LAG(km_current) OVER (PARTITION BY id ORDER BY gps_updated_at) as km_diff
+      FROM vehicles 
+      WHERE active = TRUE AND gps_updated_at IS NOT NULL
+      ORDER BY km_current DESC`);
+    
+    // Calcular km totales aproximados de hoy basándose en diferencias de odómetro
+    const hoy = new Date().toISOString().slice(0,10);
+    
+    // Cargas de combustible hoy para cruzar con km
+    const fuelHoy = await query(`
+      SELECT fl.vehicle_id, v.code, fl.liters, fl.odometer_km, fl.logged_at, u.name as chofer
+      FROM fuel_logs fl 
+      JOIN vehicles v ON v.id = fl.vehicle_id
+      LEFT JOIN users u ON u.id = fl.driver_id
+      WHERE DATE(fl.logged_at) = $1
+      ORDER BY fl.logged_at DESC`, [hoy]).catch(() => ({rows:[]}));
+
+    // Unidades en movimiento ahora
+    const enMovimiento = vehicles.rows.filter(v => v.gps_status === 'moving');
+    const detenidas    = vehicles.rows.filter(v => v.gps_status === 'stopped');
+
+    res.json({
+      fecha: hoy,
+      total_unidades: vehicles.rows.length,
+      en_movimiento: enMovimiento.length,
+      detenidas: detenidas.length,
+      unidades: vehicles.rows.map(v => ({
+        codigo: v.code,
+        patente: v.plate,
+        marca: v.brand,
+        tipo: v.type,
+        base: v.base,
+        km_total: v.km_current,
+        velocidad_actual: parseFloat(v.gps_speed || 0),
+        estado: v.gps_status,
+        ultima_actualizacion: v.gps_updated_at,
+      })),
+      cargas_hoy: fuelHoy.rows,
+    });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── 7. Proxy IA — llama a Claude desde el backend (protege la API key) ──
 auditorRouter.post('/ia', authenticate, canAudit, async (req, res) => {
   try {
