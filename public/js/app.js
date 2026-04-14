@@ -3411,7 +3411,7 @@ function renderMaintenance() {
     </div>
     ${vencidos>0 ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--danger);display:flex;align-items:center;justify-content:space-between">
       <span>⚠ <b>${vencidos} unidad${vencidos>1?'es':''}</b> con mantenimiento vencido.</span>
-      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="(window._maintenancePlans||[]).filter(p=>p.status==='danger').forEach(p=>createPreventiveOT(p.v.code,p.taskName))">Crear OTs preventivas</button>
+      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="_crearOTsPreventivas()">Crear OTs preventivas</button>
     </div>` : ''}
     ${proximos>0 ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn)">🔧 <b>${proximos} unidad${proximos>1?'es':''}</b> próxima${proximos>1?'s':''} a mantenimiento. Programar service.</div>` : ''}
     <div class="card" style="padding:0">
@@ -3563,6 +3563,35 @@ async function saveNewMaintTask() {
   closeModal();
   showToast('ok', `Tarea de mantenimiento guardada para ${code} — próximo service: ${(lastKm+interval).toLocaleString()} km`);
   renderMaintenance();
+}
+
+async function _crearOTsPreventivas() {
+  const planes = (window._maintenancePlans||[]).filter(p=>p.status==='danger');
+  if (!planes.length) { showToast('warn','No hay unidades con mantenimiento vencido'); return; }
+  showToast('ok', `Creando ${planes.length} OTs preventivas...`);
+  let creadas = 0, errores = 0;
+  for (const p of planes) {
+    const v = App.data.vehicles.find(x => x.code === p.v.code);
+    if (!v) { errores++; continue; }
+    const res = await apiFetch('/api/workorders', {
+      method: 'POST',
+      body: JSON.stringify({
+        vehicle_id:  v.id,
+        type:        'Preventivo',
+        priority:    'Normal',
+        description: p.taskName || 'Mantenimiento preventivo programado',
+      })
+    });
+    if (res.ok) { creadas++; }
+    else { errores++; }
+    // Pequeña pausa entre requests para no saturar el servidor
+    await new Promise(r => setTimeout(r, 100));
+  }
+  showToast(errores > 0 ? 'warn' : 'ok',
+    `${creadas} OTs creadas${errores > 0 ? ' · ' + errores + ' errores' : ''}`);
+  await loadInitialData();
+  renderMaintenance();
+  renderWorkOrders();
 }
 
 async function createPreventiveOT(vehicleCode, task) {
