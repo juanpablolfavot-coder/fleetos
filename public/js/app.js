@@ -2929,63 +2929,91 @@ function saveNewDoc() {
 
 // Datos de costo detallados por unidad (simulados pero realistas)
 function getCostDetail(vehicleCode) {
-  const v = App.data.vehicles.find(x=>x.code===vehicleCode);
+  const v = App.data.vehicles.find(x => x.code === vehicleCode);
   if (!v) return null;
-  const base = v.cost_km;
-  const kmMes = Math.round(v.km * 0.04);
 
-  // Rubros con eventos individuales
-  const fuelLogs = App.data.fuelLogs.filter(f=>f.vehicle===vehicleCode);
-  const fuelTotal = fuelLogs.reduce((a,b)=>a+b.total,0) || Math.round(base*0.38*kmMes);
+  // ── Período: mes actual ──
+  const now  = new Date();
+  const yr   = now.getFullYear();
+  const mo   = now.getMonth() + 1;
 
-  const otList = App.data.workOrders.filter(o=>o.vehicle===vehicleCode);
-  const prevTotal = otList.filter(o=>o.type==='Preventivo').reduce((a,b)=>a+(b.parts_cost+b.labor_cost),0) || Math.round(base*0.18*kmMes);
-  const corrTotal = otList.filter(o=>o.type!=='Preventivo').reduce((a,b)=>a+(b.parts_cost+b.labor_cost),0) || Math.round(base*0.13*kmMes);
-  const tireTotal = Math.round(base*0.21*kmMes);
-  const fixedTotal= Math.round(base*0.10*kmMes);
-  const totalMes  = fuelTotal + prevTotal + corrTotal + tireTotal + fixedTotal;
+  const inMes = d => { const x = new Date(d); return x.getFullYear()===yr && x.getMonth()+1===mo; };
+
+  // ── Combustible real ──
+  const fuelLogs = App.data.fuelLogs.filter(f => f.vehicle === vehicleCode);
+  const fuelMes  = fuelLogs.filter(f => inMes(f.date));
+  const fuelTotal = fuelMes.reduce((a,f) => a + (f.liters * f.ppu), 0);
+  const fuelItems = fuelMes.map(f => ({
+    fecha:   f.date.split(' ')[0],
+    desc:    `Carga ${f.liters}L · ${f.place}`,
+    monto:   Math.round(f.liters * f.ppu),
+    detalle: `${f.liters}L × $${f.ppu}/L · ${f.km ? f.km.toLocaleString()+' km' : 'km GPS'}`,
+  }));
+
+  // ── OTs reales del mes ──
+  const otsMes = App.data.workOrders.filter(o => {
+    if (o.vehicle !== vehicleCode) return false;
+    return inMes(o.closed_at || o.opened || o.date);
+  });
+  const prevOTs  = otsMes.filter(o => o.type === 'Preventivo');
+  const corrOTs  = otsMes.filter(o => o.type !== 'Preventivo');
+  const prevTotal = prevOTs.reduce((a,o) => a + (o.labor_cost||0) + (o.parts_cost||0), 0);
+  const corrTotal = corrOTs.reduce((a,o) => a + (o.labor_cost||0) + (o.parts_cost||0), 0);
+  const manoTotal = otsMes.reduce((a,o) => a + (o.labor_cost||0), 0);
+  const repTotal  = otsMes.reduce((a,o) => a + (o.parts_cost||0), 0);
+
+  const prevItems = prevOTs.map(o => ({
+    fecha:   (o.opened||'').split(' ')[0],
+    desc:    o.desc || o.description || '—',
+    monto:   Math.round((o.labor_cost||0) + (o.parts_cost||0)),
+    detalle: `Repuestos: $${Math.round(o.parts_cost||0).toLocaleString()} · M.O.: $${Math.round(o.labor_cost||0).toLocaleString()} · ${o.id}`,
+  }));
+  const corrItems = corrOTs.map(o => ({
+    fecha:   (o.opened||'').split(' ')[0],
+    desc:    o.desc || o.description || '—',
+    monto:   Math.round((o.labor_cost||0) + (o.parts_cost||0)),
+    detalle: `Repuestos: $${Math.round(o.parts_cost||0).toLocaleString()} · M.O.: $${Math.round(o.labor_cost||0).toLocaleString()} · ${o.id}`,
+  }));
+
+  // ── Km reales del mes (GPS) ──
+  // Diferencia entre primera y última lectura de km en cargas del mes
+  const kmsDelMes = fuelMes.filter(f => f.km > 0).map(f => f.km).sort((a,b)=>a-b);
+  let kmMes = 0;
+  if (kmsDelMes.length >= 2) {
+    kmMes = kmsDelMes[kmsDelMes.length-1] - kmsDelMes[0];
+  } else if (kmsDelMes.length === 1) {
+    kmMes = 0; // solo una carga, no podemos calcular diferencia
+  }
+  // Fallback: estimación por km total del vehículo si no hay cargas con km
+  if (kmMes <= 0 && v.km > 0) kmMes = Math.round(v.km * 0.035);
+
+  // ── Costo/km real ──
+  const totalMes = fuelTotal + prevTotal + corrTotal;
+  const costKmReal = kmMes > 0 && totalMes > 0 ? totalMes / kmMes : 0;
 
   return {
-    v, kmMes, totalMes,
+    v, kmMes, totalMes, costKmReal,
+    manoTotal, repTotal,
     rubros: [
-      { id:'fuel',  label:'Combustible',           color:'#3b82f6', total:fuelTotal,  pct:Math.round(fuelTotal/totalMes*100),
-        items: fuelLogs.length ? fuelLogs.map(f=>({ fecha:f.date.split(' ')[0], desc:`Carga ${f.liters}L · ${f.place}`, monto:f.total, detalle:`${f.liters}L × $${f.ppu}/L · ${f.km.toLocaleString()} km` }))
-          : [{ fecha:'2026-04-01', desc:'Estimación mensual combustible', monto:fuelTotal, detalle:`${kmMes} km / 2.8 km/L × $1.250/L` }]
+      {
+        id:'fuel', label:'Combustible', color:'#3b82f6',
+        total: fuelTotal, pct: totalMes>0 ? Math.round(fuelTotal/totalMes*100) : 0,
+        items: fuelItems.length ? fuelItems : [{ fecha:'—', desc:'Sin cargas registradas este mes', monto:0, detalle:'—' }],
       },
-      { id:'tire',  label:'Cubiertas / neumáticos', color:'#f59e0b', total:tireTotal,  pct:Math.round(tireTotal/totalMes*100),
-        items:[
-          { fecha:'2026-04-01', desc:'Amortización cubiertas eje 1 (dir.)', monto:Math.round(tireTotal*0.15), detalle:'2 × 295/80R22.5 · $180.000 c/u · vida útil 150.000 km' },
-          { fecha:'2026-04-01', desc:'Amortización cubiertas ejes tracción', monto:Math.round(tireTotal*0.55), detalle:'8 × 295/80R22.5 · $195.000 c/u · vida útil 120.000 km' },
-          { fecha:'2026-03-22', desc:'Reparación pinchadura posición 2-TDE', monto:Math.round(tireTotal*0.08), detalle:'Reparación en taller externo' },
-          { fecha:'2026-04-01', desc:'Amortización semirremolque (3 ejes)', monto:Math.round(tireTotal*0.22), detalle:'12 × 295/80R22.5 · $170.000 c/u · vida útil 100.000 km' },
-        ]
+      {
+        id:'prev', label:'Mantenimiento preventivo', color:'#22c55e',
+        total: prevTotal, pct: totalMes>0 ? Math.round(prevTotal/totalMes*100) : 0,
+        items: prevItems.length ? prevItems : [{ fecha:'—', desc:'Sin OTs preventivas este mes', monto:0, detalle:'—' }],
       },
-      { id:'prev',  label:'Mantenimiento preventivo', color:'#22c55e', total:prevTotal, pct:Math.round(prevTotal/totalMes*100),
-        items: otList.filter(o=>o.type==='Preventivo' && (o.parts_cost+o.labor_cost)>0).map(o=>({
-          fecha: o.opened.split(' ')[0],
-          desc:  o.desc,
-          monto: o.parts_cost+o.labor_cost,
-          detalle:`Repuestos: $${o.parts_cost.toLocaleString()} · M.O.: $${o.labor_cost.toLocaleString()} · ${o.id}`
-        })).concat(prevTotal>0&&otList.filter(o=>o.type==='Preventivo').length===0?[{ fecha:'2026-04-01', desc:'Estimación mantenimiento preventivo', monto:prevTotal, detalle:'Lubricantes, filtros y revisiones programadas' }]:[])
-      },
-      { id:'corr',  label:'Mantenimiento correctivo', color:'#ef4444', total:corrTotal, pct:Math.round(corrTotal/totalMes*100),
-        items: otList.filter(o=>o.type!=='Preventivo' && (o.parts_cost+o.labor_cost)>0).map(o=>({
-          fecha: o.opened.split(' ')[0],
-          desc:  o.desc,
-          monto: o.parts_cost+o.labor_cost,
-          detalle:`Repuestos: $${o.parts_cost.toLocaleString()} · M.O.: $${o.labor_cost.toLocaleString()} · ${o.id}`
-        })).concat(corrTotal>0&&otList.filter(o=>o.type!=='Preventivo').length===0?[{ fecha:'2026-04-01', desc:'Estimación correctivos del período', monto:corrTotal, detalle:'Reparaciones no planificadas' }]:[])
-      },
-      { id:'fixed', label:'Costos fijos (seguro, patente, habilitación)', color:'#a78bfa', total:fixedTotal, pct:Math.round(fixedTotal/totalMes*100),
-        items:[
-          { fecha:'2026-04-01', desc:'Seguro de automotores (prorrata mensual)', monto:Math.round(fixedTotal*0.55), detalle:'Póliza vigente · vence '+( App.data.documents.find(d=>d.vehicle===vehicleCode&&d.type==='Seguro')?.expiry || '—') },
-          { fecha:'2026-04-01', desc:'Patente / impuesto automotor (prorrata)', monto:Math.round(fixedTotal*0.25), detalle:'Cuota anual prorrateada 12 meses' },
-          { fecha:'2026-04-01', desc:'Habilitación y CNRT (prorrata)',          monto:Math.round(fixedTotal*0.20), detalle:'Habilitación anual prorrateada' },
-        ]
+      {
+        id:'corr', label:'Mantenimiento correctivo', color:'#ef4444',
+        total: corrTotal, pct: totalMes>0 ? Math.round(corrTotal/totalMes*100) : 0,
+        items: corrItems.length ? corrItems : [{ fecha:'—', desc:'Sin OTs correctivas este mes', monto:0, detalle:'—' }],
       },
     ]
   };
 }
+
 
 // Estado del módulo de costos
 let _costSelectedUnit  = null;
@@ -2993,8 +3021,16 @@ let _costExpandedRubro = null;
 let _costPeriod        = 'mes';
 
 function renderCosts() {
-  const sorted = [...App.data.vehicles].sort((a,b)=>b.cost_km-a.cost_km);
-  const avg    = (App.data.vehicles.reduce((a,b)=>a+b.cost_km,0)/App.data.vehicles.length).toFixed(3);
+  // Calcular costo real de cada vehículo este mes
+  const withCost = App.data.vehicles.map(v => {
+    const d = getCostDetail(v.code);
+    return { ...v, _costReal: d ? d.costKmReal : 0, _totalMes: d ? d.totalMes : 0, _kmMes: d ? d.kmMes : 0 };
+  });
+  const sorted = [...withCost].sort((a,b) => b._totalMes - a._totalMes);
+  const conDatos = sorted.filter(v => v._costReal > 0);
+  const avg = conDatos.length > 0
+    ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length).toFixed(3)
+    : '—';
 
   document.getElementById('page-costs').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
@@ -3005,18 +3041,18 @@ function renderCosts() {
       </div>
       <div class="kpi-card danger">
         <div class="kpi-label">Unidad más costosa</div>
-        <div class="kpi-value danger">$${sorted[0].cost_km.toFixed(3)}</div>
+        <div class="kpi-value danger">${sorted[0]._totalMes>0 ? '$'+Math.round(sorted[0]._totalMes/1000)+'K' : 'Sin datos'}</div>
         <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
       </div>
       <div class="kpi-card ok">
         <div class="kpi-label">Unidad más eficiente</div>
-        <div class="kpi-value ok">$${sorted[sorted.length-1].cost_km.toFixed(3)}</div>
-        <div class="kpi-trend">${sorted[sorted.length-1].code} — ${sorted[sorted.length-1].brand}</div>
+        <div class="kpi-value ok">${conDatos.length>0 ? '$'+conDatos[conDatos.length-1]._costReal.toFixed(3)+'/km' : '—'}</div>
+        <div class="kpi-trend">${conDatos.length>0 ? conDatos[conDatos.length-1].code+' — '+conDatos[conDatos.length-1].brand : 'Sin datos suficientes'}</div>
       </div>
       <div class="kpi-card warn">
-        <div class="kpi-label">Sobre $0.22/km</div>
-        <div class="kpi-value warn">${App.data.vehicles.filter(v=>v.cost_km>0.22).length}</div>
-        <div class="kpi-trend">unidades a revisar</div>
+        <div class="kpi-label">Con gasto este mes</div>
+        <div class="kpi-value warn">${conDatos.length}</div>
+        <div class="kpi-trend">unidades con movimiento registrado</div>
       </div>
     </div>
 
@@ -3048,24 +3084,23 @@ function renderCosts() {
         <table id="costs-table">
           <thead><tr>
             <th>Código</th><th>Marca / Modelo</th><th>Km mes</th>
-            <th>Combustible</th><th>Neumáticos</th><th>Preventivo</th><th>Correctivo</th><th>Fijos</th>
+            <th style="color:#3b82f6">Combustible</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
             <th>Total mes</th><th>$/km</th><th>Eval.</th><th></th>
           </tr></thead>
           <tbody>${sorted.slice(0,20).map(v=>{
             const d = getCostDetail(v.code);
-            if (!d) return '';
-            const ev = v.cost_km>0.25?['danger','Alto']:v.cost_km>0.20?['warn','Revisar']:['ok','Eficiente'];
+            if (!d || d.totalMes === 0) return '';
+            const ck = d.costKmReal;
+            const ev = ck>0.25?['danger','Alto']:ck>0.20?['warn','Revisar']:['ok','Eficiente'];
             return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${v.code}</td>
               <td>${v.brand} ${v.model}</td>
-              <td class="td-mono">${d.kmMes.toLocaleString()}</td>
-              <td class="td-mono" style="color:#3b82f6">$${Math.round(d.rubros[0].total/1000)}K</td>
-              <td class="td-mono" style="color:#f59e0b">$${Math.round(d.rubros[1].total/1000)}K</td>
-              <td class="td-mono" style="color:#22c55e">$${Math.round(d.rubros[2].total/1000)}K</td>
-              <td class="td-mono" style="color:#ef4444">$${Math.round(d.rubros[3].total/1000)}K</td>
-              <td class="td-mono" style="color:#a78bfa">$${Math.round(d.rubros[4].total/1000)}K</td>
+              <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total/1000)+'K':'—'}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total/1000)+'K':'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
-              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">$${v.cost_km.toFixed(3)}</td>
+              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toFixed(3):'—'}</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
             </tr>`;
@@ -3089,7 +3124,7 @@ function buildCostRankChart(sorted) {
       labels: sorted.slice(0,12).map(v=>v.code),
       datasets:[{
         label:'$/km',
-        data: sorted.slice(0,12).map(v=>v.cost_km),
+        data: sorted.slice(0,12).map(v=>v._costReal||0),
         backgroundColor: sorted.slice(0,12).map(v=>
           v.cost_km>0.25?'rgba(239,68,68,.75)':
           v.cost_km>0.20?'rgba(245,158,11,.75)':
@@ -3136,7 +3171,7 @@ function openCostDrillDown(vehicleCode) {
         <div style="font-size:12px;color:var(--text3);margin-top:2px">${d.v.driver} · Base ${d.v.base} · ${d.kmMes.toLocaleString()} km este mes</div>
       </div>
       <div style="margin-left:auto;text-align:right">
-        <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.v.cost_km>0.25?'danger':d.v.cost_km>0.20?'warn':'ok'})">$${d.v.cost_km.toFixed(3)}</div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'})">${d.costKmReal>0?'$'+d.costKmReal.toFixed(3):'Sin datos'}</div>
         <div style="font-size:11px;color:var(--text3)">por kilómetro</div>
         <div style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px">$${d.totalMes.toLocaleString()} / mes</div>
       </div>
@@ -3173,7 +3208,7 @@ function openCostDrillDown(vehicleCode) {
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
         ${[
           ['Costo anual total',    '$'+(d.totalMes*12/1000).toFixed(0)+'K', 'text'],
-          ['Costo/km anual',       '$'+d.v.cost_km.toFixed(3), d.v.cost_km>0.25?'danger':d.v.cost_km>0.20?'warn':'ok'],
+          ['Costo/km real mes',    d.costKmReal>0?'$'+d.costKmReal.toFixed(3):'—', d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'],
           ['Km proyectados año',   (d.kmMes*12).toLocaleString(), 'text'],
           ['Combustible año',      '$'+(d.rubros[0].total*12/1000).toFixed(0)+'K', 'text'],
         ].map(([l,val,c])=>`
