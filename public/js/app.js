@@ -250,7 +250,9 @@ function renderFleetTable(data) {
   tbody.innerHTML = data.map(v => {
     const st = {ok:'badge-ok',warn:'badge-warn',taller:'badge-info',detenida:'badge-danger'}[v.status]||'badge-gray';
     const stLbl = {ok:'Operativo',warn:'Con alerta',taller:'En taller',detenida:'Detenida'}[v.status]||v.status;
-    const cpkm_color = v.cost_km>0.25?'danger':v.cost_km>0.20?'warn':'ok';
+    const d = getCostDetail(v.code);
+    const ckReal = d ? d.costKmReal : 0;
+    const cpkm_color = ckReal>0.25?'danger':ckReal>0.20?'warn':'ok';
     return `<tr>
       <td class="td-mono td-main">${v.code}</td>
       <td class="td-mono">${v.plate}</td>
@@ -260,7 +262,7 @@ function renderFleetTable(data) {
       <td class="td-mono">${v.km.toLocaleString()} ${v.type==='autoelevador'?'hs':'km'}</td>
       <td>${v.base}</td>
       <td>${v.driver}</td>
-      <td class="td-mono" style="color:var(--${cpkm_color})">$${v.cost_km.toFixed(3)}</td>
+      <td class="td-mono" style="color:var(--${cpkm_color})">${ckReal>0?'$'+ckReal.toFixed(3):'—'}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
       <td>
         ${v.gps_updated ? `<span style="font-size:11px;color:var(--${v.gps_status==='moving'?'ok':'text3'})" title="Actualizado: ${v.gps_updated ? new Date(v.gps_updated).toLocaleString('es-AR') : '-'}">
@@ -561,9 +563,9 @@ function showVehicleFicha(id, tab) {
         <div style="margin-top:8px"><span class="badge ${stBadge[v.status]||'badge-gray'}">${stLabel[v.status]||v.status}</span></div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--${v.cost_km>0.25?'danger':v.cost_km>0.20?'warn':'ok'})">${v.km.toLocaleString()}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${v.km.toLocaleString()}</div>
         <div style="font-size:11px;color:var(--text3)">km actuales</div>
-        <div style="font-size:13px;font-family:var(--mono);color:var(--${v.cost_km>0.25?'danger':v.cost_km>0.20?'warn':'ok'});margin-top:4px">$${v.cost_km.toFixed(3)}/km</div>
+        <div style="font-size:13px;font-family:var(--mono);color:var(--text3);margin-top:4px">${(()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+'/km':'Sin datos costo/km';})()}</div>
       </div>
     </div>`;
 
@@ -584,7 +586,7 @@ function showVehicleFicha(id, tab) {
           ['Centro de costo', v.cost_center||'Sin asignar'],
           ['Chofer habitual', v.driver],
           ['Km actuales',  v.km.toLocaleString()+(v.type==='autoelevador'?' hs':' km')],
-          ['Costo/km',     '$'+v.cost_km.toFixed(3)],
+          ['Costo/km',     (()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+' (mes actual)':'Sin datos suficientes';})()],
           ['Combustible',  spec.fuel_cap],
         ].map(([l,val])=>`
           <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border)">
@@ -2984,8 +2986,7 @@ function getCostDetail(vehicleCode) {
   } else if (kmsDelMes.length === 1) {
     kmMes = 0; // solo una carga, no podemos calcular diferencia
   }
-  // Fallback: estimación por km total del vehículo si no hay cargas con km
-  if (kmMes <= 0 && v.km > 0) kmMes = Math.round(v.km * 0.035);
+  // Sin datos de km GPS en cargas del mes → no estimamos, mostramos sin datos
 
   // ── Costo/km real ──
   const totalMes = fuelTotal + prevTotal + corrTotal;
@@ -3126,15 +3127,15 @@ function buildCostRankChart(sorted) {
         label:'$/km',
         data: sorted.slice(0,12).map(v=>v._costReal||0),
         backgroundColor: sorted.slice(0,12).map(v=>
-          v.cost_km>0.25?'rgba(239,68,68,.75)':
-          v.cost_km>0.20?'rgba(245,158,11,.75)':
-          'rgba(34,197,94,.75)'
+          v._costReal>0.25?'rgba(239,68,68,.75)':
+          v._costReal>0.20?'rgba(245,158,11,.75)':
+          v._costReal>0?'rgba(34,197,94,.75)':'rgba(100,116,139,.4)'
         ),
         borderRadius:4, borderColor:'transparent',
         hoverBackgroundColor: sorted.slice(0,12).map(v=>
-          v.cost_km>0.25?'rgba(239,68,68,1)':
-          v.cost_km>0.20?'rgba(245,158,11,1)':
-          'rgba(34,197,94,1)'
+          v._costReal>0.25?'rgba(239,68,68,1)':
+          v._costReal>0.20?'rgba(245,158,11,1)':
+          v._costReal>0?'rgba(34,197,94,1)':'rgba(100,116,139,.6)'
         ),
       }]
     },
