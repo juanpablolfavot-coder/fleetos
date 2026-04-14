@@ -3069,6 +3069,26 @@ let _costSelectedUnit  = null;
 let _costExpandedRubro = null;
 let _costPeriod        = 'mes';
 
+function exportCostCSV() {
+  const now = new Date();
+  const yr = now.getFullYear(), mo = now.getMonth()+1;
+  const mesStr = yr+'-'+String(mo).padStart(2,'0');
+
+  let csv = 'Unidad,Marca,Modelo,Km mes,Combustible ($),Preventivo ($),Correctivo ($),Total ($),$/km\n';
+  App.data.vehicles.forEach(v => {
+    const d = getCostDetail(v.code);
+    if (!d || d.totalMes === 0) return;
+    csv += `${v.code},${v.brand},${v.model},${d.kmMes},${Math.round(d.rubros[0].total)},${Math.round(d.rubros[1].total)},${Math.round(d.rubros[2].total)},${Math.round(d.totalMes)},${d.costKmReal>0?d.costKmReal.toFixed(3):'—'}\n`;
+  });
+
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `costos-operativos-${mesStr}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  showToast('ok', 'CSV exportado');
+}
+
 function renderCosts() {
   // Calcular costo real de cada vehículo este mes
   const withCost = App.data.vehicles.map(v => {
@@ -3125,7 +3145,7 @@ function renderCosts() {
     <div class="section-header">
       <div><div class="section-title">Detalle por unidad — clic en una fila para el desglose completo</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="showToast('ok','Exportando costos en Excel...')">↓ Exportar Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCostCSV()">↓ Exportar CSV</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -3416,7 +3436,10 @@ function renderMaintenance() {
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Preventivo · predictivo · correctivo</p>
       </div>
     </div>
-    ${vencidos>0 ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--danger)">⚠ <b>${vencidos} unidad${vencidos>1?'es':''}</b> con mantenimiento vencido. Crear OT preventiva urgente.</div>` : ''}
+    ${vencidos>0 ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--danger);display:flex;align-items:center;justify-content:space-between">
+      <span>⚠ <b>${vencidos} unidad${vencidos>1?'es':''}</b> con mantenimiento vencido.</span>
+      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="plans.filter(p=>p.status==='danger').forEach(p=>createPreventiveOT(p.v.code,p.taskName))">Crear OTs preventivas</button>
+    </div>` : ''}
     ${proximos>0 ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn)">🔧 <b>${proximos} unidad${proximos>1?'es':''}</b> próxima${proximos>1?'s':''} a mantenimiento. Programar service.</div>` : ''}
     <div class="card" style="padding:0">
       <div class="table-wrap">
@@ -3515,31 +3538,89 @@ async function saveMaintConfig(vehicleId) {
 
 
 function openNewMaintModal() {
+  const vehicleOpts = (App.data.vehicles||[]).map(v =>
+    `<option value="${v.id}" data-code="${v.code}" data-km="${v.km}">${v.code} — ${v.brand} ${v.model} (${v.km.toLocaleString()} km)</option>`
+  ).join('');
   openModal('Nueva tarea de mantenimiento', `
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Vehículo</label><input class="form-input" placeholder="INT-XX" id="nm-veh"></div>
-      <div class="form-group"><label class="form-label">Tipo de intervalo</label><select class="form-select" id="nm-type"><option value="km">Por kilómetros</option><option value="hs">Por horas de motor</option><option value="cal">Calendárico</option></select></div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Vehículo</label>
+      <select class="form-select" id="nm-veh">${vehicleOpts}</select>
     </div>
-    <div class="form-group"><label class="form-label">Descripción de la tarea</label><input class="form-input" placeholder="Ej: Cambio aceite motor 15W-40 + filtros" id="nm-task"></div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Descripción de la tarea</label>
+      <input class="form-input" placeholder="Ej: Cambio aceite motor 15W-40 + filtros" id="nm-task">
+    </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Intervalo (km / hs / días)</label><input class="form-input" type="number" placeholder="20000" id="nm-interval"></div>
-      <div class="form-group"><label class="form-label">Último realizado (km/fecha)</label><input class="form-input" placeholder="284000" id="nm-last"></div>
+      <div class="form-group"><label class="form-label">Intervalo (km)</label><input class="form-input" type="number" placeholder="15000" id="nm-interval" value="15000"></div>
+      <div class="form-group"><label class="form-label">Km del último service</label><input class="form-input" type="number" placeholder="0" id="nm-last" value="0"></div>
     </div>
   `, [
-    { label:'Guardar tarea', cls:'btn-primary', fn: () => { closeModal(); showToast('ok','Tarea de mantenimiento registrada'); } },
+    { label:'Guardar', cls:'btn-primary', fn: saveNewMaintTask },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
 }
 
-function createPreventiveOT(vehicle, task) {
-  App.data.workOrders.unshift({
-    id:'OT-0' + (285+App.data.workOrders.length),
-    vehicle, plate:'—', type:'Preventivo', status:'Pendiente', priority:'Normal',
-    desc:task, mechanic:'—',
-    opened:new Date().toISOString().slice(0,16).replace('T',' '),
-    parts_cost:0, labor_cost:0
+async function saveNewMaintTask() {
+  const sel      = document.getElementById('nm-veh');
+  const vehicleId = sel?.value || '';
+  const task     = (document.getElementById('nm-task')?.value || '').trim();
+  const interval = parseInt(document.getElementById('nm-interval')?.value) || 15000;
+  const lastKm   = parseInt(document.getElementById('nm-last')?.value) || 0;
+  const code     = sel?.options[sel.selectedIndex]?.dataset?.code || '';
+
+  if (!vehicleId) { showToast('error', 'Seleccioná un vehículo'); return; }
+  if (!task)      { showToast('error', 'Ingresá la descripción de la tarea'); return; }
+
+  const v = App.data.vehicles.find(x => x.id === vehicleId);
+  const newTechSpec = Object.assign({}, v?.tech_spec || {}, {
+    maint_task_name:   task,
+    maint_interval_km: interval,
+    maint_last_km:     lastKm,
   });
-  showToast('ok', `OT preventiva creada para ${vehicle}`);
+
+  const res = await apiFetch(`/api/vehicles/${vehicleId}/techspec`, {
+    method: 'PATCH',
+    body: JSON.stringify(newTechSpec)
+  });
+
+  if (!res.ok) { showToast('error', 'Error al guardar la tarea'); return; }
+  const updated = await res.json();
+  if (v) v.tech_spec = updated.tech_spec || newTechSpec;
+
+  closeModal();
+  showToast('ok', `Tarea de mantenimiento guardada para ${code} — próximo service: ${(lastKm+interval).toLocaleString()} km`);
+  renderMaintenance();
+}
+
+async function createPreventiveOT(vehicleCode, task) {
+  const v = App.data.vehicles.find(x => x.code === vehicleCode);
+  if (!v) { showToast('error', 'Vehículo no encontrado'); return; }
+
+  const res = await apiFetch('/api/workorders', {
+    method: 'POST',
+    body: JSON.stringify({
+      vehicle_id:  v.id,
+      type:        'Preventivo',
+      priority:    'urgente',
+      description: task || 'Mantenimiento preventivo programado',
+    })
+  });
+
+  if (!res.ok) { showToast('error', 'Error al crear OT preventiva'); return; }
+  const wo = await res.json();
+
+  // Agregar a memoria local
+  App.data.workOrders.unshift({
+    id: wo.code || wo.id,
+    vehicle: vehicleCode, plate: v.plate || '—',
+    type: 'Preventivo', status: 'Abierta', priority: 'urgente',
+    desc: wo.description, mechanic: '—',
+    opened: new Date().toISOString().slice(0,16).replace('T',' '),
+    parts_cost: 0, labor_cost: 0
+  });
+
+  showToast('ok', `OT preventiva ${wo.code} creada para ${vehicleCode}`);
+  renderMaintenance();
 }
 
 // ── MODAL HELPER ──
