@@ -1605,10 +1605,23 @@ function viewTicket(fuelLogId) {
 }
 
 function openFuelEntryModal() {
+  const tanks = App.data.tanks || [];
+  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+  const ureaTank   = tanks.find(t => t.type === 'urea');
+  const gasoilNivel = gasoilTank ? `${Math.round(gasoilTank.current_l).toLocaleString()} / ${Math.round(gasoilTank.capacity_l).toLocaleString()} L` : 'Sin datos';
+  const ureaNivel   = ureaTank   ? `${Math.round(ureaTank.current_l).toLocaleString()} / ${Math.round(ureaTank.capacity_l).toLocaleString()} L` : 'Sin datos';
   openModal('Ingreso a cisterna', `
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Tipo</label><select class="form-select" id="fe-type"><option>Gasoil</option><option>Urea / AdBlue</option></select></div>
-      <div class="form-group"><label class="form-label">Litros ingresados</label><input class="form-input" type="number" placeholder="5000" id="fe-liters"></div>
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-select" id="fe-type" onchange="document.getElementById('fe-nivel-actual').textContent=this.value==='Gasoil'?'${gasoilNivel}':'${ureaNivel}'">
+          <option value="gasoil">Gasoil</option>
+          <option value="urea">Urea / AdBlue</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Litros a ingresar</label><input class="form-input" type="number" placeholder="5000" id="fe-liters" min="1"></div>
+    </div>
+    <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3);margin-bottom:10px">
+      Nivel actual: <strong id="fe-nivel-actual">${gasoilNivel}</strong>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="fe-supplier"></div>
@@ -1616,9 +1629,44 @@ function openFuelEntryModal() {
     </div>
     <div class="form-group"><label class="form-label">Número de remito</label><input class="form-input" placeholder="REM-00001" id="fe-remito"></div>
   `, [
-    { label:'Confirmar ingreso', cls:'btn-primary', fn: () => { closeModal(); showToast('ok','Ingreso a cisterna registrado correctamente'); } },
+    { label:'Confirmar ingreso', cls:'btn-primary', fn: saveFuelEntry },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+async function saveFuelEntry() {
+  const type   = document.getElementById('fe-type')?.value || 'gasoil';
+  const liters = parseFloat(document.getElementById('fe-liters')?.value) || 0;
+  if (liters <= 0) { showToast('error', 'Ingresá la cantidad de litros'); return; }
+
+  const tanks = App.data.tanks || [];
+  const tank  = type === 'urea'
+    ? tanks.find(t => t.type === 'urea')
+    : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+
+  if (!tank) { showToast('error', 'No se encontró la cisterna en el sistema'); return; }
+
+  const capacidad  = parseFloat(tank.capacity_l) || 47000;
+  const nivelActual = parseFloat(tank.current_l) || 0;
+  const nuevoNivel  = nivelActual + liters;
+
+  if (nuevoNivel > capacidad) {
+    showToast('error', `Excede la capacidad (${capacidad.toLocaleString()} L). Nivel actual: ${Math.round(nivelActual).toLocaleString()} L`);
+    return;
+  }
+
+  const res = await apiFetch(`/api/fuel/tanks/${tank.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ current_l: nuevoNivel })
+  });
+
+  if (!res.ok) { showToast('error', 'Error al registrar ingreso'); return; }
+
+  // Actualizar en memoria
+  tank.current_l = nuevoNivel;
+  closeModal();
+  showToast('ok', `✅ ${liters.toLocaleString()} L de ${type} ingresados a cisterna — nuevo nivel: ${Math.round(nuevoNivel).toLocaleString()} L`);
+  renderFuel();
 }
 
 
