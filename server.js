@@ -34,7 +34,7 @@ app.use(helmet({
 }));
 app.use(cors({origin:(o,cb)=>cb(null,true),credentials:true}));
 app.use(cookieParser());
-app.use(express.json({ limit: '2mb',limit:'1mb'}));
+app.use(express.json({ limit: '2mb' }));
 app.use(hpp());
 app.use(sanitize);
 app.use(compression());

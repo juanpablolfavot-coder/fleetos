@@ -21,8 +21,7 @@ router.get('/', authenticate, async (req, res) => {
     // Los choferes solo ven sus propias novedades
     if (req.user.role === 'chofer') {
       params.push(req.user.id);
-      // reporter filter
-      sql += ` AND wo.mechanic_id = $${params.length}`;
+      sql += ` AND wo.reporter_id = $${params.length}`;
     }
     if (status)     { params.push(status);     sql += ` AND wo.status = $${params.length}`; }
     if (vehicle_id) { params.push(vehicle_id); sql += ` AND wo.vehicle_id = $${params.length}`; }
