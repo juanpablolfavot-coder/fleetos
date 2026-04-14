@@ -82,28 +82,21 @@ router.post('/', authenticate, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Generar código único OT
-    // Usar secuencia atómica para evitar colisiones en requests concurrentes
+    // Generar código único OT — crear tabla ANTES de la transacción para evitar abort
+    // (CREATE TABLE dentro de una transacción abortada rompe todo)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ot_sequence (
+        dummy INT PRIMARY KEY DEFAULT 1,
+        last_val INT NOT NULL DEFAULT 0,
+        CHECK (dummy = 1)
+      )
+    `);
+    await client.query(`INSERT INTO ot_sequence (dummy, last_val) VALUES (1, 0) ON CONFLICT DO NOTHING`);
     const seq = await client.query(`
-      INSERT INTO ot_sequence (dummy) VALUES (1)
-      ON CONFLICT (dummy) DO UPDATE SET last_val = ot_sequence.last_val + 1
-      RETURNING last_val
-    `).catch(async () => {
-      // Si no existe la tabla, crearla y reintentar
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS ot_sequence (
-          dummy INT PRIMARY KEY DEFAULT 1,
-          last_val INT NOT NULL DEFAULT 0,
-          CHECK (dummy = 1)
-        )
-      `);
-      await client.query(`INSERT INTO ot_sequence (dummy, last_val) VALUES (1, 0) ON CONFLICT DO NOTHING`);
-      return client.query(`UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val`);
-    });
+      UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val
+    `);
     const seqVal = seq.rows[0].last_val;
-    // Fallback si la secuencia falla
-    const countFallback = await client.query('SELECT COUNT(*) FROM work_orders');
-    const num  = Math.max(seqVal, parseInt(countFallback.rows[0].count) + 1);
+    const num  = seqVal;
     const code = 'OT-' + String(num).padStart(5, '0');
 
     // Obtener km actuales del vehículo
