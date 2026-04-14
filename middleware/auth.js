@@ -53,6 +53,24 @@ const auditOnly = (req, res, next) => {
   next();
 };
 
+// Crear tabla audit_log si no existe
+(async () => {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS audit_log (
+      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      user_id    UUID,
+      user_name  VARCHAR(200),
+      action     VARCHAR(50),
+      table_name VARCHAR(100),
+      record_id  UUID,
+      new_value  JSONB,
+      ip_address VARCHAR(50),
+      user_agent VARCHAR(200),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+  } catch(e) { /* tabla ya existe */ }
+})();
+
 // Registrar acción en audit_log
 const auditAction = (action, tableName) => async (req, res, next) => {
   res.on('finish', async () => {

@@ -261,6 +261,11 @@ async function syncGPSData() {
 
       const searchPlate = plate || '';
       if (!searchPlate) continue;
+      // Ignorar si la patente es solo un número (ID interno del GPS, no una patente real)
+      if (/^\d+$/.test(searchPlate)) {
+        console.log('[GPS] Ignorando ID numérico:', searchPlate, '(no es patente)');
+        continue;
+      }
 
       const status = speed > 2 ? 'moving' : 'stopped';
 

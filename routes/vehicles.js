@@ -70,7 +70,9 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 // PUT /api/vehicles/:id
 router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), validateUUID('id'), auditAction('UPDATE','vehicles'), async (req, res) => {
   try {
-    const { brand, model, year, type, status, base, driver_id, driver, km_current, vin, engine_no, cost_center, plate, code } = req.body;
+    const { brand, model, year, status, base, driver_id, driver, km_current, vin, engine_no, cost_center, plate, code } = req.body;
+    const VALID_TYPES = ['camion','tractor','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
+    const type = VALID_TYPES.includes(req.body.type) ? req.body.type : 'camion';
     // Agregar columna driver_name si no existe
     await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT`).catch(()=>{});
     const result = await query(
