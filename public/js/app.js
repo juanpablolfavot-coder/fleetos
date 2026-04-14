@@ -1386,8 +1386,8 @@ function renderFuel() {
           <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:${ureaPct<20?'var(--warn)':'var(--ok)'}"></div></div>
         </div>
         <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span style="color:var(--warn)">Urea / AdBlue</span><span class="td-mono" style="color:var(--warn)">${ureaTank} / ${ureaCap} L ⚠</span></div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(ureaTank/ureaCap*100)}%;background:var(--warn)"></div></div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span style="color:var(--warn)">Urea / AdBlue</span><span class="td-mono" style="color:var(--warn)">${ureaLevel.toLocaleString()} / ${ureaCap.toLocaleString()} L ⚠</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:var(--warn)"></div></div>
         </div>
         <div style="margin-top:16px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
       </div>
