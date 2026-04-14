@@ -307,5 +307,62 @@ encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','je
   } catch(err) { console.error('encargado resumen:', err.message); res.status(500).json({error:'Error resumen'}); }
 });
 
+
+// ── Verificar ticket de carga ─────────────────────────────
+fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), validateUUID('id'), async (req, res) => {
+  try {
+    const { accion, observacion } = req.body; // accion: 'aprobar' | 'observar'
+    if (!['aprobar','observar'].includes(accion)) return res.status(400).json({ error: 'accion debe ser aprobar u observar' });
+
+    // Asegurar columnas
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
+    await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT').catch(()=>{});
+    await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID').catch(()=>{});
+    await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ').catch(()=>{});
+
+    let sql, params;
+    if (accion === 'aprobar') {
+      // Aprobar: marcar como verificado y BORRAR la foto para liberar espacio
+      sql = `UPDATE fuel_logs SET 
+        ticket_estado = 'verificado',
+        ticket_image = NULL,
+        ticket_verificado_por = $1,
+        ticket_verificado_at = NOW()
+        WHERE id = $2 RETURNING id, ticket_estado`;
+      params = [req.user.id, req.params.id];
+    } else {
+      // Observar: mantener la foto y marcar para investigar
+      sql = `UPDATE fuel_logs SET 
+        ticket_estado = 'observado',
+        ticket_obs = $1,
+        ticket_verificado_por = $2,
+        ticket_verificado_at = NOW()
+        WHERE id = $3 RETURNING id, ticket_estado`;
+      params = [observacion || 'Sin observación', req.user.id, req.params.id];
+    }
+
+    const r = await query(sql, params);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Carga no encontrada' });
+    res.json({ ok: true, estado: r.rows[0].ticket_estado });
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Cargas pendientes de verificación ────────────────────
+fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), async (req, res) => {
+  try {
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
+    const r = await query(`
+      SELECT fl.id, fl.vehicle_id, fl.liters, fl.price_per_l, fl.logged_at, fl.location,
+             fl.ticket_estado, fl.ticket_obs, fl.ticket_image,
+             v.code as vehicle_code, u.name as driver_name
+      FROM fuel_logs fl
+      JOIN vehicles v ON v.id = fl.vehicle_id
+      LEFT JOIN users u ON u.id = fl.driver_id
+      WHERE fl.ticket_image IS NOT NULL AND (fl.ticket_estado IS NULL OR fl.ticket_estado = 'pendiente')
+      ORDER BY fl.logged_at DESC LIMIT 50`);
+    res.json(r.rows);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
 module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter, checklistRouter, encargadoRouter };
 

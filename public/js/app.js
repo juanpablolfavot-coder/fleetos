@@ -1427,7 +1427,7 @@ function renderFuel() {
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span ${ureaPct<20?'style="color:var(--warn)"':''}>Urea / AdBlue</span><span class="td-mono" ${ureaPct<20?'style="color:var(--warn)"':''}>${ureaLevel.toLocaleString()} / ${ureaCap.toLocaleString()} L ${ureaPct<20?'⚠':''}</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:${ureaPct<20?'var(--warn)':'var(--ok)'}"></div></div>
         </div>
-        <div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button></div>
+        <div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button><button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button></div>
       </div>
       <div class="card">
         <div class="card-title">Consumo por unidad (últimos 30 días)</div>
@@ -4271,7 +4271,13 @@ async function renderEncargadoPanel() {
   el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">Cargando resumen del día...</div>`;
 
   try {
-    const res = await apiFetch('/api/encargado/resumen');
+    // Verificar tickets pendientes
+  const tickRes = await apiFetch('/api/fuel/pendientes-verificacion');
+  const tickPendientes = tickRes.ok ? await tickRes.json() : [];
+  if (tickPendientes.length > 0) {
+    showToast('warn', `🧾 ${tickPendientes.length} ticket${tickPendientes.length>1?'s':''} de combustible pendiente${tickPendientes.length>1?'s':''} de verificación`);
+  }
+  const res = await apiFetch('/api/encargado/resumen');
     if (!res.ok) throw new Error('Error API');
     const d = await res.json();
 
@@ -5368,5 +5374,120 @@ Si no hay datos suficientes, indicalo claramente. Si detectás algo preocupante,
   } catch(e) {
     document.getElementById('ia-loading')?.remove();
     chat.innerHTML += `<div style="align-self:flex-start;background:rgba(239,68,68,.1);color:var(--danger);padding:8px 12px;border-radius:12px;font-size:12px">Error al consultar la IA: ${e.message}</div>`;
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  VERIFICACIÓN DE TICKETS DE COMBUSTIBLE
+// ════════════════════════════════════════════════════════════
+
+async function openVerificacionTickets() {
+  const res = await apiFetch('/api/fuel/pendientes-verificacion');
+  if (!res.ok) { showToast('error','Error al cargar tickets'); return; }
+  const pendientes = await res.json();
+
+  if (pendientes.length === 0) {
+    openModal('✅ Tickets verificados', `
+      <div style="text-align:center;padding:24px">
+        <div style="font-size:40px;margin-bottom:12px">✅</div>
+        <div style="font-weight:600;font-size:15px">No hay tickets pendientes de verificación</div>
+        <div style="font-size:13px;color:var(--text3);margin-top:8px">Todas las cargas con foto han sido verificadas</div>
+      </div>`, [{ label:'Cerrar', cls:'btn-secondary', fn: closeModal }]);
+    return;
+  }
+
+  let idx = 0;
+  function renderTicket() {
+    const t = pendientes[idx];
+    if (!t) { closeModal(); showToast('ok','Todos los tickets revisados'); renderFuel(); return; }
+    const total = (parseFloat(t.liters) * parseFloat(t.price_per_l)).toLocaleString('es-AR');
+    document.getElementById('modal-title').textContent = `🧾 Ticket ${idx+1} de ${pendientes.length} — ${t.vehicle_code}`;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+            📅 ${new Date(t.logged_at).toLocaleString('es-AR')}<br>
+            🚛 ${t.vehicle_code} · 👤 ${t.driver_name||'—'}<br>
+            ⛽ ${t.liters} L × $${t.price_per_l}/L = <strong>$${total}</strong><br>
+            📍 ${t.location||'—'}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Observación (si rechazás)</label>
+            <textarea class="form-textarea" id="tick-obs" placeholder="Ej: Precio no coincide, ticket ilegible..." rows="3"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${t.id}','aprobar')">✅ Aprobar y borrar foto</button>
+            <button class="btn btn-danger" style="flex:1" onclick="verificarTicket('${t.id}','observar')">⚠ Observar</button>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">
+            Al aprobar, la foto se borra de la DB para ahorrar espacio
+          </div>
+        </div>
+        <div style="text-align:center">
+          ${t.ticket_image ? `<img src="${t.ticket_image}" style="max-width:100%;max-height:300px;border-radius:8px;object-fit:contain;border:1px solid var(--border2)">` : '<div style="padding:40px;color:var(--text3)">Sin foto</div>'}
+        </div>
+      </div>`;
+    window._ticketIdx = idx;
+    window._ticketPendientes = pendientes;
+  }
+
+  openModal(`🧾 Ticket 1 de ${pendientes.length}`, '', [
+    { label:'Saltar', cls:'btn-secondary', fn: () => { idx++; renderTicket(); } },
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
+  renderTicket();
+}
+
+async function verificarTicket(id, accion) {
+  const obs = document.getElementById('tick-obs')?.value?.trim() || '';
+  if (accion === 'observar' && !obs) { showToast('warn','Escribí una observación'); return; }
+
+  const res = await apiFetch(`/api/fuel/${id}/verificar`, {
+    method: 'PATCH',
+    body: JSON.stringify({ accion, observacion: obs })
+  });
+  if (!res.ok) { showToast('error','Error al verificar'); return; }
+
+  const pendientes = window._ticketPendientes || [];
+  const idx = (window._ticketIdx || 0) + 1;
+  window._ticketIdx = idx;
+
+  const restantes = pendientes.length - idx;
+  showToast('ok', accion === 'aprobar' ? `✅ Aprobado · foto eliminada · ${restantes} pendientes` : `⚠ Observado · ${restantes} pendientes`);
+
+  if (idx >= pendientes.length) {
+    closeModal();
+    showToast('ok', '✅ Todos los tickets revisados');
+    renderFuel();
+  } else {
+    // Continuar con el siguiente
+    const next = pendientes[idx];
+    const total = (parseFloat(next.liters) * parseFloat(next.price_per_l)).toLocaleString('es-AR');
+    document.getElementById('modal-title').textContent = `🧾 Ticket ${idx+1} de ${pendientes.length} — ${next.vehicle_code}`;
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+            📅 ${new Date(next.logged_at).toLocaleString('es-AR')}<br>
+            🚛 ${next.vehicle_code} · 👤 ${next.driver_name||'—'}<br>
+            ⛽ ${next.liters} L × $${next.price_per_l}/L = <strong>$${total}</strong><br>
+            📍 ${next.location||'—'}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Observación (si rechazás)</label>
+            <textarea class="form-textarea" id="tick-obs" placeholder="Ej: Precio no coincide, ticket ilegible..." rows="3"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${next.id}','aprobar')">✅ Aprobar y borrar foto</button>
+            <button class="btn btn-danger" style="flex:1" onclick="verificarTicket('${next.id}','observar')">⚠ Observar</button>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">
+            Al aprobar, la foto se borra de la DB para ahorrar espacio
+          </div>
+        </div>
+        <div style="text-align:center">
+          ${next.ticket_image ? `<img src="${next.ticket_image}" style="max-width:100%;max-height:300px;border-radius:8px;object-fit:contain;border:1px solid var(--border2)">` : '<div style="padding:40px;color:var(--text3)">Sin foto</div>'}
+        </div>
+      </div>`;
   }
 }
