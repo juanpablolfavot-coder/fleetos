@@ -5336,19 +5336,17 @@ ${anomOT.anomalias?.map(a=>`  • ${a.titulo}: ${a.descripcion}`).join('\n')||' 
 Respondé en español, de forma concisa y profesional. Si no hay datos suficientes, indicalo claramente.
 Si detectás algo preocupante, mencionalo. Si todo está bien, confirmalo.`;
 
-    // Llamar a Claude via API
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    // Llamar a Claude via proxy del backend (protege la API key)
+    const resp = await apiFetch('/api/auditor/ia', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: contexto,
-        messages: [{ role: 'user', content: pregunta }]
-      })
+      body: JSON.stringify({ pregunta, contexto })
     });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Error del servidor');
+    }
     const data = await resp.json();
-    const respuesta = data.content?.[0]?.text || 'Sin respuesta';
+    const respuesta = data.respuesta || 'Sin respuesta';
 
     document.getElementById('ia-loading')?.remove();
     chat.innerHTML += `<div style="align-self:flex-start;background:var(--bg3);padding:10px 14px;border-radius:12px 12px 12px 2px;font-size:13px;max-width:85%;line-height:1.5">${respuesta.replace(/\n/g,'<br>')}</div>`;

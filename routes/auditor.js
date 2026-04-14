@@ -385,3 +385,54 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
 });
 
 module.exports = auditorRouter;
+
+// ── 7. Proxy IA — llama a Claude desde el backend (protege la API key) ──
+auditorRouter.post('/ia', authenticate, canAudit, async (req, res) => {
+  try {
+    const { pregunta, contexto } = req.body;
+    if (!pregunta) return res.status(400).json({ error: 'Pregunta requerida' });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'API key de IA no configurada. Contactar al administrador.' });
+
+    const https = require('https');
+    const body  = JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: contexto || 'Sos un auditor experto en empresas de transporte de Argentina. Respondé en español, de forma concisa y profesional.',
+      messages: [{ role: 'user', content: pregunta }]
+    });
+
+    const respuesta = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(body)
+        }
+      };
+      let data = '';
+      const r = https.request(options, resp => {
+        resp.on('data', c => data += c);
+        resp.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch(e) { reject(new Error('Respuesta inválida de la IA')); }
+        });
+      });
+      r.on('error', reject);
+      r.write(body);
+      r.end();
+    });
+
+    const texto = respuesta.content?.[0]?.text;
+    if (!texto) return res.status(500).json({ error: 'Sin respuesta de la IA' });
+    res.json({ respuesta: texto });
+  } catch(err) {
+    console.error('auditor ia:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
