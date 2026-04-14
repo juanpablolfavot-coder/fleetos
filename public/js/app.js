@@ -1385,7 +1385,7 @@ function renderFuel() {
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span ${ureaPct<20?'style="color:var(--warn)"':''}>Urea / AdBlue</span><span class="td-mono" ${ureaPct<20?'style="color:var(--warn)"':''}>${ureaLevel.toLocaleString()} / ${ureaCap.toLocaleString()} L ${ureaPct<20?'⚠':''}</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:${ureaPct<20?'var(--warn)':'var(--ok)'}"></div></div>
         </div>
-        <div style="margin-top:16px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button></div>
+        <div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button></div>
       </div>
       <div class="card">
         <div class="card-title">Consumo por unidad (últimos 30 días)</div>
@@ -1613,6 +1613,36 @@ function openFuelEntryModal() {
   ]);
 }
 
+
+async function openEditTankCapacityModal() {
+  const tanks = App.data.tanks || [];
+  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+  const ureaTank   = tanks.find(t => t.type === 'urea');
+  openModal('⚙ Editar capacidad de cisternas', `
+    <div class='form-group' style='margin-bottom:12px'>
+      <label class='form-label'>Capacidad cisterna gasoil (L)</label>
+      <input class='form-input' type='number' id='tc-gasoil' value='${gasoilTank ? gasoilTank.capacity_l : 47000}'>
+    </div>
+    <div class='form-group'>
+      <label class='form-label'>Capacidad cisterna urea (L)</label>
+      <input class='form-input' type='number' id='tc-urea' value='${ureaTank ? ureaTank.capacity_l : 2000}'>
+    </div>
+  `, [
+    { label:'Guardar', cls:'btn-primary', fn: async () => {
+      const gasoilCap = parseInt(document.getElementById('tc-gasoil').value);
+      const ureaCap   = parseInt(document.getElementById('tc-urea').value);
+      if (gasoilTank) await apiFetch(`/api/fuel/tanks/${gasoilTank.id}`, { method:'PATCH', body: JSON.stringify({ capacity_l: gasoilCap }) });
+      if (ureaTank)   await apiFetch(`/api/fuel/tanks/${ureaTank.id}`,   { method:'PATCH', body: JSON.stringify({ capacity_l: ureaCap }) });
+      // Recargar tanks
+      const r = await apiFetch('/api/fuel/tanks');
+      if (r.ok) App.data.tanks = await r.json();
+      closeModal();
+      navigate('fuel');
+      showToast('ok', 'Capacidad de cisternas actualizada');
+    }},
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
 
 const AXLE_CONFIGS = {
   tractor: [
