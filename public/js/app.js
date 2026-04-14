@@ -4094,7 +4094,7 @@ function renderWorkOrders() {
             <td class="td-mono">${(o.parts_cost||0)+(o.labor_cost||0)>0?'$'+Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString():'—'}</td>
             <td class="td-mono" style="font-size:11px">${(o.opened||'—').toString().split('T')[0]}</td>
             <td style="white-space:nowrap">
-              ${o.status!=='Cerrada'?`<button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Editar</button>`:''}
+              ${o.status!=='Cerrada'?`   <button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Editar</button>   <button class="btn btn-primary btn-sm" onclick="closeOT('${o.id||o._id}')">Cerrar OT</button> `:'<span style="color:var(--ok);font-size:12px">✓ Cerrada</span>'}
             </td>
           </tr>`).join('')}
           </tbody>
