@@ -1583,12 +1583,28 @@ async function updateFuelPlaceNote() {
     const precio = tank?.price_per_l ? parseFloat(tank.price_per_l) : null;
 
     if (ppuEl && precio && precio > 0) {
-      ppuEl.value = precio;
-      noteEl.innerHTML = `⚠ Litros se descontarán de cisterna &nbsp;·&nbsp; <strong>Precio: $${Math.round(precio).toLocaleString('es-AR')}/L</strong> (de la última compra)`;
+      // Precio fijo — no editable
+      ppuEl.value    = precio;
+      ppuEl.readOnly = true;
+      ppuEl.style.opacity    = '0.65';
+      ppuEl.style.cursor     = 'not-allowed';
+      ppuEl.style.background = 'var(--bg3)';
+      ppuEl.title            = 'Precio fijado por el abastecimiento de cisterna';
+      const ppuLabel = ppuEl.closest('.form-group')?.querySelector('.form-label');
+      if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro <span style="color:var(--ok);font-size:11px;font-weight:400">🔒 fijado por cisterna</span>';
+      noteEl.innerHTML = `⚠ Litros se descontarán de cisterna &nbsp;·&nbsp; <strong style="color:var(--ok)">$${Math.round(precio).toLocaleString('es-AR')}/L</strong>`;
     } else {
-      noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna. Ingresá el precio por litro manualmente.';
+      if (ppuEl) { ppuEl.readOnly = false; ppuEl.style.opacity = '1'; ppuEl.style.cursor = ''; ppuEl.style.background = ''; }
+      noteEl.textContent = '⚠ Sin precio configurado en cisterna — ingresalo manualmente o configuralo en ⚙ Editar cisternas.';
     }
   } else {
+    // Externa — desbloquear precio
+    if (ppuEl) {
+      ppuEl.readOnly = false; ppuEl.style.opacity = '1';
+      ppuEl.style.cursor = ''; ppuEl.style.background = ''; ppuEl.title = '';
+      const ppuLabel = ppuEl.closest('.form-group')?.querySelector('.form-label');
+      if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro ($)';
+    }
     noteEl.style.background  = 'rgba(99,102,241,.1)';
     noteEl.style.borderColor = 'rgba(99,102,241,.3)';
     noteEl.style.color       = 'var(--info, #60a5fa)';
