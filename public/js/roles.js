@@ -291,7 +291,7 @@ async function loadInitialData() {
   try {
     showToast('info', 'Cargando datos...');
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -299,9 +299,11 @@ async function loadInitialData() {
       apiFetch('/api/documents'),
       apiFetch('/api/config'),
       apiFetch('/api/fuel/tanks'),
+      apiFetch('/api/users'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
+    if (usersRes?.ok)       App.data.users       = await usersRes.json();
     if (workordersRes?.ok)  App.data.workOrders  = await workordersRes.json();
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
     if (stockRes?.ok)       App.data.stock       = await stockRes.json();
@@ -320,6 +322,7 @@ async function loadInitialData() {
     if (!App.data.fuelLogs)   App.data.fuelLogs   = [];
     if (!App.data.stock)      App.data.stock      = [];
     if (!App.data.documents)  App.data.documents  = [];
+    if (!App.data.users)      App.data.users      = [];
     if (!App.data.tires)      App.data.tires      = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];

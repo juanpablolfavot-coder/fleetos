@@ -880,16 +880,20 @@ async function saveNewOT() {
   const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
-  // Repuestos — filtrar nulls y sin nombre
-  const parts = (window._otParts || [])
-    .filter(p => p && p.name && p.name.trim().length >= 3)
-    .map(p => ({
-      name:      p.name.trim(),
-      qty:       parseFloat(p.qty) || 1,
-      unit:      p.unit || 'un',
-      unit_cost: parseFloat(p.unit_cost) || 0,
+  // Repuestos — leer directo del DOM
+  const parts = [];
+  document.querySelectorAll('[id^="otp-name-"]').forEach(nameEl => {
+    const idx   = nameEl.id.replace('otp-name-', '');
+    const name  = nameEl.value.trim();
+    if (!name || name.length < 2) return;
+    parts.push({
+      name,
+      qty:       parseFloat(document.getElementById('otp-qty-'  + idx)?.value) || 1,
+      unit:      document.getElementById('otp-unit-' + idx)?.value || 'un',
+      unit_cost: parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0,
       origin:    'externo'
-    }));
+    });
+  });
 
   if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
   if (!title)      { showToast('error','Ingresá un título para la OT'); return; }
@@ -4854,14 +4858,22 @@ function updateOTPartField(idx, field, val) {
 }
 
 function updateOTTotal() {
-  const parts = (window._otParts||[]).filter(Boolean);
-  const partsTotal = parts.reduce((a,p) => a + (parseFloat(p.qty)||1) * (parseFloat(p.unit_cost)||0), 0);
+  // Leer directo de los inputs del DOM
+  let partsTotal = 0;
+  document.querySelectorAll('[id^="otp-qty-"]').forEach(qtyEl => {
+    const idx   = qtyEl.id.replace('otp-qty-', '');
+    const qty   = parseFloat(qtyEl.value) || 0;
+    const cost  = parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0;
+    partsTotal += qty * cost;
+  });
   const labor = parseFloat(document.getElementById('ot-labor')?.value) || 0;
   const total = partsTotal + labor;
-  const totalEl = document.getElementById('ot-total-display');
+  const totalEl    = document.getElementById('ot-total-display');
   const partsValEl = document.getElementById('ot-parts-total-val');
-  if (totalEl) totalEl.value = '$' + Math.round(total).toLocaleString('es-AR');
+  const partsTotalDiv = document.getElementById('ot-parts-total');
+  if (totalEl)    totalEl.value = '$' + Math.round(total).toLocaleString('es-AR');
   if (partsValEl) partsValEl.textContent = '$' + Math.round(partsTotal).toLocaleString('es-AR');
+  if (partsTotalDiv && partsTotal > 0) partsTotalDiv.style.display = 'block';
 }
 
 async function syncGPSNow(btn) {
