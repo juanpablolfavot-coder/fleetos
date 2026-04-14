@@ -351,6 +351,9 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), async (req, res) => {
   try {
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ").catch(()=>{});
     const r = await query(`
       SELECT fl.id, fl.vehicle_id, fl.liters, fl.price_per_l, fl.logged_at, fl.location,
              fl.ticket_estado, fl.ticket_obs, fl.ticket_image,
