@@ -745,10 +745,40 @@ function showVehicleFicha(id, tab) {
       : `<div style="color:var(--text3);font-size:13px;padding:24px 0;text-align:center">Sin cargas de combustible registradas para esta unidad.</div>`;
   }
 
-  openModal(`${v.code} — ${v.brand} ${v.model}`, header + tabBar + `<div id="ficha-tab-content">${content}</div>`, [
+  const actions = [
     { label:'Nueva OT',   cls:'btn-primary',   fn: () => { closeModal(); openNewOTModal(v.code); } },
     { label:'Editar',     cls:'btn-secondary', fn: () => openEditVehicleModal(id) },
     { label:'Cerrar',     cls:'btn-secondary', fn: closeModal },
+  ];
+  // Solo el dueño puede dar de baja una unidad
+  if (App.user?.role === 'dueno') {
+    actions.splice(2, 0, { label:'🗑 Dar de baja', cls:'btn-danger', fn: () => confirmBajaVehiculo(id, v.code) });
+  }
+  openModal(`${v.code} — ${v.brand} ${v.model}`, header + tabBar + `<div id="ficha-tab-content">${content}</div>`, actions);
+}
+
+async function confirmBajaVehiculo(id, code) {
+  openModal('Dar de baja — ' + code, `
+    <div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+      <div style="font-weight:600;color:var(--danger);margin-bottom:8px">⚠ Esta acción es irreversible</div>
+      <div style="font-size:13px;color:var(--text3)">La unidad <strong>${code}</strong> quedará inactiva y no aparecerá más en el sistema. Sus registros históricos se conservan.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Motivo de la baja</label>
+      <input class="form-input" id="baja-motivo" placeholder="Ej: Venta, siniestro total, fin de vida útil...">
+    </div>
+  `, [
+    { label:'Confirmar baja', cls:'btn-danger', fn: async () => {
+      const motivo = document.getElementById('baja-motivo')?.value?.trim();
+      if (!motivo) { showToast('warn','Ingresá el motivo de la baja'); return; }
+      const res = await apiFetch(`/api/vehicles/${id}`, { method: 'DELETE' });
+      if (!res.ok) { showToast('error','Error al dar de baja'); return; }
+      App.data.vehicles = App.data.vehicles.filter(v => v.id !== id);
+      closeModal();
+      showToast('ok', `Unidad ${code} dada de baja`);
+      renderFleet();
+    }},
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
