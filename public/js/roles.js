@@ -241,7 +241,7 @@ function getRoleData(role) {
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Pañol / Stock',            badge:'role-stock',      modules:['stock','workorders'], canEdit:['stock'] },
     contador:              { label:'Contador / Administración',badge:'role-contador',   modules:['costs','documents','contador_panel'], canEdit:[] },
-    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs'], canEdit:[] },
+    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
   };
   return roles[role] || roles['auditor'];
 }
@@ -277,6 +277,7 @@ function bootApp() {
   loadInitialData().then(() => {
     if      (u.role === 'chofer')             navigate('chofer_panel');
     else if (u.role === 'contador')           navigate('contador_panel');
+    else if (u.role === 'auditor')            navigate('auditor_panel');
     else if (u.role === 'mecanico')           navigate('encargado_panel');
     else if (u.role === 'jefe_mantenimiento') navigate('encargado_panel');
     else if (u.role === 'gerencia')           navigate('encargado_panel');

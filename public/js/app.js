@@ -54,16 +54,16 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs' };
+  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs', auditor_panel:'Anomalías · trazabilidad · log de acciones' };
   return s[p] || '';
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, users: renderUsers, config: renderConfig };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, auditor_panel: renderAuditorPanel, users: renderUsers, config: renderConfig };
   if (fns[page]) fns[page]();
 }
 
@@ -4955,3 +4955,407 @@ document.addEventListener('DOMContentLoaded', () => {
     initLogin();
   }
 });
+
+// ════════════════════════════════════════════════════════════
+//  PANEL DEL AUDITOR — Solo lectura, IA integrada
+// ════════════════════════════════════════════════════════════
+
+async function renderAuditorPanel() {
+  const root = document.getElementById('page-auditor_panel');
+  if (!root) return;
+
+  root.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">🔍 Panel de Auditoría</h2>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Solo lectura · Acceso exclusivo al auditor</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="renderAuditorPanel()">↻ Actualizar</button>
+        <button class="btn btn-primary btn-sm" onclick="openAuditorIA()">🤖 Consultar IA</button>
+      </div>
+    </div>
+    <div id="auditor-tabs" style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border2);padding-bottom:0">
+      ${[
+        ['resumen',    '📊 Resumen'],
+        ['combustible','⛽ Anomalías combustible'],
+        ['ots',        '🔧 Anomalías OTs'],
+        ['trazabilidad','📋 Trazabilidad'],
+        ['comparativo','📈 Comparativo mensual'],
+        ['log',        '🗂 Log de acciones'],
+      ].map(([id,label]) => `
+        <button id="atab-${id}" onclick="showAuditorTab('${id}')"
+          style="padding:8px 14px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:600;color:var(--text3);border-bottom:2px solid transparent;transition:.15s;white-space:nowrap">
+          ${label}
+        </button>`).join('')}
+    </div>
+    <div id="auditor-content">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Cargando...</div>
+    </div>`;
+
+  showAuditorTab('resumen');
+}
+
+async function showAuditorTab(tab) {
+  // Resaltar tab activo
+  document.querySelectorAll('[id^="atab-"]').forEach(b => {
+    b.style.color = 'var(--text3)';
+    b.style.borderBottom = '2px solid transparent';
+  });
+  const activeBtn = document.getElementById('atab-' + tab);
+  if (activeBtn) {
+    activeBtn.style.color = 'var(--accent)';
+    activeBtn.style.borderBottom = '2px solid var(--accent)';
+  }
+
+  const content = document.getElementById('auditor-content');
+  if (!content) return;
+  content.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">
+    <div style="font-size:24px;margin-bottom:8px">⏳</div>Cargando datos...
+  </div>`;
+
+  try {
+    if (tab === 'resumen')      await renderAuditorResumen(content);
+    if (tab === 'combustible')  await renderAuditorCombustible(content);
+    if (tab === 'ots')          await renderAuditorOTs(content);
+    if (tab === 'trazabilidad') await renderAuditorTrazabilidad(content);
+    if (tab === 'comparativo')  await renderAuditorComparativo(content);
+    if (tab === 'log')          await renderAuditorLog(content);
+  } catch(e) {
+    content.innerHTML = `<div class="card" style="color:var(--danger);padding:24px">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Tab 1: Resumen ejecutivo ──────────────────────────────
+async function renderAuditorResumen(el) {
+  const now = new Date();
+  const mes = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const res = await apiFetch(`/api/auditor/resumen?mes=${mes}`);
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar resumen</div>`; return; }
+  const d = await res.json();
+
+  const flotaTotal = Object.values(d.flota).reduce((a,b)=>a+b,0);
+  const flotaOk    = d.flota.ok || 0;
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:20px">
+      <div class="kpi-card info">
+        <div class="kpi-label">💰 Costo total del mes</div>
+        <div class="kpi-value white">$${Math.round(parseFloat(d.combustible.costo)+parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">combustible + mantenimiento</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
+        <div class="kpi-label">⛽ Combustible</div>
+        <div class="kpi-value" style="color:#3b82f6">$${Math.round(parseFloat(d.combustible.costo)).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">${Math.round(parseFloat(d.combustible.litros)).toLocaleString()} L · ${d.combustible.cargas} cargas · ${d.combustible.sin_ticket} sin ticket</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">🔧 Mantenimiento</div>
+        <div class="kpi-value" style="color:#f59e0b">$${Math.round(parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">${d.ordenes.total} OTs · ${d.ordenes.abiertas} abiertas · ${d.ordenes.cerradas} cerradas</div>
+      </div>
+      <div class="kpi-card ${flotaOk < flotaTotal * 0.8 ? 'danger' : 'ok'}">
+        <div class="kpi-label">🚛 Flota operativa</div>
+        <div class="kpi-value ${flotaOk < flotaTotal * 0.8 ? 'danger' : 'ok'}">${flotaOk} / ${flotaTotal}</div>
+        <div class="kpi-trend">${d.flota.taller||0} en taller · ${d.flota.detenida||0} detenidas</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div class="card-title">📋 Checklists del mes</div>
+        <div style="font-size:32px;font-weight:700;color:var(--text)">${d.checklists.total}</div>
+        <div style="font-size:13px;color:${d.checklists.con_problema > 0 ? 'var(--danger)' : 'var(--ok)'}">
+          ${d.checklists.con_problema > 0 ? `⚠ ${d.checklists.con_problema} con problemas reportados` : '✓ Sin problemas reportados'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">👥 Usuarios activos</div>
+        <div style="font-size:32px;font-weight:700;color:var(--text)">${d.usuarios_activos}</div>
+        <div style="font-size:13px;color:var(--text3)">usuarios con actividad en el mes</div>
+      </div>
+    </div>`;
+}
+
+// ── Tab 2: Anomalías combustible ─────────────────────────
+async function renderAuditorCombustible(el) {
+  const res = await apiFetch('/api/auditor/anomalias-combustible');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
+  const d = await res.json();
+
+  if (d.total_anomalias === 0) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">✅</div>
+      <div style="font-weight:600;color:var(--ok)">Sin anomalías detectadas</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">No se encontraron irregularidades en las cargas de combustible</div>
+    </div>`; return;
+  }
+
+  el.innerHTML = d.anomalias.map(a => `
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--${a.severidad==='alta'?'danger':'warn'})">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:20px">${a.severidad==='alta'?'🔴':'🟡'}</span>
+        <div>
+          <div style="font-weight:700;font-size:14px">${a.titulo}</div>
+          <div style="font-size:12px;color:var(--text3)">${a.descripcion}</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr>${Object.keys(a.registros[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
+          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${Object.values(r).map(v=>`<td>${v||'—'}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+      ${a.registros.length > 10 ? `<div style="font-size:11px;color:var(--text3);margin-top:8px;padding:4px">... y ${a.registros.length-10} más</div>` : ''}
+    </div>`).join('');
+}
+
+// ── Tab 3: Anomalías OTs ──────────────────────────────────
+async function renderAuditorOTs(el) {
+  const res = await apiFetch('/api/auditor/anomalias-ots');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
+  const d = await res.json();
+
+  if (d.total_anomalias === 0) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">✅</div>
+      <div style="font-weight:600;color:var(--ok)">Sin anomalías en OTs</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">No se detectaron irregularidades en órdenes de trabajo. A medida que haya más historial, el análisis será más preciso.</div>
+    </div>`; return;
+  }
+
+  el.innerHTML = d.anomalias.map(a => `
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--${a.severidad==='alta'?'danger':'warn'})">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:20px">${a.severidad==='alta'?'🔴':'🟡'}</span>
+        <div>
+          <div style="font-weight:700;font-size:14px">${a.titulo}</div>
+          <div style="font-size:12px;color:var(--text3)">${a.descripcion}</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr>${Object.keys(a.registros[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
+          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${Object.values(r).map(v=>`<td class="td-mono">${typeof v === 'number' ? '$'+Math.round(v).toLocaleString('es-AR') : (v||'—')}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`).join('');
+}
+
+// ── Tab 4: Trazabilidad por unidad ───────────────────────
+async function renderAuditorTrazabilidad(el) {
+  const vehicleOpts = (App.data.vehicles||[]).map(v =>
+    `<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Seleccionar unidad</div>
+      <div style="display:flex;gap:8px">
+        <select class="form-select" id="traz-vehicle" style="max-width:300px">${vehicleOpts}</select>
+        <button class="btn btn-primary" onclick="loadAuditorTrazabilidad()">Ver trazabilidad completa</button>
+      </div>
+    </div>
+    <div id="traz-result"></div>`;
+}
+
+async function loadAuditorTrazabilidad() {
+  const id = document.getElementById('traz-vehicle')?.value;
+  if (!id) return;
+  const el = document.getElementById('traz-result');
+  el.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text3)">Cargando...</div>';
+
+  const res = await apiFetch(`/api/auditor/trazabilidad/${id}`);
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
+  const d = await res.json();
+
+  const costTotal = d.resumen.costo_combustible + d.resumen.costo_mantenimiento;
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card info"><div class="kpi-label">Costo total histórico</div><div class="kpi-value white">$${Math.round(costTotal).toLocaleString('es-AR')}</div></div>
+      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)"><div class="kpi-label">Cargas combustible</div><div class="kpi-value" style="color:#3b82f6">${d.resumen.total_cargas}</div></div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)"><div class="kpi-label">Órdenes de trabajo</div><div class="kpi-value" style="color:#f59e0b">${d.resumen.total_ots}</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Checklists</div><div class="kpi-value ok">${d.resumen.total_checklists}</div></div>
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Línea de tiempo completa — ${d.timeline.length} eventos</div>
+      </div>
+      <div class="table-wrap" style="max-height:500px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Usuario</th><th>Monto</th></tr></thead>
+          <tbody>${d.timeline.map(e => {
+            const iconos = { combustible:'⛽', ot_apertura:'🔧', ot_cierre:'✅', checklist:'📋' };
+            const colores = { combustible:'#3b82f6', ot_apertura:'#f59e0b', ot_cierre:'#22c55e', checklist:'#94a3b8' };
+            return `<tr>
+              <td class="td-mono" style="font-size:11px">${new Date(e.fecha).toLocaleString('es-AR')}</td>
+              <td><span style="color:${colores[e.tipo]||'var(--text3)'};">${iconos[e.tipo]||'•'} ${e.tipo.replace(/_/g,' ')}</span></td>
+              <td style="font-size:12px">${e.detalle}</td>
+              <td style="font-size:12px;color:var(--text3)">${e.usuario||'—'}</td>
+              <td class="td-mono" style="font-size:12px;color:${e.monto>0?'var(--danger)':'var(--text3)'}">${e.monto>0?'$'+Math.round(e.monto).toLocaleString('es-AR'):'—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ── Tab 5: Comparativo mensual ────────────────────────────
+async function renderAuditorComparativo(el) {
+  const res = await apiFetch('/api/auditor/comparativo');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
+  const d = await res.json();
+
+  const hayDatos = d.meses.some(m => m.total > 0);
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px;padding:0">
+      <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Comparativo últimos 6 meses</div>
+      </div>
+      ${!hayDatos ? `<div style="padding:32px;text-align:center;color:var(--text3)">Sin datos suficientes aún — se completará a medida que se operen los meses</div>` : `
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Período</th>
+            <th style="color:#3b82f6">Combustible</th>
+            <th style="color:#3b82f6">Litros</th>
+            <th style="color:#f59e0b">Mantenimiento</th>
+            <th style="color:#f59e0b">OTs</th>
+            <th style="font-weight:700">Total</th>
+            <th>Var. vs anterior</th>
+          </tr></thead>
+          <tbody>${d.meses.map((m, i) => {
+            const prev = i > 0 ? d.meses[i-1].total : null;
+            const varPct = prev && prev > 0 ? ((m.total - prev) / prev * 100).toFixed(1) : null;
+            const varColor = varPct === null ? 'var(--text3)' : parseFloat(varPct) > 10 ? 'var(--danger)' : parseFloat(varPct) > 0 ? 'var(--warn)' : 'var(--ok)';
+            return `<tr>
+              <td class="td-mono" style="font-weight:600">${m.label.toUpperCase()}</td>
+              <td class="td-mono" style="color:#3b82f6">${m.costo_combustible>0?'$'+Math.round(m.costo_combustible).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${m.litros>0?Math.round(m.litros).toLocaleString()+' L':'—'}</td>
+              <td class="td-mono" style="color:#f59e0b">${m.costo_mantenimiento>0?'$'+Math.round(m.costo_mantenimiento).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono">${m.ots||'—'}</td>
+              <td class="td-mono" style="font-weight:700">${m.total>0?'$'+Math.round(m.total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:${varColor}">${varPct !== null ? (parseFloat(varPct)>0?'+':'')+varPct+'%' : '—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`}
+    </div>`;
+}
+
+// ── Tab 6: Log de acciones ────────────────────────────────
+async function renderAuditorLog(el) {
+  const res = await apiFetch('/api/auditor/log-acciones?limit=100');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
+  const d = await res.json();
+
+  if (d.nota) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:32px">
+      <div style="font-size:24px;margin-bottom:12px">🗂</div>
+      <div style="font-weight:600">${d.nota}</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">Las acciones críticas (crear/cerrar OTs, bajas de stock, dar de baja vehículos) quedan registradas con usuario y timestamp.</div>
+    </div>`; return;
+  }
+
+  el.innerHTML = `
+    <div class="card" style="padding:0">
+      <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Log de acciones — últimas ${d.log.length}</div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Tabla</th><th>Registro</th></tr></thead>
+          <tbody>${d.log.map(l=>`<tr>
+            <td class="td-mono">${new Date(l.created_at).toLocaleString('es-AR')}</td>
+            <td>${l.user_name||'—'}</td>
+            <td><span class="badge role-${l.user_role}">${l.user_role||'—'}</span></td>
+            <td style="color:${l.action==='DELETE'||l.action==='DEACTIVATE'?'var(--danger)':l.action==='CREATE'?'var(--ok)':'var(--text)'}">${l.action}</td>
+            <td class="td-mono">${l.table_name||'—'}</td>
+            <td class="td-mono" style="color:var(--text3)">${l.record_id?.slice(0,8)||'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ── Asistente IA del auditor ──────────────────────────────
+function openAuditorIA() {
+  openModal('🤖 Asistente IA — Auditoría', `
+    <div style="background:rgba(37,99,235,.08);border:1px solid rgba(37,99,235,.2);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:12px;color:var(--text3)">
+      Consultá al asistente sobre cualquier aspecto de la operación. Tiene acceso a todos los datos del sistema.
+    </div>
+    <div id="ia-chat" style="min-height:200px;max-height:350px;overflow-y:auto;margin-bottom:12px;display:flex;flex-direction:column;gap:8px"></div>
+    <div style="display:flex;gap:8px">
+      <input class="form-input" id="ia-input" placeholder="Ej: ¿Hay alguna unidad con consumo inusual este mes?" style="flex:1"
+        onkeydown="if(event.key==='Enter'){sendAuditorIA();}">
+      <button class="btn btn-primary" onclick="sendAuditorIA()">Enviar</button>
+    </div>
+  `, [
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+async function sendAuditorIA() {
+  const input  = document.getElementById('ia-input');
+  const chat   = document.getElementById('ia-chat');
+  const pregunta = (input?.value || '').trim();
+  if (!pregunta) return;
+
+  // Mostrar mensaje del usuario
+  chat.innerHTML += `<div style="align-self:flex-end;background:var(--accent);color:white;padding:8px 12px;border-radius:12px 12px 2px 12px;font-size:13px;max-width:80%">${pregunta}</div>`;
+  input.value = '';
+  chat.scrollTop = chat.scrollHeight;
+
+  // Indicador de carga
+  chat.innerHTML += `<div id="ia-loading" style="align-self:flex-start;background:var(--bg3);padding:8px 12px;border-radius:12px 12px 12px 2px;font-size:13px;color:var(--text3)">⏳ Analizando...</div>`;
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    // Recopilar contexto del sistema para la IA
+    const [resumen, anomFuel, anomOT, comparativo] = await Promise.all([
+      apiFetch('/api/auditor/resumen').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/auditor/anomalias-combustible').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/auditor/anomalias-ots').then(r=>r.json()).catch(()=>({})),
+      apiFetch('/api/auditor/comparativo').then(r=>r.json()).catch(()=>({})),
+    ]);
+
+    const contexto = `
+Sos un auditor experto en empresas de transporte de cargas de Argentina.
+Tenés acceso a los datos en tiempo real del sistema FleetOS de Expreso Biletta.
+
+DATOS ACTUALES DEL SISTEMA:
+- Flota: ${JSON.stringify(resumen.flota||{})}
+- Combustible del mes: ${JSON.stringify(resumen.combustible||{})}
+- OTs del mes: ${JSON.stringify(resumen.ordenes||{})}
+- Anomalías combustible detectadas: ${anomFuel.total_anomalias||0}
+${anomFuel.anomalias?.map(a=>`  • ${a.titulo}: ${a.descripcion}`).join('\n')||'  • Ninguna'}
+- Anomalías OTs detectadas: ${anomOT.total_anomalias||0}
+${anomOT.anomalias?.map(a=>`  • ${a.titulo}: ${a.descripcion}`).join('\n')||'  • Ninguna'}
+- Comparativo últimos 6 meses: ${JSON.stringify(comparativo.meses?.map(m=>({periodo:m.periodo,total:m.total,combustible:m.costo_combustible,mantenimiento:m.costo_mantenimiento}))||[])}
+
+Respondé en español, de forma concisa y profesional. Si no hay datos suficientes, indicalo claramente.
+Si detectás algo preocupante, mencionalo. Si todo está bien, confirmalo.`;
+
+    // Llamar a Claude via API
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        system: contexto,
+        messages: [{ role: 'user', content: pregunta }]
+      })
+    });
+    const data = await resp.json();
+    const respuesta = data.content?.[0]?.text || 'Sin respuesta';
+
+    document.getElementById('ia-loading')?.remove();
+    chat.innerHTML += `<div style="align-self:flex-start;background:var(--bg3);padding:10px 14px;border-radius:12px 12px 12px 2px;font-size:13px;max-width:85%;line-height:1.5">${respuesta.replace(/\n/g,'<br>')}</div>`;
+    chat.scrollTop = chat.scrollHeight;
+
+  } catch(e) {
+    document.getElementById('ia-loading')?.remove();
+    chat.innerHTML += `<div style="align-self:flex-start;background:rgba(239,68,68,.1);color:var(--danger);padding:8px 12px;border-radius:12px;font-size:12px">Error al consultar la IA: ${e.message}</div>`;
+  }
+}
