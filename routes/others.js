@@ -111,6 +111,14 @@ docRouter.post('/',authenticate,requireRole('dueno','gerencia','jefe_mantenimien
   res.status(201).json(r.rows[0]);}catch(err){res.status(500).json({error:'Error documento'});}
 });
 
+docRouter.put('/:id',authenticate,requireRole('dueno','gerencia','jefe_mantenimiento','contador'),validateUUID('id'),async(req,res)=>{
+  try{const{expiry_date,reference,notes,issue_date}=req.body;
+  if(!expiry_date) return res.status(400).json({error:'expiry_date requerido'});
+  const r=await query('UPDATE documents SET expiry_date=$1,reference=$2,notes=$3,updated_at=NOW() WHERE id=$4 RETURNING *',[expiry_date,reference||null,notes||null,req.params.id]);
+  if(!r.rows[0]) return res.status(404).json({error:'Documento no encontrado'});
+  res.json(r.rows[0]);}catch(err){res.status(500).json({error:'Error actualizar documento'});}
+});
+
 // ======= USUARIOS =======
 userRouter.get('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=>{
   try{res.json((await query('SELECT id,name,email,role,vehicle_code,active,last_login FROM users ORDER BY name')).rows);}catch(err){res.status(500).json({error:'Error usuarios'});}

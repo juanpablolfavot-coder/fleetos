@@ -934,23 +934,30 @@ function openEditOTModal(id) {
   ]);
 }
 
-function saveEditOT(id) {
+async function saveEditOT(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
-  ot.vehicle    = document.getElementById('eo-vehicle').value  || ot.vehicle;
-  ot.type       = document.getElementById('eo-type').value;
-  ot.priority   = document.getElementById('eo-priority').value;
-  ot.status     = document.getElementById('eo-status').value;
-  ot.mechanic   = document.getElementById('eo-mech').value     || ot.mechanic;
-  ot.desc       = document.getElementById('eo-desc').value     || ot.desc;
-  ot.parts_cost = parseInt(document.getElementById('eo-parts').value) || ot.parts_cost;
-  ot.labor_cost = parseInt(document.getElementById('eo-labor').value) || ot.labor_cost;
+  const status    = document.getElementById('eo-status')?.value   || ot.status;
+  const mechanic  = document.getElementById('eo-mechanic')?.value || '';
+  const desc      = document.getElementById('eo-desc')?.value     || ot.desc;
+  const priority  = document.getElementById('eo-priority')?.value || ot.priority;
+  const labor     = parseFloat(document.getElementById('eo-labor')?.value) || 0;
+
+  // Buscar UUID real del WO
+  const woUUID = ot._uuid || ot.id;
+  const res = await apiFetch(`/api/workorders/${woUUID}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, priority })
+  });
+  if (!res.ok) { showToast('error', 'Error al actualizar OT'); return; }
+
+  ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor;
   closeModal();
-  renderWorkOrders();
   showToast('ok', `${id} actualizada correctamente`);
+  renderWorkOrders();
 }
 
-// ── CERRAR OT con confirmación ──
+
 function openCloseOTModal(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
@@ -1124,37 +1131,39 @@ function removeCloseOTPart(otId, i) {
   if (ot?.closeParts) { ot.closeParts.splice(i,1); renderCloseOTPartsList(otId); }
 }
 
-function closeOTConfirmed(id) {
+async function closeOTConfirmed(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
+  const causa  = document.getElementById('cl-causa')?.value  || '—';
+  const labor  = parseFloat(document.getElementById('cl-labor')?.value) || 0;
 
-  // Descontar del stock los repuestos del cierre
+  // Descontar repuestos del modal
+  const parts = [];
   let descuentos = 0;
-  (ot.closeParts||[]).filter(p=>p.origin==='stock'&&p.stockId).forEach(p=>{
-    const item = App.data.stock.find(s=>s.id===p.stockId);
-    if (item && item.qty >= (p.qty||1)) {
-      item.qty -= (p.qty||1);
+  document.querySelectorAll('.cl-part-row').forEach(row => {
+    const stockId = row.dataset.stockId;
+    const qty     = parseFloat(row.dataset.qty) || 0;
+    const name    = row.dataset.name || '';
+    const cost    = parseFloat(row.dataset.cost) || 0;
+    if (stockId && qty > 0) {
+      parts.push({ stock_id: stockId, name, qty, unit_cost: cost, origin: 'stock' });
       descuentos++;
     }
   });
 
-  // Combinar partes
-  if ((ot.closeParts||[]).length > 0) {
-    ot.parts      = [...(ot.parts||[]), ...ot.closeParts];
-    const closing = ot.closeParts.reduce((a,b)=>a+(b.cost||0)*(b.qty||1),0);
-    ot.parts_cost = (ot.parts_cost||0) + closing;
-  }
+  const woUUID = ot._uuid || ot.id;
+  const res = await apiFetch(`/api/workorders/${woUUID}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ root_cause: causa, labor_cost: labor, close_parts: parts })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al cerrar OT'); return; }
 
-  ot.status     = 'Cerrada';
-  ot.labor_cost = parseInt(document.getElementById('cl-labor').value)||ot.labor_cost||0;
-  ot.causa_raiz = document.getElementById('cl-causa').value || '—';
-  ot.closed     = new Date().toISOString().slice(0,16).replace('T',' ');
-  delete ot.closeParts;
-
+  ot.status = 'Cerrada'; ot.labor_cost = labor;
   closeModal();
-  renderWorkOrders();
   showToast('ok', `${id} cerrada${descuentos>0?' · '+descuentos+' ítems descontados del stock':''}`);
+  renderWorkOrders();
 }
+
 
 function closeOT(id) { openCloseOTModal(id); }
 
@@ -1929,49 +1938,36 @@ function onTireDragLeave(event) {
   event.currentTarget.classList.remove('drag-over');
 }
 
-function onTireDrop(event, toPos, vehicleCode) {
+async function onTireDrop(event, toPos, vehicleCode) {
   event.preventDefault();
-  event.currentTarget.classList.remove('drag-over');
-  // restaurar opacidad
-  document.querySelectorAll('.tire-slot').forEach(el => el.style.opacity = '');
-
   if (!_dragSerial) return;
   if (_dragFromPos === toPos) { _dragSerial = null; _dragFromPos = null; return; }
-
   const draggedTire = App.data.tires.find(t=>t.serial===_dragSerial);
   if (!draggedTire) return;
-
   const targetTire  = App.data.tires.find(t=>t.vehicle===vehicleCode && t.pos===toPos);
   const vehicle     = App.data.vehicles.find(v=>v.code===vehicleCode);
-  const km          = vehicle?.km || 0;
-  const now         = new Date().toISOString().split('T')[0];
-  const user        = App.currentUser?.name || 'Sistema';
 
   if (targetTire) {
-    // Permuta: intercambio de posiciones
-    const fromPos       = draggedTire.pos;
-    draggedTire.pos     = toPos;
-    targetTire.pos      = fromPos;
-    draggedTire.vehicle = vehicleCode;
-    App.data.tireHistory.unshift({ date:now, serial:draggedTire.serial, fromPos, toPos,         vehicle:vehicleCode, km, type:'Rotación (permuta)', user, obs:`Permuta con ${targetTire.serial}` });
-    App.data.tireHistory.unshift({ date:now, serial:targetTire.serial,  fromPos:toPos, toPos:fromPos, vehicle:vehicleCode, km, type:'Rotación (permuta)', user, obs:`Permuta con ${draggedTire.serial}` });
-    showToast('ok', `Permuta: ${draggedTire.serial} ↔ ${targetTire.serial}`);
+    // Permuta — mover ambas
+    const r1 = await apiFetch(`/api/tires/${draggedTire.id}/move`, { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: toPos, type: 'Rotación (permuta)', notes: `Permuta con ${targetTire.serial}` }) });
+    const r2 = await apiFetch(`/api/tires/${targetTire.id}/move`,  { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: _dragFromPos, type: 'Rotación (permuta)', notes: `Permuta con ${draggedTire.serial}` }) });
+    if (r1.ok && r2.ok) {
+      draggedTire.pos = toPos; targetTire.pos = _dragFromPos;
+      showToast('ok', `Permuta: ${draggedTire.serial} ↔ ${targetTire.serial}`);
+    } else { showToast('error','Error al registrar permuta'); }
   } else {
-    // Mover a posición vacía
-    const fromPos       = draggedTire.pos;
-    const oldVehicle    = draggedTire.vehicle;
-    draggedTire.pos     = toPos;
-    draggedTire.vehicle = vehicleCode;
-    App.data.tireHistory.unshift({ date:now, serial:draggedTire.serial, fromPos, toPos, vehicle:vehicleCode, km, type:'Rotación', user, obs:`Movimiento vía drag & drop${oldVehicle!==vehicleCode?' desde unidad '+oldVehicle:''}` });
-    showToast('ok', `${draggedTire.serial}: ${fromPos} → ${toPos}`);
+    const r = await apiFetch(`/api/tires/${draggedTire.id}/move`, { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: toPos, type: 'Rotación', notes: '' }) });
+    if (r.ok) {
+      draggedTire.pos = toPos; draggedTire.vehicle = vehicleCode;
+      showToast('ok', `${draggedTire.serial}: ${_dragFromPos} → ${toPos}`);
+    } else { showToast('error','Error al registrar movimiento'); }
   }
 
   _dragSerial = null; _dragFromPos = null;
-  refreshTireMap();
-  renderTireHistory();
+  renderTires();
 }
 
-// ─────────────────────────────────────────
+
 function renderTireTableBody(vehicleCode) {
   const tbody = document.getElementById('tire-table-body');
   if (!tbody) return;
@@ -2080,41 +2076,28 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
 // Alias para el botón "+ Montar cubierta"
 function openMountTireModal() { openMountFromStockModal('', getSelectedVehicle(), ''); }
 
-function saveMountTire(vehicleCode) {
-  const serial = document.getElementById('ms-serial').value;
-  const pos    = document.getElementById('ms-pos').value;
-  const km     = parseInt(document.getElementById('ms-km').value) || 0;
-  const date   = document.getElementById('ms-date').value;
-  const obs    = document.getElementById('ms-obs').value || 'Montaje desde stock';
-  const user   = App.currentUser?.name || 'Sistema';
-
+async function saveMountTire(vehicleCode) {
+  const serial  = document.getElementById('mt-serial')?.value || '';
+  const pos     = document.getElementById('mt-pos')?.value    || '';
+  const obs     = (document.getElementById('ms-obs')?.value   || '').trim();
   if (!serial) { showToast('warn','Seleccioná una cubierta del stock'); return; }
   if (!pos)    { showToast('warn','Seleccioná la posición de montaje');  return; }
-
   const tire = App.data.tires.find(t=>t.serial===serial);
   if (!tire)   { showToast('warn','Cubierta no encontrada');             return; }
 
-  // Si hay cubierta ocupando esa posición, desmontar primero
-  const existing = App.data.tires.find(t=>t.vehicle===vehicleCode && t.pos===pos);
-  if (existing) {
-    existing.vehicle = 'STOCK';
-    existing.pos     = 'Stock';
-    App.data.tireHistory.unshift({ date, serial:existing.serial, fromPos:pos, toPos:'Stock', vehicle:vehicleCode, km, type:'Desmontaje', user, obs:'Desmontada para dar lugar a '+serial });
-    showToast('warn', `${existing.serial} desmontada y enviada al stock`);
-  }
+  const res = await apiFetch(`/api/tires/${tire.id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ to_vehicle_id: App.data.vehicles.find(v=>v.code===vehicleCode)?.id, to_position: pos, type: 'Montaje', notes: obs })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al montar cubierta'); return; }
 
-  tire.vehicle = vehicleCode;
-  tire.pos     = pos;
-  App.data.tireHistory.unshift({ date, serial, fromPos:'Stock', toPos:pos, vehicle:vehicleCode, km, type:'Montaje', user, obs });
-
+  tire.vehicle = vehicleCode; tire.pos = pos; tire.status = 'montada';
   closeModal();
-  refreshTireMap();
-  renderTireHistory();
   showToast('ok', `${serial} montada en ${vehicleCode} posición ${pos}`);
+  renderTires();
 }
 
-// ─────────────────────────────────────────
-// AGREGAR cubierta nueva al stock
+
 function openNewTireToStockModal() {
   openModal('Agregar cubierta al stock', `
     <div class="form-row">
@@ -2167,41 +2150,34 @@ function openNewTireToStockModal() {
   ]);
 }
 
-function saveNewTireToStock() {
-  const serial = document.getElementById('ns-serial').value.trim();
-  const brand  = document.getElementById('ns-brand').value.trim();
-  const depth  = parseInt(document.getElementById('ns-depth').value) || 16;
-  const km     = parseInt(document.getElementById('ns-km').value)    || 0;
-  const price  = parseInt(document.getElementById('ns-price').value) || 180000;
+async function saveNewTireToStock() {
+  const serial  = (document.getElementById('ns-serial')?.value  || '').trim();
+  const brand   = (document.getElementById('ns-brand')?.value   || '').trim();
+  const model   = (document.getElementById('ns-model')?.value   || '').trim();
+  const size    = (document.getElementById('ns-size')?.value    || '295/80R22.5').trim();
+  const depth   = parseFloat(document.getElementById('ns-depth')?.value)  || null;
+  const km      = parseInt(document.getElementById('ns-km')?.value)        || 0;
+  const price   = parseFloat(document.getElementById('ns-price')?.value)   || null;
+  const supplier= (document.getElementById('ns-supplier')?.value || '').trim();
 
   if (!serial) { showToast('warn','El número de serie es obligatorio'); return; }
   if (!brand)  { showToast('warn','La marca es obligatoria');           return; }
   if (App.data.tires.find(t=>t.serial===serial)) { showToast('warn','Ya existe una cubierta con ese número de serie'); return; }
 
-  const maxD = depth;
-  App.data.tires.push({
-    serial, pos:'Stock', vehicle:'STOCK',
-    brand,
-    size:  document.getElementById('ns-size').value  || '295/80R22.5',
-    km, depth, maxDepth:maxD,
-    status:'ok', purchase:price,
+  const res = await apiFetch('/api/tires', {
+    method: 'POST',
+    body: JSON.stringify({ serial_no: serial, brand, model, size, tread_depth: depth, purchase_price: price, supplier_name: supplier })
   });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar cubierta'); return; }
+  const t = await res.json();
 
-  App.data.tireHistory.unshift({
-    date:    new Date().toISOString().split('T')[0],
-    serial,  fromPos:'Proveedor', toPos:'Stock',
-    vehicle: 'STOCK', km: 0, type:'Ingreso stock',
-    user:    App.currentUser?.name || 'Sistema',
-    obs:     `Alta de cubierta ${document.getElementById('ns-tipo').value} — ${document.getElementById('ns-supplier').value||'sin proveedor'}`,
-  });
-
+  App.data.tires.push({ id: t.id, serial, brand, model, size, depth, km, price, pos:'Stock', vehicle:null, status:'stock' });
   closeModal();
-  renderTires(); // refrescar página completa para actualizar stock
   showToast('ok', `Cubierta ${serial} agregada al stock`);
+  renderTires();
 }
 
-// ─────────────────────────────────────────
-// DETALLE completo de cubierta con historial
+
 function openTireDetail(serial) {
   const t = App.data.tires.find(x=>x.serial===serial);
   if (!t) return;
@@ -2286,45 +2262,29 @@ function openTireDetail(serial) {
   ]);
 }
 
-function saveTireAction(serial) {
+async function saveTireAction(serial) {
   const t      = App.data.tires.find(x=>x.serial===serial);
   if (!t) return;
-  const action = document.getElementById('td-action').value;
-  const depth  = parseInt(document.getElementById('td-depth').value);
-  const obs    = document.getElementById('td-obs').value || 'Sin observaciones';
-  const now    = new Date().toISOString().split('T')[0];
-  const vehicle= App.data.vehicles.find(v=>v.code===t.vehicle);
-  const km     = vehicle?.km || 0;
-  const user   = App.currentUser?.name || 'Sistema';
+  const action = document.getElementById('ta-action')?.value || 'desmontar';
+  const obs    = (document.getElementById('ta-obs')?.value   || '').trim();
 
-  if (!isNaN(depth)) {
-    t.depth  = depth;
-    t.status = depth <= 4 ? 'danger' : depth <= 6 ? 'warn' : 'ok';
-  }
+  const typeMap = { desmontar:'Desmontaje', recapar:'Envío recapado', baja:'Baja definitiva' };
+  const toPos   = { desmontar:'Stock', recapar:'Recapado', baja:'Baja' }[action] || 'Stock';
 
-  if (action === 'stock') {
-    App.data.tireHistory.unshift({ date:now, serial, fromPos:t.pos, toPos:'Stock', vehicle:t.vehicle, km, type:'Desmontaje', user, obs });
-    t.pos = 'Stock'; t.vehicle = 'STOCK';
-    showToast('ok', `${serial} desmontada y enviada al stock`);
-  } else if (action === 'recap') {
-    App.data.tireHistory.unshift({ date:now, serial, fromPos:t.pos, toPos:'Recapado', vehicle:t.vehicle, km, type:'Envío recapado', user, obs });
-    t.pos = 'Recapado'; t.vehicle = 'RECAP';
-    showToast('ok', `${serial} enviada a recapado`);
-  } else if (action === 'baja') {
-    App.data.tireHistory.unshift({ date:now, serial, fromPos:t.pos, toPos:'Baja', vehicle:t.vehicle, km, type:'Baja definitiva', user, obs });
-    t.pos = 'Baja'; t.vehicle = 'BAJA'; t.status = 'danger';
-    showToast('warn', `${serial} dada de baja definitiva`);
-  } else {
-    App.data.tireHistory.unshift({ date:now, serial, fromPos:t.pos, toPos:t.pos, vehicle:t.vehicle, km, type:'Medición desgaste', user, obs:`Profundidad actualizada a ${depth}mm` });
-    showToast('ok', `Medición actualizada: ${depth}mm`);
-  }
+  const res = await apiFetch(`/api/tires/${t.id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ to_vehicle_id: null, to_position: toPos, type: typeMap[action], notes: obs })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar acción'); return; }
+
+  t.vehicle = null; t.pos = toPos; t.status = toPos.toLowerCase();
   closeModal();
-  refreshTireMap();
-  renderTireHistory();
+  const msgs = { desmontar:`${serial} desmontada y enviada al stock`, recapar:`${serial} enviada a recapado`, baja:`${serial} dada de baja` };
+  showToast('ok', msgs[action] || 'Acción registrada');
+  renderTires();
 }
 
-// ─────────────────────────────────────────
-// MOVIMIENTO MANUAL
+
 function openManualMoveModal() {
   const code    = getSelectedVehicle();
   const vTires  = App.data.tires.filter(t=>t.vehicle===code);
@@ -2378,29 +2338,28 @@ function openManualMoveModal() {
   ]);
 }
 
-function saveManualMove(vehicleCode) {
-  const serial  = document.getElementById('mm-serial').value;
-  const type    = document.getElementById('mm-type').value;
-  const fromPos = document.getElementById('mm-from').value.trim();
-  const toPos   = document.getElementById('mm-to').value.trim();
-  const km      = parseInt(document.getElementById('mm-km').value) || 0;
-  const date    = document.getElementById('mm-date').value;
-  const obs     = document.getElementById('mm-obs').value || '—';
-  const user    = App.currentUser?.name || 'Sistema';
-
+async function saveManualMove(vehicleCode) {
+  const serial  = document.getElementById('mm-serial')?.value || '';
+  const fromPos = (document.getElementById('mm-from')?.value  || '').trim();
+  const toPos   = (document.getElementById('mm-to')?.value    || '').trim();
+  const obs     = (document.getElementById('mm-obs')?.value   || '').trim();
   if (!fromPos || !toPos) { showToast('warn','Completá las posiciones de origen y destino'); return; }
-
   const t = App.data.tires.find(x=>x.serial===serial);
-  if (t) { t.pos = toPos; if (toPos==='Stock') t.vehicle='STOCK'; else t.vehicle=vehicleCode; }
+  if (!t) { showToast('warn','Cubierta no encontrada'); return; }
 
-  App.data.tireHistory.unshift({ date, serial, fromPos, toPos, vehicle:vehicleCode, km, type, user, obs });
+  const res = await apiFetch(`/api/tires/${t.id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ to_vehicle_id: App.data.vehicles.find(v=>v.code===vehicleCode)?.id, to_position: toPos, type: 'Rotación', notes: obs })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar movimiento'); return; }
+
+  t.pos = toPos;
   closeModal();
-  refreshTireMap();
-  renderTireHistory();
   showToast('ok', `Movimiento registrado: ${serial} ${fromPos} → ${toPos}`);
+  renderTires();
 }
 
-// ── STOCK ──
+
 function renderStock() {
   const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
   const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
@@ -2535,25 +2494,27 @@ function openStockEgresoModal(stockId) {
   ]);
 }
 
-function saveStockEgreso(stockId) {
+async function saveStockEgreso(stockId) {
   const s   = App.data.stock.find(function(x){ return x.id===stockId; });
   if (!s) return;
-  const qty = parseInt(document.getElementById('eg-qty').value) || 1;
-  const ref = document.getElementById('eg-ref').value || '—';
-  if (qty > s.qty) { showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
-  s.qty -= qty;
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
-    date:   new Date().toISOString().split('T')[0],
-    name:   s.name, unit: s.unit, qty, type: 'Egreso',
-    motivo: ref,
-    user:   (App.currentUser && App.currentUser.name) || 'Sistema',
+  const qty    = parseFloat(document.getElementById('se-qty')?.value)    || 0;
+  const reason = (document.getElementById('se-reason')?.value || '').trim();
+  if (qty <= 0)   { showToast('warn','Ingresá una cantidad'); return; }
+  if (qty > s.qty){ showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
+
+  const res = await apiFetch(`/api/stock/${stockId}/egreso`, {
+    method: 'POST',
+    body: JSON.stringify({ qty, reason: reason || 'Egreso manual' })
   });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar egreso'); return; }
+
+  s.qty -= qty;
   closeModal();
-  renderStock();
   showToast('ok', 'Egreso registrado: '+qty+' '+s.unit+' de '+s.name);
+  renderStock();
 }
 
-// ── BAJA de stock — SOLO DUEÑO / GERENCIA ──
+
 function openStockBajaModal() {
   if (!userHasRole('dueno','gerencia')) {
     showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
@@ -2628,40 +2589,35 @@ function updateBajaSummary() {
     + 'Pérdida valorizada: <strong style="color:var(--danger)">$'+(qty*s.cost).toLocaleString()+'</strong>';
 }
 
-function saveStockBaja() {
-  if (!userHasRole('dueno','gerencia')) {
-    showToast('warn','Sin permiso para realizar esta operación');
+async function saveStockBaja() {
+  const role = App.user?.role || '';
+  if (role !== 'dueno' && role !== 'gerencia') {
+    showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
     return;
   }
-  const id     = parseInt((document.getElementById('bj-id')||{}).value);
-  const qty    = parseInt((document.getElementById('bj-qty')||{}).value) || 1;
-  const motivo = (document.getElementById('bj-motivo')||{}).value || 'otro';
-  const obs    = ((document.getElementById('bj-obs')||{}).value || '').trim();
+  const id     = document.getElementById('sb-item')?.value;
+  const qty    = parseFloat(document.getElementById('sb-qty')?.value)   || 0;
+  const obs    = (document.getElementById('sb-obs')?.value   || '').trim();
+  const motivo = document.getElementById('sb-motive')?.value || 'otro';
   const s      = App.data.stock.find(function(x){ return x.id===id; });
-
   if (!id)         { showToast('warn','Seleccioná un ítem'); return; }
-  if (!obs)        { showToast('warn','El detalle de la baja es obligatorio'); return; }
+  if (!obs || obs.length < 10) { showToast('warn','El motivo debe tener al menos 10 caracteres'); return; }
   if (!s)          { showToast('warn','Ítem no encontrado'); return; }
   if (qty > s.qty) { showToast('warn','Cantidad mayor al stock disponible ('+s.qty+')'); return; }
 
-  s.qty -= qty;
-
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
-    date:   new Date().toISOString().split('T')[0],
-    name:   s.name,
-    unit:   s.unit,
-    qty:    qty,
-    type:   'Baja',
-    motivo: '['+motivo.toUpperCase()+'] '+obs,
-    user:   (App.currentUser && App.currentUser.name) || 'Dueño',
+  const res = await apiFetch(`/api/stock/${id}/baja`, {
+    method: 'POST',
+    body: JSON.stringify({ qty, reason: obs, motive: motivo })
   });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar baja'); return; }
 
+  s.qty -= qty;
   closeModal();
-  renderStock();
   showToast('ok', 'Baja registrada: '+qty+' '+s.unit+' de '+s.name+' — Motivo: '+motivo);
+  renderStock();
 }
 
-// ── AJUSTE de inventario (pañolero / jefe)
+
 function openStockAjusteModal() {
   const opts = App.data.stock.map(function(s){
     return '<option value="'+s.id+'">'+s.name+' — Sistema: '+s.qty+' '+s.unit+'</option>';
@@ -2685,28 +2641,26 @@ function openStockAjusteModal() {
   ]);
 }
 
-function saveStockAjuste() {
-  const id     = parseInt((document.getElementById('aj-id')||{}).value);
-  const newQty = parseInt((document.getElementById('aj-qty')||{}).value);
-  const obs    = (document.getElementById('aj-obs')||{}).value || 'Ajuste de inventario';
+async function saveStockAjuste() {
+  const id     = document.getElementById('sa-item')?.value;
+  const newQty = parseFloat(document.getElementById('aj-qty')?.value);
+  const reason = (document.getElementById('aj-obs')?.value || '').trim();
   const s      = App.data.stock.find(function(x){ return x.id===id; });
   if (!s || isNaN(newQty)) { showToast('warn','Completá todos los campos'); return; }
-  const diff = newQty - s.qty;
-  s.qty = newQty;
-  (App.data.stockHistory || (App.data.stockHistory = [])).unshift({
-    date:   new Date().toISOString().split('T')[0],
-    name:   s.name, unit: s.unit,
-    qty:    Math.abs(diff),
-    type:   'Ajuste',
-    motivo: (diff>=0?'+':'')+diff+' '+s.unit+' · '+obs,
-    user:   (App.currentUser && App.currentUser.name) || 'Sistema',
+
+  const res = await apiFetch(`/api/stock/${id}/ajuste`, {
+    method: 'POST',
+    body: JSON.stringify({ new_qty: newQty, reason: reason || 'Recuento físico' })
   });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al ajustar'); return; }
+
+  s.qty = newQty;
   closeModal();
-  renderStock();
   showToast('ok', 'Inventario ajustado: '+s.name+' → '+newQty+' '+s.unit);
+  renderStock();
 }
 
-// ── NUEVO ítem de stock
+
 function openNewStockModal() {
   openModal('Registrar nuevo ítem de stock', ''
     + '<div class="form-row">'
@@ -2846,21 +2800,27 @@ function openRenewDocModal(idx) {
   ]);
 }
 
-function saveRenewDoc(idx) {
-  const newExpiry = document.getElementById('rn-expiry').value;
-  const newRef    = document.getElementById('rn-ref').value;
+async function saveRenewDoc(idx) {
+  const newExpiry = (document.getElementById('rn-expiry')?.value || '').trim();
+  const obs       = (document.getElementById('rn-obs')?.value    || '').trim();
+  const ref       = (document.getElementById('rn-ref')?.value    || '').trim();
   if (!newExpiry) { showToast('warn','Ingresá la nueva fecha de vencimiento'); return; }
   const d = App.data.documents[idx];
-  const days = Math.ceil((new Date(newExpiry)-new Date())/86400000);
-  d.expiry = newExpiry;
-  d.ref    = newRef || d.ref;
-  d.status = days > 30 ? 'ok' : days > 0 ? 'warn' : 'danger';
+  if (!d) return;
+
+  const res = await apiFetch(`/api/documents/${d.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ expiry_date: newExpiry, notes: obs, reference: ref })
+  });
+  if (!res.ok) { showToast('error','Error al renovar documento'); return; }
+
+  d.expiry = newExpiry; d.ref = ref; d.notes = obs;
   closeModal();
-  renderDocuments();
   showToast('ok', `${d.type} de ${d.vehicle} renovado — nuevo vencimiento: ${newExpiry}`);
+  renderDocuments();
 }
 
-// ── EDITAR documento (todos los campos) ──
+
 function openEditDocModal(idx) {
   const d = App.data.documents[idx];
   if (!d) return;
@@ -2899,23 +2859,27 @@ function openEditDocModal(idx) {
   ]);
 }
 
-function saveEditDoc(idx) {
-  const newExpiry = document.getElementById('ed-expiry').value;
+async function saveEditDoc(idx) {
+  const newExpiry = (document.getElementById('ed-expiry')?.value || '').trim();
+  const obs       = (document.getElementById('ed-obs')?.value    || '').trim();
+  const ref       = (document.getElementById('ed-ref')?.value    || '').trim();
   if (!newExpiry) { showToast('warn','La fecha de vencimiento es obligatoria'); return; }
   const d = App.data.documents[idx];
-  const days = Math.ceil((new Date(newExpiry)-new Date())/86400000);
-  d.vehicle = document.getElementById('ed-veh').value    || d.vehicle;
-  d.type    = document.getElementById('ed-type').value;
-  d.expiry  = newExpiry;
-  d.ref     = document.getElementById('ed-ref').value;
-  d.plate   = document.getElementById('ed-plate').value  || d.plate;
-  d.status  = days > 30 ? 'ok' : days > 0 ? 'warn' : 'danger';
+  if (!d) return;
+
+  const res = await apiFetch(`/api/documents/${d.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ expiry_date: newExpiry, notes: obs, reference: ref })
+  });
+  if (!res.ok) { showToast('error','Error al actualizar documento'); return; }
+
+  d.expiry = newExpiry; d.ref = ref; d.notes = obs;
   closeModal();
+  showToast('ok', 'Documento actualizado correctamente');
   renderDocuments();
-  showToast('ok', `Documento actualizado correctamente`);
 }
 
-// ── NUEVO documento ──
+
 function openNewDocModal() {
   openModal('Cargar nuevo documento', `
     <div class="form-row">
@@ -2951,33 +2915,41 @@ function openNewDocModal() {
   ]);
 }
 
-function saveNewDoc() {
-  const expiry = document.getElementById('nd-expiry').value;
-  const veh    = document.getElementById('nd-veh').value;
+async function saveNewDoc() {
+  const veh    = (document.getElementById('nd-veh')?.value    || '').trim();
+  const plate  = (document.getElementById('nd-plate')?.value  || '').trim();
+  const type   = (document.getElementById('nd-type')?.value   || '').trim();
+  const expiry = (document.getElementById('nd-expiry')?.value || '').trim();
+  const ref    = (document.getElementById('nd-ref')?.value    || '').trim();
+  const obs    = (document.getElementById('nd-obs')?.value    || '').trim();
   if (!veh)    { showToast('warn','Ingresá el código del vehículo'); return; }
   if (!expiry) { showToast('warn','Ingresá la fecha de vencimiento'); return; }
-  const days   = Math.ceil((new Date(expiry)-new Date())/86400000);
+
+  const v = App.data.vehicles.find(x => x.code === veh || x.plate === plate);
+  const entityId = v?.id || veh;
+
+  const res = await apiFetch('/api/documents', {
+    method: 'POST',
+    body: JSON.stringify({
+      entity_type: 'vehicle', entity_id: entityId,
+      doc_type: type, reference: ref,
+      expiry_date: expiry, notes: obs
+    })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al cargar documento'); return; }
+  const doc = await res.json();
+
   App.data.documents.push({
-    id:      App.data.documents.length + 1,
-    vehicle: veh,
-    plate:   document.getElementById('nd-plate').value || '—',
-    type:    document.getElementById('nd-type').value,
-    expiry,
-    ref:     document.getElementById('nd-ref').value || '—',
-    status:  days > 30 ? 'ok' : days > 0 ? 'warn' : 'danger',
-    file:    '—'
+    id: doc.id, vehicle: veh, plate: plate||v?.plate||'—',
+    type, expiry, ref, notes: obs,
+    status: new Date(expiry) < new Date() ? 'danger' : 'ok'
   });
   closeModal();
-  renderDocuments();
   showToast('ok', 'Documento cargado correctamente');
+  renderDocuments();
 }
 
-// ── COSTOS ──
-// ══════════════════════════════════════════
-//  MÓDULO DE COSTOS — Interactivo con drill-down
-// ══════════════════════════════════════════
 
-// Datos de costo detallados por unidad (simulados pero realistas)
 function getCostDetail(vehicleCode) {
   const v = App.data.vehicles.find(x => x.code === vehicleCode);
   if (!v) return null;
