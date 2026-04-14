@@ -144,6 +144,17 @@ router.post('/', authenticate, async (req, res) => {
           [p.stock_id, p.qty, `OT ${code}`, woId, req.user.id]
         );
       }
+      // Repuesto externo: validar que tenga nombre y precio razonable
+      if (p.origin === 'externo' || !p.stock_id) {
+        if (!p.name || p.name.trim().length < 3) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Los repuestos externos deben tener una descripción de al menos 3 caracteres' });
+        }
+        if ((p.unit_cost||p.cost||0) > 10000000) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: `Precio unitario fuera de rango para: ${p.name}. Máximo $10.000.000 por unidad.` });
+        }
+      }
       const inserted = await client.query(
         `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING subtotal`,
@@ -171,6 +182,12 @@ router.post('/', authenticate, async (req, res) => {
 router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'), validateUUID('id'), async (req, res) => {
   try {
     const { status, mechanic_id, description, labor_cost, priority } = req.body;
+    // Verificar que la OT no esté cerrada
+    const check = await query('SELECT status FROM work_orders WHERE id=$1', [req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
+    if (check.rows[0].status === 'Cerrada' && req.user.role !== 'dueno') {
+      return res.status(409).json({ error: 'No se puede editar una OT cerrada. Solo el dueño puede modificarla.' });
+    }
     const result = await query(
       `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=$4, priority=$5
        WHERE id = $6 RETURNING *`,
@@ -188,6 +205,10 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
   const client = await require('../db/pool').pool.connect();
   try {
     const { root_cause, labor_cost, close_parts = [] } = req.body;
+    // Solo dueño/gerencia/jefe puede cargar costo de mano de obra
+    if (labor_cost > 0 && req.user.role === 'mecanico') {
+      return res.status(403).json({ error: 'El mecánico no puede cargar el costo de mano de obra. Debe ser aprobado por el jefe de mantenimiento.' });
+    }
     await client.query('BEGIN');
 
     const wo = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [req.params.id]);

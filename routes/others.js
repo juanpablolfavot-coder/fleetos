@@ -34,6 +34,22 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
   try {
     const { vehicle_id, tank_id, fuel_type, liters, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
     if (!vehicle_id || !liters || !price_per_l) return res.status(400).json({ error: 'vehicle_id, liters y price_per_l requeridos' });
+    // Chofer solo puede cargar a su propia unidad asignada
+    if (req.user.role === 'chofer') {
+      const veh = await client.query('SELECT code FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
+      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+      if (veh.rows[0].code !== req.user.vehicle_code) {
+        return res.status(403).json({ error: 'Solo podés cargar combustible a tu unidad asignada (' + (req.user.vehicle_code||'sin asignar') + ')' });
+      }
+    }
+    // Control de duplicados: misma unidad en los últimos 10 minutos
+    const dup = await client.query(
+      "SELECT id FROM fuel_logs WHERE vehicle_id=$1 AND driver_id=$2 AND logged_at > NOW() - INTERVAL '10 minutes'",
+      [vehicle_id, req.user.id]
+    );
+    if (dup.rows.length > 0) {
+      return res.status(409).json({ error: 'Ya registraste una carga para esta unidad hace menos de 10 minutos. Si es correcta, esperá unos minutos e intentá de nuevo.' });
+    }
     // Validar ticket_image si viene — debe ser JPG o PNG en base64, máx 5MB
     if (ticket_image) {
       const validTypes = ['data:image/jpeg','data:image/jpg','data:image/png','data:image/webp'];

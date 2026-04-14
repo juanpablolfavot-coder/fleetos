@@ -1066,10 +1066,11 @@ function openCloseOTModal(id) {
       <textarea class="form-textarea" placeholder="Describí qué se encontró y cómo se resolvió..." id="cl-causa"></textarea>
     </div>
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Costo mano de obra ($)</label>
-        <input class="form-input" type="number" id="cl-labor" value="${ot.labor_cost||0}">
-      </div>
+      ${(App.user?.role === 'mecanico') ?
+        '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn)">El costo de mano de obra debe ser cargado por el Jefe de Mantenimiento.</div>'
+        : '<div class="form-group"><label class="form-label">Costo mano de obra ($)</label><input class="form-input" type="number" id="cl-labor" value="${ot.labor_cost||0}"></div>'
+      }
+      <div style="display:none>
       <div class="form-group">
         <label class="form-label">Total repuestos (acumulado)</label>
         <input class="form-input" id="cl-parts-total" readonly style="background:var(--bg4);color:var(--text3)" value="$${((ot.parts||[]).reduce((a,b)=>a+(b.cost||0)*(b.qty||1),0)).toLocaleString()}">
