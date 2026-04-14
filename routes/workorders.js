@@ -237,4 +237,20 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
   }
 });
 
+// DELETE /api/workorders/preventivas-hoy — borrar OTs preventivas creadas hoy (solo dueño)
+router.delete('/preventivas-hoy', authenticate, requireRole('dueno'), async (req, res) => {
+  try {
+    const r = await query(
+      `DELETE FROM work_orders 
+       WHERE type = 'Preventivo' 
+       AND DATE(opened_at) = CURRENT_DATE
+       AND status != 'Cerrada'
+       RETURNING code`
+    );
+    res.json({ deleted: r.rowCount, codes: r.rows.map(x=>x.code) });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
