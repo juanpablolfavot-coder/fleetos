@@ -873,28 +873,46 @@ async function saveEditVehicle(id) {
 }
 
 async function saveNewOT() {
-  const vehicle_id= document.getElementById('ot-vehicle')?.value || '';
-  const title     = (document.getElementById('ot-title')?.value || document.getElementById('ot-type')?.value || 'Nueva OT').trim();
-  const priority  = document.getElementById('ot-priority')?.value || 'media';
-  const assigned  = (document.getElementById('ot-assigned')?.value || '').trim();
-  const due_date  = document.getElementById('ot-due')?.value || null;
-  const notes     = (document.getElementById('ot-notes')?.value || '').trim();
+  const vehicle_id = document.getElementById('ot-vehicle')?.value || '';
+  const title      = (document.getElementById('ot-title')?.value || '').trim();
+  const priority   = document.getElementById('ot-priority')?.value || 'Normal';
+  const mechanic_id = document.getElementById('ot-mechanic')?.value || null;
+  const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
+  const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
-  // Partes/repuestos del formulario
-  const parts = typeof _otParts !== 'undefined' ? _otParts : [];
-  const labor_cost = parseInt(document.getElementById('ot-labor')?.value) || 0;
+  // Repuestos — filtrar nulls y sin nombre
+  const parts = (window._otParts || [])
+    .filter(p => p && p.name && p.name.trim().length >= 3)
+    .map(p => ({
+      name:      p.name.trim(),
+      qty:       parseFloat(p.qty) || 1,
+      unit:      p.unit || 'un',
+      unit_cost: parseFloat(p.unit_cost) || 0,
+      origin:    'externo'
+    }));
 
   if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
   if (!title)      { showToast('error','Ingresá un título para la OT'); return; }
 
   const res = await apiFetch('/api/workorders', {
     method: 'POST',
-    body: JSON.stringify({ vehicle_id, description: title, type: document.getElementById('ot-type')?.value||'Correctivo', priority: priority||'Normal', mechanic_id: null, parts: parts||[], labor_cost: labor_cost||0 })
+    body: JSON.stringify({
+      vehicle_id,
+      description: title + (notes ? '\n' + notes : ''),
+      type:        document.getElementById('ot-type')?.value || 'Correctivo',
+      priority,
+      mechanic_id: mechanic_id || null,
+      parts,
+      labor_cost
+    })
   });
-  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
+  const ot = await res.json();
 
-  closeModal(); showToast('ok','OT creada correctamente');
-  renderWorkOrders(); loadInitialData().then(()=>renderWorkOrders());
+  window._otParts = [];
+  closeModal();
+  showToast('ok', `OT ${ot.code} creada · Repuestos: $${Math.round(ot.parts_cost||0).toLocaleString()} · MO: $${Math.round(ot.labor_cost||0).toLocaleString()}`);
+  loadInitialData().then(() => renderWorkOrders());
 }
 
 
@@ -4720,8 +4738,15 @@ async function saveNewVehicle() {
 }
 
 function openNewOTModal(preselectedVehicle) {
+  window._otParts = [];
+
   const vehicleOpts = (App.data.vehicles || [])
     .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${v.code} — ${v.brand} ${v.model} (${v.plate})</option>`)
+    .join('');
+
+  const mecanicoOpts = (App.data.users || [])
+    .filter(u => ['mecanico','jefe_mantenimiento'].includes(u.role))
+    .map(u => `<option value="${u.id}">${u.name}</option>`)
     .join('');
 
   openModal('Nueva orden de trabajo', `
@@ -4753,24 +4778,90 @@ function openNewOTModal(preselectedVehicle) {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Mecánico asignado</label>
-        <input class="form-input" placeholder="Nombre del mecánico" id="ot-assigned">
+        <select class="form-select" id="ot-mechanic">
+          <option value="">— Sin asignar —</option>
+          ${mecanicoOpts}
+        </select>
       </div>
       <div class="form-group"><label class="form-label">Fecha límite</label>
         <input class="form-input" type="date" id="ot-due">
       </div>
     </div>
-    <div class="form-row">
+
+    <!-- Repuestos -->
+    <div style="margin:12px 0 8px;display:flex;align-items:center;justify-content:space-between">
+      <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos</label>
+      <button class="btn btn-secondary btn-sm" type="button" onclick="addOTPart()">+ Agregar repuesto</button>
+    </div>
+    <div id="ot-parts-list" style="margin-bottom:8px"></div>
+    <div id="ot-parts-total" style="font-size:13px;color:var(--text3);text-align:right;display:none">
+      Total repuestos: <strong id="ot-parts-total-val">$0</strong>
+    </div>
+
+    <div class="form-row" style="margin-top:10px">
       <div class="form-group"><label class="form-label">Mano de obra ($)</label>
-        <input class="form-input" type="number" placeholder="0" id="ot-labor">
+        <input class="form-input" type="number" placeholder="0" id="ot-labor" oninput="updateOTTotal()">
+      </div>
+      <div class="form-group"><label class="form-label">Costo total estimado</label>
+        <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
       </div>
     </div>
     <div class="form-group"><label class="form-label">Notas adicionales</label>
-      <textarea class="form-input" rows="3" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
+      <textarea class="form-input" rows="2" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
     </div>
   `, [
     { label: 'Crear OT', cls: 'btn-primary',   fn: saveNewOT },
     { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
   ]);
+}
+
+function addOTPart() {
+  if (!window._otParts) window._otParts = [];
+  const idx = window._otParts.length;
+  window._otParts.push({ name:'', qty:1, unit:'un', unit_cost:0, origin:'externo' });
+
+  const container = document.getElementById('ot-parts-list');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.id = 'ot-part-row-' + idx;
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 60px 60px 110px 32px;gap:6px;margin-bottom:6px;align-items:center';
+  div.innerHTML = `
+    <input class="form-input" placeholder="Descripción del repuesto" id="otp-name-${idx}"
+      oninput="updateOTPartField(${idx},'name',this.value)" style="font-size:13px">
+    <input class="form-input" type="number" value="1" min="0.01" id="otp-qty-${idx}"
+      oninput="updateOTPartField(${idx},'qty',parseFloat(this.value)||1)" style="font-size:13px;text-align:center">
+    <input class="form-input" value="un" id="otp-unit-${idx}"
+      oninput="updateOTPartField(${idx},'unit',this.value)" style="font-size:13px;text-align:center">
+    <input class="form-input" type="number" value="0" placeholder="Precio" id="otp-cost-${idx}"
+      oninput="updateOTPartField(${idx},'unit_cost',parseFloat(this.value)||0)" style="font-size:13px;text-align:right">
+    <button type="button" onclick="removeOTPart(${idx})"
+      style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:16px;padding:0 6px;height:36px">✕</button>`;
+  container.appendChild(div);
+  document.getElementById('ot-parts-total').style.display = 'block';
+  updateOTTotal();
+}
+
+function removeOTPart(idx) {
+  window._otParts[idx] = null;
+  document.getElementById('ot-part-row-' + idx)?.remove();
+  updateOTTotal();
+}
+
+function updateOTPartField(idx, field, val) {
+  if (!window._otParts[idx]) return;
+  window._otParts[idx][field] = val;
+  updateOTTotal();
+}
+
+function updateOTTotal() {
+  const parts = (window._otParts||[]).filter(Boolean);
+  const partsTotal = parts.reduce((a,p) => a + (parseFloat(p.qty)||1) * (parseFloat(p.unit_cost)||0), 0);
+  const labor = parseFloat(document.getElementById('ot-labor')?.value) || 0;
+  const total = partsTotal + labor;
+  const totalEl = document.getElementById('ot-total-display');
+  const partsValEl = document.getElementById('ot-parts-total-val');
+  if (totalEl) totalEl.value = '$' + Math.round(total).toLocaleString('es-AR');
+  if (partsValEl) partsValEl.textContent = '$' + Math.round(partsTotal).toLocaleString('es-AR');
 }
 
 async function syncGPSNow(btn) {
