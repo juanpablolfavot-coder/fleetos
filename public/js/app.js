@@ -3400,6 +3400,7 @@ function renderMaintenance() {
 
   const vencidos = plans.filter(p=>p.status==='danger').length;
   const proximos = plans.filter(p=>p.status==='warn').length;
+  window._maintenancePlans = plans; // exponer para el onclick
 
   root.innerHTML = `
     <div class="section-header" style="margin-bottom:20px">
@@ -3410,7 +3411,7 @@ function renderMaintenance() {
     </div>
     ${vencidos>0 ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--danger);display:flex;align-items:center;justify-content:space-between">
       <span>⚠ <b>${vencidos} unidad${vencidos>1?'es':''}</b> con mantenimiento vencido.</span>
-      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="plans.filter(p=>p.status==='danger').forEach(p=>createPreventiveOT(p.v.code,p.taskName))">Crear OTs preventivas</button>
+      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="(window._maintenancePlans||[]).filter(p=>p.status==='danger').forEach(p=>createPreventiveOT(p.v.code,p.taskName))">Crear OTs preventivas</button>
     </div>` : ''}
     ${proximos>0 ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn)">🔧 <b>${proximos} unidad${proximos>1?'es':''}</b> próxima${proximos>1?'s':''} a mantenimiento. Programar service.</div>` : ''}
     <div class="card" style="padding:0">
