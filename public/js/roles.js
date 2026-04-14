@@ -365,7 +365,9 @@ async function loadInitialData() {
       parts:      [],
       parts_cost: parseFloat(o.parts_cost) || 0,
       labor_cost: parseFloat(o.labor_cost) || 0,
+      closed_at:  o.closed_at || null,
       _id:        o.id,
+      _uuid:      o.id,
     }));
 
     App.data.fuelLogs = App.data.fuelLogs.map(f => ({

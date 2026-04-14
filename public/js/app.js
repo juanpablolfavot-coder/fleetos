@@ -859,7 +859,7 @@ async function saveNewOT() {
 
   const res = await apiFetch('/api/workorders', {
     method: 'POST',
-    body: JSON.stringify({ vehicle_id, description: title, type: document.getElementById('ot-type')?.value||'Correctivo', priority, mechanic_id: null, parts, labor_cost })
+    body: JSON.stringify({ vehicle_id, description: title, type: document.getElementById('ot-type')?.value||'Correctivo', priority: priority||'Normal', mechanic_id: null, parts: parts||[], labor_cost: labor_cost||0 })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
 
