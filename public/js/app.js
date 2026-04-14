@@ -1475,7 +1475,7 @@ function renderFuel() {
 }
 
 function openFuelLoadModal() {
-  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.code}">${v.code} — ${v.plate}</option>`).join('');
+  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
   openModal('Registrar carga de combustible / urea', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Unidad</label>
@@ -1551,20 +1551,36 @@ function updateFuelPlaceOpts() {
 }
 
 function updateFuelPlaceNote() {
-  const place = document.getElementById('fl-place')?.value || '';
+  const place  = document.getElementById('fl-place')?.value || '';
+  const type   = document.getElementById('fl-type')?.value  || 'diesel';
   const noteEl = document.getElementById('fl-place-note');
+  const ppuEl  = document.getElementById('fl-ppu');
   if (!noteEl) return;
   const descuenta = place.includes('Cisterna');
+
   if (descuenta) {
-    noteEl.style.background = 'rgba(245,158,11,.1)';
+    noteEl.style.background  = 'rgba(245,158,11,.1)';
     noteEl.style.borderColor = 'rgba(245,158,11,.3)';
-    noteEl.style.color = 'var(--warn)';
-    noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna al confirmar.';
+    noteEl.style.color       = 'var(--warn)';
+
+    // Autocompletar precio desde la cisterna si tiene price_per_l cargado
+    const tanks = App.data.tanks || [];
+    const tank  = type === 'urea'
+      ? tanks.find(t => t.type === 'urea')
+      : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+    const precio = tank?.price_per_l ? parseFloat(tank.price_per_l) : null;
+
+    if (ppuEl && precio && precio > 0) {
+      ppuEl.value = precio;
+      noteEl.textContent = `⚠ Los litros se descontarán de cisterna · Precio cargado automáticamente: $${precio.toLocaleString('es-AR')}/L`;
+    } else {
+      noteEl.textContent = '⚠ Los litros se descontarán del stock de cisterna al confirmar. Verificá el precio por litro.';
+    }
   } else {
-    noteEl.style.background = 'rgba(99,102,241,.1)';
+    noteEl.style.background  = 'rgba(99,102,241,.1)';
     noteEl.style.borderColor = 'rgba(99,102,241,.3)';
-    noteEl.style.color = 'var(--info, #60a5fa)';
-    noteEl.textContent = '📦 Carga externa — no descuenta del stock de cisterna. Solo registra el consumo y costo.';
+    noteEl.style.color       = 'var(--info, #60a5fa)';
+    noteEl.textContent       = '📦 Carga externa — no descuenta del stock de cisterna. Solo registra el consumo y costo.';
   }
 }
 
@@ -1697,13 +1713,15 @@ async function saveFuelEntry() {
 
   const res = await apiFetch(`/api/fuel/tanks/${tank.id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ current_l: nuevoNivel })
+    body: JSON.stringify({ current_l: nuevoNivel, price_per_l: parseFloat(document.getElementById('fe-ppu')?.value) || null })
   });
 
   if (!res.ok) { showToast('error', 'Error al registrar ingreso'); return; }
 
   // Actualizar en memoria
+  const ppu = parseFloat(document.getElementById('fe-ppu')?.value) || null;
   tank.current_l = nuevoNivel;
+  if (ppu) tank.price_per_l = ppu;
   closeModal();
   showToast('ok', `✅ ${liters.toLocaleString()} L de ${type} ingresados a cisterna — nuevo nivel: ${Math.round(nuevoNivel).toLocaleString()} L`);
   renderFuel();
@@ -1714,27 +1732,44 @@ async function openEditTankCapacityModal() {
   const tanks = App.data.tanks || [];
   const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
   const ureaTank   = tanks.find(t => t.type === 'urea');
-  openModal('⚙ Editar capacidad de cisternas', `
-    <div class='form-group' style='margin-bottom:12px'>
-      <label class='form-label'>Capacidad cisterna gasoil (L)</label>
-      <input class='form-input' type='number' id='tc-gasoil' value='${gasoilTank ? gasoilTank.capacity_l : 47000}'>
+  openModal('⚙ Editar cisternas', `
+    <div style="font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px;text-transform:uppercase">🟡 Cisterna Gasoil</div>
+    <div class="form-row">
+      <div class='form-group'>
+        <label class='form-label'>Capacidad (L)</label>
+        <input class='form-input' type='number' id='tc-gasoil-cap' value='${gasoilTank ? gasoilTank.capacity_l : 47000}'>
+      </div>
+      <div class='form-group'>
+        <label class='form-label'>Precio por litro ($)</label>
+        <input class='form-input' type='number' id='tc-gasoil-price' placeholder='Ej: 1250' value='${gasoilTank?.price_per_l ? parseFloat(gasoilTank.price_per_l) : ""}'>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">Se autocompleta al cargar desde cisterna</div>
+      </div>
     </div>
-    <div class='form-group'>
-      <label class='form-label'>Capacidad cisterna urea (L)</label>
-      <input class='form-input' type='number' id='tc-urea' value='${ureaTank ? ureaTank.capacity_l : 2000}'>
+    <div style="font-size:12px;font-weight:700;color:var(--accent);margin:12px 0 10px;text-transform:uppercase">🔵 Cisterna Urea</div>
+    <div class="form-row">
+      <div class='form-group'>
+        <label class='form-label'>Capacidad (L)</label>
+        <input class='form-input' type='number' id='tc-urea-cap' value='${ureaTank ? ureaTank.capacity_l : 2000}'>
+      </div>
+      <div class='form-group'>
+        <label class='form-label'>Precio por litro ($)</label>
+        <input class='form-input' type='number' id='tc-urea-price' placeholder='Ej: 800' value='${ureaTank?.price_per_l ? parseFloat(ureaTank.price_per_l) : ""}'>
+      </div>
     </div>
   `, [
     { label:'Guardar', cls:'btn-primary', fn: async () => {
-      const gasoilCap = parseInt(document.getElementById('tc-gasoil').value);
-      const ureaCap   = parseInt(document.getElementById('tc-urea').value);
-      if (gasoilTank) await apiFetch(`/api/fuel/tanks/${gasoilTank.id}`, { method:'PATCH', body: JSON.stringify({ capacity_l: gasoilCap }) });
-      if (ureaTank)   await apiFetch(`/api/fuel/tanks/${ureaTank.id}`,   { method:'PATCH', body: JSON.stringify({ capacity_l: ureaCap }) });
+      const gasoilCap   = parseInt(document.getElementById('tc-gasoil-cap').value);
+      const gasoilPrice = parseFloat(document.getElementById('tc-gasoil-price').value) || null;
+      const ureaCap     = parseInt(document.getElementById('tc-urea-cap').value);
+      const ureaPrice   = parseFloat(document.getElementById('tc-urea-price').value) || null;
+      if (gasoilTank) await apiFetch(`/api/fuel/tanks/${gasoilTank.id}`, { method:'PATCH', body: JSON.stringify({ capacity_l: gasoilCap, price_per_l: gasoilPrice }) });
+      if (ureaTank)   await apiFetch(`/api/fuel/tanks/${ureaTank.id}`,   { method:'PATCH', body: JSON.stringify({ capacity_l: ureaCap,   price_per_l: ureaPrice }) });
       // Recargar tanks
       const r = await apiFetch('/api/fuel/tanks');
-      if (r.ok) App.data.tanks = await r.json();
+      if (r.ok) { App.data.tanks = await r.json(); }
       closeModal();
       navigate('fuel');
-      showToast('ok', 'Capacidad de cisternas actualizada');
+      showToast('ok', 'Cisternas actualizadas');
     }},
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);

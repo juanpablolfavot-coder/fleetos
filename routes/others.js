@@ -12,6 +12,13 @@ const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 const bcrypt     = require('bcryptjs');
 
 // ======= COMBUSTIBLE =======
+// Migración: agregar price_per_l a tanks si no existe
+(async () => {
+  try {
+    await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)");
+  } catch(e) {}
+})();
+
 fuelRouter.get('/', authenticate, async (req, res) => {
   try {
     const { vehicle_id, limit = 50 } = req.query;
@@ -26,7 +33,7 @@ fuelRouter.get('/', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error combustible' }); }
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
-  try { res.json((await query('SELECT DISTINCT ON (type) id, type, capacity_l, current_l, location FROM tanks ORDER BY type ASC')).rows); }
+  try { res.json((await query('SELECT DISTINCT ON (type) id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC')).rows); }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
@@ -77,10 +84,11 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
 });
 fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encargado_combustible'),validateUUID('id'),async(req,res)=>{
   try{
-    const { current_l, capacity_l } = req.body;
+    const { current_l, capacity_l, price_per_l } = req.body;
     const fields = []; const params = [];
     if (current_l !== undefined) { params.push(current_l); fields.push('current_l=$'+params.length); }
     if (capacity_l !== undefined) { params.push(capacity_l); fields.push('capacity_l=$'+params.length); }
+    if (price_per_l !== undefined) { params.push(price_per_l); fields.push('price_per_l=$'+params.length); }
     if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
     params.push(req.params.id);
     const r = await query('UPDATE tanks SET '+fields.join(',')+',updated_at=NOW() WHERE id=$'+params.length+' RETURNING *', params);
