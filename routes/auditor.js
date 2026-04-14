@@ -21,7 +21,8 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     const yr    = mes ? parseInt(mes.split('-')[0]) : now.getFullYear();
     const mo    = mes ? parseInt(mes.split('-')[1]) : now.getMonth() + 1;
     const desde = `${yr}-${String(mo).padStart(2,'0')}-01`;
-    const hasta = `${yr}-${String(mo).padStart(2,'0')}-31`;
+    const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
+    const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
     // Asegurar que existen las tablas opcionales
     await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT').catch(()=>{});
@@ -372,7 +373,8 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
       const yr    = d.getFullYear();
       const mo    = d.getMonth() + 1;
       const desde = `${yr}-${String(mo).padStart(2,'0')}-01`;
-      const hasta = `${yr}-${String(mo).padStart(2,'0')}-31`;
+      const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
+    const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
       const [fuel, ots] = await Promise.all([
         query(`SELECT COALESCE(SUM(liters*price_per_l),0) as costo_fuel, COALESCE(SUM(liters),0) as litros, COUNT(*) as cargas FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
