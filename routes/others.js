@@ -60,7 +60,14 @@ fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encar
   try{
     const { current_l, capacity_l } = req.body;
     const fields = []; const params = [];
-    if (current_l !== undefined) { params.push(current_l); fields.push('current_l=
+    if (current_l !== undefined) { params.push(current_l); fields.push('current_l=$'+params.length); }
+    if (capacity_l !== undefined) { params.push(capacity_l); fields.push('capacity_l=$'+params.length); }
+    if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    params.push(req.params.id);
+    const r = await query('UPDATE tanks SET '+fields.join(',')+',updated_at=NOW() WHERE id=$'+params.length+' RETURNING *', params);
+    if(!r.rows[0]) return res.status(404).json({error:'Cisterna no encontrada'}); res.json(r.rows[0]);
+  }catch(err){res.status(500).json({error:'Error cisterna'});}
+});
 
 // ======= CUBIERTAS =======
 tireRouter.get('/',authenticate,async(req,res)=>{
