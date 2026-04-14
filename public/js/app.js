@@ -1532,6 +1532,8 @@ function openFuelLoadModal() {
     { label:'Registrar carga', cls:'btn-primary', fn: saveFuelLoad },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+  // Autocompletar precio al abrir si ya hay cisterna seleccionada
+  setTimeout(() => updateFuelPlaceNote(), 100);
 }
 
 function updateFuelPlaceOpts() {
