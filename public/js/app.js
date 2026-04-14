@@ -876,7 +876,7 @@ async function saveNewOT() {
   const vehicle_id = document.getElementById('ot-vehicle')?.value || '';
   const title      = (document.getElementById('ot-title')?.value || '').trim();
   const priority   = document.getElementById('ot-priority')?.value || 'Normal';
-  const mechanic_id = document.getElementById('ot-mechanic')?.value || null;
+  // mechanic se lee directo al enviar
   const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
@@ -905,7 +905,8 @@ async function saveNewOT() {
       description: title + (notes ? '\n' + notes : ''),
       type:        document.getElementById('ot-type')?.value || 'Correctivo',
       priority,
-      mechanic_id: mechanic_id || null,
+      mechanic_id: null,
+      mechanic: document.getElementById('ot-mechanic')?.value?.trim() || null,
       parts,
       labor_cost
     })
@@ -4782,10 +4783,10 @@ function openNewOTModal(preselectedVehicle) {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Mecánico asignado</label>
-        <select class="form-select" id="ot-mechanic">
-          <option value="">— Sin asignar —</option>
-          ${mecanicoOpts}
-        </select>
+        <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del mecánico">
+        <datalist id="ot-mecanicos-list">
+          ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${u.name}">`).join('')}
+        </datalist>
       </div>
       <div class="form-group"><label class="form-label">Fecha límite</label>
         <input class="form-input" type="date" id="ot-due">
