@@ -136,7 +136,7 @@ router.post('/refresh', async (req, res) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', authenticate, async (req, res) => {
+router.post('/logout', async (req, res) => {
   const refreshToken = req.cookies.refreshToken;
   if (refreshToken) {
     const hash = crypto.createHash('sha256').update(refreshToken).digest('hex');
