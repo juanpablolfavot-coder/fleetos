@@ -282,6 +282,19 @@ async function syncGPSData() {
       if (r.rows.length > 0) {
         updated++;
         log.push(`${r.rows[0].code}(${km}km/${Math.round(hourMeter)}h)`);
+      } else {
+        // Vehículo no existe — crear con datos del GPS
+        const cleanPlate = searchPlate.replace(/[^A-Z0-9]/gi,'').toUpperCase();
+        const code = cleanPlate; // Usar patente como código provisional
+        try {
+          await query(
+            `INSERT INTO vehicles (code, plate, brand, model, year, type, status, km_current, gps_status, gps_updated_at, active)
+             VALUES ($1, $2, '—', '—', 2020, 'camion', 'ok', $3, $4, NOW(), TRUE)
+             ON CONFLICT (plate) DO NOTHING`,
+            [code, searchPlate, km||0, status]
+          );
+          log.push(`[NUEVO] ${searchPlate}(${km}km)`);
+        } catch(e) { /* ignorar si ya existe */ }
       }
     }
 
