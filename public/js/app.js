@@ -990,22 +990,19 @@ function openEditOTModal(id) {
 async function saveEditOT(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
-  const status    = document.getElementById('eo-status')?.value   || ot.status;
-  const mechanic  = document.getElementById('eo-mechanic')?.value || '';
-  const desc      = document.getElementById('eo-desc')?.value     || ot.desc;
-  const priority  = document.getElementById('eo-priority')?.value || ot.priority;
-  const labor     = parseFloat(document.getElementById('eo-labor')?.value) || 0;
-
-  // Buscar UUID real del WO
+  const status     = document.getElementById('eo-status')?.value   || ot.status;
+  const mechanic   = document.getElementById('eo-mechanic')?.value || '';
+  const desc       = document.getElementById('eo-desc')?.value     || ot.desc;
+  const priority   = document.getElementById('eo-priority')?.value || ot.priority;
+  const labor      = parseFloat(document.getElementById('eo-labor')?.value)  || ot.labor_cost  || 0;
+  const parts_cost = parseFloat(document.getElementById('eo-parts')?.value)  || ot.parts_cost  || 0;
   const woUUID = ot._uuid || ot.id;
   const res = await apiFetch(`/api/workorders/${woUUID}`, {
     method: 'PUT',
-    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, parts_cost: parseFloat(document.getElementById('eo-parts')?.value)||ot.parts_cost||0, priority })
+    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, parts_cost, priority })
   });
   if (!res.ok) { showToast('error', 'Error al actualizar OT'); return; }
-
-  ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor;
-  ot.parts_cost = parseFloat(document.getElementById('eo-parts')?.value) || ot.parts_cost || 0;
+  ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor; ot.parts_cost = parts_cost;
   closeModal();
   showToast('ok', `${id} actualizada correctamente`);
   renderWorkOrders();
