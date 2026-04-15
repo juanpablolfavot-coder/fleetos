@@ -12,13 +12,12 @@ router.get('/', authenticate, async (req, res) => {
              v.code AS vehicle_code, v.plate, v.brand, v.model,
              m.name AS mechanic_name
       FROM work_orders wo
-      JOIN vehicles v ON v.id = wo.vehicle_id
+      LEFT JOIN vehicles v ON v.id = wo.vehicle_id
       LEFT JOIN users m ON m.id = wo.mechanic_id
       WHERE 1=1
     `;
     const params = [];
 
-    // Los choferes solo ven sus propias novedades
     if (req.user.role === 'chofer') {
       params.push(req.user.id);
       sql += ` AND wo.reporter_id = $${params.length}`;
@@ -45,14 +44,13 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
       `SELECT wo.*, v.code AS vehicle_code, v.plate, v.brand, v.model,
               v.km_current, v.base, m.name AS mechanic_name
        FROM work_orders wo
-       JOIN vehicles v ON v.id = wo.vehicle_id
+       LEFT JOIN vehicles v ON v.id = wo.vehicle_id
        LEFT JOIN users m ON m.id = wo.mechanic_id
        WHERE wo.id = $1`,
       [req.params.id]
     );
     if (!wo.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
 
-    // Choferes solo ven sus propias OT
     if (req.user.role === 'chofer' && wo.rows[0].reporter_id !== req.user.id) {
       return res.status(403).json({ error: 'No autorizado' });
     }
@@ -82,8 +80,6 @@ router.post('/', authenticate, async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Generar código único OT — crear tabla ANTES de la transacción para evitar abort
-    // (CREATE TABLE dentro de una transacción abortada rompe todo)
     await client.query(`
       CREATE TABLE IF NOT EXISTS ot_sequence (
         dummy INT PRIMARY KEY DEFAULT 1,
@@ -92,18 +88,12 @@ router.post('/', authenticate, async (req, res) => {
       )
     `);
     await client.query(`INSERT INTO ot_sequence (dummy, last_val) VALUES (1, 0) ON CONFLICT DO NOTHING`);
-    const seq = await client.query(`
-      UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val
-    `);
-    const seqVal = seq.rows[0].last_val;
-    const num  = seqVal;
-    const code = 'OT-' + String(num).padStart(5, '0');
+    const seq = await client.query(`UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val`);
+    const code = 'OT-' + String(seq.rows[0].last_val).padStart(5, '0');
 
-    // Obtener km actuales del vehículo
     const veh = await client.query('SELECT km_current FROM vehicles WHERE id = $1', [vehicle_id]);
     const km  = veh.rows[0]?.km_current || 0;
 
-    // Choferes solo pueden crear Correctivo
     const woType = req.user.role === 'chofer' ? 'Correctivo' : (type || 'Correctivo');
 
     const wo = await client.query(
@@ -113,7 +103,6 @@ router.post('/', authenticate, async (req, res) => {
     );
     const woId = wo.rows[0].id;
 
-    // Agregar repuestos y descontar stock
     let partsCost = 0;
     for (const p of parts) {
       if (p.origin === 'stock' && p.stock_id) {
@@ -125,19 +114,12 @@ router.post('/', authenticate, async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: `Stock insuficiente para: ${p.name}` });
         }
-        // Descontar stock
+        await client.query('UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2', [p.qty, p.stock_id]);
         await client.query(
-          'UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2',
-          [p.qty, p.stock_id]
-        );
-        // Registrar movimiento
-        await client.query(
-          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id)
-           VALUES ($1, 'Egreso', $2, $3, $4, $5)`,
+          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
           [p.stock_id, p.qty, `OT ${code}`, woId, req.user.id]
         );
       }
-      // Repuesto externo: validar que tenga nombre y precio razonable
       if (p.origin === 'externo' || !p.stock_id) {
         if (!p.name || p.name.trim().length < 3) {
           await client.query('ROLLBACK');
@@ -149,18 +131,14 @@ router.post('/', authenticate, async (req, res) => {
         }
       }
       const inserted = await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING subtotal`,
+        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING subtotal`,
         [woId, p.stock_id||null, p.name, p.origin, p.qty, p.unit||'un', p.unit_cost||p.cost||0]
       );
       partsCost += parseFloat(inserted.rows[0].subtotal);
     }
 
-    // Actualizar parts_cost
     await client.query('UPDATE work_orders SET parts_cost = $1 WHERE id = $2', [partsCost, woId]);
-
     await client.query('COMMIT');
-
     res.status(201).json({ ...wo.rows[0], parts_cost: partsCost, parts });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -174,17 +152,18 @@ router.post('/', authenticate, async (req, res) => {
 // PUT /api/workorders/:id — editar OT
 router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'), validateUUID('id'), async (req, res) => {
   try {
-    const { status, mechanic_id, description, labor_cost, priority } = req.body;
-    // Verificar que la OT no esté cerrada
+    const { status, mechanic_id, description, labor_cost, parts_cost, priority } = req.body;
     const check = await query('SELECT status FROM work_orders WHERE id=$1', [req.params.id]);
     if (!check.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
     if (check.rows[0].status === 'Cerrada' && req.user.role !== 'dueno') {
       return res.status(409).json({ error: 'No se puede editar una OT cerrada. Solo el dueño puede modificarla.' });
     }
+    const newPartsCost = (parts_cost !== undefined && parts_cost !== null && parts_cost !== '') ? parseFloat(parts_cost) : null;
     const result = await query(
-      `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=$4, priority=$5
+      `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=$4, priority=$5,
+         parts_cost = COALESCE($7, parts_cost)
        WHERE id = $6 RETURNING *, (labor_cost + parts_cost) AS total_cost`,
-      [status, mechanic_id||null, description, labor_cost||0, priority, req.params.id]
+      [status, mechanic_id||null, description, parseFloat(labor_cost)||0, priority, req.params.id, newPartsCost]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
     res.json(result.rows[0]);
@@ -198,9 +177,8 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
   const client = await require('../db/pool').pool.connect();
   try {
     const { root_cause, labor_cost, close_parts = [] } = req.body;
-    // Solo dueño/gerencia/jefe puede cargar costo de mano de obra
     if (labor_cost > 0 && req.user.role === 'mecanico') {
-      return res.status(403).json({ error: 'El mecánico no puede cargar el costo de mano de obra. Debe ser aprobado por el jefe de mantenimiento.' });
+      return res.status(403).json({ error: 'El mecánico no puede cargar el costo de mano de obra.' });
     }
     await client.query('BEGIN');
 
@@ -208,7 +186,6 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
     if (!wo.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT no encontrada' }); }
     if (wo.rows[0].status === 'Cerrada') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'OT ya está cerrada' }); }
 
-    // Agregar repuestos del cierre y descontar stock
     let extraCost = 0;
     for (const p of close_parts) {
       if (p.origin === 'stock' && p.stock_id) {
@@ -219,21 +196,19 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
         }
         await client.query('UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2', [p.qty, p.stock_id]);
         await client.query(
-          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id)
-           VALUES ($1,'Egreso',$2,$3,$4,$5)`,
+          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
           [p.stock_id, p.qty, `Cierre ${wo.rows[0].code}`, req.params.id, req.user.id]
         );
       }
       const ins = await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING subtotal`,
+        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING subtotal`,
         [req.params.id, p.stock_id||null, p.name, p.origin, p.qty, p.unit||'un', p.unit_cost||0]
       );
       extraCost += parseFloat(ins.rows[0].subtotal);
     }
 
     const result = await client.query(
-      `UPDATE work_orders SET 
+      `UPDATE work_orders SET
          status='Cerrada', root_cause=$1, labor_cost=$2,
          parts_cost = parts_cost + $3, closed_at = NOW()
        WHERE id=$4 RETURNING *, (labor_cost + parts_cost) AS total_cost`,
@@ -251,12 +226,12 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
   }
 });
 
-// DELETE /api/workorders/preventivas-hoy — borrar OTs preventivas creadas hoy (solo dueño)
+// DELETE /api/workorders/preventivas-hoy
 router.delete('/preventivas-hoy', authenticate, requireRole('dueno'), async (req, res) => {
   try {
     const r = await query(
-      `DELETE FROM work_orders 
-       WHERE type = 'Preventivo' 
+      `DELETE FROM work_orders
+       WHERE type = 'Preventivo'
        AND DATE(opened_at) = CURRENT_DATE
        AND status != 'Cerrada'
        RETURNING code`
