@@ -183,7 +183,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
     }
     const result = await query(
       `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=$4, priority=$5
-       WHERE id = $6 RETURNING *`,
+       WHERE id = $6 RETURNING *, (labor_cost + parts_cost) AS total_cost`,
       [status, mechanic_id||null, description, labor_cost||0, priority, req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
@@ -236,7 +236,7 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
       `UPDATE work_orders SET 
          status='Cerrada', root_cause=$1, labor_cost=$2,
          parts_cost = parts_cost + $3, closed_at = NOW()
-       WHERE id=$4 RETURNING *`,
+       WHERE id=$4 RETURNING *, (labor_cost + parts_cost) AS total_cost`,
       [root_cause||'—', labor_cost||wo.rows[0].labor_cost, extraCost, req.params.id]
     );
 
