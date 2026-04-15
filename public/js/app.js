@@ -1000,12 +1000,12 @@ async function saveEditOT(id) {
   const woUUID = ot._uuid || ot.id;
   const res = await apiFetch(`/api/workorders/${woUUID}`, {
     method: 'PUT',
-    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, priority })
+    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, parts_cost: parseFloat(document.getElementById('eo-parts')?.value)||ot.parts_cost||0, priority })
   });
   if (!res.ok) { showToast('error', 'Error al actualizar OT'); return; }
 
   ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor;
-  if (parts > 0) ot.parts_cost = parts;;
+  ot.parts_cost = parseFloat(document.getElementById('eo-parts')?.value) || ot.parts_cost || 0;
   closeModal();
   showToast('ok', `${id} actualizada correctamente`);
   renderWorkOrders();
