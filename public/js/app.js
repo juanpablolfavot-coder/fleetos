@@ -1005,6 +1005,7 @@ async function saveEditOT(id) {
   if (!res.ok) { showToast('error', 'Error al actualizar OT'); return; }
 
   ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor;
+  if (parts > 0) ot.parts_cost = parts;;
   closeModal();
   showToast('ok', `${id} actualizada correctamente`);
   renderWorkOrders();
