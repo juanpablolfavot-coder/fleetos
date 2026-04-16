@@ -2024,14 +2024,37 @@ function refreshTireMap() {
 }
 
 // ─────────────────────────────────────────
+function onStockTireDragStart(event, serial) {
+  _dragSerial  = serial;
+  _dragFromPos = 'STOCK';
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', serial);
+}
+
+async function onDropToStock(event) {
+  event.preventDefault();
+  if (!_dragSerial || _dragFromPos === 'STOCK') { _dragSerial = null; _dragFromPos = null; return; }
+  const tire = App.data.tires.find(t=>t.serial===_dragSerial);
+  if (!tire) { _dragSerial = null; _dragFromPos = null; return; }
+  const r = await apiFetch(`/api/tires/${tire.id}/move`, {
+    method:'POST',
+    body: JSON.stringify({ to_vehicle_id: null, to_position: 'STOCK', type: 'Desmontaje', notes: 'Desmontado al stock por drag & drop' })
+  });
+  if (r.ok) {
+    tire.vehicle = 'STOCK'; tire.pos = null;
+    showToast('ok', `${tire.serial} desmontada al stock`);
+  } else { showToast('error','Error al desmontar cubierta'); }
+  _dragSerial = null; _dragFromPos = null;
+  renderTires();
+}
+
+// ─────────────────────────────────────────
 function renderTireMapDnD(vehicleCode, config) {
   const map = document.getElementById('tire-map-dnd');
   if (!map) return;
-
   map.innerHTML = config.map(axle => {
     const leftPos  = axle.dual ? axle.positions.slice(0,2) : [axle.positions[0]];
     const rightPos = axle.dual ? axle.positions.slice(2,4) : [axle.positions[1]];
-
     const slot = (pos) => {
       const t = App.data.tires.find(x=>x.vehicle===vehicleCode && x.pos===pos);
       if (t) {
@@ -2066,7 +2089,6 @@ function renderTireMapDnD(vehicleCode, config) {
         </div>`;
       }
     };
-
     return `<div style="background:var(--bg3);border-radius:var(--radius);padding:12px 14px;border:1px solid var(--border);margin-bottom:8px">
       <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${axle.name}</div>
       <div style="display:flex;align-items:center;justify-content:center;gap:10px">
