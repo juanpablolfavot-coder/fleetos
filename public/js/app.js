@@ -1888,7 +1888,14 @@ function getAxleConfig(vehicle) {
       const prefix = vehicle.type === 'semirremolque' ? 'S' : '';
       const n = i + 1;
       if (axle.dual) {
-        return { name:`Eje ${n} — ${ax
+        return { name:'Eje ' + n + ' - ' + (axle.label||'Portante'), positions:[prefix+n+'-IE',prefix+n+'-II',prefix+n+'-DE',prefix+n+'-DD'], dual:true };
+      } else {
+        return { name:'Eje ' + n + ' - ' + (axle.label||'Direccion'), positions:[prefix+n+'-DI',prefix+n+'-DD'], dual:false };
+      }
+    });
+  }
+  return AXLE_CONFIGS[vehicle?.type] || AXLE_CONFIGS.camion;
+}
 // ─────────────────────────────────────────
 function renderTires() {
   const mounted  = App.data.tires.filter(t=>t.vehicle!=='STOCK'&&t.vehicle!=='RECAP'&&t.vehicle!=='BAJA');
