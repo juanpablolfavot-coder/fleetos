@@ -1931,7 +1931,7 @@ function renderTires() {
             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
             <td class="td-mono" style="color:var(--ok)">${t.depth}/${t.maxDepth}mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
-            <td class="td-mono">$${t.purchase.toLocaleString()}</td>
+            <td class="td-mono">$${(t.purchase||0).toLocaleString()}</td>
             <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
           </tbody>
