@@ -2128,6 +2128,20 @@ async function onTireDrop(event, toPos, vehicleCode) {
   event.preventDefault();
   if (!_dragSerial) return;
   if (_dragFromPos === toPos) { _dragSerial = null; _dragFromPos = null; return; }
+  // Si viene del stock, montar directamente
+  if (_dragFromPos === 'STOCK') {
+    const stockTire = App.data.tires.find(t=>t.serial===_dragSerial);
+    const vehicle   = App.data.vehicles.find(v=>v.code===vehicleCode);
+    if (!stockTire || !vehicle) { _dragSerial = null; _dragFromPos = null; return; }
+    const r = await apiFetch(`/api/tires/${stockTire.id}/move`, {
+      method:'POST',
+      body: JSON.stringify({ to_vehicle_id: vehicle.id, to_position: toPos, type: 'Montaje', notes: 'Montado desde stock por drag & drop' })
+    });
+    if (r.ok) { stockTire.vehicle = vehicleCode; stockTire.pos = toPos; showToast('ok', `${stockTire.serial} montada en ${toPos}`); }
+    else { showToast('error','Error al montar cubierta'); }
+    _dragSerial = null; _dragFromPos = null;
+    renderTires(); return;
+  }
   const draggedTire = App.data.tires.find(t=>t.serial===_dragSerial);
   if (!draggedTire) return;
   const targetTire  = App.data.tires.find(t=>t.vehicle===vehicleCode && t.pos===toPos);
