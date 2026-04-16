@@ -53,7 +53,7 @@ app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);
 app.use('/api/config',configRouter);
-app.use('/api/auditor',auditorRouter);
+app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrdersRouter);
 app.get('/api/health',async(req,res)=>{
   try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
   catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
