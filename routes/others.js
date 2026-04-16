@@ -117,7 +117,7 @@ tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_ma
   const veh=to_vehicle_id?await client.query('SELECT km_current FROM vehicles WHERE id=$1',[to_vehicle_id]):null;
   const km=veh?.rows[0]?.km_current||0;
   await client.query(`INSERT INTO tire_movements(tire_id,type,from_pos,to_pos,vehicle_id,km_at_move,tread_at_move,user_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[req.params.id,type||'RotaciÃÂ³n',tire.rows[0].current_position,to_position,to_vehicle_id||tire.rows[0].current_vehicle_id,km,tread_depth||tire.rows[0].tread_depth,req.user.id,notes||null]);
-  const ns=to_vehicle_id?'montada':(to_position==='Stock'?'stock':'baja');
+  const ns=to_vehicle_id?'montada':(!to_vehicle_id&&(to_position==='STOCK'||to_position==='Stock'||!to_position)?'stock':'baja');
   await client.query(`UPDATE tires SET current_vehicle_id=$1,current_position=$2,status=$3,tread_depth=COALESCE($4,tread_depth),km_total=km_total+$5 WHERE id=$6`,[to_vehicle_id||null,to_position,ns,tread_depth||null,km,req.params.id]);
   await client.query('COMMIT');res.json({message:'Movimiento registrado'});}catch(err){await client.query('ROLLBACK');res.status(500).json({error:'Error mover cubierta'});}finally{client.release();}
 });
