@@ -18,6 +18,7 @@ const woRoutes=require('./routes/workorders');
 const stockRoutes=require('./routes/stock');
 const {fuelRouter,tireRouter,docRouter,userRouter,configRouter,checklistRouter,encargadoRouter}=require('./routes/others');
 const auditorRouter = require('./routes/auditor');
+const purchaseOrdersRouter = require('./routes/purchase_orders');
 const app=express();
 app.use(helmet({
   contentSecurityPolicy: {
