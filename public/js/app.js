@@ -5843,3 +5843,786 @@ async function deleteFuelLog(id, vehicle, liters) {
     renderFuel();
   } catch(err) { showToast('error', err.message||'Error'); }
 }
+
+async function renderPurchaseOrders() {
+  const root = document.getElementById('page-purchase_orders');
+  if (!root) return;
+
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
+
+  root.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">📋 Órdenes de Compra</h2>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Gestión de compras · firma manual · enlace con factura</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
+        ${canCreate ? `<button class="btn btn-primary" onclick="openNewPOModal()">+ Nueva OC</button>` : ''}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${['','borrador','emitida','en_curso','recibida','cancelada'].map(s => `
+        <button onclick="filterPO('${s}')" id="po-filter-${s||'all'}"
+          style="padding:6px 14px;border-radius:20px;border:1px solid var(--border2);background:${s===''?'var(--accent)':'transparent'};
+          color:${s===''?'white':'var(--text3)'};cursor:pointer;font-size:12px;font-weight:600;transition:.15s">
+          ${s===''?'Todas':s.charAt(0).toUpperCase()+s.slice(1)}
+        </button>`).join('')}
+    </div>
+
+    <div id="po-area-filter" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--bg3);border-radius:var(--radius)">
+      <span style="font-size:12px;color:var(--text3);font-weight:600;margin-right:8px">ÁREA:</span>
+      <span id="po-area-filter-btns"></span>
+    </div>
+    <div id="po-list">
+      <div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando...</div>
+    </div>`;
+
+  await loadPOList('');
+}
+
+let _poCurrentFilter = '';
+async function filterPO(status) {
+  _poCurrentFilter = status;
+  // Actualizar botones
+  ['','borrador','emitida','recibida','cancelada'].forEach(s => {
+    const btn = document.getElementById('po-filter-' + (s||'all'));
+    if (!btn) return;
+    btn.style.background = s === status ? 'var(--accent)' : 'transparent';
+    btn.style.color      = s === status ? 'white' : 'var(--text3)';
+  });
+  await loadPOList(status);
+}
+
+async function loadPOList(status) {
+  const el = document.getElementById('po-list');
+  if (!el) return;
+  try {
+    const url = '/api/purchase-orders' + (status ? `?status=${status}` : '');
+    const res = await apiFetch(url);
+    if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar OCs</div>`; return; }
+    const list = await res.json();
+
+    if (list.length === 0) {
+      el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+        <div style="font-size:32px;margin-bottom:12px">📋</div>
+        <div style="font-weight:600">Sin órdenes de compra</div>
+        <div style="font-size:13px;color:var(--text3);margin-top:8px">Creá la primera con el botón "Nueva OC"</div>
+      </div>`;
+      return;
+    }
+
+    const statusColors = { borrador:'var(--warn)', emitida:'var(--accent)', recibida:'var(--ok)', cancelada:'var(--danger)' };
+    const statusLabels = { borrador:'✏️ Borrador', emitida:'📤 Emitida', en_curso:'🔄 En curso', recibida:'✅ Recibida', cancelada:'❌ Cancelada' };
+    const statusIcons  = { borrador:'✏️', emitida:'📤', en_curso:'🔄', recibida:'✅', cancelada:'❌' };
+
+    el.innerHTML = `
+      <div class="card" style="padding:0">
+        <table>
+          <thead><tr>
+            <th>Código</th><th>Estado</th><th>Sucursal</th><th>Área</th><th>Solicitante</th>
+            <th>Proveedor</th><th>Factura Nro</th>
+            <th style="text-align:right">Total estimado</th>
+            <th>Fecha</th><th>Acciones</th>
+          </tr></thead>
+          <tbody>
+            ${list.map(po => `<tr>
+              <td><span style="font-family:monospace;font-weight:700;color:var(--accent)">${po.code}</span></td>
+              <td><span style="background:${statusColors[po.status]||'var(--text3)'}22;color:${statusColors[po.status]||'var(--text3)'};
+                padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">
+                ${statusLabels[po.status]||po.status}
+              </span></td>
+              <td style="font-size:13px">${po.sucursal ? `<span style='background:var(--accent)22;color:var(--accent);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>${po.sucursal}</span>` : '<span style="color:var(--text3)">—</span>'}</td>
+              <td style="font-size:12px">${po.area ? `<span style='color:var(--text3)'>${po.area}</span>` : '<span style="color:var(--border2)">—</span>'}</td>
+              <td style="font-size:13px">${po.solicitante_nombre||'—'}</td>
+              <td style="font-size:13px">${po.proveedor||'<span style="color:var(--text3)">Sin asignar</span>'}</td>
+              <td style="font-size:12px;font-family:monospace">${po.factura_nro||'<span style="color:var(--text3)">—</span>'}</td>
+              <td style="text-align:right;font-family:monospace;font-weight:600">
+                $${Math.round(parseFloat(po.total_real||po.total_estimado||0)).toLocaleString('es-AR')}
+                ${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:10px;color:var(--text3)">IVA ${po.iva_pct}%</div>` : ''}
+              </td>
+              <td style="font-size:12px;color:var(--text3)">${new Date(po.created_at).toLocaleDateString('es-AR')}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-secondary btn-sm" onclick="openPODetail('${po.id}')">Ver</button>
+                  <button class="btn btn-secondary btn-sm" onclick="printPO('${po.id}')" title="Imprimir">🖨</button>
+                  ${['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role) && po.status === 'borrador' ?
+                    `<button class="btn btn-danger btn-sm" onclick="deletePO('${po.id}')">✕</button>` : ''}
+                </div>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch(err) {
+    el.innerHTML = `<div class="card" style="color:var(--danger)">Error: ${err.message}</div>`;
+  }
+}
+
+// ── Modal nueva OC ────────────────────────────────────────
+function openNewPOModal() {
+  openModal('📋 Nueva Orden de Compra', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px">
+      <div class="form-group">
+        <label class="form-label">Sucursal</label>
+        <select class="form-select" id="po-sucursal" onchange="updatePOAreaSelect()">
+          <option value="">— Seleccionar sucursal —</option>
+          ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Área</label>
+        <select class="form-select" id="po-area">
+          <option value="">— Primero seleccioná la sucursal —</option>
+        </select>
+      </div>
+      <div class="form-group" id="po-vehicle-field">
+        <label class="form-label">🚛 Vehículo (opcional)</label>
+        <select class="form-select" id="po-vehicle">
+          <option value="">— Sin vehículo asignado —</option>
+          ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">Al recibir la OC se genera automáticamente una OT para esta unidad</div>
+      </div>
+      <div class="form-group" style="grid-column:span 2">
+        <label class="form-label">Tipo de orden</label>
+        <div style="display:flex;gap:8px">
+          <button type="button" id="po-tipo-flota" onclick="setPOTipo('flota')"
+            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:13px;font-weight:600">
+            🚛 Flota
+          </button>
+          <button type="button" id="po-tipo-mantenimiento" onclick="setPOTipo('mantenimiento')"
+            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--border2);background:transparent;color:var(--text3);cursor:pointer;font-size:13px;font-weight:600">
+            🏪 Mantenimiento edilicio
+          </button>
+          <button type="button" id="po-tipo-otro" onclick="setPOTipo('otro')"
+            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--border2);background:transparent;color:var(--text3);cursor:pointer;font-size:13px;font-weight:600">
+            📋 Otro
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Observaciones / destino</label>
+        <textarea class="form-textarea" id="po-notes" rows="2" placeholder="Ej: Repuestos para preventivo INT-08"></textarea>
+      </div>
+    </div>
+    <!-- Campos adicionales según tipo -->
+    <div id="po-extra-fields" style="display:none;background:var(--bg3);border-radius:var(--radius);padding:14px;margin-bottom:12px;border:1px solid var(--border2)"></div>
+
+    <div style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label class="form-label" style="margin:0">Artículos</label>
+        <button class="btn btn-secondary btn-sm" onclick="addPOItem()">+ Agregar artículo</button>
+      </div>
+      <div id="po-items">
+        ${buildPOItemRow(0)}
+      </div>
+    </div>
+    <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:13px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="color:var(--text3);font-weight:600">IVA:</span>
+        <button type="button" id="po-iva-btn-Sin IVA" onclick="setPOIva('Sin IVA')"
+          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:white;transition:.15s">Sin IVA</button>
+        <button type="button" id="po-iva-btn-10.5%" onclick="setPOIva('10.5%')"
+          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">10.5%</button>
+        <button type="button" id="po-iva-btn-21%" onclick="setPOIva('21%')"
+          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">21%</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border2)">
+        <span style="color:var(--text3)">Subtotal</span>
+        <span id="po-subtotal" style="font-family:monospace">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <span style="color:var(--text3)" id="po-iva-label">IVA (0%)</span>
+        <span id="po-iva-monto" style="font-family:monospace">$0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:2px solid var(--border2)">
+        <span style="font-weight:700;font-size:14px">TOTAL</span>
+        <span id="po-total" style="font-weight:700;font-size:18px;font-family:monospace;color:var(--accent)">$0</span>
+      </div>
+    </div>`,
+    [
+      { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
+      { label:'Crear OC', cls:'btn-primary',   fn: saveNewPO },
+    ]
+  );
+}
+
+function buildPOItemRow(idx) {
+  return `<div id="po-item-${idx}" style="margin-bottom:6px">
+    <div style="display:grid;grid-template-columns:1fr 80px 80px 120px 32px;gap:6px;align-items:center">
+      <div style="position:relative">
+        <input class="form-input" placeholder="Descripción o buscá del stock..." id="poi-desc-${idx}"
+          oninput="searchPOStock(${idx})" autocomplete="off" style="font-size:13px;width:100%">
+        <div id="poi-suggestions-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);
+          border:1px solid var(--border2);border-radius:0 0 var(--radius) var(--radius);z-index:100;max-height:160px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.2)">
+        </div>
+      </div>
+      <input class="form-input" type="number" placeholder="Cant." id="poi-qty-${idx}" value="1"
+        min="0.01" step="0.01" oninput="updatePOTotal()" style="font-size:13px;text-align:center">
+      <input class="form-input" placeholder="Unidad" id="poi-unit-${idx}" value="un"
+        style="font-size:13px;text-align:center">
+      <input class="form-input" type="number" placeholder="Precio unit." id="poi-price-${idx}" value="0"
+        min="0" oninput="updatePOTotal()" style="font-size:13px;text-align:right">
+      <button style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:16px;padding:0 6px;height:36px"
+        onclick="removePOItem(${idx})">✕</button>
+    </div>
+    <div id="poi-stock-hint-${idx}" style="font-size:10px;color:var(--text3);padding:2px 4px;display:none">
+      📦 Stock disponible: <span id="poi-stock-qty-${idx}"></span>
+    </div>
+  </div>`;
+}
+
+
+
+let _poItemCount = 1;
+function addPOItem() {
+  const container = document.getElementById('po-items');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.innerHTML = buildPOItemRow(_poItemCount);
+  container.appendChild(div.firstElementChild);
+  _poItemCount++;
+}
+
+function removePOItem(idx) {
+  document.getElementById(`po-item-${idx}`)?.remove();
+  updatePOTotal();
+}
+
+// IVA activo en la OC actual
+window._poIvaPct = 0;
+
+function setPOIva(val) {
+  window._poIvaPct = val === '21%' ? 21 : val === '10.5%' ? 10.5 : 0;
+  // Actualizar botones
+  ['Sin IVA','10.5%','21%'].forEach(v => {
+    const btn = document.getElementById('po-iva-btn-' + v);
+    if (!btn) return;
+    btn.style.background = v === val ? 'var(--accent)' : 'transparent';
+    btn.style.color      = v === val ? 'white' : 'var(--text3)';
+  });
+  updatePOTotal();
+}
+
+function updatePOTotal() {
+  let subtotal = 0;
+  document.querySelectorAll('[id^="poi-qty-"]').forEach(qtyEl => {
+    const idx   = qtyEl.id.replace('poi-qty-', '');
+    const qty   = parseFloat(qtyEl.value) || 0;
+    const price = parseFloat(document.getElementById('poi-price-'+idx)?.value) || 0;
+    subtotal += qty * price;
+  });
+  const ivaPct   = window._poIvaPct || 0;
+  const ivaMonto = subtotal * ivaPct / 100;
+  const total    = subtotal + ivaMonto;
+
+  const subEl   = document.getElementById('po-subtotal');
+  const ivaLbl  = document.getElementById('po-iva-label');
+  const ivaMEl  = document.getElementById('po-iva-monto');
+  const totalEl = document.getElementById('po-total');
+
+  if (subEl)  subEl.textContent  = '$' + Math.round(subtotal).toLocaleString('es-AR');
+  if (ivaLbl) ivaLbl.textContent = 'IVA (' + ivaPct + '%)';
+  if (ivaMEl) ivaMEl.textContent = '$' + Math.round(ivaMonto).toLocaleString('es-AR');
+  if (totalEl) totalEl.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+}
+
+async function saveNewPO() {
+  try {
+    const notes    = document.getElementById('po-notes')?.value?.trim() || '';
+    const sucursal = document.getElementById('po-sucursal')?.value || '';
+    const area     = document.getElementById('po-area')?.value || '';
+    const tipo     = window._poTipo || 'flota';
+    const extra    = getPOExtraFields();
+    const vehicle_id = document.getElementById('po-vehicle')?.value || null;
+    const items = [];
+    document.querySelectorAll('[id^="poi-desc-"]').forEach(descEl => {
+      const idx   = descEl.id.replace('poi-desc-', '');
+      const desc  = descEl.value.trim();
+      if (!desc) return;
+      items.push({
+        descripcion: desc,
+        cantidad:    parseFloat(document.getElementById(`poi-qty-${idx}`)?.value)   || 1,
+        unidad:      document.getElementById(`poi-unit-${idx}`)?.value              || 'un',
+        precio_unit: parseFloat(document.getElementById(`poi-price-${idx}`)?.value) || 0,
+      });
+    });
+    if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
+
+    const ivaPct = window._poIvaPct || 0;
+    const res = await apiFetch('/api/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify({ notes, sucursal: sucursal||null, area: area||null, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
+    });
+    window._poIvaPct = 0; // reset
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    const po = await res.json();
+    closeModal();
+    showToast('ok', `OC ${po.code} creada`);
+    _poItemCount = 1;
+    await loadPOList(_poCurrentFilter);
+  } catch(err) {
+    showToast('error', err.message || 'Error al crear OC');
+  }
+}
+
+// ── Ver detalle de OC ────────────────────────────────────
+async function openPODetail(id) {
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}`);
+    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
+    const po = await res.json();
+
+    const canEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
+    const estadoLabels = { borrador:'✏️ Borrador', emitida:'📤 Emitida', en_curso:'🔄 En curso', recibida:'✅ Recibida', cancelada:'❌ Cancelada' };
+    const statusOptions = ['borrador','emitida','en_curso','recibida','cancelada']
+      .map(s => `<option value="${s}" ${po.status===s?'selected':''}>${estadoLabels[s]||s}</option>`)
+      .join('');
+
+    const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+
+    openModal(`📋 ${po.code}`, `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card" style="padding:12px;grid-column:span 2">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">TIPO DE ORDEN</div>
+          <div style="display:flex;gap:6px">
+            ${['flota','mantenimiento','otro'].map(t => {
+              const labels = {flota:'🚛 Flota', mantenimiento:'🏪 Mantenimiento edilicio', otro:'📋 Otro'};
+              const active = (po.tipo||'flota') === t;
+              return canEdit
+                ? `<button type="button" id="pod-tipo-${t}" onclick="setPODetailTipo('${t}')"
+                    style="flex:1;padding:7px 4px;border-radius:var(--radius);border:2px solid ${active?'var(--accent)':'var(--border2)'};
+                    background:${active?'var(--accent)':'transparent'};color:${active?'white':'var(--text3)'};
+                    cursor:pointer;font-size:12px;font-weight:700;transition:.15s">${labels[t]}</button>`
+                : (active ? `<span style="font-weight:700;color:var(--accent);font-size:13px">${labels[t]}</span>` : '');
+            }).join('')}
+          </div>
+          <input type="hidden" id="pod-tipo" value="${po.tipo||'flota'}">
+        </div>
+        <div class="card" style="padding:12px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">ESTADO</div>
+          ${canEdit ? `<select class="form-select" id="pod-status">${statusOptions}</select>` : `<div style="font-weight:600">${po.status}</div>`}
+        </div>
+        <div class="card" style="padding:12px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">SOLICITANTE</div>
+          <div style="font-weight:600">${po.solicitante_nombre||'—'}</div>
+        </div>
+        ${po.tipo === 'flota' || !po.tipo ? `
+        <div class="card" style="padding:12px;grid-column:span 2">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">🚛 VEHÍCULO ASIGNADO</div>
+          ${canEdit && !['recibida','cancelada'].includes(po.status)
+            ? `<select class="form-select" id="pod-vehicle">
+                <option value="">— Sin vehículo —</option>
+                ${(App.data.vehicles||[]).map(v => '<option value="'+v.id+'"'+(po.vehicle_id===v.id?' selected':'')+'>'+v.code+' · '+v.plate+'</option>').join('')}
+               </select>
+               <div style="font-size:11px;color:var(--text3);margin-top:3px">Al recibir la OC se generará una OT para esta unidad con el costo de la factura</div>`
+            : (po.vehicle_id
+                ? '<div style="font-weight:700;color:var(--accent)">' + ((App.data.vehicles||[]).find(v=>v.id===po.vehicle_id)?.code||'—') + '</div>'
+                + (po.ot_id ? '<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="navigate(\'workorders\')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>' : '')
+                : '<div style="color:var(--text3)">Sin vehículo asignado</div>')}
+        </div>` : ''}
+      </div>
+
+      <div class="card" style="padding:12px;margin-bottom:16px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:8px;font-weight:700">DATOS DE FACTURA — completar a mano o al recibir</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group">
+            <label class="form-label">Sucursal</label>
+            ${canEdit
+              ? `<select class="form-select" id="pod-sucursal" onchange="updatePODetailAreaSelect()">
+                  <option value="">— Sin sucursal —</option>
+                  ${(App.config?.bases||[]).map(b => `<option value="${b}" ${po.sucursal===b?'selected':''}>${b}</option>`).join('')}
+                </select>`
+              : `<div style="font-weight:600">${po.sucursal||'—'}</div>`}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Proveedor</label>
+            <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor" ${canEdit?'':'readonly'}>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nro. Factura</label>
+            <input class="form-input" id="pod-factura-nro" value="${po.factura_nro||''}" placeholder="0001-00012345" ${canEdit?'':'readonly'}>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fecha factura</label>
+            <input class="form-input" type="date" id="pod-factura-fecha" value="${po.factura_fecha?.slice(0,10)||''}" ${canEdit?'':'readonly'}>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Monto factura ($)</label>
+            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit?'':'readonly'}>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Área</label>
+          ${canEdit
+            ? `<select class="form-select" id="pod-area">
+                <option value="">— Sin área —</option>
+                ${((App.config?.areas||{})[po.sucursal]||[]).map(a => '<option value="'+a+'" '+(po.area===a?'selected':'')+'>'+a+'</option>').join('')}
+               </select>`
+            : `<div style="font-weight:600">${po.area||'—'}</div>`}
+        </div>
+        <div class="form-group">
+          <label class="form-label">IVA</label>
+          ${canEdit
+            ? ('<div style="display:flex;gap:8px">'
+                + ['Sin IVA','10.5%','21%'].map(v => {
+                    const pct = v==='21%' ? 21 : v==='10.5%' ? 10.5 : 0;
+                    const active = parseFloat(po.iva_pct||0) === pct;
+                    return '<button type="button" id="pod-iva-btn-'+v+'" onclick="setPODetailIva(\''+v+'\')"'
+                      +' style="padding:4px 14px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;'
+                      +'background:'+(active?'var(--accent)':'transparent')+';color:'+(active?'white':'var(--text3)')+';transition:.15s">'+v+'</button>';
+                  }).join('')
+                + '<input type="hidden" id="pod-iva-pct" value="'+parseFloat(po.iva_pct||0)+'">'
+                + '</div>')
+            : ('<span style="font-weight:600">' + (parseFloat(po.iva_pct||0) > 0 ? po.iva_pct+'%' : 'Sin IVA') + '</span>')}
+        </div>
+        <div class="form-group">
+          <label class="form-label">Observaciones</label>
+          <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit?'':'readonly'}>${po.notes||''}</textarea>
+        </div>
+        ${canEdit ? `
+        <div class="form-group">
+          <label class="form-label">IVA</label>
+          <div style="display:flex;gap:8px">
+            ${['0','10.5','21'].map(v => `<button type="button" id="pod-iva-btn-${v}" onclick="setPODetailIva('${v}')"
+              style="padding:5px 14px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;transition:.15s;
+              background:${parseFloat(po.iva_pct||0)==parseFloat(v)?'var(--accent)':'transparent'};
+              color:${parseFloat(po.iva_pct||0)==parseFloat(v)?'white':'var(--text3)'}">
+              ${v==='0'?'Sin IVA':v+'%'}
+            </button>`).join('')}
+          </div>
+          <input type="hidden" id="pod-iva-pct" value="${po.iva_pct||0}">
+        </div>` : `<div style="font-size:13px;color:var(--text3)">IVA: ${parseFloat(po.iva_pct||0) > 0 ? po.iva_pct+'%' : 'Sin IVA'}</div>`}
+      </div>
+
+    <!-- Campos extra mantenimiento -->
+    <div id="pod-extra-container" style="margin-bottom:16px">
+      ${po.tipo && po.tipo !== 'flota' ? `<div style="background:var(--bg3);border-radius:var(--radius);padding:14px;border:1px solid var(--border2)">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
+          ${po.tipo==='mantenimiento'?'🏪 Mantenimiento edilicio':'📋 Datos adicionales'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><div style="font-size:11px;color:var(--text3)">Urgencia</div><div style="font-weight:700;color:var(--warn)">${(po.urgencia||'normal').toUpperCase()}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Local</div><div style="font-weight:600">${po.local_sector||'—'}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Sector</div><div style="font-weight:600">${po.sector_detalle||'—'}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Equipo</div><div style="font-weight:600">${po.equipo||'—'}</div></div>
+          <div><div style="font-size:11px;color:var(--text3)">Activo/Serie</div><div style="font-weight:600">${po.activo_serie||'—'}</div></div>
+          <div style="grid-column:span 2"><div style="font-size:11px;color:var(--text3)">Descripción del problema</div><div style="font-weight:600">${po.problema_desc||'—'}</div></div>
+        </div>
+        ${canEdit ? `<div id="pod-extra-fields" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border2)"></div>` : ''}
+      </div>` : (canEdit ? `<div id="pod-extra-fields"></div>` : '')}
+    </div>
+
+      <div class="card" style="padding:0;margin-bottom:12px">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border2);font-size:12px;font-weight:700;color:var(--text3)">ARTÍCULOS</div>
+        <table style="font-size:13px">
+          <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:center">Unid.</th><th style="text-align:right">P. Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>
+            ${po.items.map(i => `<tr>
+              <td>${i.descripcion}</td>
+              <td style="text-align:center">${parseFloat(i.cantidad)}</td>
+              <td style="text-align:center">${i.unidad}</td>
+              <td style="text-align:right;font-family:monospace">$${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
+              <td style="text-align:right;font-family:monospace;font-weight:600">$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <div style="padding:8px 16px;border-top:1px solid var(--border2);display:flex;justify-content:space-between">
+          <span style="font-size:12px;color:var(--text3)">Subtotal</span>
+          <span style="font-family:monospace;font-size:12px" id="pod-subtotal-display">$${Math.round(totalReal).toLocaleString('es-AR')}</span>
+        </div>
+        <div id="pod-iva-row" style="padding:4px 16px;display:flex;justify-content:space-between;${parseFloat(po.iva_pct||0)===0?'opacity:.4':''}">
+          <span style="font-size:12px;color:var(--text3)" id="pod-iva-row-label">IVA (${po.iva_pct||0}%)</span>
+          <span style="font-family:monospace;font-size:12px" id="pod-iva-row-monto">$${Math.round(totalReal * parseFloat(po.iva_pct||0) / 100).toLocaleString('es-AR')}</span>
+        </div>
+        <div style="padding:10px 16px;border-top:2px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:700">TOTAL</span>
+          <span style="font-size:20px;font-weight:700;font-family:monospace;color:var(--accent)" id="pod-total-display">$${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</span>
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--text3)">Creada el ${new Date(po.created_at).toLocaleString('es-AR')}</div>`,
+      [
+        { label:'Cerrar', cls:'btn-secondary', fn: closeModal },
+        ...(canEdit ? [
+          { label:'✏️ Editar artículos', cls:'btn-secondary', fn: () => { closeModal(); openEditPOItemsModal(id); } },
+          { label:'🖨 Imprimir',         cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
+          ...(!['recibida','cancelada'].includes(po.status) ? [
+            { label:'📥 Recibir' + (po.vehicle_id ? ' y generar OT' : ''), cls:'btn-primary', fn: () => recibirOC(id) },
+          ] : []),
+          ...(['recibida','cancelada'].includes(po.status) ? [
+            { label:'Guardar cambios', cls:'btn-primary', fn: () => savePODetail(id) },
+          ] : [
+            { label:'Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
+          ]),
+        ] : [
+          { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
+        ])
+      ]
+    );
+  } catch(err) { showToast('error', err.message); }
+}
+
+async function savePODetail(id) {
+  try {
+    const ivaPct = parseFloat(document.getElementById('pod-iva-pct')?.value) || 0;
+    const extra = getPODetailExtraFields();
+    const body = {
+      iva_pct:       ivaPct,
+      ...extra,
+      sucursal:      document.getElementById('pod-sucursal')?.value || null,
+      area:          document.getElementById('pod-area')?.value || null,
+      vehicle_id:    document.getElementById('pod-vehicle')?.value || null,
+      proveedor:     document.getElementById('pod-proveedor')?.value?.trim() || null,
+      factura_nro:   document.getElementById('pod-factura-nro')?.value?.trim() || null,
+      factura_fecha: document.getElementById('pod-factura-fecha')?.value || null,
+      factura_monto: parseFloat(document.getElementById('pod-factura-monto')?.value) || null,
+      notes:         document.getElementById('pod-notes')?.value?.trim() || null,
+      status:        document.getElementById('pod-status')?.value || null,
+    };
+    const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'PATCH', body: JSON.stringify(body) });
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    closeModal();
+    showToast('ok','OC actualizada');
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message); }
+}
+
+async function deletePO(id) {
+  if (!confirm('¿Eliminar esta OC? Esta acción no se puede deshacer.')) return;
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'DELETE' });
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    showToast('ok','OC eliminada');
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message); }
+}
+
+// ── Impresión de OC ──────────────────────────────────────
+async function printPO(id) {
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}`);
+    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
+    const po = await res.json();
+    const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+
+    const win = window.open('', '_blank');
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="UTF-8">
+      <title>OC ${po.code}</title>
+      <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: Arial, sans-serif; font-size:13px; color:#111; padding:32px; }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; border-bottom:2px solid #111; padding-bottom:16px; }
+        .company { font-size:22px; font-weight:700; }
+        .doc-title { text-align:right; }
+        .doc-code { font-size:28px; font-weight:700; color:#2563eb; }
+        .doc-sub { font-size:12px; color:#666; }
+        .section { margin-bottom:20px; }
+        .section-title { font-size:11px; font-weight:700; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; border-bottom:1px solid #ddd; padding-bottom:4px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        .field { margin-bottom:8px; }
+        .field-label { font-size:11px; color:#666; }
+        .field-value { font-weight:600; font-size:13px; border-bottom:1px solid #ccc; min-height:22px; padding:2px 0; }
+        table { width:100%; border-collapse:collapse; }
+        th { background:#f3f4f6; font-size:11px; font-weight:700; text-transform:uppercase; padding:8px; border:1px solid #ddd; }
+        td { padding:8px; border:1px solid #ddd; }
+        .total-row td { font-weight:700; background:#f9fafb; }
+        .firma-section { display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; margin-top:40px; }
+        .firma-box { border-top:1px solid #333; padding-top:8px; text-align:center; font-size:11px; color:#666; }
+        @media print { body { padding:16px; } }
+      </style>
+    </head><body>
+      <div class="header">
+        <div>
+          <div class="company">LuconiOS</div>
+          <div style="font-size:12px;color:#666">Sistema de gestión de flota pesada</div>
+        </div>
+        <div class="doc-title">
+          <div class="doc-code">${po.code}</div>
+          <div class="doc-sub">ORDEN DE COMPRA</div>
+          <div class="doc-sub">Fecha: ${new Date(po.created_at).toLocaleDateString('es-AR')}</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Datos del pedido</div>
+        <div class="grid2">
+          <div class="field"><div class="field-label">Sucursal</div><div class="field-value">${po.sucursal||'—'}</div></div>
+          <div class="field"><div class="field-label">Área</div><div class="field-value">${po.area||'—'}</div></div>
+          <div class="field"><div class="field-label">Solicitado por</div><div class="field-value">${po.solicitante_nombre||'—'}</div></div>
+          <div class="field"><div class="field-label">Estado</div><div class="field-value">${po.status.toUpperCase()}</div></div>
+          <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${po.proveedor||'—'}</div></div>
+          <div class="field"><div class="field-label">Vehículo</div><div class="field-value">${po.vehicle_code||'—'}</div></div>
+          <div class="field"><div class="field-label">Nro. Factura</div><div class="field-value">${po.factura_nro||'—'}</div></div>
+          <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
+          <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
+          <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
+      </div>
+
+     
+      <div class="section">
+        <div class="section-title">Artículos solicitados</div>
+        <table>
+          <thead><tr>
+            <th style="width:40%;text-align:left">Descripción</th>
+            <th style="text-align:center">Cantidad</th>
+            <th style="text-align:center">Unidad</th>
+            <th style="text-align:right">Precio Unit.</th>
+            <th style="text-align:right">Subtotal</th>
+          </tr></thead>
+          <tbody>
+            ${po.items.map(i => `<tr>
+              <td>${i.descripcion}</td>
+              <td style="text-align:center">${parseFloat(i.cantidad)}</td>
+              <td style="text-align:center">${i.unidad}</td>
+              <td style="text-align:right">$${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
+              <td style="text-align:right"><strong>$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</strong></td>
+            </tr>`).join('')}
+            ${parseFloat(po.iva_pct||0) > 0 ? `
+            <tr>
+              <td colspan="4" style="text-align:right;color:#6b7280">Subtotal</td>
+              <td style="text-align:right">$${Math.round(totalReal).toLocaleString('es-AR')}</td>
+            </tr>
+            <tr>
+              <td colspan="4" style="text-align:right;color:#6b7280">IVA (${po.iva_pct}%)</td>
+              <td style="text-align:right">$${Math.round(totalReal * parseFloat(po.iva_pct||0) / 100).toLocaleString('es-AR')}</td>
+            </tr>` : ''}
+          <tr class="total-row">
+              <td colspan="4" style="text-align:right">TOTAL</td>
+              <td style="text-align:right;font-size:15px">$${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="firma-section">
+        <div class="firma-box">Solicitado por<br><br><br></div>
+        <div class="firma-box">Autorizado por<br><br><br></div>
+        <div class="firma-box">Recibido / Conforme<br><br><br></div>
+      </div>
+
+      <div style="margin-top:32px;font-size:10px;color:#999;text-align:center">
+        Documento generado por LuconiOS · ${new Date().toLocaleString('es-AR')} · ${po.code}
+      </div>
+    </body></html>`);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+  } catch(err) { showToast('error', err.message); }
+}
+
+async function saveNewUser() {
+  const name  = (document.getElementById('nu-name')?.value  || '').trim();
+  const email = (document.getElementById('nu-email')?.value || '').trim();
+  const role  = document.getElementById('nu-role')?.value   || 'operario';
+  const pass  = (document.getElementById('nu-pass')?.value  || '').trim();
+
+  if (!name || !email || !pass) { showToast('error','Nombre, email y contraseña son obligatorios'); return; }
+
+  const res = await apiFetch('/api/users', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, role, password: pass })
+  });
+  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear usuario'); return; }
+
+  closeModal(); showToast('ok',`Usuario ${name} creado`);
+  renderUsers(); loadInitialData().then(()=>renderUsers());
+}
+
+// ── Editar ítems de una OC existente ─────────────────────
+async function openEditPOItemsModal(id) {
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}`);
+    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
+    const po = await res.json();
+
+    const itemRows = po.items.map((item, idx) => buildEditPOItemRow(idx, item)).join('');
+
+    openModal(`✏️ Editar artículos — ${po.code}`, `
+      <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px">
+        ⚠️ Al guardar se reemplazarán todos los artículos actuales por los que estén en esta lista.
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label class="form-label" style="margin:0;font-weight:700">Artículos</label>
+        <button class="btn btn-secondary btn-sm" onclick="addEditPOItem()">+ Agregar artículo</button>
+      </div>
+      <div id="epo-items">${itemRows}</div>
+      <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+        <span style="color:var(--text3)">Total estimado</span>
+        <span id="epo-total" style="font-weight:700;font-size:16px;font-family:monospace">
+          $${Math.round(po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0)).toLocaleString('es-AR')}
+        </span>
+      </div>`,
+      [
+        { label:'Cancelar',          cls:'btn-secondary', fn: closeModal },
+        { label:'Guardar artículos', cls:'btn-primary',   fn: () => saveEditPOItems(id) },
+      ]
+    );
+    window._editPOItemCount = po.items.length;
+  } catch(err) { showToast('error', err.message); }
+}
+
+function buildEditPOItemRow(idx, item = {}) {
+  return `<div id="epo-item-${idx}" style="display:grid;grid-template-columns:1fr 80px 80px 120px 32px;gap:6px;margin-bottom:6px;align-items:center">
+    <input class="form-input" placeholder="Descripción" id="epoi-desc-${idx}" value="${(item.descripcion||'').replace(/"/g,'&quot;')}" oninput="updateEditPOTotal()" style="font-size:13px">
+    <input class="form-input" type="number" placeholder="Cant." id="epoi-qty-${idx}" value="${parseFloat(item.cantidad||1)}" min="0.01" step="0.01" oninput="updateEditPOTotal()" style="font-size:13px;text-align:center">
+    <input class="form-input" placeholder="Unid." id="epoi-unit-${idx}" value="${item.unidad||'un'}" style="font-size:13px;text-align:center">
+    <input class="form-input" type="number" placeholder="Precio unit." id="epoi-price-${idx}" value="${parseFloat(item.precio_unit||0)}" min="0" oninput="updateEditPOTotal()" style="font-size:13px;text-align:right">
+    <button style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:16px;padding:0 6px;height:36px" onclick="removeEditPOItem(${idx})">✕</button>
+  </div>`;
+}
+
+function addEditPOItem() {
+  const container = document.getElementById('epo-items');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.innerHTML = buildEditPOItemRow(window._editPOItemCount || 99);
+  container.appendChild(div.firstElementChild);
+  window._editPOItemCount = (window._editPOItemCount || 99) + 1;
+}
+
+function removeEditPOItem(idx) {
+  document.getElementById(`epo-item-${idx}`)?.remove();
+  updateEditPOTotal();
+}
+
+function updateEditPOTotal() {
+  let total = 0;
+  document.querySelectorAll('[id^="epoi-qty-"]').forEach(qtyEl => {
+    const idx   = qtyEl.id.replace('epoi-qty-', '');
+    const qty   = parseFloat(qtyEl.value) || 0;
+    const price = parseFloat(document.getElementById(`epoi-price-${idx}`)?.value) || 0;
+    total += qty * price;
+  });
+  const el = document.getElementById('epo-total');
+  if (el) el.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+}
+
+async function saveEditPOItems(id) {
+  try {
+    const items = [];
+    document.querySelectorAll('[id^="epoi-desc-"]').forEach(descEl => {
+      const idx   = descEl.id.replace('epoi-desc-', '');
+      const desc  = descEl.value.trim();
+      if (!desc) return;
+      items.push({
+        descripcion: desc,
+        cantidad:    parseFloat(document.getElementById(`epoi-qty-${idx}`)?.value)   || 1,
+        unidad:      document.getElementById(`epoi-unit-${idx}`)?.value              || 'un',
+        precio_unit: parseFloat(document.getElementById(`epoi-price-${idx}`)?.value) || 0,
+      });
+    });
+    if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
+
+    const res = await apiFetch(`/api/purchase-orders/${id}/items`, {
+      method: 'PUT',
+      body: JSON.stringify({ items })
+    });
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    closeModal();
+    showToast('ok', 'Artículos actualizados');
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message||'Error al guardar'); }
+}
