@@ -2096,7 +2096,7 @@ function renderTireTableBody(vehicleCode) {
     <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${t.serial}')">${t.serial}</td>
     <td class="td-mono">${t.pos}</td>
     <td style="font-size:12px">${t.brand.split(' ')[0]} ${t.brand.split(' ')[1]||''}</td>
-    <td class="td-mono">${t.km.toLocaleString()}</td>
+    <td class="td-mono">${(t.km||0).toLocaleString()}</td>
     <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.depth}/${t.maxDepth}mm</td>
     <td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td>
     <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Ver</button></td>
@@ -2312,7 +2312,7 @@ function openTireDetail(serial) {
       </div>
       <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);text-align:center">
         <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Km acumulados</div>
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${t.km.toLocaleString()}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${(t.purchase||0).toLocaleString()}</div>
         <div style="font-size:10px;color:var(--text3)">km totales</div>
       </div>
       <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);text-align:center">
