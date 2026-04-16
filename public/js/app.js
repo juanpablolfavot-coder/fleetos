@@ -1968,7 +1968,7 @@ function renderTires() {
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:16px"
+   <div class="card" style="margin-bottom:16px"
       ondragover="event.preventDefault()"
       ondrop="onDropToStock(event)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
@@ -1992,26 +1992,6 @@ function renderTires() {
             <td class="td-mono">$${(t.purchase||0).toLocaleString()}</td>
             <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-          <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km acum.</th><th>Dibujo</th><th>Tipo</th><th>Precio compra</th><th></th></tr></thead>
-          <tbody id="stock-tires-tbody">${App.data.tires.filter(t=>t.vehicle==='STOCK').map(t=>`<tr
-            draggable="true"
-            ondragstart="onStockTireDragStart(event,'${t.serial}')"
-            style="cursor:grab"
-            title="Arrastrá al mapa para montar">
-            <td class="td-mono td-main">${t.serial}</td>
-            <td>${t.brand}</td>
-            <td class="td-mono">${t.size}</td>
-            <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
-            <td class="td-mono" style="color:var(--ok)">${(t.depth||0)}/${(t.maxDepth||0)}mm</td>
-            <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
-            <td class="td-mono">$${(t.purchase||0).toLocaleString()}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
-          </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
-          </tbody>
           </tbody>
         </table>
       </div>
