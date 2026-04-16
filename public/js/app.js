@@ -2151,7 +2151,7 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
         <label class="form-label">Cubierta a montar</label>
         <select class="form-select" id="ms-serial">
           ${stock.length
-            ? stock.map(t=>`<option value="${t.serial}" ${t.serial===serial?'selected':''}>${t.serial} · ${t.brand} · ${t.km===0?'Nueva':'Usada '+t.km.toLocaleString()+'km'} · ${t.depth}mm dibujo</option>`).join('')
+            ? stock.map(t=>`<option value="${t.serial}" ${t.serial===serial?'selected':''}>${t.serial} · ${t.brand} · ${t.km===0?'Nueva':'Usada '+(t.km||0).toLocaleString()+'km'} · ${t.depth}mm dibujo</option>`).join('')
             : '<option value="">— Sin cubiertas en stock —</option>'
           }
         </select>
@@ -2298,7 +2298,7 @@ function openTireDetail(serial) {
   if (!t) return;
   const hist     = App.data.tireHistory.filter(h=>h.serial===serial);
   const depthPct = Math.round((t.depth / t.maxDepth) * 100);
-  const cpkm     = t.km > 0 ? (t.purchase / t.km).toFixed(2) : '—';
+  const cpkm     = t.km > 0 ? ((t.purchase||0) / t.km).toFixed(2) : '—';
 
   openModal('Cubierta — ' + serial, `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
