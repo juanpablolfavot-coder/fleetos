@@ -233,9 +233,9 @@ function logout() {
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
-    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','users','encargado_panel','contador_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','users','contador_panel'], canEdit:['all'] },
-    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','encargado_panel'], canEdit:['workorders','fleet'] },
+    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs','users','encargado_panel','contador_panel'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs','users','contador_panel'], canEdit:['all'] },
+    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','encargado_panel'], canEdit:['workorders','fleet'] },
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
