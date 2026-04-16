@@ -1928,7 +1928,7 @@ function renderTires() {
             <td class="td-mono td-main">${t.serial}</td>
             <td>${t.brand}</td>
             <td class="td-mono">${t.size}</td>
-            <td class="td-mono">${t.km.toLocaleString()} km</td>
+            <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
             <td class="td-mono" style="color:var(--ok)">${t.depth}/${t.maxDepth}mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
             <td class="td-mono">$${t.purchase.toLocaleString()}</td>
@@ -2327,7 +2327,7 @@ function openTireDetail(serial) {
       <tr><td style="color:var(--text3);padding:5px 0">Medida</td><td class="td-mono">${t.size}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Posición actual</td><td class="td-mono" style="color:var(--accent)">${t.pos} · ${t.vehicle}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Estado</td><td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td></tr>
-      <tr><td style="color:var(--text3);padding:5px 0">Precio compra</td><td class="td-mono">$${t.purchase.toLocaleString()}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0">Precio compra</td><td class="td-mono">$${(t.purchase||0).toLocaleString()}</td></tr>
     </table>
 
     <div style="font-size:11px;font-weight:500;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">
