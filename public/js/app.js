@@ -4946,9 +4946,87 @@ function openEditTechSpecModal(id) {
     </div>
   `, [
     { label: 'Guardar ficha', cls: 'btn-primary',   fn: () => saveTechSpec(id) },
+    { label: '⚙️ Ejes', cls: 'btn-secondary', fn: () => openAxleConfigModal(id) },
     { label: 'Restaurar fábrica', cls: 'btn-secondary', fn: () => resetTechSpec(id) },
     { label: 'Cancelar',      cls: 'btn-secondary', fn: () => showVehicleFicha(id, 'tecnica') },
   ]);
+}
+
+function openAxleConfigModal(id) {
+  const v = App.data.vehicles.find(x => x.id === id);
+  if (!v) return;
+  const currentAxles = v.tech_spec?.axles || getAxleConfig(v);
+  openModal(`⚙️ Configurar ejes — ${v.code}`, `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+      Configurá la cantidad y tipo de ejes. Los cambios afectan el mapa de cubiertas.
+    </div>
+    <div id="axles-container">
+      ${currentAxles.map((axle, i) => `
+        <div id="axle-row-${i}" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;background:var(--bg3);padding:8px 12px;border-radius:var(--radius)">
+          <div style="font-size:12px;font-weight:700;min-width:50px">Eje ${i+1}</div>
+          <input class="form-input" id="axle-label-${i}" value="${axle.label||axle.name?.split('—')[1]?.trim()||''}" placeholder="Ej: Dirección, Tracción, Portante" style="flex:2">
+          <select class="form-select" id="axle-dual-${i}" style="flex:1">
+            <option value="false" ${!axle.dual?'selected':''}>Simple (2 cub.)</option>
+            <option value="true"  ${axle.dual?'selected':''}>Dual (4 cub.)</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="removeAxleRow(${i})">🗑</button>
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="addAxleRow()">+ Agregar eje</button>
+    <div style="margin-top:12px;font-size:11px;color:var(--text3)">
+      💡 Simple = 2 cubiertas · Dual = 4 cubiertas (rueda doble)
+    </div>
+  `, [
+    { label: 'Guardar ejes', cls: 'btn-primary', fn: () => saveAxleConfig(id) },
+    { label: 'Cancelar', cls: 'btn-secondary', fn: () => openEditTechSpecModal(id) },
+  ]);
+}
+
+function addAxleRow() {
+  const container = document.getElementById('axles-container');
+  const count = container.querySelectorAll('[id^="axle-row-"]').length;
+  const div = document.createElement('div');
+  div.id = `axle-row-${count}`;
+  div.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:8px;background:var(--bg3);padding:8px 12px;border-radius:6px';
+  div.innerHTML = `
+    <div style="font-size:12px;font-weight:700;min-width:50px">Eje ${count+1}</div>
+    <input class="form-input" id="axle-label-${count}" value="" placeholder="Ej: Portante" style="flex:2">
+    <select class="form-select" id="axle-dual-${count}" style="flex:1">
+      <option value="false">Simple (2 cub.)</option>
+      <option value="true" selected>Dual (4 cub.)</option>
+    </select>
+    <button class="btn btn-secondary btn-sm" onclick="removeAxleRow(${count})">🗑</button>`;
+  container.appendChild(div);
+}
+
+function removeAxleRow(i) {
+  const el = document.getElementById(`axle-row-${i}`);
+  if (el) el.remove();
+}
+
+async function saveAxleConfig(id) {
+  const v = App.data.vehicles.find(x => x.id === id);
+  if (!v) return;
+  const axles = [];
+  let i = 0;
+  while (document.getElementById(`axle-label-${i}`)) {
+    const label = document.getElementById(`axle-label-${i}`)?.value?.trim() || `Eje ${i+1}`;
+    const dual  = document.getElementById(`axle-dual-${i}`)?.value === 'true';
+    axles.push({ label, dual });
+    i++;
+  }
+  if (axles.length === 0) { showToast('error', 'Agregá al menos un eje'); return; }
+  const newTechSpec = Object.assign({}, v.tech_spec || {}, { axles });
+  const res = await apiFetch(`/api/vehicles/${id}/techspec`, {
+    method: 'PATCH',
+    body: JSON.stringify(newTechSpec)
+  });
+  if (!res.ok) { showToast('error', 'Error al guardar'); return; }
+  const updated = await res.json();
+  if (v) v.tech_spec = updated.tech_spec;
+  closeModal();
+  showToast('ok', `Ejes configurados: ${axles.length} ejes · ${axles.reduce((a,x)=>a+(x.dual?4:2),0)} posiciones`);
+  showVehicleFicha(id, 'tecnica');
 }
 
 async function saveTechSpec(id) {
