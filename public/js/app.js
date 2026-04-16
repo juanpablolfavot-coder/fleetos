@@ -6437,7 +6437,7 @@ async function printPO(id) {
     </head><body>
       <div class="header">
         <div>
-          <div class="company">LuconiOS</div>
+          <div class="company">Expreso Biletta</div>
           <div style="font-size:12px;color:#666">Sistema de gestión de flota pesada</div>
         </div>
         <div class="doc-title">
@@ -6505,7 +6505,7 @@ async function printPO(id) {
       </div>
 
       <div style="margin-top:32px;font-size:10px;color:#999;text-align:center">
-        Documento generado por LuconiOS · ${new Date().toLocaleString('es-AR')} · ${po.code}
+        Documento generado por FleetOS · ${new Date().toLocaleString('es-AR')} · ${po.code}
       </div>
     </body></html>`);
     win.document.close();
