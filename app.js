@@ -2020,7 +2020,7 @@ function getSelectedVehicle() {
 function refreshTireMap() {
   const code    = getSelectedVehicle();
   const vehicle = App.data.vehicles.find(v=>v.code===code);
-  const config  = AXLE_CONFIGS[vehicle?.type] || AXLE_CONFIGS['tractor'];
+  const config  = getAxleConfig(vehicle);
   renderTireMapDnD(code, config);
   renderTireTableBody(code);
 }
