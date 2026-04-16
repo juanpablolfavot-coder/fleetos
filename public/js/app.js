@@ -6626,3 +6626,188 @@ async function saveEditPOItems(id) {
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message||'Error al guardar'); }
 }
+
+// funciones auxiliares OC
+function getPOExtraFields() {
+  var tipo = window._poTipo || 'flota';
+  if (tipo === 'flota') return {};
+  var prefix = 'po-x';
+  return {
+    tipo:          tipo,
+    urgencia:      document.getElementById(prefix+'-urgencia')?.value || 'normal',
+    local_sector:  document.getElementById(prefix+'-local')?.value?.trim() || null,
+    sector_detalle:document.getElementById(prefix+'-sector')?.value || null,
+    equipo:        document.getElementById(prefix+'-equipo')?.value?.trim() || null,
+    activo_serie:  document.getElementById(prefix+'-serie')?.value?.trim() || null,
+    problema_desc: document.getElementById(prefix+'-problema')?.value?.trim() || null,
+  };
+}
+
+function getPODetailExtraFields() {
+  var tipo = document.getElementById('pod-tipo')?.value || 'flota';
+  if (tipo === 'flota') return { tipo };
+  var prefix = 'pod-x';
+  return {
+    tipo,
+    urgencia:      document.getElementById(prefix+'-urgencia')?.value || 'normal',
+    local_sector:  document.getElementById(prefix+'-local')?.value?.trim() || null,
+    sector_detalle:document.getElementById(prefix+'-sector')?.value || null,
+    equipo:        document.getElementById(prefix+'-equipo')?.value?.trim() || null,
+    activo_serie:  document.getElementById(prefix+'-serie')?.value?.trim() || null,
+    problema_desc: document.getElementById(prefix+'-problema')?.value?.trim() || null,
+  };
+}
+
+function updatePOAreaSelect() {
+  var suc    = document.getElementById('po-sucursal')?.value || '';
+  var sel    = document.getElementById('po-area');
+  if (!sel) return;
+  var areas  = (App.config?.areas || {})[suc] || [];
+  sel.innerHTML = areas.length
+    ? '<option value="">— Seleccioná el área —</option>' + areas.map(function(a){ return '<option value="'+a+'">'+a+'</option>'; }).join('')
+    : '<option value="">— Sin áreas configuradas —</option>';
+}
+
+function setPOTipo(tipo) {
+  window._poTipo = tipo;
+  ['flota','mantenimiento','otro'].forEach(function(t) {
+    var btn = document.getElementById('po-tipo-' + t);
+    if (!btn) return;
+    var active = t === tipo;
+    btn.style.background   = active ? 'var(--accent)' : 'transparent';
+    btn.style.color        = active ? 'white' : 'var(--text3)';
+    btn.style.borderColor  = active ? 'var(--accent)' : 'var(--border2)';
+  });
+  // Mostrar selector de vehículo solo en tipo Flota
+  var vehField = document.getElementById('po-vehicle-field');
+  if (vehField) vehField.style.display = tipo === 'flota' ? '' : 'none';
+  renderPOExtraFields(tipo, 'po-extra-fields');
+}
+
+async function recibirOC(id) {
+  try {
+    // Primero ver datos de la OC
+    const res = await apiFetch('/api/purchase-orders/' + id);
+    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
+    const po = await res.json();
+
+    var vehiculo = po.vehicle_id
+      ? (App.data.vehicles||[]).find(function(v){ return v.id === po.vehicle_id; })
+      : null;
+
+    var msg = vehiculo
+      ? 'Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nSe generará automáticamente la OT para el vehículo ' + vehiculo.code + ' (' + vehiculo.plate + ') con el costo de la factura ($' + parseFloat(po.factura_monto||po.total_estimado||0).toLocaleString('es-AR') + ').\n\n¿Confirmás?'
+      : 'Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nNo tiene vehículo asignado — no se generará OT.\n\n¿Confirmás?';
+
+    if (!confirm(msg)) return;
+
+    const r = await apiFetch('/api/purchase-orders/' + id + '/recibir', { method: 'POST' });
+    if (!r.ok) { var e = await r.json(); showToast('error', e.error||'Error'); return; }
+    var data = await r.json();
+
+    if (data.ot_generada) {
+      showToast('ok', '✅ OC recibida · OT ' + data.ot_code + ' generada para ' + data.vehicle + ' · $' + parseFloat(data.costo_aplicado).toLocaleString('es-AR') + ' al costo de la unidad');
+    } else {
+      showToast('ok', '✅ OC marcada como recibida');
+    }
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+
+    // Si se generó OT ofrecer verla
+    if (data.ot_generada) {
+      setTimeout(function() {
+        if (confirm('¿Querés ver la OT ' + data.ot_code + ' generada?')) {
+          navigate('workorders');
+        }
+      }, 500);
+    }
+  } catch(err) { showToast('error', err.message||'Error'); }
+}
+
+function setPODetailTipo(tipo) {
+  var hidden = document.getElementById('pod-tipo');
+  if (hidden) hidden.value = tipo;
+  ['flota','mantenimiento','otro'].forEach(function(t) {
+    var btn = document.getElementById('pod-tipo-' + t);
+    if (!btn) return;
+    var active = t === tipo;
+    btn.style.background   = active ? 'var(--accent)' : 'transparent';
+    btn.style.color        = active ? 'white' : 'var(--text3)';
+    btn.style.borderColor  = active ? 'var(--accent)' : 'var(--border2)';
+  });
+  renderPOExtraFields(tipo, 'pod-extra-fields');
+}
+
+function setPODetailIva(val) {
+  const pct = val === '21%' ? 21 : val === '10.5%' ? 10.5 : 0;
+  const hidden = document.getElementById('pod-iva-pct');
+  if (hidden) hidden.value = pct;
+  ['Sin IVA','10.5%','21%'].forEach(v => {
+    const btn = document.getElementById('pod-iva-btn-' + v);
+    if (!btn) return;
+    btn.style.background = v === val ? 'var(--accent)' : 'transparent';
+    btn.style.color      = v === val ? 'white' : 'var(--text3)';
+  });
+}
+
+function updatePODetailAreaSelect() {
+  var suc   = document.getElementById('pod-sucursal')?.value || '';
+  var sel   = document.getElementById('pod-area');
+  if (!sel) return;
+  var areas = (App.config?.areas || {})[suc] || [];
+  var cur   = sel.value;
+  sel.innerHTML = '<option value="">— Sin área —</option>'
+    + areas.map(function(a){ return '<option value="'+a+'"'+(a===cur?' selected':'')+'>'+a+'</option>'; }).join('');
+}
+
+function searchPOStock(idx) {
+  updatePOTotal();
+  var val = (document.getElementById('poi-desc-'+idx)?.value || '').trim().toLowerCase();
+  var sug = document.getElementById('poi-suggestions-'+idx);
+  if (!sug) return;
+  if (!val || val.length < 2) { sug.style.display = 'none'; return; }
+
+  var stock = App.data.stock || [];
+  var matches = stock.filter(function(s) {
+    return (s.name||'').toLowerCase().includes(val) || (s.code||'').toLowerCase().includes(val);
+  }).slice(0, 8);
+
+  if (!matches.length) { sug.style.display = 'none'; return; }
+
+  sug.innerHTML = matches.map(function(s) {
+    var sucLabel = s.sucursal ? '<span style="color:var(--accent);font-size:10px;margin-left:6px">['+s.sucursal+']</span>' : '';
+    var critColor = s.is_critical ? 'var(--danger)' : 'var(--text3)';
+    return '<div onclick="selectPOStockItem('+idx+',\''+s.id+'\',\''+s.name.replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\',\''+s.unit+'\','+parseFloat(s.unit_cost||0)+','+parseFloat(s.qty_current||0)+')"'
+      +' style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"'
+      +' onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'
+      +'<div><span style="font-weight:600">'+s.name+'</span>'
+      +'<span style="color:var(--text3);margin-left:8px;font-family:monospace;font-size:11px">'+s.code+'</span>'
+      +sucLabel+'</div>'
+      +'<div style="text-align:right">'
+      +'<div style="font-weight:700;color:var(--accent)">$'+Math.round(s.unit_cost||0).toLocaleString('es-AR')+'/'+s.unit+'</div>'
+      +'<div style="font-size:10px;color:'+critColor+'">Stock: '+parseFloat(s.qty_current||0)+' '+s.unit+'</div>'
+      +'</div></div>';
+  }).join('');
+  sug.style.display = 'block';
+}
+
+async function openAreasConfigModal() {
+  var bases = App.config?.bases || [];
+  var areas = App.config?.areas || {};
+
+  var rows = bases.map(function(suc) {
+    var sucAreas = (areas[suc] || []).join(', ');
+    return '<div class="form-group">'
+      +'<label class="form-label" style="font-weight:700">'+suc+'</label>'
+      +'<input class="form-input" id="areas-'+suc.replace(/\s+/g,'_')+'" value="'+sucAreas+'" '
+      +'placeholder="Ej: Flota, Mantenimiento edilicio, Administración" style="font-size:13px">'
+      +'<div style="font-size:11px;color:var(--text3);margin-top:3px">Separar las áreas con comas</div>'
+      +'</div>';
+  }).join('');
+
+  openModal('⚙️ Configurar áreas por sucursal', rows, [
+    { label:'Cancelar',          cls:'btn-secondary', fn: closeModal },
+    { label:'Guardar áreas',     cls:'btn-primary',   fn: saveAreasConfig },
+  ]);
+}
+
