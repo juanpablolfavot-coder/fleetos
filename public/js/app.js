@@ -6810,4 +6810,110 @@ async function openAreasConfigModal() {
     { label:'Guardar áreas',     cls:'btn-primary',   fn: saveAreasConfig },
   ]);
 }
+/* ═══════════════════════════════════════════════════════════
+   OC EXTRAS v1 — forma de pago, cc_dias, moneda + sucursales API
+   ═══════════════════════════════════════════════════════════ */
 
+async function loadSucursalesFromAPI() {
+  try {
+    const res = await apiFetch('/api/sucursales');
+    if (res.ok === false) return;
+    const rows = await res.json();
+    if (Array.isArray(rows) === false) return;
+    App.config = App.config || {};
+    App.config.bases = rows.map(function(r){ return r.nombre; });
+    App.config.areas = {};
+    rows.forEach(function(r){
+      App.config.areas[r.nombre] = Array.isArray(r.areas) ? r.areas : [];
+    });
+  } catch(e) { console.warn('loadSucursalesFromAPI', e); }
+}
+
+function _ocToggleCC(prefix) {
+  var sel = document.getElementById(prefix + '-forma-pago');
+  var fld = document.getElementById(prefix + '-cc-dias-field');
+  if (sel == null || fld == null) return;
+  fld.style.display = (sel.value === 'cuenta_corriente') ? '' : 'none';
+}
+
+function _ocExtrasHTML(prefix, values) {
+  values = values || {};
+  var fp  = values.forma_pago || '';
+  var ccd = (values.cc_dias == null) ? '' : values.cc_dias;
+  var mon = values.moneda || 'ARS';
+  var ccDisplay = (fp === 'cuenta_corriente') ? '' : 'display:none';
+  var html = ''
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
+    +   '<div class="form-group">'
+    +     '<label class="form-label">Forma de pago</label>'
+    +     '<select class="form-select" id="' + prefix + '-forma-pago" onchange="_ocToggleCC(\'' + prefix + '\')">'
+    +       '<option value="">-- Seleccionar --</option>'
+    +       '<option value="contado">Contado</option>'
+    +       '<option value="cuenta_corriente">Cuenta corriente</option>'
+    +     '</select>'
+    +   '</div>'
+    +   '<div class="form-group" id="' + prefix + '-cc-dias-field" style="' + ccDisplay + '">'
+    +     '<label class="form-label">Dias CC</label>'
+    +     '<input class="form-input" type="number" min="0" step="1" id="' + prefix + '-cc-dias" value="' + ccd + '" placeholder="30">'
+    +   '</div>'
+    +   '<div class="form-group">'
+    +     '<label class="form-label">Moneda</label>'
+    +     '<select class="form-select" id="' + prefix + '-moneda">'
+    +       '<option value="ARS">Pesos (ARS)</option>'
+    +       '<option value="USD">Dolares (USD)</option>'
+    +     '</select>'
+    +   '</div>'
+    + '</div>';
+  setTimeout(function(){
+    var sel1 = document.getElementById(prefix + '-forma-pago');
+    var sel2 = document.getElementById(prefix + '-moneda');
+    if (sel1 != null) sel1.value = fp;
+    if (sel2 != null) sel2.value = mon;
+  }, 0);
+  return html;
+}
+
+function renderPOExtraFields(tipo, containerId) {
+  var el = document.getElementById(containerId);
+  if (el == null) return;
+  var prefix = (containerId === 'pod-extra-fields') ? 'pod' : 'po';
+  var vals = window._ocEditValues || {};
+  el.style.display = '';
+  el.innerHTML = _ocExtrasHTML(prefix, vals);
+}
+
+function getPOExtraFields() {
+  var fp  = document.getElementById('po-forma-pago');
+  var ccd = document.getElementById('po-cc-dias');
+  var mon = document.getElementById('po-moneda');
+  var out = {
+    forma_pago: fp ? (fp.value || null) : null,
+    moneda:     mon ? (mon.value || 'ARS') : 'ARS'
+  };
+  if (out.forma_pago === 'cuenta_corriente') {
+    out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
+  } else {
+    out.cc_dias = null;
+  }
+  return out;
+}
+
+function getPODetailExtraFields() {
+  var fp  = document.getElementById('pod-forma-pago');
+  var ccd = document.getElementById('pod-cc-dias');
+  var mon = document.getElementById('pod-moneda');
+  var out = {
+    forma_pago: fp ? (fp.value || null) : null,
+    moneda:     mon ? (mon.value || null) : null
+  };
+  if (out.forma_pago === 'cuenta_corriente') {
+    out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
+  } else if (out.forma_pago === 'contado') {
+    out.cc_dias = null;
+  } else {
+    out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
+  }
+  return out;
+}
+
+/* FIN OC EXTRAS v1 */
