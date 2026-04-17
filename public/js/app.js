@@ -5965,10 +5965,23 @@ async function openNewPOModal() {
   try { await loadSucursalesFromAPI(); } catch(e){}
   window._poTipo = 'flota';
   window._poIvaPct = 0;
+
+  // Traer proveedores existentes para el datalist
+  var proveedoresPrev = [];
+  try {
+    const rp = await apiFetch('/api/purchase-orders/aux/proveedores');
+    if (rp.ok) proveedoresPrev = await rp.json();
+  } catch(e) {}
+
+  var solicitante = App.currentUser?.name || App.currentUser?.email || '—';
+
   openModal('📋 Nueva Orden de Compra', `
     <!-- ORIGEN -->
     <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🏢 Origen</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🏢 Origen</div>
+        <div style="font-size:11px;color:var(--text3)">👤 Solicita: <span style="font-weight:700;color:var(--accent)">${solicitante}</span></div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
@@ -5989,7 +6002,7 @@ async function openNewPOModal() {
     <!-- DESTINO -->
     <div class="card" style="padding:12px 16px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🚛 Destino</div>
-      <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Tipo de orden</label>
           <select class="form-select" id="po-tipo-select" onchange="setPOTipo(this.value)">
@@ -6004,8 +6017,15 @@ async function openNewPOModal() {
             <option value="">— Sin vehículo asignado —</option>
             ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
           </select>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Si lo asignás, al recibir se genera una OT automáticamente</div>
         </div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label">Proveedor <span style="color:var(--danger)">*</span></label>
+        <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor" autocomplete="off">
+        <datalist id="po-proveedores-datalist">
+          ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
+        </datalist>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Escribí para autocompletar o tipeá uno nuevo</div>
       </div>
     </div>
 
@@ -6060,11 +6080,9 @@ async function openNewPOModal() {
     ]
   );
 
-  // Renderizar campos de pago inmediatamente
   if (typeof renderPOExtraFields === 'function') {
     renderPOExtraFields('flota', 'po-extra-fields');
   }
-  // Actualizar símbolo de moneda en precios cuando cambia
   setTimeout(function(){
     var selMon = document.getElementById('po-moneda');
     if (selMon) selMon.addEventListener('change', updatePOTotal);
@@ -6155,6 +6173,7 @@ async function saveNewPO() {
     const notes    = document.getElementById('po-notes')?.value?.trim() || '';
     const sucursal = document.getElementById('po-sucursal')?.value || '';
     const area     = document.getElementById('po-area')?.value || '';
+    const proveedor = document.getElementById('po-proveedor')?.value?.trim() || '';
     const tipo     = window._poTipo || 'flota';
     const extra    = getPOExtraFields();
     const vehicle_id = document.getElementById('po-vehicle')?.value || null;
@@ -6171,14 +6190,16 @@ async function saveNewPO() {
       });
     });
     if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
-    if (!sucursal) { showToast('warn','Seleccioná una sucursal'); return; }
-    if (!area)     { showToast('warn','Seleccioná un área');    return; }
+    if (!sucursal)  { showToast('warn','Seleccioná una sucursal'); return; }
+    if (!area)      { showToast('warn','Seleccioná un área');    return; }
+    if (!proveedor) { showToast('warn','Cargá el proveedor');     return; }
+
     const ivaPct = window._poIvaPct || 0;
     const res = await apiFetch('/api/purchase-orders', {
       method: 'POST',
-      body: JSON.stringify({ notes, sucursal: sucursal||null, area: area||null, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
+      body: JSON.stringify({ notes, sucursal, area, proveedor, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
     });
-    window._poIvaPct = 0; // reset
+    window._poIvaPct = 0;
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
     const po = await res.json();
     closeModal();
