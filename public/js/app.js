@@ -6177,97 +6177,97 @@ async function openPODetail(id) {
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
 
-    const canEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
-    const estadoLabels = { borrador:'✏️ Borrador', emitida:'📤 Emitida', en_curso:'🔄 En curso', recibida:'✅ Recibida', cancelada:'❌ Cancelada' };
-    const statusOptions = ['borrador','emitida','en_curso','recibida','cancelada']
-      .map(s => `<option value="${s}" ${po.status===s?'selected':''}>${estadoLabels[s]||s}</option>`)
-      .join('');
+    const role    = App.currentUser?.role;
+    const canEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(role);
+    const canPay  = ['dueno','gerencia','contador'].includes(role);
+    const canCancel = ['dueno','gerencia'].includes(role);
+
+    const estadoInfo = {
+      en_revision: { label:'EN REVISIÓN', color:'#f59e0b', icon:'🕐' },
+      aprobada:    { label:'APROBADA',    color:'#10b981', icon:'✅' },
+      rechazada:   { label:'RECHAZADA',   color:'#ef4444', icon:'❌' },
+      recibida:    { label:'RECIBIDA',    color:'#3b82f6', icon:'📥' },
+      pagada:      { label:'PAGADA',      color:'#8b5cf6', icon:'💵' },
+      cancelada:   { label:'CANCELADA',   color:'#6b7280', icon:'🚫' }
+    };
+    const st = estadoInfo[po.status] || { label:po.status.toUpperCase(), color:'#6b7280', icon:'📋' };
+    const esTerminal = ['pagada','rechazada','cancelada'].includes(po.status);
+    window._ocEditValues = { forma_pago: po.forma_pago, cc_dias: po.cc_dias, moneda: po.moneda };
 
     const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+    const fmt = d => d ? new Date(d).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
 
-    openModal(`📋 ${po.code}`, `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div class="card" style="padding:12px;grid-column:span 2">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">TIPO DE ORDEN</div>
-          <div style="display:flex;gap:6px">
-            ${['flota','mantenimiento','otro'].map(t => {
-              const labels = {flota:'🚛 Flota', mantenimiento:'🏪 Mantenimiento edilicio', otro:'📋 Otro'};
-              const active = (po.tipo||'flota') === t;
-              return canEdit
-                ? `<button type="button" id="pod-tipo-${t}" onclick="setPODetailTipo('${t}')"
-                    style="flex:1;padding:7px 4px;border-radius:var(--radius);border:2px solid ${active?'var(--accent)':'var(--border2)'};
-                    background:${active?'var(--accent)':'transparent'};color:${active?'white':'var(--text3)'};
-                    cursor:pointer;font-size:12px;font-weight:700;transition:.15s">${labels[t]}</button>`
-                : (active ? `<span style="font-weight:700;color:var(--accent);font-size:13px">${labels[t]}</span>` : '');
-            }).join('')}
-          </div>
-          <input type="hidden" id="pod-tipo" value="${po.tipo||'flota'}">
+    const tl = (label, nombre, fecha, done) => `
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+        <div style="width:10px;height:10px;border-radius:50%;background:${done?'var(--accent)':'var(--border2)'};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">${label}</div>
+          <div style="font-size:13px;font-weight:${done?'600':'400'};color:${done?'var(--text)':'var(--text3)'}">${done ? (nombre||'—') : '—'}</div>
         </div>
-        <div class="card" style="padding:12px">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">ESTADO</div>
-          ${canEdit ? `<select class="form-select" id="pod-status">${statusOptions}</select>` : `<div style="font-weight:600">${po.status}</div>`}
+        <div style="font-size:11px;color:var(--text3);white-space:nowrap">${done ? fmt(fecha) : ''}</div>
+      </div>
+    `;
+
+    openModal(`${st.icon} ${po.code} — ${po.sucursal||'—'} · ${po.area||'—'}`, `
+      <div style="background:${st.color}22;border:1px solid ${st.color};border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="background:${st.color};color:white;padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700">${st.label}</span>
+          <span style="font-size:13px;color:var(--text2)">${po.moneda==='USD'?'US$':'$'} ${po.forma_pago==='cuenta_corriente'?'Cuenta corriente a '+(po.cc_dias||0)+' días':(po.forma_pago==='contado'?'Contado':'—')}</span>
         </div>
-        <div class="card" style="padding:12px">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">SOLICITANTE</div>
-          <div style="font-weight:600">${po.solicitante_nombre||'—'}</div>
-        </div>
-        ${po.tipo === 'flota' || !po.tipo ? `
-        <div class="card" style="padding:12px;grid-column:span 2">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">🚛 VEHÍCULO ASIGNADO</div>
-          ${canEdit && !['recibida','cancelada'].includes(po.status)
-            ? `<select class="form-select" id="pod-vehicle">
-                <option value="">— Sin vehículo —</option>
-                ${(App.data.vehicles||[]).map(v => '<option value="'+v.id+'"'+(po.vehicle_id===v.id?' selected':'')+'>'+v.code+' · '+v.plate+'</option>').join('')}
-               </select>
-               <div style="font-size:11px;color:var(--text3);margin-top:3px">Al recibir la OC se generará una OT para esta unidad con el costo de la factura</div>`
-            : (po.vehicle_id
-                ? '<div style="font-weight:700;color:var(--accent)">' + ((App.data.vehicles||[]).find(v=>v.id===po.vehicle_id)?.code||'—') + '</div>'
-                + (po.ot_id ? '<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="navigate(\'workorders\')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>' : '')
-                : '<div style="color:var(--text3)">Sin vehículo asignado</div>')}
-        </div>` : ''}
+        <div style="font-size:11px;color:var(--text3)">Creada ${fmt(po.created_at)}</div>
       </div>
 
-      <div class="card" style="padding:12px;margin-bottom:16px">
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px;font-weight:700">DATOS DE FACTURA — completar a mano o al recibir</div>
+      ${po.status==='rechazada' && po.rechazo_motivo ? `
+      <div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px">
+        <div style="font-size:11px;color:#ef4444;font-weight:700;text-transform:uppercase;margin-bottom:4px">Motivo del rechazo</div>
+        <div style="font-size:13px;color:var(--text)">${po.rechazo_motivo}</div>
+      </div>` : ''}
+
+      <div class="card" style="padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🕐 Trazabilidad</div>
+        ${tl('Solicitó',     po.solicitante_nombre, po.created_at,   true)}
+        ${tl('Aprobó',       po.aprobador_nombre,   po.aprobado_en,  !!po.aprobado_en)}
+        ${po.status==='rechazada' ? tl('Rechazó', po.rechazador_nombre, po.rechazado_en, true) : ''}
+        ${tl('Recibió',      po.receptor_nombre,    po.recibido_en,  !!po.recibido_en)}
+        ${tl('Pagó',         po.pagador_nombre,     po.pagado_en,    !!po.pagado_en)}
+      </div>
+
+      ${po.vehicle_id ? `
+      <div class="card" style="padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🚛 Vehículo</div>
+        <div style="font-size:15px;font-weight:700;color:var(--accent)">${po.vehicle_code||'—'} · ${po.vehicle_plate||'—'}</div>
+        ${po.ot_id ? `<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="closeModal();navigate('workorders')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>` :
+          (po.status==='aprobada' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
+      </div>` : ''}
+
+      <div class="card" style="padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💰 Datos de factura</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div class="form-group">
-            <label class="form-label">Sucursal</label>
-            ${canEdit
-              ? `<select class="form-select" id="pod-sucursal" onchange="updatePODetailAreaSelect()">
-                  <option value="">— Sin sucursal —</option>
-                  ${(App.config?.bases||[]).map(b => `<option value="${b}" ${po.sucursal===b?'selected':''}>${b}</option>`).join('')}
-                </select>`
-              : `<div style="font-weight:600">${po.sucursal||'—'}</div>`}
-          </div>
-          <div class="form-group">
+          <div class="form-group" style="margin:0">
             <label class="form-label">Proveedor</label>
-            <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor" ${canEdit?'':'readonly'}>
+            <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor" ${canEdit && !esTerminal?'':'readonly'}>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin:0">
             <label class="form-label">Nro. Factura</label>
-            <input class="form-input" id="pod-factura-nro" value="${po.factura_nro||''}" placeholder="0001-00012345" ${canEdit?'':'readonly'}>
+            <input class="form-input" id="pod-factura-nro" value="${po.factura_nro||''}" placeholder="0001-00012345" ${canEdit && !esTerminal?'':'readonly'}>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="margin:0">
             <label class="form-label">Fecha factura</label>
-            <input class="form-input" type="date" id="pod-factura-fecha" value="${po.factura_fecha?.slice(0,10)||''}" ${canEdit?'':'readonly'}>
+            <input class="form-input" type="date" id="pod-factura-fecha" value="${po.factura_fecha?.slice(0,10)||''}" ${canEdit && !esTerminal?'':'readonly'}>
           </div>
-          <div class="form-group">
-            <label class="form-label">Monto factura ($)</label>
-            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit?'':'readonly'}>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Monto factura</label>
+            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit && !esTerminal?'':'readonly'}>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Área</label>
-          ${canEdit
-            ? `<select class="form-select" id="pod-area">
-                <option value="">— Sin área —</option>
-                ${((App.config?.areas||{})[po.sucursal]||[]).map(a => '<option value="'+a+'" '+(po.area===a?'selected':'')+'>'+a+'</option>').join('')}
-               </select>`
-            : `<div style="font-weight:600">${po.area||'—'}</div>`}
-        </div>
-        <div class="form-group">
-          <label class="form-label">IVA</label>
-          ${canEdit
+      </div>
+
+      <div class="card" style="padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💳 Pago y moneda</div>
+        <div id="pod-extra-fields"></div>
+        <div style="margin-top:10px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:6px">IVA</div>
+          ${canEdit && !esTerminal
             ? ('<div style="display:flex;gap:8px">'
                 + ['Sin IVA','10.5%','21%'].map(v => {
                     const pct = v==='21%' ? 21 : v==='10.5%' ? 10.5 : 0;
@@ -6280,45 +6280,10 @@ async function openPODetail(id) {
                 + '</div>')
             : ('<span style="font-weight:600">' + (parseFloat(po.iva_pct||0) > 0 ? po.iva_pct+'%' : 'Sin IVA') + '</span>')}
         </div>
-        <div class="form-group">
-          <label class="form-label">Observaciones</label>
-          <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit?'':'readonly'}>${po.notes||''}</textarea>
-        </div>
-        ${canEdit ? `
-        <div class="form-group">
-          <label class="form-label">IVA</label>
-          <div style="display:flex;gap:8px">
-            ${['0','10.5','21'].map(v => `<button type="button" id="pod-iva-btn-${v}" onclick="setPODetailIva('${v}')"
-              style="padding:5px 14px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;transition:.15s;
-              background:${parseFloat(po.iva_pct||0)==parseFloat(v)?'var(--accent)':'transparent'};
-              color:${parseFloat(po.iva_pct||0)==parseFloat(v)?'white':'var(--text3)'}">
-              ${v==='0'?'Sin IVA':v+'%'}
-            </button>`).join('')}
-          </div>
-          <input type="hidden" id="pod-iva-pct" value="${po.iva_pct||0}">
-        </div>` : `<div style="font-size:13px;color:var(--text3)">IVA: ${parseFloat(po.iva_pct||0) > 0 ? po.iva_pct+'%' : 'Sin IVA'}</div>`}
       </div>
 
-    <!-- Campos extra mantenimiento -->
-    <div id="pod-extra-container" style="margin-bottom:16px">
-      ${po.tipo && po.tipo !== 'flota' ? `<div style="background:var(--bg3);border-radius:var(--radius);padding:14px;border:1px solid var(--border2)">
-        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
-          ${po.tipo==='mantenimiento'?'🏪 Mantenimiento edilicio':'📋 Datos adicionales'}
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div><div style="font-size:11px;color:var(--text3)">Urgencia</div><div style="font-weight:700;color:var(--warn)">${(po.urgencia||'normal').toUpperCase()}</div></div>
-          <div><div style="font-size:11px;color:var(--text3)">Local</div><div style="font-weight:600">${po.local_sector||'—'}</div></div>
-          <div><div style="font-size:11px;color:var(--text3)">Sector</div><div style="font-weight:600">${po.sector_detalle||'—'}</div></div>
-          <div><div style="font-size:11px;color:var(--text3)">Equipo</div><div style="font-weight:600">${po.equipo||'—'}</div></div>
-          <div><div style="font-size:11px;color:var(--text3)">Activo/Serie</div><div style="font-weight:600">${po.activo_serie||'—'}</div></div>
-          <div style="grid-column:span 2"><div style="font-size:11px;color:var(--text3)">Descripción del problema</div><div style="font-weight:600">${po.problema_desc||'—'}</div></div>
-        </div>
-        ${canEdit ? `<div id="pod-extra-fields" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border2)"></div>` : ''}
-      </div>` : (canEdit ? `<div id="pod-extra-fields"></div>` : '')}
-    </div>
-
-      <div class="card" style="padding:0;margin-bottom:12px">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border2);font-size:12px;font-weight:700;color:var(--text3)">ARTÍCULOS</div>
+      <div class="card" style="padding:0;margin-bottom:16px">
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border2);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</div>
         <table style="font-size:13px">
           <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:center">Unid.</th><th style="text-align:right">P. Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
           <tbody>
@@ -6326,47 +6291,59 @@ async function openPODetail(id) {
               <td>${i.descripcion}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
               <td style="text-align:center">${i.unidad}</td>
-              <td style="text-align:right;font-family:monospace">$${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
-              <td style="text-align:right;font-family:monospace;font-weight:600">$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+              <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
+              <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
             </tr>`).join('')}
           </tbody>
         </table>
         <div style="padding:8px 16px;border-top:1px solid var(--border2);display:flex;justify-content:space-between">
           <span style="font-size:12px;color:var(--text3)">Subtotal</span>
-          <span style="font-family:monospace;font-size:12px" id="pod-subtotal-display">$${Math.round(totalReal).toLocaleString('es-AR')}</span>
+          <span style="font-family:monospace;font-size:12px" id="pod-subtotal-display">${po.moneda==='USD'?'US$':'$'}${Math.round(totalReal).toLocaleString('es-AR')}</span>
         </div>
         <div id="pod-iva-row" style="padding:4px 16px;display:flex;justify-content:space-between;${parseFloat(po.iva_pct||0)===0?'opacity:.4':''}">
           <span style="font-size:12px;color:var(--text3)" id="pod-iva-row-label">IVA (${po.iva_pct||0}%)</span>
-          <span style="font-family:monospace;font-size:12px" id="pod-iva-row-monto">$${Math.round(totalReal * parseFloat(po.iva_pct||0) / 100).toLocaleString('es-AR')}</span>
+          <span style="font-family:monospace;font-size:12px" id="pod-iva-row-monto">${po.moneda==='USD'?'US$':'$'}${Math.round(totalReal * parseFloat(po.iva_pct||0) / 100).toLocaleString('es-AR')}</span>
         </div>
         <div style="padding:10px 16px;border-top:2px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:13px;font-weight:700">TOTAL</span>
-          <span style="font-size:20px;font-weight:700;font-family:monospace;color:var(--accent)" id="pod-total-display">$${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</span>
+          <span style="font-size:20px;font-weight:700;font-family:monospace;color:var(--accent)" id="pod-total-display">${po.moneda==='USD'?'US$':'$'}${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</span>
         </div>
       </div>
 
-      <div style="font-size:11px;color:var(--text3)">Creada el ${new Date(po.created_at).toLocaleString('es-AR')}</div>`,
+      <div class="card" style="padding:12px 16px;margin-bottom:4px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones</div>
+        <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit && !esTerminal?'':'readonly'} placeholder="—">${po.notes||''}</textarea>
+      </div>`,
       [
         { label:'Cerrar', cls:'btn-secondary', fn: closeModal },
-        ...(canEdit ? [
+        ...(canEdit && !esTerminal ? [
+          { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
           { label:'✏️ Editar artículos', cls:'btn-secondary', fn: () => { closeModal(); openEditPOItemsModal(id); } },
-          { label:'🖨 Imprimir',         cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
-          ...(!['recibida','cancelada'].includes(po.status) ? [
+          { label:'💾 Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
+          ...(po.status==='en_revision' ? [
+            { label:'❌ Rechazar', cls:'btn-danger',  fn: () => rechazarOC(id) },
+            { label:'✅ Aprobar',  cls:'btn-primary', fn: () => aprobarOC(id) },
+          ] : []),
+          ...(po.status==='aprobada' ? [
             { label:'📥 Recibir' + (po.vehicle_id ? ' y generar OT' : ''), cls:'btn-primary', fn: () => recibirOC(id) },
           ] : []),
-          ...(['recibida','cancelada'].includes(po.status) ? [
-            { label:'Guardar cambios', cls:'btn-primary', fn: () => savePODetail(id) },
-          ] : [
-            { label:'Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
-          ]),
+          ...(po.status==='recibida' && canPay ? [
+            { label:'💵 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
+          ] : []),
+          ...(canCancel ? [
+            { label:'🚫 Cancelar OC', cls:'btn-danger', fn: () => cancelarOC(id, po.status) },
+          ] : []),
         ] : [
           { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
         ])
       ]
     );
+
+    if (typeof renderPOExtraFields === 'function') {
+      renderPOExtraFields(po.tipo, 'pod-extra-fields');
+    }
   } catch(err) { showToast('error', err.message); }
 }
-
 async function savePODetail(id) {
   try {
     const ivaPct = parseFloat(document.getElementById('pod-iva-pct')?.value) || 0;
