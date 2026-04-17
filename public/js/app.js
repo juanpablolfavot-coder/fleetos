@@ -6151,7 +6151,8 @@ async function saveNewPO() {
       });
     });
     if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
-
+    if (!sucursal) { showToast('warn','Seleccioná una sucursal'); return; }
+    if (!area)     { showToast('warn','Seleccioná un área');    return; }
     const ivaPct = window._poIvaPct || 0;
     const res = await apiFetch('/api/purchase-orders', {
       method: 'POST',
