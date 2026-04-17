@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  FleetOS — Órdenes de Compra
+//  FleetOS — Órdenes de Compra (con workflow)
 // ═══════════════════════════════════════════════════════════
 const router   = require('express').Router();
 const { query } = require('../db/pool');
@@ -9,7 +9,7 @@ async function ensureTables() {
   await query(`CREATE TABLE IF NOT EXISTS purchase_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     code VARCHAR(20) UNIQUE NOT NULL,
-    status VARCHAR(20) DEFAULT 'borrador',
+    status VARCHAR(20) DEFAULT 'en_revision',
     requested_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     sucursal VARCHAR(200), notes TEXT, proveedor VARCHAR(200),
@@ -53,7 +53,21 @@ router.get('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento
 
 router.get('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','contador','auditor'), async (req, res) => {
   try {
-    const po = await query(`SELECT po.*, u.name as solicitante_nombre, v.code as vehicle_code, v.plate as vehicle_plate FROM purchase_orders po LEFT JOIN users u ON u.id = po.requested_by LEFT JOIN vehicles v ON v.id = po.vehicle_id WHERE po.id = $1`, [req.params.id]);
+    const po = await query(`SELECT po.*,
+      u.name as solicitante_nombre,
+      v.code as vehicle_code, v.plate as vehicle_plate,
+      ua.name as aprobador_nombre,
+      urj.name as rechazador_nombre,
+      urc.name as receptor_nombre,
+      up.name as pagador_nombre
+      FROM purchase_orders po
+      LEFT JOIN users u   ON u.id   = po.requested_by
+      LEFT JOIN users ua  ON ua.id  = po.aprobado_por
+      LEFT JOIN users urj ON urj.id = po.rechazado_por
+      LEFT JOIN users urc ON urc.id = po.recibido_por
+      LEFT JOIN users up  ON up.id  = po.pagado_por
+      LEFT JOIN vehicles v ON v.id = po.vehicle_id
+      WHERE po.id = $1`, [req.params.id]);
     if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const items = await query('SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at', [req.params.id]);
     res.json({ ...po.rows[0], items: items.rows });
@@ -70,7 +84,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
     const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD') ? 'USD' : 'ARS';
-    const po = await query(`INSERT INTO purchase_orders (code,status,requested_by,sucursal,area,tipo,vehicle_id,notes,iva_pct,total_estimado,forma_pago,cc_dias,moneda) VALUES ($1,'borrador',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    const po = await query(`INSERT INTO purchase_orders (code,status,requested_by,sucursal,area,tipo,vehicle_id,notes,iva_pct,total_estimado,forma_pago,cc_dias,moneda) VALUES ($1,'en_revision',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
       [code,req.user.id,sucursal||null,area||null,tipo||'flota',vehicle_id||null,notes||null,parseFloat(iva_pct||0),total,_fp,_cc,_mon]);
     const poId = po.rows[0].id;
     for (const item of items) {
@@ -87,8 +101,8 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 router.patch('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
     const { proveedor,factura_nro,factura_fecha,factura_monto,notes,status,sucursal,area,iva_pct,tipo,vehicle_id,forma_pago,cc_dias,moneda } = req.body;
-    const valid_status = ['borrador','emitida','en_curso','recibida','cancelada'];
-    if (status && !valid_status.includes(status)) return res.status(400).json({ error: 'Estado inválido' });
+    const valid_status = ['en_revision','aprobada','rechazada','recibida','pagada','cancelada'];
+    if (status && !valid_status.includes(status)) return res.status(400).json({ error: 'Estado invalido' });
     const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
     const _cc = (_fp === 'contado') ? null : ((cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null);
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : null;
@@ -118,7 +132,7 @@ router.patch('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenim
 router.put('/:id/items', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
     const { items=[] } = req.body;
-    if (!items.length) return res.status(400).json({ error: 'Debe haber al menos un artículo' });
+    if (!items.length) return res.status(400).json({ error: 'Debe haber al menos un articulo' });
     await query('DELETE FROM purchase_order_items WHERE po_id=$1',[req.params.id]);
     let total = 0;
     for (const item of items) {
@@ -138,11 +152,71 @@ router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_manteni
   try {
     const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
     if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    if (check.rows[0].status !== 'borrador' && req.user.role !== 'dueno') return res.status(409).json({ error: 'Solo se pueden eliminar OCs en borrador' });
+    if (check.rows[0].status !== 'en_revision' && req.user.role !== 'dueno') return res.status(409).json({ error: 'Solo se pueden eliminar OCs en revision' });
     await query('DELETE FROM purchase_orders WHERE id=$1',[req.params.id]);
     res.json({ ok:true });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
+
+/* --- OC WORKFLOW v1 --- */
+
+router.post('/:id/aprobar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  try {
+    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (check.rows[0].status !== 'en_revision') return res.status(409).json({ error: 'Solo se aprueban OCs en revision' });
+    const r = await query(
+      "UPDATE purchase_orders SET status='aprobada', aprobado_por=$1, aprobado_en=NOW() WHERE id=$2 RETURNING *",
+      [req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  try {
+    const { motivo } = req.body;
+    if (!motivo || !motivo.trim()) return res.status(400).json({ error: 'El motivo de rechazo es obligatorio' });
+    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (check.rows[0].status !== 'en_revision') return res.status(409).json({ error: 'Solo se rechazan OCs en revision' });
+    const r = await query(
+      "UPDATE purchase_orders SET status='rechazada', rechazado_por=$1, rechazado_en=NOW(), rechazo_motivo=$2 WHERE id=$3 RETURNING *",
+      [req.user.id, motivo.trim(), req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','contador'), async (req, res) => {
+  try {
+    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (check.rows[0].status !== 'recibida') return res.status(409).json({ error: 'Solo se paga una OC en estado recibida' });
+    const r = await query(
+      "UPDATE purchase_orders SET status='pagada', pagado_por=$1, pagado_en=NOW() WHERE id=$2 RETURNING *",
+      [req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/:id/cancelar', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
+  try {
+    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
+    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const st = check.rows[0].status;
+    const terminales = ['pagada','rechazada','cancelada'];
+    if (terminales.includes(st)) return res.status(409).json({ error: 'No se puede cancelar una OC ' + st });
+    const r = await query(
+      "UPDATE purchase_orders SET status='cancelada' WHERE id=$1 RETURNING *",
+      [req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+/* --- FIN OC WORKFLOW v1 --- */
 
 router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
@@ -157,8 +231,12 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
     if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const oc = po.rows[0];
     if (oc.status === 'recibida') return res.status(409).json({ error: 'La OC ya fue recibida' });
+    if (oc.status !== 'aprobada') return res.status(409).json({ error: 'Solo se recibe una OC aprobada' });
     await client.query('BEGIN');
-    await client.query("UPDATE purchase_orders SET status='recibida' WHERE id=$1",[req.params.id]);
+    await client.query(
+      "UPDATE purchase_orders SET status='recibida', recibido_por=$1, recibido_en=NOW() WHERE id=$2",
+      [req.user.id, req.params.id]
+    );
     let otId=null, otCode=null;
     if (oc.vehicle_id) {
       await client.query(`CREATE TABLE IF NOT EXISTS ot_sequence (
