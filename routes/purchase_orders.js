@@ -53,7 +53,7 @@ router.get('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento
 
 router.get('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','contador','auditor'), async (req, res) => {
   try {
-    const po = await query(`SELECT po.*, u.name as solicitante_nombre FROM purchase_orders po LEFT JOIN users u ON u.id = po.requested_by WHERE po.id = $1`, [req.params.id]);
+    const po = await query(`SELECT po.*, u.name as solicitante_nombre, v.code as vehicle_code, v.plate as vehicle_plate FROM purchase_orders po LEFT JOIN users u ON u.id = po.requested_by LEFT JOIN vehicles v ON v.id = po.vehicle_id WHERE po.id = $1`, [req.params.id]);
     if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const items = await query('SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at', [req.params.id]);
     res.json({ ...po.rows[0], items: items.rows });
