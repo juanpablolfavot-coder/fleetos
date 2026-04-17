@@ -5844,7 +5844,7 @@ async function deleteFuelLog(id, vehicle, liters) {
   } catch(err) { showToast('error', err.message||'Error'); }
 }
 
-async function renderPurchaseOrders() {
+async function renderPurchaseOrders() {   try { await loadSucursalesFromAPI(); } catch(e){}
   const root = document.getElementById('page-purchase_orders');
   if (!root) return;
 
@@ -5961,7 +5961,8 @@ async function loadPOList(status) {
 }
 
 // ── Modal nueva OC ────────────────────────────────────────
-function openNewPOModal() {
+async function openNewPOModal() {
+  try { await loadSucursalesFromAPI(); } catch(e){}
   openModal('📋 Nueva Orden de Compra', `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px">
       <div class="form-group">
@@ -6459,7 +6460,7 @@ async function printPO(id) {
           <div class="field"><div class="field-label">Nro. Factura</div><div class="field-value">${po.factura_nro||'—'}</div></div>
           <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
-          <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
+          <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>           <div class="field"><div class="field-label">Moneda</div><div class="field-value">${po.moneda==="USD" ? "Dólares (USD)" : "Pesos (ARS)"}</div></div>           <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${po.forma_pago==="contado" ? "Contado" : (po.forma_pago==="cuenta_corriente" ? ("Cuenta corriente a "+(po.cc_dias||0)+" dias") : "—")}</div></div>
       </div>
 
      
