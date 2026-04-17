@@ -19,6 +19,7 @@ const stockRoutes=require('./routes/stock');
 const {fuelRouter,tireRouter,docRouter,userRouter,configRouter,checklistRouter,encargadoRouter}=require('./routes/others');
 const auditorRouter = require('./routes/auditor');
 const purchaseOrdersRouter = require('./routes/purchase_orders');
+const sucursalesRouter = require('./routes/sucursales');
 const app=express();
 app.use(helmet({
   contentSecurityPolicy: {
@@ -54,7 +55,7 @@ app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);
 app.use('/api/config',configRouter);
-app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrdersRouter);
+app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter);
 app.get('/api/health',async(req,res)=>{
   try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
   catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
