@@ -6709,12 +6709,12 @@ async function recibirOC(id) {
 
     if (data.ot_generada) {
       showToast('ok', '✅ OC recibida · OT ' + data.ot_code + ' generada para ' + data.vehicle + ' · $' + parseFloat(data.costo_aplicado).toLocaleString('es-AR') + ' al costo de la unidad');
-    } else {
+} else {
       showToast('ok', '✅ OC marcada como recibida');
     }
     closeModal();
     await loadPOList(_poCurrentFilter);
-
+    if (data.ot_generada) { try { await loadInitialData(); } catch(e){} }
     // Si se generó OT ofrecer verla
     if (data.ot_generada) {
       setTimeout(function() {
