@@ -5963,93 +5963,113 @@ async function loadPOList(status) {
 // ── Modal nueva OC ────────────────────────────────────────
 async function openNewPOModal() {
   try { await loadSucursalesFromAPI(); } catch(e){}
+  window._poTipo = 'flota';
+  window._poIvaPct = 0;
   openModal('📋 Nueva Orden de Compra', `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:4px">
-      <div class="form-group">
-        <label class="form-label">Sucursal</label>
-        <select class="form-select" id="po-sucursal" onchange="updatePOAreaSelect()">
-          <option value="">— Seleccionar sucursal —</option>
-          ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Área</label>
-        <select class="form-select" id="po-area">
-          <option value="">— Primero seleccioná la sucursal —</option>
-        </select>
-      </div>
-      <div class="form-group" id="po-vehicle-field">
-        <label class="form-label">🚛 Vehículo (opcional)</label>
-        <select class="form-select" id="po-vehicle">
-          <option value="">— Sin vehículo asignado —</option>
-          ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:3px">Al recibir la OC se genera automáticamente una OT para esta unidad</div>
-      </div>
-      <div class="form-group" style="grid-column:span 2">
-        <label class="form-label">Tipo de orden</label>
-        <div style="display:flex;gap:8px">
-          <button type="button" id="po-tipo-flota" onclick="setPOTipo('flota')"
-            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--accent);background:var(--accent);color:white;cursor:pointer;font-size:13px;font-weight:600">
-            🚛 Flota
-          </button>
-          <button type="button" id="po-tipo-mantenimiento" onclick="setPOTipo('mantenimiento')"
-            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--border2);background:transparent;color:var(--text3);cursor:pointer;font-size:13px;font-weight:600">
-            🏪 Mantenimiento edilicio
-          </button>
-          <button type="button" id="po-tipo-otro" onclick="setPOTipo('otro')"
-            style="flex:1;padding:8px;border-radius:var(--radius);border:2px solid var(--border2);background:transparent;color:var(--text3);cursor:pointer;font-size:13px;font-weight:600">
-            📋 Otro
-          </button>
+    <!-- ORIGEN -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🏢 Origen</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" id="po-sucursal" onchange="updatePOAreaSelect()">
+            <option value="">— Seleccionar sucursal —</option>
+            ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Área <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" id="po-area">
+            <option value="">— Primero seleccioná la sucursal —</option>
+          </select>
         </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">Observaciones / destino</label>
-        <textarea class="form-textarea" id="po-notes" rows="2" placeholder="Ej: Repuestos para preventivo INT-08"></textarea>
+    </div>
+
+    <!-- DESTINO -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🚛 Destino</div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Tipo de orden</label>
+          <select class="form-select" id="po-tipo-select" onchange="setPOTipo(this.value)">
+            <option value="flota">🚛 Flota</option>
+            <option value="mantenimiento">🏪 Mantenimiento edilicio</option>
+            <option value="otro">📋 Otro</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0" id="po-vehicle-field">
+          <label class="form-label">Vehículo (opcional)</label>
+          <select class="form-select" id="po-vehicle">
+            <option value="">— Sin vehículo asignado —</option>
+            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+          </select>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Si lo asignás, al recibir se genera una OT automáticamente</div>
+        </div>
       </div>
     </div>
-    <!-- Campos adicionales según tipo -->
-    <div id="po-extra-fields" style="display:none;background:var(--bg3);border-radius:var(--radius);padding:14px;margin-bottom:12px;border:1px solid var(--border2)"></div>
 
-    <div style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <label class="form-label" style="margin:0">Artículos</label>
+    <!-- PAGO Y MONEDA -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💳 Pago y moneda</div>
+      <div id="po-extra-fields"></div>
+    </div>
+
+    <!-- ARTÍCULOS -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</div>
         <button class="btn btn-secondary btn-sm" onclick="addPOItem()">+ Agregar artículo</button>
       </div>
       <div id="po-items">
         ${buildPOItemRow(0)}
       </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border2)">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <span style="color:var(--text3);font-weight:600;font-size:12px">IVA:</span>
+          <button type="button" id="po-iva-btn-Sin IVA" onclick="setPOIva('Sin IVA')"
+            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:white;transition:.15s">Sin IVA</button>
+          <button type="button" id="po-iva-btn-10.5%" onclick="setPOIva('10.5%')"
+            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">10.5%</button>
+          <button type="button" id="po-iva-btn-21%" onclick="setPOIva('21%')"
+            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">21%</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;font-size:13px">
+          <span style="color:var(--text3)">Subtotal</span>
+          <span id="po-subtotal" style="font-family:monospace">$0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:13px">
+          <span style="color:var(--text3)" id="po-iva-label">IVA (0%)</span>
+          <span id="po-iva-monto" style="font-family:monospace">$0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:2px solid var(--border2)">
+          <span style="font-weight:700;font-size:14px">TOTAL</span>
+          <span id="po-total" style="font-weight:700;font-size:18px;font-family:monospace;color:var(--accent)">$0</span>
+        </div>
+      </div>
     </div>
-    <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:13px">
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <span style="color:var(--text3);font-weight:600">IVA:</span>
-        <button type="button" id="po-iva-btn-Sin IVA" onclick="setPOIva('Sin IVA')"
-          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:white;transition:.15s">Sin IVA</button>
-        <button type="button" id="po-iva-btn-10.5%" onclick="setPOIva('10.5%')"
-          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">10.5%</button>
-        <button type="button" id="po-iva-btn-21%" onclick="setPOIva('21%')"
-          style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">21%</button>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:1px solid var(--border2)">
-        <span style="color:var(--text3)">Subtotal</span>
-        <span id="po-subtotal" style="font-family:monospace">$0</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-        <span style="color:var(--text3)" id="po-iva-label">IVA (0%)</span>
-        <span id="po-iva-monto" style="font-family:monospace">$0</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:2px solid var(--border2)">
-        <span style="font-weight:700;font-size:14px">TOTAL</span>
-        <span id="po-total" style="font-weight:700;font-size:18px;font-family:monospace;color:var(--accent)">$0</span>
-      </div>
+
+    <!-- OBSERVACIONES -->
+    <div class="card" style="padding:12px 16px;margin-bottom:4px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones (opcional)</div>
+      <textarea class="form-textarea" id="po-notes" rows="2" placeholder="Ej: Repuestos para preventivo INT-08"></textarea>
     </div>`,
     [
       { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
-      { label:'Crear OC', cls:'btn-primary',   fn: saveNewPO },
+      { label:'✅ Crear OC', cls:'btn-primary', fn: saveNewPO },
     ]
   );
-}
 
+  // Renderizar campos de pago inmediatamente
+  if (typeof renderPOExtraFields === 'function') {
+    renderPOExtraFields('flota', 'po-extra-fields');
+  }
+  // Actualizar símbolo de moneda en precios cuando cambia
+  setTimeout(function(){
+    var selMon = document.getElementById('po-moneda');
+    if (selMon) selMon.addEventListener('change', updatePOTotal);
+  }, 50);
+}
 function buildPOItemRow(idx) {
   return `<div id="po-item-${idx}" style="margin-bottom:6px">
     <div style="display:grid;grid-template-columns:1fr 80px 80px 120px 32px;gap:6px;align-items:center">
