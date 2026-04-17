@@ -170,14 +170,14 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       const partsCost = parseFloat(oc.factura_monto||oc.total_estimado||0);
       const wo = await client.query(`INSERT INTO work_orders
         (code,vehicle_id,type,status,priority,description,reporter_id,parts_cost,labor_cost,km_at_open)
-        VALUES ($1,$2,'Correctivo','Cerrada','Normal',$3,$4,$5,0,
+        VALUES ($1,$2,'Correctivo','Pendiente','Normal',$3,$4,$5,0,
           COALESCE((SELECT km_current FROM vehicles WHERE id=$2),0))
         RETURNING id,code`,
         [otCode,oc.vehicle_id,
          `OC ${oc.code}${oc.proveedor?' — '+oc.proveedor:''}`,
          req.user.id,partsCost]);
       otId=wo.rows[0].id; otCode=wo.rows[0].code;
-      await client.query(`UPDATE work_orders SET closed_at=NOW(),root_cause=$1 WHERE id=$2`,
+      await client.query(`UPDATE work_orders SET root_cause=$1 WHERE id=$2`,
         [`Generada desde OC ${oc.code}`,otId]);
       await client.query('UPDATE purchase_orders SET ot_id=$1 WHERE id=$2',[otId,req.params.id]);
     }
