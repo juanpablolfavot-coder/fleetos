@@ -6896,3 +6896,62 @@ function getPODetailExtraFields() {
 }
 
 /* FIN OC EXTRAS v1 */
+/* --- OC WORKFLOW ACTIONS v1 --- */
+
+async function aprobarOC(id) {
+  if (!confirm('¿Aprobar esta orden de compra? Una vez aprobada podrá ser recibida.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
+    showToast('ok', '✅ OC aprobada');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+async function rechazarOC(id) {
+  var motivo = prompt('Motivo del rechazo (obligatorio):');
+  if (motivo == null) return;
+  motivo = motivo.trim();
+  if (!motivo) { showToast('warn', 'Tenés que indicar un motivo'); return; }
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/rechazar', {
+      method: 'POST',
+      body: JSON.stringify({ motivo: motivo })
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al rechazar'); return; }
+    showToast('ok', '❌ OC rechazada');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+async function pagarOC(id) {
+  if (!confirm('¿Registrar el pago de esta orden de compra? Esta acción es definitiva.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al registrar el pago'); return; }
+    showToast('ok', '💵 Pago registrado');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+async function cancelarOC(id, statusActual) {
+  var msg;
+  if (statusActual === 'recibida') {
+    msg = '⚠️ Esta OC ya fue recibida. Cancelarla implica devolver la mercadería al proveedor. ¿Estás seguro que querés cancelar?';
+  } else {
+    msg = '¿Cancelar esta orden de compra? Esta acción no se puede deshacer.';
+  }
+  if (!confirm(msg)) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/cancelar', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al cancelar'); return; }
+    showToast('ok', '🚫 OC cancelada');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+/* FIN OC WORKFLOW ACTIONS v1 */
