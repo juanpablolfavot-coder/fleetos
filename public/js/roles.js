@@ -468,9 +468,3 @@ function buildNavForRole(role) {
     item.style.display = allowed ? '' : 'none';
   });
 }
-
-// ── PANEL CONTADOR ──
-function renderContadorPanel() {
-  navigate('costs');
-}
-
