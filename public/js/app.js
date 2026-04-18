@@ -2470,7 +2470,7 @@ async function saveTireAction(serial) {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar acción'); return; }
 
-  t.vehicle = null;
+  const vehicleMap = { stock: 'STOCK', recap: 'RECAP', baja: 'BAJA' };   t.vehicle = vehicleMap[action];
   t.pos = toPos;
   t.status = toPos.toLowerCase();
 
