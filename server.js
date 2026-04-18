@@ -19,7 +19,8 @@ const stockRoutes=require('./routes/stock');
 const {fuelRouter,tireRouter,docRouter,userRouter,configRouter,checklistRouter,encargadoRouter}=require('./routes/others');
 const auditorRouter = require('./routes/auditor');
 const purchaseOrdersRouter = require('./routes/purchase_orders');
-const sucursalesRouter = require('./routes/sucursales'); const adminRouter = require('./routes/admin');
+const sucursalesRouter = require('./routes/sucursales');
+const adminRouter = require('./routes/admin');
 const app=express();
 app.use(helmet({
   contentSecurityPolicy: {
@@ -85,8 +86,6 @@ app.get(/^(?!\/api).*/, (req, res) => {
   res.send(html);
 });
 
-
-
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
 // ── Endpoints GPS ──
@@ -115,6 +114,3 @@ app.listen(PORT, () => {
   // Iniciar sync GPS con Powerfleet cada 5 minutos
   startGPSSync(5);
 });
-
-
-// TEMP: Migration endpoint
