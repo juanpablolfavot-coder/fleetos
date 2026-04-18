@@ -2706,8 +2706,8 @@ function openStockEgresoModal(stockId) {
 async function saveStockEgreso(stockId) {
   const s   = App.data.stock.find(function(x){ return x.id===stockId; });
   if (!s) return;
-  const qty    = parseFloat(document.getElementById('se-qty')?.value)    || 0;
-  const reason = (document.getElementById('se-reason')?.value || '').trim();
+  const qty    = parseFloat(document.getElementById('eg-qty')?.value)    || 0;
+  const reason = (document.getElementById('eg-ref')?.value || '').trim();
   if (qty <= 0)   { showToast('warn','Ingresá una cantidad'); return; }
   if (qty > s.qty){ showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
 
