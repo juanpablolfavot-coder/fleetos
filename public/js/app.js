@@ -6952,3 +6952,90 @@ async function cancelarOC(id, statusActual) {
 }
 
 /* FIN OC WORKFLOW ACTIONS v1 */
+// ════════════════════════════════════════════════════════════
+//  BACKUP DE DB — Solo accesible por rol 'dueno'
+// ════════════════════════════════════════════════════════════
+
+async function downloadBackupDB() {
+  if (!userHasRole('dueno')) {
+    showToast('error', 'Solo el dueño puede descargar el backup');
+    return;
+  }
+
+  openModal('🔒 Backup de base de datos', `
+    <div style="background:var(--bg3);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
+      <div style="font-size:13px;color:var(--text2);line-height:1.6">
+        Vas a descargar un <strong>backup completo</strong> de toda la base de datos de FleetOS (Expreso Biletta) en formato comprimido (<code>.sql.gz</code>).
+      </div>
+      <div style="margin-top:14px;padding:12px;background:var(--bg2);border-radius:var(--radius);border-left:3px solid var(--accent)">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">📦 Qué incluye</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.7">
+          ✓ Todos los vehículos y ficha técnica<br>
+          ✓ Órdenes de trabajo con repuestos y costos<br>
+          ✓ Cargas de combustible y cisternas<br>
+          ✓ Cubiertas con historial<br>
+          ✓ Stock y movimientos<br>
+          ✓ Órdenes de compra<br>
+          ✓ Usuarios, documentos y configuración
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);font-size:12px;color:var(--warn)">
+        💡 <strong>Recomendación:</strong> guardá el archivo en 3 lugares (compu + Google Drive + email).
+      </div>
+    </div>
+  `, [
+    { label: '📥 Descargar ahora', cls: 'btn-primary', fn: _executeBackupDownload },
+    { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
+  ]);
+}
+
+async function _executeBackupDownload() {
+  const btns = document.querySelectorAll('#modal-footer button');
+  btns.forEach(b => { b.disabled = true; });
+  const primaryBtn = btns[0];
+  if (primaryBtn) primaryBtn.textContent = '⏳ Generando backup...';
+
+  try {
+    const token = window._getToken ? window._getToken() : null;
+    if (!token) {
+      showToast('error', 'Sesión expirada. Volvé a loguearte.');
+      return;
+    }
+
+    const res = await fetch('/api/admin/backup', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => 'Error');
+      showToast('error', 'Error ' + res.status + ': ' + txt);
+      if (primaryBtn) { primaryBtn.textContent = '📥 Descargar ahora'; primaryBtn.disabled = false; }
+      btns.forEach(b => { b.disabled = false; });
+      return;
+    }
+
+    const blob = await res.blob();
+    const sizeKB = (blob.size / 1024).toFixed(1);
+
+    const fecha = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+    const filename = `biletta-backup-${fecha}.sql.gz`;
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    closeModal();
+    showToast('ok', `✅ Backup descargado: ${filename} (${sizeKB} KB)`);
+
+  } catch (err) {
+    console.error('[BACKUP]', err);
+    showToast('error', 'Error al descargar: ' + (err.message || 'desconocido'));
+    if (primaryBtn) { primaryBtn.textContent = '📥 Descargar ahora'; primaryBtn.disabled = false; }
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
