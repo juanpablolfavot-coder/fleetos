@@ -6678,21 +6678,6 @@ async function saveEditPOItems(id) {
 }
 
 // funciones auxiliares OC
-function getPOExtraFields() {
-  var tipo = window._poTipo || 'flota';
-  if (tipo === 'flota') return {};
-  var prefix = 'po-x';
-  return {
-    tipo:          tipo,
-    urgencia:      document.getElementById(prefix+'-urgencia')?.value || 'normal',
-    local_sector:  document.getElementById(prefix+'-local')?.value?.trim() || null,
-    sector_detalle:document.getElementById(prefix+'-sector')?.value || null,
-    equipo:        document.getElementById(prefix+'-equipo')?.value?.trim() || null,
-    activo_serie:  document.getElementById(prefix+'-serie')?.value?.trim() || null,
-    problema_desc: document.getElementById(prefix+'-problema')?.value?.trim() || null,
-  };
-}
-
 function getPODetailExtraFields() {
   var tipo = document.getElementById('pod-tipo')?.value || 'flota';
   if (tipo === 'flota') return { tipo };
