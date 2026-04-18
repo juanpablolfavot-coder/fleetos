@@ -6524,23 +6524,6 @@ async function printPO(id) {
   } catch(err) { showToast('error', err.message); }
 }
 
-async function saveNewUser() {
-  const name  = (document.getElementById('nu-name')?.value  || '').trim();
-  const email = (document.getElementById('nu-email')?.value || '').trim();
-  const role  = document.getElementById('nu-role')?.value   || 'operario';
-  const pass  = (document.getElementById('nu-pass')?.value  || '').trim();
-
-  if (!name || !email || !pass) { showToast('error','Nombre, email y contraseña son obligatorios'); return; }
-
-  const res = await apiFetch('/api/users', {
-    method: 'POST',
-    body: JSON.stringify({ name, email, role, password: pass })
-  });
-  if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear usuario'); return; }
-
-  closeModal(); showToast('ok',`Usuario ${name} creado`);
-  renderUsers(); loadInitialData().then(()=>renderUsers());
-}
 
 // ── Editar ítems de una OC existente ─────────────────────
 async function openEditPOItemsModal(id) {
