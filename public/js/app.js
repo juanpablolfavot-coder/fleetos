@@ -3886,7 +3886,7 @@ async function renderUsers() {
         <h2 style="font-size:18px;font-weight:700;color:var(--text1);margin:0">Gestión de usuarios</h2>
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Crear, administrar y aprobar accesos al sistema</p>
       </div>
-      <button class="btn btn-primary" onclick="openNewUserModal()">+ Nuevo usuario</button>
+      ${userHasRole('dueno') ? `<button class="btn btn-secondary" onclick="downloadBackupDB()" style="margin-right:8px;background:rgba(59,130,246,.15);color:var(--accent);border:1px solid rgba(59,130,246,.3)" title="Descargar backup completo de la base de datos">🔒 Backup DB</button>` : ''}<button class="btn btn-primary" onclick="openNewUserModal()">+ Nuevo usuario</button>
     </div>
     <div id="pending-wrap"></div>
     <div id="users-table-wrap"><div style="text-align:center;padding:40px;color:var(--text3)">Cargando usuarios...</div></div>
