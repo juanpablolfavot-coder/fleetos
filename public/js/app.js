@@ -2286,8 +2286,8 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
 function openMountTireModal() { openMountFromStockModal('', getSelectedVehicle(), ''); }
 
 async function saveMountTire(vehicleCode) {
-  const serial  = document.getElementById('mt-serial')?.value || '';
-  const pos     = document.getElementById('mt-pos')?.value    || '';
+  const serial  = document.getElementById('ms-serial')?.value || '';
+  const pos     = document.getElementById('ms-pos')?.value    || '';
   const obs     = (document.getElementById('ms-obs')?.value   || '').trim();
   if (!serial) { showToast('warn','Seleccioná una cubierta del stock'); return; }
   if (!pos)    { showToast('warn','Seleccioná la posición de montaje');  return; }
