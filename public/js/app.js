@@ -2472,13 +2472,36 @@ function openTireDetail(serial) {
 }
 
 async function saveTireAction(serial) {
-  const t      = App.data.tires.find(x=>x.serial===serial);
+  const t = App.data.tires.find(x => x.serial === serial);
   if (!t) return;
-  const action = document.getElementById('ta-action')?.value || 'desmontar';
-  const obs    = (document.getElementById('ta-obs')?.value   || '').trim();
 
-  const typeMap = { desmontar:'Desmontaje', recapar:'Envío recapado', baja:'Baja definitiva' };
-  const toPos   = { desmontar:'Stock', recapar:'Recapado', baja:'Baja' }[action] || 'Stock';
+  const action = document.getElementById('td-action')?.value || '';
+  const obs    = (document.getElementById('td-obs')?.value || '').trim();
+  const depth  = parseFloat(document.getElementById('td-depth')?.value);
+  const goStock = document.getElementById('td-stock')?.checked;
+
+  if (!action) { showToast('warn','Seleccioná una acción'); return; }
+
+  // Acción "depth" = solo actualizar profundidad, sin mover de posición
+  if (action === 'depth') {
+    if (isNaN(depth) || depth < 0) { showToast('warn','Ingresá una profundidad válida en mm'); return; }
+    const res = await apiFetch(`/api/tires/${t.id}/depth`, {
+      method: 'POST',
+      body: JSON.stringify({ depth_mm: depth, notes: obs })
+    });
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al actualizar profundidad'); return; }
+    t.depth_mm = depth;
+    closeModal();
+    showToast('ok', `${serial}: profundidad actualizada a ${depth}mm`);
+    renderTires();
+    return;
+  }
+
+  // Acciones que mueven la cubierta: stock / recap / baja
+  const typeMap = { stock:'Desmontaje', recap:'Envío recapado', baja:'Baja definitiva' };
+  const toPos   = { stock:'Stock', recap:'Recapado', baja:'Baja' }[action];
+
+  if (!typeMap[action]) { showToast('warn','Acción no válida'); return; }
 
   const res = await apiFetch(`/api/tires/${t.id}/move`, {
     method: 'POST',
@@ -2486,10 +2509,17 @@ async function saveTireAction(serial) {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar acción'); return; }
 
-  t.vehicle = null; t.pos = toPos; t.status = toPos.toLowerCase();
+  t.vehicle = null;
+  t.pos = toPos;
+  t.status = toPos.toLowerCase();
+
   closeModal();
-  const msgs = { desmontar:`${serial} desmontada y enviada al stock`, recapar:`${serial} enviada a recapado`, baja:`${serial} dada de baja` };
-  showToast('ok', msgs[action] || 'Acción registrada');
+  const msgs = {
+    stock: `${serial} desmontada y enviada al stock`,
+    recap: `${serial} enviada a recapado`,
+    baja:  `${serial} dada de baja definitivamente`
+  };
+  showToast('ok', msgs[action]);
   renderTires();
 }
 
