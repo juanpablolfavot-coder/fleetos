@@ -2851,7 +2851,7 @@ function openStockAjusteModal() {
 }
 
 async function saveStockAjuste() {
-  const id     = document.getElementById('sa-item')?.value;
+  const id     = document.getElementById('aj-id')?.value;
   const newQty = parseFloat(document.getElementById('aj-qty')?.value);
   const reason = (document.getElementById('aj-obs')?.value || '').trim();
   const s      = App.data.stock.find(function(x){ return x.id===id; });
