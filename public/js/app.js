@@ -6932,22 +6932,34 @@ function getPOExtraFields() {
   }
   return out;
 }
-
-function getPODetailExtraFields() {
-  var fp  = document.getElementById('pod-forma-pago');
-  var ccd = document.getElementById('pod-cc-dias');
-  var mon = document.getElementById('pod-moneda');
+function getPOExtraFields() {
+  // Datos de pago (siempre presentes)
+  var fp  = document.getElementById('po-forma-pago');
+  var ccd = document.getElementById('po-cc-dias');
+  var mon = document.getElementById('po-moneda');
   var out = {
     forma_pago: fp ? (fp.value || null) : null,
-    moneda:     mon ? (mon.value || null) : null
+    moneda:     mon ? (mon.value || 'ARS') : 'ARS'
   };
   if (out.forma_pago === 'cuenta_corriente') {
     out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
-  } else if (out.forma_pago === 'contado') {
-    out.cc_dias = null;
   } else {
-    out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
+    out.cc_dias = null;
   }
+  
+  // Datos de tipo de OC (solo si es edilicio u otro)
+  var tipo = window._poTipo || 'flota';
+  if (tipo !== 'flota') {
+    var prefix = 'po-x';
+    out.tipo           = tipo;
+    out.urgencia       = document.getElementById(prefix+'-urgencia')?.value || 'normal';
+    out.local_sector   = document.getElementById(prefix+'-local')?.value?.trim() || null;
+    out.sector_detalle = document.getElementById(prefix+'-sector')?.value || null;
+    out.equipo         = document.getElementById(prefix+'-equipo')?.value?.trim() || null;
+    out.activo_serie   = document.getElementById(prefix+'-serie')?.value?.trim() || null;
+    out.problema_desc  = document.getElementById(prefix+'-problema')?.value?.trim() || null;
+  }
+  
   return out;
 }
 
