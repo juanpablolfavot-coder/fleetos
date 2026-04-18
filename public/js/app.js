@@ -6918,21 +6918,6 @@ function renderPOExtraFields(tipo, containerId) {
 }
 
 function getPOExtraFields() {
-  var fp  = document.getElementById('po-forma-pago');
-  var ccd = document.getElementById('po-cc-dias');
-  var mon = document.getElementById('po-moneda');
-  var out = {
-    forma_pago: fp ? (fp.value || null) : null,
-    moneda:     mon ? (mon.value || 'ARS') : 'ARS'
-  };
-  if (out.forma_pago === 'cuenta_corriente') {
-    out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
-  } else {
-    out.cc_dias = null;
-  }
-  return out;
-}
-function getPOExtraFields() {
   // Datos de pago (siempre presentes)
   var fp  = document.getElementById('po-forma-pago');
   var ccd = document.getElementById('po-cc-dias');
