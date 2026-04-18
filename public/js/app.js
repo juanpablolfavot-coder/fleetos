@@ -1824,45 +1824,6 @@ async function openEditTankCapacityModal() {
   ]);
 }
 
-function getAxleConfig(vehicle) {
-  const customAxles = vehicle?.tech_spec?.axles;
-  if (customAxles && customAxles.length > 0) {
-    return customAxles.map((axle, i) => {
-      const prefix = vehicle.type === 'semirremolque' ? 'S' : '';
-      const n = i + 1;
-      if (axle.dual) {
-        return {
-          name: `Eje ${n} — ${axle.label||'Portante'}`,
-          positions: [`${prefix}${n}-IE`,`${prefix}${n}-II`,`${prefix}${n}-DE`,`${prefix}${n}-DD`],
-          dual: true
-        };
-      } else {
-        return {
-          name: `Eje ${n} — ${axle.label||'Dirección'}`,
-          positions: [`${prefix}${n}-DI`,`${prefix}${n}-DD`],
-          dual: false
-        };
-      }
-    });
-  }
-  const DEFAULTS = {
-    tractor: [
-      { name:'Eje 1 — Dirección', positions:['1-DI','1-DD'],                       dual:false },
-      { name:'Eje 2 — Tracción',  positions:['2-TIE','2-TII','2-TDE','2-TDD'],     dual:true  },
-      { name:'Eje 3 — Tracción',  positions:['3-TIE','3-TII','3-TDE','3-TDD'],     dual:true  },
-    ],
-    camion: [
-      { name:'Eje 1 — Dirección', positions:['1-DI','1-DD'],                       dual:false },
-      { name:'Eje 2 — Tracción',  positions:['2-TIE','2-TII','2-TDE','2-TDD'],     dual:true  },
-    ],
-    semirremolque: [
-      { name:'Eje 1 — Portante',  positions:['S1-IE','S1-II','S1-DE','S1-DD'],     dual:true  },
-      { name:'Eje 2 — Portante',  positions:['S2-IE','S2-II','S2-DE','S2-DD'],     dual:true  },
-      { name:'Eje 3 — Portante',  positions:['S3-IE','S3-II','S3-DE','S3-DD'],     dual:true  },
-    ],
-  };
-  return DEFAULTS[vehicle?.type] || DEFAULTS.camion;
-}
 
 const AXLE_CONFIGS = {
   tractor: [
