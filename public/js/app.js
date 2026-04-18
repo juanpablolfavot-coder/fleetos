@@ -751,7 +751,7 @@ function showVehicleFicha(id, tab) {
     { label:'Cerrar',     cls:'btn-secondary', fn: closeModal },
   ];
   // Solo el dueño puede dar de baja una unidad
-  if (App.user?.role === 'dueno') {
+  if (App.currentUser?.role === 'dueno') {
     actions.splice(2, 0, { label:'🗑 Dar de baja', cls:'btn-danger', fn: () => confirmBajaVehiculo(id, v.code) });
   }
   openModal(`${v.code} — ${v.brand} ${v.model}`, header + tabBar + `<div id="ficha-tab-content">${content}</div>`, actions);
@@ -2804,10 +2804,10 @@ async function saveStockBaja() {
     showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
     return;
   }
-  const id     = document.getElementById('sb-item')?.value;
-  const qty    = parseFloat(document.getElementById('sb-qty')?.value)   || 0;
-  const obs    = (document.getElementById('sb-obs')?.value   || '').trim();
-  const motivo = document.getElementById('sb-motive')?.value || 'otro';
+  const id     = document.getElementById('bj-id')?.value;
+  const qty    = parseFloat(document.getElementById('bj-qty')?.value)   || 0;
+  const obs    = (document.getElementById('bj-obs')?.value   || '').trim();
+  const motivo = document.getElementById('bj-motivo')?.value || 'otro';
   const s      = App.data.stock.find(function(x){ return x.id===id; });
   if (!id)         { showToast('warn','Seleccioná un ítem'); return; }
   if (!obs || obs.length < 10) { showToast('warn','El motivo debe tener al menos 10 caracteres'); return; }
