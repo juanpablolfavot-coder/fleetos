@@ -122,6 +122,73 @@ tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_ma
   await client.query('COMMIT');res.json({message:'Movimiento registrado'});}catch(err){await client.query('ROLLBACK');res.status(500).json({error:'Error mover cubierta'});}finally{client.release();}
 });
 
+// POST /api/tires/:id/depth — Solo actualizar profundidad (sin mover de posición)
+// Registra en tire_movements como "Control profundidad" para auditoría
+tireRouter.post('/:id/depth',
+  authenticate,
+  requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'),
+  validateUUID('id'),
+  async (req, res) => {
+    const client = await require('../db/pool').pool.connect();
+    try {
+      const { depth_mm, notes } = req.body;
+      const depthNum = parseFloat(depth_mm);
+      if (isNaN(depthNum) || depthNum < 0 || depthNum > 50) {
+        return res.status(400).json({ error: 'Profundidad inválida. Debe estar entre 0 y 50 mm' });
+      }
+
+      await client.query('BEGIN');
+
+      // Verificar que existe y bloquear la fila
+      const tire = await client.query(
+        'SELECT * FROM tires WHERE id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      if (!tire.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Cubierta no encontrada' });
+      }
+
+      const currentVehicleId = tire.rows[0].current_vehicle_id;
+      const currentPos = tire.rows[0].current_position;
+
+      // Obtener km actual del vehículo (si está montada)
+      let km = 0;
+      if (currentVehicleId) {
+        const veh = await client.query(
+          'SELECT km_current FROM vehicles WHERE id = $1',
+          [currentVehicleId]
+        );
+        km = veh.rows[0]?.km_current || 0;
+      }
+
+      // Registrar el control en tire_movements (queda en el historial/auditoría)
+      await client.query(
+        `INSERT INTO tire_movements
+         (tire_id, type, from_pos, to_pos, vehicle_id, km_at_move, tread_at_move, user_id, notes)
+         VALUES ($1, 'Control profundidad', $2, $2, $3, $4, $5, $6, $7)`,
+        [req.params.id, currentPos, currentVehicleId, km, depthNum, req.user.id, notes || null]
+      );
+
+      // Actualizar solo tread_depth (no se mueve de posición)
+      await client.query(
+        'UPDATE tires SET tread_depth = $1 WHERE id = $2',
+        [depthNum, req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.json({
+        message: 'Profundidad actualizada',
+        depth_mm: depthNum,
+        tire_id: req.params.id
+      });
+    } catch(err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: 'Error al actualizar profundidad' });
+    } finally { client.release(); }
+  }
+);
+
 // GET /api/tires/history — blanqueo de movimientos de cubiertas (auditoría)
 // Lee tire_movements con JOIN a tires, vehicles y users.
 // Si una cubierta fue eliminada (raro), el serial aparece como '[eliminada]'.
