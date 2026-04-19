@@ -63,7 +63,7 @@ function getPageSub(p) {
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, auditor_panel: renderAuditorPanel, users: renderUsers, config: renderConfig, purchase_orders: renderPurchaseOrders };
+  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, auditor_panel: renderAuditorPanel, users: renderUsers, config: renderConfig, purchase_orders: renderPurchaseOrders, suppliers: renderSuppliers };
   if (fns[page]) fns[page]();
 }
 
@@ -873,10 +873,10 @@ async function saveEditVehicle(id) {
 }
 
 async function saveNewOT() {
-  const vehicle_id = document.getElementById('ot-vehicle')?.value || '';
+  const ot_tipo   = window._otTipoActual || 'vehiculo';
+  const target_id = document.getElementById('ot-target-select')?.value || '';
   const title      = (document.getElementById('ot-title')?.value || '').trim();
   const priority   = document.getElementById('ot-priority')?.value || 'Normal';
-  // mechanic se lee directo al enviar
   const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
@@ -895,21 +895,28 @@ async function saveNewOT() {
     });
   });
 
-  if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
-  if (!title)      { showToast('error','Ingresá un título para la OT'); return; }
+  if (!target_id) {
+    showToast('error', ot_tipo==='vehiculo' ? 'Seleccioná una unidad' : 'Seleccioná un activo');
+    return;
+  }
+  if (!title) { showToast('error','Ingresá un título para la OT'); return; }
+
+  const payload = {
+    ot_tipo,
+    description: title + (notes ? '\n' + notes : ''),
+    type:        document.getElementById('ot-type')?.value || 'Correctivo',
+    priority,
+    mechanic_id: null,
+    mechanic: document.getElementById('ot-mechanic')?.value?.trim() || null,
+    parts,
+    labor_cost
+  };
+  if (ot_tipo === 'vehiculo') payload.vehicle_id = target_id;
+  else                         payload.asset_id   = target_id;
 
   const res = await apiFetch('/api/workorders', {
     method: 'POST',
-    body: JSON.stringify({
-      vehicle_id,
-      description: title + (notes ? '\n' + notes : ''),
-      type:        document.getElementById('ot-type')?.value || 'Correctivo',
-      priority,
-      mechanic_id: null,
-      mechanic: document.getElementById('ot-mechanic')?.value?.trim() || null,
-      parts,
-      labor_cost
-    })
+    body: JSON.stringify(payload)
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al crear OT'); return; }
   const ot = await res.json();
@@ -5251,25 +5258,43 @@ async function saveNewVehicle() {
 function openNewOTModal(preselectedVehicle) {
   window._otParts = [];
 
-  const vehicleOpts = (App.data.vehicles || [])
-    .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${v.code} — ${v.brand} ${v.model} (${v.plate})</option>`)
-    .join('');
-
-  const mecanicoOpts = (App.data.users || [])
-    .filter(u => ['mecanico','jefe_mantenimiento'].includes(u.role))
-    .map(u => `<option value="${u.id}">${u.name}</option>`)
-    .join('');
+  // Cargar activos si no están cargados aún
+  if (!App.data.assets) loadAssetsIntoData();
 
   openModal('Nueva orden de trabajo', `
-    <div class="form-group">
-      <label class="form-label">Unidad</label>
-      <select class="form-select" id="ot-vehicle">
-        <option value="">— Seleccioná una unidad —</option>
-        ${vehicleOpts}
-      </select>
+    <!-- Selector de tipo arriba, estilo pills -->
+    <div style="margin-bottom:16px">
+      <label class="form-label" style="font-weight:700;margin-bottom:8px">¿Qué estás manteniendo?</label>
+      <div id="ot-tipo-pills" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${[
+          ['vehiculo',    '🚛 Vehículo'],
+          ['edilicio',    '🏢 Edificio'],
+          ['herramienta', '🧰 Herramienta'],
+          ['equipo',      '⚙️ Equipo'],
+          ['informatica', '💻 Informática'],
+          ['instalacion', '🔌 Instalación'],
+          ['otro',        '📌 Otro'],
+        ].map(([v,label]) => `
+          <button type="button" class="ot-tipo-pill" data-tipo="${v}" onclick="_otSelectTipo('${v}')"
+            style="padding:7px 14px;border:1px solid var(--border2);border-radius:20px;background:${v==='vehiculo'?'var(--accent)':'var(--bg)'};color:${v==='vehiculo'?'white':'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;transition:.15s">
+            ${label}
+          </button>
+        `).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">La OT quedará vinculada al objeto que elijas abajo</div>
     </div>
+
+    <!-- Dropdown dinámico: cambia según el tipo -->
+    <div class="form-group" id="ot-target-group">
+      <label class="form-label" id="ot-target-label">Unidad</label>
+      <select class="form-select" id="ot-target-select">
+        <option value="">— Cargando... —</option>
+      </select>
+      <div style="font-size:11px;margin-top:4px" id="ot-target-hint"></div>
+    </div>
+
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Tipo</label>
+      <div class="form-group"><label class="form-label">Tipo de trabajo</label>
         <select class="form-select" id="ot-type">
           <option value="Correctivo">Correctivo</option>
           <option value="Preventivo">Preventivo</option>
@@ -5284,12 +5309,14 @@ function openNewOTModal(preselectedVehicle) {
         </select>
       </div>
     </div>
+
     <div class="form-group"><label class="form-label">Título / Descripción del trabajo</label>
       <input class="form-input" placeholder="Ej: Cambio de aceite y filtros" id="ot-title">
     </div>
+
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Mecánico asignado</label>
-        <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del mecánico">
+      <div class="form-group"><label class="form-label">Mecánico / Responsable asignado</label>
+        <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del responsable">
         <datalist id="ot-mecanicos-list">
           ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${u.name}">`).join('')}
         </datalist>
@@ -5324,6 +5351,61 @@ function openNewOTModal(preselectedVehicle) {
     { label: 'Crear OT', cls: 'btn-primary',   fn: saveNewOT },
     { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
   ]);
+
+  // Estado inicial: arrancamos en vehículo
+  window._otTipoActual = 'vehiculo';
+  _otPopulateTarget('vehiculo', preselectedVehicle);
+}
+
+// Cambia el dropdown de target según el tipo de OT
+function _otSelectTipo(tipo) {
+  window._otTipoActual = tipo;
+
+  // Actualizar visual de los pills
+  document.querySelectorAll('.ot-tipo-pill').forEach(btn => {
+    const isActive = btn.dataset.tipo === tipo;
+    btn.style.background = isActive ? 'var(--accent)' : 'var(--bg)';
+    btn.style.color      = isActive ? 'white' : 'var(--text2)';
+  });
+
+  _otPopulateTarget(tipo);
+}
+
+function _otPopulateTarget(tipo, preselectedVehicle) {
+  const label  = document.getElementById('ot-target-label');
+  const select = document.getElementById('ot-target-select');
+  const hint   = document.getElementById('ot-target-hint');
+  if (!label || !select) return;
+
+  if (tipo === 'vehiculo') {
+    label.textContent = 'Unidad (vehículo)';
+    const opts = (App.data.vehicles || [])
+      .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${v.code} — ${v.brand||''} ${v.model||''} (${v.plate})</option>`)
+      .join('');
+    select.innerHTML = `<option value="">— Seleccioná una unidad —</option>${opts}`;
+    if (hint) hint.innerHTML = `<span style="color:var(--text3)">${(App.data.vehicles||[]).length} unidades disponibles</span>`;
+  } else {
+    // Filtrar activos por tipo
+    const assets = (App.data.assets || []).filter(a => a.type === tipo);
+    label.textContent = {
+      edilicio:    'Edificio / Oficina',
+      herramienta: 'Herramienta',
+      equipo:      'Equipo',
+      informatica: 'Equipo informático',
+      instalacion: 'Instalación',
+      otro:        'Activo',
+    }[tipo] || 'Activo';
+
+    const opts = assets.map(a => `<option value="${a.id}">${a.code} — ${a.name}${a.location?' ('+a.location+')':''}</option>`).join('');
+
+    if (assets.length === 0) {
+      select.innerHTML = `<option value="">— No hay ${label.textContent.toLowerCase()}s registrados —</option>`;
+      if (hint) hint.innerHTML = `<span style="color:var(--warn)">⚠️ Primero cargá activos en el módulo <b>Activos patrimoniales</b>. <a href="#" onclick="closeModal();navigate('suppliers');return false" style="color:var(--accent)">(próximamente disponible)</a></span>`;
+    } else {
+      select.innerHTML = `<option value="">— Seleccioná un activo —</option>${opts}`;
+      if (hint) hint.innerHTML = `<span style="color:var(--text3)">${assets.length} activo${assets.length===1?'':'s'} disponible${assets.length===1?'':'s'} de tipo "${tipo}"</span>`;
+    }
+  }
 }
 
 function addOTPart() {
@@ -8154,4 +8236,627 @@ async function _executeBackupDownload() {
     if (primaryBtn) { primaryBtn.textContent = '📥 Descargar ahora'; primaryBtn.disabled = false; }
     btns.forEach(b => { b.disabled = false; });
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PROVEEDORES — módulo completo con tabla moderna + modal
+// ═══════════════════════════════════════════════════════════
+App.supTable = App.supTable || {
+  rawData: [],
+  search: '',
+  status: 'all',
+  rubro:  'all',
+  sortKey: 'name',
+  sortDir: 'asc',
+};
+
+async function renderSuppliers() {
+  const root = document.getElementById('page-suppliers');
+  if (!root) return;
+
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role);
+
+  root.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">🏢 Proveedores</h2>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Catálogo de proveedores con datos fiscales y condiciones comerciales</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-secondary btn-sm" onclick="_supExportPDF()">📄 PDF</button>
+        ${canCreate ? `<button class="btn btn-primary" onclick="openNewSupplierModal()">+ Nuevo proveedor</button>` : ''}
+      </div>
+    </div>
+
+    <div id="sup-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+      <div class="kpi-card"><div class="kpi-label">Total proveedores</div><div class="kpi-value" style="color:var(--text)" id="sup-kpi-total">—</div><div class="kpi-trend">registrados</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Activos</div><div class="kpi-value ok" id="sup-kpi-activos">—</div><div class="kpi-trend">habilitados para operar</div></div>
+      <div class="kpi-card" style="border-color:rgba(217,119,6,.35)"><div class="kpi-label">Suspendidos</div><div class="kpi-value" style="color:var(--warn)" id="sup-kpi-susp">—</div><div class="kpi-trend">pendientes de revisión</div></div>
+      <div class="kpi-card" style="border-color:rgba(220,38,38,.35)"><div class="kpi-label">Blacklist</div><div class="kpi-value" style="color:var(--danger)" id="sup-kpi-black">—</div><div class="kpi-trend">no operar</div></div>
+    </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input id="sup-search" type="text" placeholder="🔍 Buscar nombre, CUIT, contacto..." value="${App.supTable.search}"
+        oninput="App.supTable.search=this.value;_supRenderRows()"
+        style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:13px">
+
+      <select onchange="App.supTable.status=this.value;_supRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all">Estado: Todos</option>
+        <option value="activo">Activo</option>
+        <option value="suspendido">Suspendido</option>
+        <option value="blacklist">Blacklist</option>
+      </select>
+
+      <select id="sup-f-rubro" onchange="App.supTable.rubro=this.value;_supRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all">Rubro: Todos</option>
+      </select>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table id="sup-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead id="sup-thead"></thead>
+          <tbody id="sup-tbody"><tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando...</td></tr></tbody>
+        </table>
+      </div>
+      <div id="sup-footer" style="padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;justify-content:space-between;align-items:center;background:var(--bg2)"></div>
+    </div>
+  `;
+
+  await loadSuppliersList();
+}
+
+async function loadSuppliersList() {
+  try {
+    const res = await apiFetch('/api/suppliers');
+    if (!res.ok) {
+      const tbody = document.getElementById('sup-tbody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar proveedores</td></tr>`;
+      return;
+    }
+    App.supTable.rawData = await res.json();
+
+    // Populate dropdown de rubros con valores únicos encontrados
+    const allRubros = new Set();
+    App.supTable.rawData.forEach(s => (s.rubros || []).forEach(r => allRubros.add(r)));
+    const rubroSel = document.getElementById('sup-f-rubro');
+    if (rubroSel) {
+      rubroSel.innerHTML = `<option value="all">Rubro: Todos</option>` +
+        [...allRubros].sort().map(r => `<option value="${r}">${r}</option>`).join('');
+    }
+
+    _supRenderKPIs();
+    _supRenderRows();
+  } catch(err) {
+    const tbody = document.getElementById('sup-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--danger)">Error: ${err.message}</td></tr>`;
+  }
+}
+
+function _supRenderKPIs() {
+  const d = App.supTable.rawData || [];
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('sup-kpi-total',   d.length);
+  set('sup-kpi-activos', d.filter(s => s.status === 'activo').length);
+  set('sup-kpi-susp',    d.filter(s => s.status === 'suspendido').length);
+  set('sup-kpi-black',   d.filter(s => s.status === 'blacklist').length);
+}
+
+function _supRenderRows() {
+  const thead = document.getElementById('sup-thead');
+  const tbody = document.getElementById('sup-tbody');
+  const footer= document.getElementById('sup-footer');
+  if (!thead || !tbody) return;
+
+  const all = App.supTable.rawData || [];
+  const T = App.supTable;
+
+  let rows = all.filter(s => {
+    if (T.status !== 'all' && s.status !== T.status) return false;
+    if (T.rubro !== 'all' && !(s.rubros || []).includes(T.rubro)) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [s.name, s.razon_social, s.cuit, s.contact_person, s.phone, s.email]
+        .filter(Boolean).map(x => String(x).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+
+  rows.sort((a,b) => {
+    const va = (a[T.sortKey] || '').toString().toLowerCase();
+    const vb = (b[T.sortKey] || '').toString().toLowerCase();
+    if (va < vb) return T.sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return T.sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const cols = [
+    ['name',           'Nombre'],
+    ['cuit',           'CUIT'],
+    ['rubros',         'Rubros', true],
+    ['contact_person', 'Contacto'],
+    ['phone',          'Teléfono'],
+    ['forma_pago',     'Pago'],
+    ['rating',         '⭐'],
+    ['status',         'Estado'],
+    ['actions',        '', true],
+  ];
+  thead.innerHTML = `<tr style="background:var(--bg3);border-bottom:2px solid var(--border)">${cols.map(([k,label,noSort]) => {
+    const isSorted = !noSort && T.sortKey === k;
+    const arrow = isSorted ? (T.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    const cls = isSorted ? 'color:var(--accent)' : 'color:var(--text3)';
+    const cursor = noSort ? 'default' : 'pointer';
+    return `<th onclick="${noSort?'':'_supSort(\''+k+'\')'}" style="text-align:left;padding:10px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;cursor:${cursor};white-space:nowrap;font-family:var(--mono);${cls}">${label}${arrow}</th>`;
+  }).join('')}</tr>`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--text3)">
+      ${all.length===0 ? 'Sin proveedores registrados — creá el primero con "+ Nuevo proveedor"' : 'No hay proveedores que coincidan con los filtros'}
+    </td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(s => _supRenderRow(s)).join('');
+  }
+
+  if (footer) {
+    footer.innerHTML = `<span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} proveedores</span>`;
+  }
+}
+
+function _supSort(key) {
+  const T = App.supTable;
+  if (T.sortKey === key) T.sortDir = T.sortDir === 'asc' ? 'desc' : 'asc';
+  else { T.sortKey = key; T.sortDir = 'asc'; }
+  _supRenderRows();
+}
+
+function _supRenderRow(s) {
+  const statusColors = {
+    activo:      'var(--ok)',
+    suspendido:  'var(--warn)',
+    blacklist:   'var(--danger)',
+  };
+  const statusLabels = {
+    activo:      '✅ Activo',
+    suspendido:  '⏸ Suspendido',
+    blacklist:   '🚫 Blacklist',
+  };
+  const sideColor = statusColors[s.status] || 'var(--border2)';
+
+  const rubros = (s.rubros || []).slice(0, 3).map(r =>
+    `<span style="background:var(--bg3);padding:1px 6px;border-radius:8px;font-size:9px;color:var(--text3)">${r}</span>`
+  ).join(' ');
+  const extraRubros = (s.rubros || []).length > 3 ? `<span style="color:var(--text3);font-size:9px"> +${s.rubros.length-3}</span>` : '';
+
+  const rating = s.rating ? `<span style="font-family:var(--mono);color:var(--warn);font-weight:700">${parseFloat(s.rating).toFixed(1)}</span>` : '<span style="color:var(--text3)">—</span>';
+
+  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC ${s.cc_dias||'—'}d`, cheque: 'Cheque', transferencia: 'Transf.' }[s.forma_pago] || '—';
+
+  return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
+    onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+
+    <td style="padding:10px 12px">
+      <div style="font-weight:600;color:var(--text)">${s.name}</div>
+      ${s.razon_social ? `<div style="font-size:10px;color:var(--text3)">${s.razon_social}</div>` : ''}
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text2)">${s.cuit || '—'}</td>
+
+    <td style="padding:10px 12px">${rubros || '<span style="color:var(--text3);font-size:10px">—</span>'}${extraRubros}</td>
+
+    <td style="padding:10px 12px;font-size:12px">
+      <div>${s.contact_person || '—'}</div>
+      ${s.email ? `<div style="font-size:10px;color:var(--text3)">${s.email}</div>` : ''}
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text2)">${s.phone || '—'}</td>
+
+    <td style="padding:10px 12px;font-size:11px;color:var(--text2)">${formaPagoLabel}</td>
+
+    <td style="padding:10px 12px;text-align:center">${rating}</td>
+
+    <td style="padding:10px 12px">
+      <span style="background:${statusColors[s.status]||'var(--text3)'}22;color:${statusColors[s.status]||'var(--text3)'};padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;font-family:var(--mono)">
+        ${statusLabels[s.status] || s.status}
+      </span>
+    </td>
+
+    <td style="padding:10px 12px;white-space:nowrap;text-align:right">
+      <button class="btn btn-secondary btn-sm" onclick="openSupplierDetail('${s.id}')">Ver</button>
+      ${['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role) ?
+        `<button class="btn btn-secondary btn-sm" onclick="openEditSupplierModal('${s.id}')" style="margin-left:4px">Editar</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+// ── Modal nuevo proveedor (también sirve para editar) ────
+function openNewSupplierModal() { _openSupplierModal(null); }
+function openEditSupplierModal(id) {
+  const sup = (App.supTable.rawData || []).find(s => s.id === id);
+  if (!sup) { showToast('error', 'Proveedor no encontrado'); return; }
+  _openSupplierModal(sup);
+}
+
+function _openSupplierModal(existing) {
+  const s = existing || {};
+  const isEdit = !!existing;
+
+  const body = `
+    <div style="max-height:70vh;overflow-y:auto;padding-right:8px">
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">🏢 DATOS GENERALES</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:16px">
+        <div>
+          <label class="form-label">Nombre comercial *</label>
+          <input id="sup-name" class="form-input" value="${s.name||''}" placeholder="Ej: Distribuidora ABC">
+        </div>
+        <div>
+          <label class="form-label">Estado</label>
+          <select id="sup-status" class="form-select">
+            <option value="activo" ${s.status==='activo'?'selected':''}>Activo</option>
+            <option value="suspendido" ${s.status==='suspendido'?'selected':''}>Suspendido</option>
+            <option value="blacklist" ${s.status==='blacklist'?'selected':''}>Blacklist</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:16px">
+        <label class="form-label">Razón social</label>
+        <input id="sup-razon" class="form-input" value="${s.razon_social||''}" placeholder="Ej: Distribuidora ABC S.R.L.">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div>
+          <label class="form-label">CUIT</label>
+          <input id="sup-cuit" class="form-input" value="${s.cuit||''}" placeholder="30-12345678-9">
+        </div>
+        <div>
+          <label class="form-label">Condición IVA</label>
+          <select id="sup-iva" class="form-select">
+            <option value="">—</option>
+            <option value="responsable_inscripto" ${s.iva_condition==='responsable_inscripto'?'selected':''}>Responsable Inscripto</option>
+            <option value="monotributo" ${s.iva_condition==='monotributo'?'selected':''}>Monotributo</option>
+            <option value="exento" ${s.iva_condition==='exento'?'selected':''}>Exento</option>
+            <option value="consumidor_final" ${s.iva_condition==='consumidor_final'?'selected':''}>Consumidor final</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">📞 CONTACTO</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label class="form-label">Persona de contacto</label>
+          <input id="sup-contact" class="form-input" value="${s.contact_person||''}" placeholder="Juan Pérez">
+        </div>
+        <div>
+          <label class="form-label">Teléfono</label>
+          <input id="sup-phone" class="form-input" value="${s.phone||''}" placeholder="+54 11 1234-5678">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div>
+          <label class="form-label">Email</label>
+          <input id="sup-email" class="form-input" type="email" value="${s.email||''}" placeholder="contacto@proveedor.com">
+        </div>
+        <div>
+          <label class="form-label">Sitio web</label>
+          <input id="sup-website" class="form-input" value="${s.website||''}" placeholder="https://">
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">📍 DIRECCIÓN</div>
+      <div style="margin-bottom:12px">
+        <label class="form-label">Domicilio</label>
+        <input id="sup-address" class="form-input" value="${s.address||''}" placeholder="Calle 123">
+      </div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div>
+          <label class="form-label">Ciudad</label>
+          <input id="sup-city" class="form-input" value="${s.city||''}">
+        </div>
+        <div>
+          <label class="form-label">Provincia</label>
+          <input id="sup-province" class="form-input" value="${s.province||''}">
+        </div>
+        <div>
+          <label class="form-label">CP</label>
+          <input id="sup-cp" class="form-input" value="${s.postal_code||''}">
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">🏷 RUBROS</div>
+      <div style="margin-bottom:20px">
+        <label class="form-label">Rubros (separados por coma)</label>
+        <input id="sup-rubros" class="form-input" value="${(s.rubros||[]).join(', ')}" placeholder="repuestos, cubiertas, aceites, administrativo">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Ej: repuestos, cubiertas, aceites, limpieza, informatica, libreria, herramientas</div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">💰 CONDICIONES COMERCIALES</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label class="form-label">Forma de pago</label>
+          <select id="sup-fpago" class="form-select">
+            <option value="">—</option>
+            <option value="contado" ${s.forma_pago==='contado'?'selected':''}>Contado</option>
+            <option value="cuenta_corriente" ${s.forma_pago==='cuenta_corriente'?'selected':''}>Cuenta corriente</option>
+            <option value="cheque" ${s.forma_pago==='cheque'?'selected':''}>Cheque</option>
+            <option value="transferencia" ${s.forma_pago==='transferencia'?'selected':''}>Transferencia</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Días CC</label>
+          <input id="sup-ccdias" class="form-input" type="number" value="${s.cc_dias||''}" placeholder="30">
+        </div>
+        <div>
+          <label class="form-label">Moneda</label>
+          <select id="sup-moneda" class="form-select">
+            <option value="ARS" ${s.moneda==='ARS'?'selected':''}>ARS (pesos)</option>
+            <option value="USD" ${s.moneda==='USD'?'selected':''}>USD (dólares)</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div>
+          <label class="form-label">Descuento habitual (%)</label>
+          <input id="sup-disc" class="form-input" type="number" step="0.01" value="${s.discount_pct||0}">
+        </div>
+        <div>
+          <label class="form-label">Tiempo entrega (días)</label>
+          <input id="sup-deliv" class="form-input" type="number" value="${s.delivery_time_days||''}" placeholder="7">
+        </div>
+        <div>
+          <label class="form-label">Calificación ⭐</label>
+          <input id="sup-rating" class="form-input" type="number" step="0.1" min="0" max="5" value="${s.rating||''}" placeholder="4.5">
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">🏦 DATOS BANCARIOS</div>
+      <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px;margin-bottom:20px">
+        <div>
+          <label class="form-label">Banco</label>
+          <input id="sup-bank" class="form-input" value="${s.bank_name||''}">
+        </div>
+        <div>
+          <label class="form-label">CBU</label>
+          <input id="sup-cbu" class="form-input" value="${s.bank_cbu||''}">
+        </div>
+        <div>
+          <label class="form-label">Alias</label>
+          <input id="sup-alias" class="form-input" value="${s.bank_alias||''}">
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">📝 NOTAS</div>
+      <div style="margin-bottom:16px">
+        <label class="form-label">Observaciones</label>
+        <textarea id="sup-notes" class="form-input" rows="2" placeholder="Notas internas...">${s.notes||''}</textarea>
+      </div>
+
+      <div id="sup-blacklist-row" style="display:${s.status==='blacklist'?'block':'none'};margin-bottom:10px">
+        <label class="form-label" style="color:var(--danger)">Razón de blacklist</label>
+        <textarea id="sup-blreason" class="form-input" rows="2">${s.blacklist_reason||''}</textarea>
+      </div>
+    </div>
+  `;
+
+  openModal({
+    title: isEdit ? `Editar proveedor — ${s.name}` : 'Nuevo proveedor',
+    body: body,
+    buttons: [
+      ...(isEdit ? [{ label: '🗑 Eliminar', cls: 'btn-danger', fn: () => _supDelete(s.id) }] : []),
+      { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal },
+      { label: isEdit ? 'Guardar cambios' : 'Crear proveedor', cls: 'btn-primary', fn: () => _supSave(isEdit ? s.id : null) },
+    ],
+  });
+
+  // Toggle del campo razón de blacklist según status elegido
+  setTimeout(() => {
+    const statusSel = document.getElementById('sup-status');
+    const blRow     = document.getElementById('sup-blacklist-row');
+    if (statusSel && blRow) {
+      statusSel.addEventListener('change', () => {
+        blRow.style.display = statusSel.value === 'blacklist' ? 'block' : 'none';
+      });
+    }
+  }, 100);
+}
+
+async function _supSave(id) {
+  const val = (x) => document.getElementById(x)?.value?.trim() || '';
+  const numOrNull = (x) => {
+    const v = document.getElementById(x)?.value;
+    return (v === '' || v == null) ? null : parseFloat(v);
+  };
+
+  const payload = {
+    name:          val('sup-name'),
+    razon_social:  val('sup-razon'),
+    cuit:          val('sup-cuit'),
+    iva_condition: val('sup-iva') || null,
+    contact_person:val('sup-contact'),
+    phone:         val('sup-phone'),
+    email:         val('sup-email'),
+    website:       val('sup-website'),
+    address:       val('sup-address'),
+    city:          val('sup-city'),
+    province:      val('sup-province'),
+    postal_code:   val('sup-cp'),
+    rubros:        val('sup-rubros').split(',').map(r => r.trim().toLowerCase()).filter(Boolean),
+    forma_pago:    val('sup-fpago') || null,
+    cc_dias:       numOrNull('sup-ccdias'),
+    moneda:        val('sup-moneda') || 'ARS',
+    discount_pct:  numOrNull('sup-disc'),
+    delivery_time_days: numOrNull('sup-deliv'),
+    rating:        numOrNull('sup-rating'),
+    bank_name:     val('sup-bank'),
+    bank_cbu:      val('sup-cbu'),
+    bank_alias:    val('sup-alias'),
+    notes:         val('sup-notes'),
+    status:        val('sup-status') || 'activo',
+    blacklist_reason: val('sup-blreason') || null,
+  };
+
+  if (!payload.name) { showToast('error', 'El nombre es obligatorio'); return; }
+
+  try {
+    const url = id ? `/api/suppliers/${id}` : '/api/suppliers';
+    const method = id ? 'PUT' : 'POST';
+    const res = await apiFetch(url, { method, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar');
+    showToast('ok', id ? `Proveedor actualizado: ${payload.name}` : `Proveedor creado: ${payload.name}`);
+    closeModal();
+    await loadSuppliersList();
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+async function _supDelete(id) {
+  if (!confirm('¿Eliminar este proveedor? (soft delete)')) return;
+  try {
+    const res = await apiFetch(`/api/suppliers/${id}`, { method: 'DELETE' });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    showToast('ok', 'Proveedor eliminado');
+    closeModal();
+    await loadSuppliersList();
+  } catch(err) { showToast('error', err.message); }
+}
+
+async function openSupplierDetail(id) {
+  const sup = (App.supTable.rawData || []).find(s => s.id === id);
+  if (!sup) { showToast('error', 'Proveedor no encontrado'); return; }
+
+  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC a ${sup.cc_dias||'—'} días`, cheque: 'Cheque', transferencia: 'Transferencia' }[sup.forma_pago] || '—';
+  const ivaLabel = { responsable_inscripto: 'Responsable Inscripto', monotributo: 'Monotributo', exento: 'Exento', consumidor_final: 'Consumidor final' }[sup.iva_condition] || '—';
+  const statusBadge = { activo: '✅ Activo', suspendido: '⏸ Suspendido', blacklist: '🚫 Blacklist' }[sup.status] || sup.status;
+
+  const body = `
+    <div style="max-height:70vh;overflow-y:auto">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${sup.name}</div>
+          <div style="font-size:12px;color:var(--text3)">${sup.razon_social||'—'}</div>
+        </div>
+        <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;font-family:var(--mono);background:var(--bg3)">${statusBadge}</span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:16px">
+        <div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">🏢 Fiscal</div>
+          <div style="padding:8px 0"><b>CUIT:</b> <span style="font-family:var(--mono)">${sup.cuit||'—'}</span></div>
+          <div style="padding:4px 0"><b>IVA:</b> ${ivaLabel}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">📞 Contacto</div>
+          <div style="padding:4px 0"><b>Persona:</b> ${sup.contact_person||'—'}</div>
+          <div style="padding:4px 0"><b>Tel:</b> <span style="font-family:var(--mono)">${sup.phone||'—'}</span></div>
+          <div style="padding:4px 0"><b>Email:</b> ${sup.email||'—'}</div>
+          ${sup.website ? `<div style="padding:4px 0"><b>Web:</b> <a href="${sup.website}" target="_blank" style="color:var(--accent)">${sup.website}</a></div>` : ''}
+        </div>
+      </div>
+
+      ${sup.address || sup.city ? `
+      <div style="padding:12px;background:var(--bg3);border-radius:var(--radius);font-size:13px;margin-bottom:16px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:6px">📍 Dirección</div>
+        ${sup.address||''} ${sup.address&&sup.city?', ':''}${sup.city||''} ${sup.province?'('+sup.province+')':''} ${sup.postal_code?'- CP '+sup.postal_code:''}
+      </div>` : ''}
+
+      ${(sup.rubros||[]).length ? `
+      <div style="margin-bottom:16px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">🏷 Rubros</div>
+        ${sup.rubros.map(r => `<span style="display:inline-block;background:var(--accent);color:white;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;margin-right:5px;margin-bottom:5px">${r}</span>`).join('')}
+      </div>` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div style="padding:12px;background:var(--bg3);border-radius:var(--radius)">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">💰 Condiciones</div>
+          <div style="font-size:13px;padding:3px 0"><b>Pago:</b> ${formaPagoLabel}</div>
+          <div style="font-size:13px;padding:3px 0"><b>Moneda:</b> ${sup.moneda||'ARS'}</div>
+          ${sup.discount_pct ? `<div style="font-size:13px;padding:3px 0"><b>Desc:</b> ${sup.discount_pct}%</div>` : ''}
+          ${sup.delivery_time_days ? `<div style="font-size:13px;padding:3px 0"><b>Entrega:</b> ${sup.delivery_time_days} días</div>` : ''}
+          ${sup.rating ? `<div style="font-size:13px;padding:3px 0"><b>Calificación:</b> <span style="color:var(--warn);font-weight:700">${parseFloat(sup.rating).toFixed(1)} ⭐</span></div>` : ''}
+        </div>
+        ${sup.bank_name || sup.bank_cbu ? `
+        <div style="padding:12px;background:var(--bg3);border-radius:var(--radius)">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">🏦 Bancario</div>
+          ${sup.bank_name ? `<div style="font-size:13px;padding:3px 0"><b>Banco:</b> ${sup.bank_name}</div>` : ''}
+          ${sup.bank_cbu ? `<div style="font-size:12px;padding:3px 0;font-family:var(--mono)"><b>CBU:</b> ${sup.bank_cbu}</div>` : ''}
+          ${sup.bank_alias ? `<div style="font-size:12px;padding:3px 0;font-family:var(--mono)"><b>Alias:</b> ${sup.bank_alias}</div>` : ''}
+        </div>` : '<div></div>'}
+      </div>
+
+      ${sup.notes ? `
+      <div style="padding:12px;background:rgba(217,119,6,.10);border-left:3px solid var(--warn);border-radius:var(--radius);font-size:13px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--warn);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Notas</div>
+        ${sup.notes}
+      </div>` : ''}
+
+      ${sup.blacklist_reason ? `
+      <div style="padding:12px;background:rgba(220,38,38,.10);border-left:3px solid var(--danger);border-radius:var(--radius);font-size:13px">
+        <div style="font-size:10px;color:var(--danger);text-transform:uppercase;font-weight:700;margin-bottom:4px">🚫 Razón blacklist</div>
+        ${sup.blacklist_reason}
+      </div>` : ''}
+    </div>
+  `;
+
+  openModal({
+    title: `Proveedor: ${sup.name}`,
+    body: body,
+    buttons: [
+      { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
+      ...(['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role) ?
+        [{ label: '✎ Editar', cls: 'btn-primary', fn: () => { closeModal(); openEditSupplierModal(id); } }] : []),
+    ],
+  });
+}
+
+// Export PDF de proveedores
+function _supExportPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { showToast('error', 'jsPDF no cargado'); return; }
+  const all = App.supTable.rawData || [];
+  const T = App.supTable;
+  let rows = all.filter(s => {
+    if (T.status !== 'all' && s.status !== T.status) return false;
+    if (T.rubro !== 'all' && !(s.rubros || []).includes(T.rubro)) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [s.name, s.razon_social, s.cuit, s.contact_person].filter(Boolean).map(x=>String(x).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  doc.setFontSize(16); doc.setFont('helvetica','bold');
+  doc.text('Proveedores — Expreso Biletta', 40, 40);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100);
+  doc.text(`Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} proveedor${rows.length===1?'':'es'}`, 40, 58);
+  const tableData = rows.map(s => [
+    s.name || '—', s.cuit || '—',
+    (s.rubros||[]).join(', ') || '—',
+    s.contact_person || '—', s.phone || '—', s.email || '—',
+    s.forma_pago || '—',
+    s.status || '—',
+  ]);
+  doc.autoTable({
+    startY: 72,
+    head: [['Nombre','CUIT','Rubros','Contacto','Tel','Email','Pago','Estado']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+  });
+  doc.save(`Proveedores-Biletta-${new Date().toISOString().slice(0,10)}.pdf`);
+  showToast('ok', 'PDF descargado');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ACTIVOS — cargar assets en App.data (para OTs edilicias/etc)
+// ═══════════════════════════════════════════════════════════
+async function loadAssetsIntoData() {
+  try {
+    const res = await apiFetch('/api/assets');
+    if (res.ok) App.data.assets = await res.json();
+  } catch(e) { App.data.assets = []; }
 }
