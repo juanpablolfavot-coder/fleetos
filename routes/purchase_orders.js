@@ -282,16 +282,17 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
     const warnings     = [];      // lista de ítems sin vincular al stock
 
     // Asegurarse que exista la tabla de movimientos de stock
+    // IMPORTANTE: usa el mismo schema que db/schema.sql y routes/workorders.js
     await client.query(`CREATE TABLE IF NOT EXISTS stock_movements (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      stock_item_id UUID REFERENCES stock_items(id) ON DELETE CASCADE,
-      tipo VARCHAR(20) NOT NULL,
+      stock_id UUID REFERENCES stock_items(id) ON DELETE CASCADE,
+      type VARCHAR(20) NOT NULL,
       qty NUMERIC(12,2) NOT NULL,
-      balance_after NUMERIC(12,2),
-      ref_type VARCHAR(30),
-      ref_id UUID,
-      notes TEXT,
+      reason TEXT,
+      wo_id UUID,
       user_id UUID REFERENCES users(id),
+      requires_approval BOOLEAN DEFAULT FALSE,
+      approved_by UUID REFERENCES users(id),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`).catch(() => {});
 
@@ -302,9 +303,9 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
         continue;
       }
 
-      // Verificar que el ítem de stock existe
+      // Verificar que el ítem de stock existe — con FOR UPDATE para prevenir race conditions
       const si = await client.query(
-        'SELECT id, code, name, qty_current, unit_cost FROM stock_items WHERE id=$1',
+        'SELECT id, code, name, qty_current, unit_cost FROM stock_items WHERE id=$1 FOR UPDATE',
         [item.stock_item_id]
       );
       if (!si.rows[0]) {
@@ -318,6 +319,8 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       const nuevoQty = parseFloat(stockItem.qty_current || 0) + qtyIngreso;
 
       // Actualizar stock: qty_current += cantidad, unit_cost = precio de esta OC (última compra)
+      // La fila ya está bloqueada por el FOR UPDATE de arriba, nadie más puede modificarla
+      // hasta que hagamos COMMIT al final de la transacción.
       await client.query(
         `UPDATE stock_items
          SET qty_current = qty_current + $1,
@@ -328,11 +331,13 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       );
 
       // Registrar movimiento
+      // NOTA: usa el schema existente (stock_id, type, qty, reason, wo_id, user_id)
+      //       que ya existe por db/schema.sql y routes/workorders.js
       await client.query(
-        `INSERT INTO stock_movements (stock_item_id, tipo, qty, balance_after, ref_type, ref_id, notes, user_id)
-         VALUES ($1, 'ingreso', $2, $3, 'purchase_order', $4, $5, $6)`,
-        [item.stock_item_id, qtyIngreso, nuevoQty, oc.id,
-         `Ingreso por OC ${oc.code}${oc.proveedor ? ' — ' + oc.proveedor : ''}`,
+        `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id)
+         VALUES ($1, 'Ingreso', $2, $3, $4)`,
+        [item.stock_item_id, qtyIngreso,
+         `Ingreso por OC ${oc.code}${oc.proveedor ? ' — ' + oc.proveedor : ''} · Nuevo precio unit: $${precioNuevo}`,
          req.user.id]
       );
 
