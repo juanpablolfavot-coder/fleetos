@@ -880,18 +880,29 @@ async function saveNewOT() {
   const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
-  // Repuestos — leer directo del DOM
+  // Repuestos — leer directo del DOM (incluye origin + stock_id si aplica)
   const parts = [];
   document.querySelectorAll('[id^="otp-name-"]').forEach(nameEl => {
     const idx   = nameEl.id.replace('otp-name-', '');
     const name  = nameEl.value.trim();
     if (!name || name.length < 2) return;
+
+    // Leer el selector de origen (Externo / Pañol)
+    const originEl = document.getElementById('otp-origin-' + idx);
+    const origin = originEl?.value === 'stock' ? 'stock' : 'externo';
+    // Si es del pañol, el stock_id está en dataset del input de nombre
+    const stock_id = (origin === 'stock') ? (nameEl.dataset.stockId || null) : null;
+
+    // Si eligió pañol pero no vinculó → tratar como externo (no fallar)
+    const finalOrigin = (origin === 'stock' && !stock_id) ? 'externo' : origin;
+
     parts.push({
       name,
       qty:       parseFloat(document.getElementById('otp-qty-'  + idx)?.value) || 1,
       unit:      document.getElementById('otp-unit-' + idx)?.value || 'un',
       unit_cost: parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0,
-      origin:    'externo'
+      origin:    finalOrigin,
+      stock_id:  (finalOrigin === 'stock') ? stock_id : null,
     });
   });
 
@@ -973,14 +984,35 @@ function openEditOTModal(id) {
       <label class="form-label">Descripción / diagnóstico</label>
       <textarea class="form-textarea" id="eo-desc">${ot.desc||''}</textarea>
     </div>
+
+    <!-- ⏱ PARTES DE TRABAJO (opción B) ──────────────────────── -->
+    <div style="margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <label class="form-label" style="margin:0;font-weight:700">⏱️ Partes de trabajo (mano de obra propia)</label>
+          <div style="font-size:11px;color:var(--text3)">Quién trabajó y cuánto. Se suma automáticamente al costo MO.</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="_labAddRow()">+ Agregar parte</button>
+      </div>
+      <div id="eo-labor-list" style="margin-bottom:8px">
+        <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando partes...</div>
+      </div>
+      <div id="eo-labor-total" style="text-align:right;font-size:13px;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);display:none">
+        Total MO de partes: <strong id="eo-labor-total-val" style="color:var(--accent)">$0</strong>
+        <span style="color:var(--text3);font-size:11px">· <span id="eo-labor-total-hours">0</span>h</span>
+      </div>
+    </div>
+
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Costo repuestos ($)</label>
         <input class="form-input" type="number" id="eo-parts" value="${ot.parts_cost||0}">
       </div>
       <div class="form-group">
-        <label class="form-label">Costo mano de obra ($)</label>
-        <input class="form-input" type="number" id="eo-labor" value="${ot.labor_cost||0}">
+        <label class="form-label">Costo mano de obra ($)
+          <span style="font-size:10px;color:var(--text3);font-weight:400">· autocalculado desde los partes</span>
+        </label>
+        <input class="form-input" type="number" id="eo-labor" value="${ot.labor_cost||0}" readonly style="background:var(--bg3)">
       </div>
     </div>
     ${(ot.parts||[]).length>0?`
@@ -992,6 +1024,12 @@ function openEditOTModal(id) {
     { label:'Guardar cambios', cls:'btn-primary',   fn: () => saveEditOT(id) },
     { label:'Cancelar',        cls:'btn-secondary', fn: closeModal }
   ]);
+
+  // Guardar el ID de la OT en una variable global del modal, para que las funciones
+  // de partes sepan a qué OT agregar los registros
+  window._labCurrentOtId = ot._uuid || ot.id;
+  // Cargar los partes existentes de esta OT
+  _labLoadList();
 }
 
 async function saveEditOT(id) {
@@ -5411,18 +5449,31 @@ function _otPopulateTarget(tipo, preselectedVehicle) {
 function addOTPart() {
   if (!window._otParts) window._otParts = [];
   const idx = window._otParts.length;
-  window._otParts.push({ name:'', qty:1, unit:'un', unit_cost:0, origin:'externo' });
+  window._otParts.push({ name:'', qty:1, unit:'un', unit_cost:0, origin:'externo', stock_id:null });
 
   const container = document.getElementById('ot-parts-list');
   if (!container) return;
   const div = document.createElement('div');
   div.id = 'ot-part-row-' + idx;
-  div.style.cssText = 'display:grid;grid-template-columns:1fr 60px 60px 110px 32px;gap:6px;margin-bottom:6px;align-items:center';
+  div.style.cssText = 'display:grid;grid-template-columns:90px 1fr 60px 60px 110px 32px;gap:6px;margin-bottom:6px;align-items:start;position:relative';
   div.innerHTML = `
-    <input class="form-input" placeholder="Descripción del repuesto" id="otp-name-${idx}"
-      oninput="updateOTPartField(${idx},'name',this.value)" style="font-size:13px">
+    <select class="form-select" id="otp-origin-${idx}"
+      onchange="changeOTPartOrigin(${idx}, this.value)"
+      style="font-size:12px;padding:6px">
+      <option value="externo">🛒 Externo</option>
+      <option value="stock">📦 Pañol</option>
+    </select>
+    <div style="position:relative">
+      <input class="form-input" placeholder="Descripción del repuesto" id="otp-name-${idx}"
+        oninput="onOTPartNameInput(${idx}, this.value)" autocomplete="off"
+        style="font-size:13px;width:100%">
+      <div id="otp-suggestions-${idx}" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:0 0 var(--radius) var(--radius);z-index:100;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.25)"></div>
+      <div id="otp-stock-info-${idx}" style="display:none;font-size:10px;color:var(--text3);padding:3px 0">
+        <span id="otp-stock-msg-${idx}"></span>
+      </div>
+    </div>
     <input class="form-input" type="number" value="1" min="0.01" id="otp-qty-${idx}"
-      oninput="updateOTPartField(${idx},'qty',parseFloat(this.value)||1)" style="font-size:13px;text-align:center">
+      oninput="onOTPartQtyChange(${idx})" style="font-size:13px;text-align:center">
     <input class="form-input" value="un" id="otp-unit-${idx}"
       oninput="updateOTPartField(${idx},'unit',this.value)" style="font-size:13px;text-align:center">
     <input class="form-input" type="number" value="0" placeholder="Precio" id="otp-cost-${idx}"
@@ -5431,6 +5482,161 @@ function addOTPart() {
       style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:16px;padding:0 6px;height:36px">✕</button>`;
   container.appendChild(div);
   document.getElementById('ot-parts-total').style.display = 'block';
+  updateOTTotal();
+}
+
+// Cuando el usuario cambia el selector "Externo" / "Pañol"
+function changeOTPartOrigin(idx, origin) {
+  if (!window._otParts[idx]) return;
+  window._otParts[idx].origin = origin;
+  const nameEl = document.getElementById('otp-name-' + idx);
+  const stockInfoEl = document.getElementById('otp-stock-info-' + idx);
+  const sugEl = document.getElementById('otp-suggestions-' + idx);
+
+  if (origin === 'externo') {
+    // Limpiar vinculación al stock
+    window._otParts[idx].stock_id = null;
+    if (nameEl) {
+      nameEl.placeholder = 'Descripción del repuesto (compra externa)';
+      nameEl.style.borderLeft = '';
+      nameEl.dataset.stockId = '';
+    }
+    if (stockInfoEl) stockInfoEl.style.display = 'none';
+    if (sugEl) sugEl.style.display = 'none';
+  } else {
+    // Origen = stock: mostrar hint para buscar
+    if (nameEl) {
+      nameEl.placeholder = 'Escribí para buscar en el pañol...';
+      nameEl.value = '';
+      nameEl.dataset.stockId = '';
+      nameEl.style.borderLeft = '';
+    }
+    if (stockInfoEl) {
+      stockInfoEl.style.display = 'block';
+      const msg = document.getElementById('otp-stock-msg-' + idx);
+      if (msg) msg.innerHTML = '<span style="color:var(--accent)">📦 Elegí un ítem del pañol</span>';
+    }
+    // Resetear cantidad/precio
+    const qtyEl = document.getElementById('otp-qty-' + idx);
+    const costEl = document.getElementById('otp-cost-' + idx);
+    if (qtyEl) qtyEl.value = 1;
+    if (costEl) { costEl.value = 0; costEl.readOnly = false; }
+  }
+  updateOTTotal();
+}
+
+// Input del nombre: si es stock, busca autocompletado; si es externo, solo guarda texto
+function onOTPartNameInput(idx, val) {
+  if (!window._otParts[idx]) return;
+  window._otParts[idx].name = val;
+
+  const origin = window._otParts[idx].origin;
+  const sugEl = document.getElementById('otp-suggestions-' + idx);
+  if (!sugEl) return;
+
+  if (origin !== 'stock') {
+    // Origen externo: sin sugerencias
+    sugEl.style.display = 'none';
+    return;
+  }
+
+  // Si el usuario modifica el texto después de haber seleccionado, desvincula
+  const nameEl = document.getElementById('otp-name-' + idx);
+  if (nameEl && nameEl.dataset.stockId) {
+    window._otParts[idx].stock_id = null;
+    nameEl.dataset.stockId = '';
+    nameEl.style.borderLeft = '';
+  }
+
+  if (!val || val.length < 2) { sugEl.style.display = 'none'; return; }
+  const q = val.toLowerCase();
+  const stock = (App.data.stock || []).filter(s =>
+    (s.name||'').toLowerCase().includes(q) || (s.code||'').toLowerCase().includes(q)
+  ).slice(0, 8);
+
+  if (!stock.length) {
+    sugEl.innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center">Sin resultados en el pañol. Cambiá a "Externo" si es una compra de afuera.</div>';
+    sugEl.style.display = 'block';
+    return;
+  }
+
+  sugEl.innerHTML = stock.map(s => {
+    const qty = parseFloat(s.qty_current || 0);
+    const critical = qty <= parseFloat(s.qty_min || 0);
+    const color = critical ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
+    const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return `<div onclick="selectOTStockItem(${idx},'${s.id}','${safeName}','${s.unit||'un'}',${parseFloat(s.unit_cost||0)},${qty})"
+      style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      <div>
+        <div style="font-weight:600">${s.name}</div>
+        <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost||0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
+        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
+      </div>
+    </div>`;
+  }).join('');
+  sugEl.style.display = 'block';
+}
+
+// Cuando eligen un ítem del autocompletado
+function selectOTStockItem(idx, stockId, name, unit, unitCost, qtyAvailable) {
+  if (!window._otParts[idx]) return;
+  window._otParts[idx].name = name;
+  window._otParts[idx].unit = unit;
+  window._otParts[idx].unit_cost = unitCost;
+  window._otParts[idx].stock_id = stockId;
+  window._otParts[idx].origin = 'stock';
+
+  const nameEl = document.getElementById('otp-name-' + idx);
+  const unitEl = document.getElementById('otp-unit-' + idx);
+  const costEl = document.getElementById('otp-cost-' + idx);
+  const qtyEl = document.getElementById('otp-qty-' + idx);
+  const sugEl = document.getElementById('otp-suggestions-' + idx);
+  const msgEl = document.getElementById('otp-stock-msg-' + idx);
+  const infoEl = document.getElementById('otp-stock-info-' + idx);
+
+  if (nameEl) {
+    nameEl.value = name;
+    nameEl.dataset.stockId = stockId;
+    nameEl.dataset.stockAvailable = qtyAvailable;
+    nameEl.style.borderLeft = '3px solid var(--ok)';
+  }
+  if (unitEl) unitEl.value = unit;
+  if (costEl) { costEl.value = unitCost; costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; }
+  if (sugEl) sugEl.style.display = 'none';
+  if (infoEl) infoEl.style.display = 'block';
+  if (msgEl) {
+    const color = qtyAvailable > 0 ? 'var(--ok)' : 'var(--danger)';
+    msgEl.innerHTML = `<span style="color:${color}">✓ Vinculado al pañol · Disponible: <b>${qtyAvailable} ${unit}</b></span>`;
+  }
+  // Validar cantidad contra disponible
+  onOTPartQtyChange(idx);
+  updateOTTotal();
+  if (typeof showToast === 'function') showToast('ok', 'Repuesto vinculado al pañol');
+}
+
+// Al cambiar la cantidad: validar contra stock disponible si es del pañol
+function onOTPartQtyChange(idx) {
+  if (!window._otParts[idx]) return;
+  const qtyEl = document.getElementById('otp-qty-' + idx);
+  const nameEl = document.getElementById('otp-name-' + idx);
+  const msgEl = document.getElementById('otp-stock-msg-' + idx);
+  const qty = parseFloat(qtyEl?.value) || 0;
+  window._otParts[idx].qty = qty;
+
+  if (window._otParts[idx].origin === 'stock' && nameEl?.dataset.stockId) {
+    const available = parseFloat(nameEl.dataset.stockAvailable || 0);
+    if (qty > available) {
+      if (qtyEl) qtyEl.style.borderColor = 'var(--danger)';
+      if (msgEl) msgEl.innerHTML = `<span style="color:var(--danger)">⚠️ Cantidad mayor al disponible (${available})</span>`;
+    } else {
+      if (qtyEl) qtyEl.style.borderColor = '';
+      if (msgEl) msgEl.innerHTML = `<span style="color:var(--ok)">✓ Disponible: <b>${available}</b> · Usando: <b>${qty}</b> · Queda: <b>${available - qty}</b></span>`;
+    }
+  }
   updateOTTotal();
 }
 
@@ -5657,14 +5863,15 @@ async function resetTechSpec(id) {
 function renderConfig() {
   const bases  = (App.config?.bases  || ['Central','Norte','Sur']);
   const vtypes = (App.config?.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']);
+  const laborRate = parseFloat(App.config?.labor_rate || 0);
   document.getElementById('page-config').innerHTML = `
     <div class="section-header">
       <div>
         <div class="section-title">Configuración del sistema</div>
-        <div class="section-sub">Bases operativas y tipos de vehículos</div>
+        <div class="section-sub">Bases operativas, tipos de vehículos y costos internos</div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:900px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:900px;margin-bottom:20px">
 
       <!-- BASES -->
       <div class="card">
@@ -5696,6 +5903,35 @@ function renderConfig() {
         <button class="btn btn-primary" onclick="saveConfig()">Guardar cambios</button>
       </div>
 
+    </div>
+
+    <!-- COSTO HORA DEL TALLER -->
+    <div class="card" style="max-width:900px;border-left:3px solid var(--accent)">
+      <div class="card-title">⏱️ Costo hora del taller (para Mano de Obra interna)</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:14px;max-width:680px">
+        Este valor se usa como tarifa por defecto al cargar partes de trabajo en OTs hechas por tu taller propio.
+        Incluí: sueldos + cargas sociales + herramientas + espacio + consumibles (trapos, etc.). Dividido por las horas productivas promedio del mes.
+        <br><br>
+        <b>No es el sueldo de nadie</b> — es un número interno para valorizar el trabajo del taller. Solo lo ve el dueño/gerencia.
+      </div>
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
+        <div>
+          <label class="form-label">Tarifa por hora ($)</label>
+          <input class="form-input" type="number" id="cfg-labor-rate" value="${laborRate}" min="0" step="100" style="font-size:14px;font-weight:700">
+          <div style="font-size:11px;color:var(--text3);margin-top:6px">Ej: 4500, 5000, 7500</div>
+          <button class="btn btn-primary btn-sm" onclick="saveConfig()" style="margin-top:12px">Guardar tarifa</button>
+        </div>
+        <div style="background:var(--bg3);padding:12px;border-radius:var(--radius);font-size:12px;color:var(--text2)">
+          <div style="font-weight:700;margin-bottom:6px;color:var(--text)">💡 Cómo calcular tu tarifa real</div>
+          <div style="line-height:1.6">
+            Sueldos totales mensuales (todos los mecánicos): <b>$A</b><br>
+            Horas productivas del mes (mecánicos × horas): <b>H</b> (ej: 3 personas × 160h = 480h)<br>
+            Costo sueldos por hora: <b>$A / H</b><br>
+            + Overhead 30-40% (herramientas, espacio, consumibles)<br>
+            <b style="color:var(--accent)">= Tarifa realista</b>
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -5732,10 +5968,20 @@ async function saveConfig() {
   const vtypes = Array.from(document.querySelectorAll('[id^="cfg-type-"]')).map(el=>el.value.trim()).filter(Boolean);
   if (!bases.length)  { showToast('error','Necesitás al menos una base'); return; }
   if (!vtypes.length) { showToast('error','Necesitás al menos un tipo de vehículo'); return; }
-  const res = await apiFetch('/api/config', { method:'PUT', body: JSON.stringify({ bases, vehicle_types: vtypes }) });
+
+  // labor_rate es opcional — solo aparece en la pantalla de config, no siempre está visible
+  const labor_rate_el = document.getElementById('cfg-labor-rate');
+  const payload = { bases, vehicle_types: vtypes };
+  if (labor_rate_el) {
+    const lr = parseFloat(labor_rate_el.value);
+    if (!isNaN(lr) && lr >= 0) payload.labor_rate = lr;
+  }
+
+  const res = await apiFetch('/api/config', { method:'PUT', body: JSON.stringify(payload) });
   if (!res.ok) { showToast('error','Error al guardar configuración'); return; }
   App.config.bases = bases;
   App.config.vehicle_types = vtypes;
+  if (payload.labor_rate !== undefined) App.config.labor_rate = payload.labor_rate;
   showToast('ok', 'Configuración guardada correctamente');
   renderConfig();
 }
@@ -9046,4 +9292,232 @@ async function loadAssetsIntoData() {
     const res = await apiFetch('/api/assets');
     if (res.ok) App.data.assets = await res.json();
   } catch(e) { App.data.assets = []; }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PARTES DE TRABAJO — Opción B (trazabilidad MO)
+// ═══════════════════════════════════════════════════════════
+
+// Cargar lista de partes de la OT actual
+async function _labLoadList() {
+  const otId = window._labCurrentOtId;
+  const container = document.getElementById('eo-labor-list');
+  if (!otId || !container) return;
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/labor`);
+    if (!r.ok) {
+      container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error al cargar partes de trabajo</div>`;
+      return;
+    }
+    const partes = await r.json();
+    window._labCurrentPartes = partes;
+    _labRender(partes);
+  } catch(err) {
+    container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error: ${err.message}</div>`;
+  }
+}
+
+function _labRender(partes) {
+  const container = document.getElementById('eo-labor-list');
+  const totalDiv  = document.getElementById('eo-labor-total');
+  const totalVal  = document.getElementById('eo-labor-total-val');
+  const totalHrs  = document.getElementById('eo-labor-total-hours');
+  const eoLabor   = document.getElementById('eo-labor');
+  if (!container) return;
+
+  if (!partes || partes.length === 0) {
+    container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px;background:var(--bg3);border-radius:var(--radius);border:1px dashed var(--border2)">
+      Aún no hay partes de trabajo cargados.<br>Click en <b>"+ Agregar parte"</b> para registrar quién trabajó y cuántas horas.
+    </div>`;
+    if (totalDiv) totalDiv.style.display = 'none';
+    if (eoLabor) eoLabor.value = 0;
+    return;
+  }
+
+  container.innerHTML = partes.map(p => {
+    const hours    = parseFloat(p.hours || 0);
+    const rate     = parseFloat(p.rate || 0);
+    const subtotal = parseFloat(p.subtotal || 0);
+    const fecha    = p.work_date ? new Date(p.work_date).toLocaleDateString('es-AR') : '—';
+    return `<div style="display:grid;grid-template-columns:1fr 60px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
+      <div>
+        <div style="font-weight:600">${p.worker_name}</div>
+        <div style="color:var(--text3);font-size:10px">${fecha}${p.notes ? ' · ' + p.notes.substring(0,50) : ''}</div>
+      </div>
+      <div style="text-align:center;font-family:var(--mono)">${hours}h</div>
+      <div style="text-align:right;font-family:var(--mono);color:var(--text3)">$${Math.round(rate).toLocaleString('es-AR')}/h</div>
+      <div style="text-align:right;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(subtotal).toLocaleString('es-AR')}</div>
+      <button type="button" onclick="_labDelete('${p.id}')"
+        title="Eliminar este parte"
+        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>
+    </div>`;
+  }).join('');
+
+  const totalH = partes.reduce((a,p) => a + parseFloat(p.hours||0), 0);
+  const totalM = partes.reduce((a,p) => a + parseFloat(p.subtotal||0), 0);
+  if (totalDiv) totalDiv.style.display = 'block';
+  if (totalVal) totalVal.textContent = '$' + Math.round(totalM).toLocaleString('es-AR');
+  if (totalHrs) totalHrs.textContent = totalH.toFixed(1);
+  if (eoLabor)  eoLabor.value = totalM.toFixed(2);
+}
+
+// Modal para agregar un parte nuevo
+function _labAddRow() {
+  if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
+
+  // Lista de mecánicos del sistema (users con rol mecanico, jefe_mantenimiento o el que sea)
+  const mechanics = (App.data.users || []).filter(u =>
+    ['mecanico','jefe_mantenimiento','dueno','gerencia'].includes(u.role)
+  );
+  const mechOpts = mechanics.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name} (${u.role})</option>`).join('');
+
+  // Rate default: traer labor_rate del config
+  const defaultRate = parseFloat(App.config?.labor_rate || 0);
+
+  const body = `
+    <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
+      💡 <b>Parte de trabajo:</b> registrá quién trabajó, cuántas horas y a qué tarifa.
+      El costo se calcula solo y se suma al total MO de la OT.
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">¿Quién trabajó? *</label>
+      <select class="form-select" id="lab-user" onchange="_labUserChanged()">
+        <option value="">— Seleccionar o escribir manualmente —</option>
+        ${mechOpts}
+        <option value="__manual__">✍️ Otro (escribir nombre)</option>
+      </select>
+      <div id="lab-user-manual-wrap" style="display:none;margin-top:6px">
+        <input class="form-input" id="lab-user-manual" placeholder="Nombre del trabajador">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Horas trabajadas *</label>
+        <input class="form-input" type="number" id="lab-hours" step="0.25" min="0.25" max="24" value="1"
+          oninput="_labRecalc()" style="font-size:14px">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">Ej: 0.5 (media hora), 3 (tres horas), 3.5 (tres y media)</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tarifa por hora ($)</label>
+        <input class="form-input" type="number" id="lab-rate" min="0" value="${defaultRate}" oninput="_labRecalc()">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">Default: ${defaultRate > 0 ? '$' + defaultRate.toLocaleString('es-AR') + ' (configuración)' : 'Configurala en Config.'}</div>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Fecha del trabajo</label>
+        <input class="form-input" type="date" id="lab-date" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total calculado</label>
+        <input class="form-input" id="lab-subtotal" readonly style="background:var(--bg3);font-weight:700;color:var(--accent);font-size:14px" value="$0">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Notas (opcional)</label>
+      <input class="form-input" id="lab-notes" placeholder="Qué hizo exactamente, observaciones, etc.">
+    </div>
+  `;
+  openModal('⏱️ Agregar parte de trabajo', body, [
+    { label: 'Cancelar', cls: 'btn-secondary', fn: () => { closeModal(); openEditOTModal(window._labCurrentOtId); } },
+    { label: 'Guardar parte', cls: 'btn-primary', fn: _labSave },
+  ]);
+
+  setTimeout(() => _labRecalc(), 50);
+}
+
+// Cuando cambia el select de usuario
+function _labUserChanged() {
+  const sel = document.getElementById('lab-user');
+  const manualWrap = document.getElementById('lab-user-manual-wrap');
+  if (!sel || !manualWrap) return;
+  manualWrap.style.display = sel.value === '__manual__' ? 'block' : 'none';
+}
+
+// Recalcular subtotal en tiempo real
+function _labRecalc() {
+  const hours = parseFloat(document.getElementById('lab-hours')?.value) || 0;
+  const rate  = parseFloat(document.getElementById('lab-rate')?.value)  || 0;
+  const subtotalEl = document.getElementById('lab-subtotal');
+  if (subtotalEl) subtotalEl.value = '$' + Math.round(hours * rate).toLocaleString('es-AR');
+}
+
+// Guardar el parte
+async function _labSave() {
+  const otId  = window._labCurrentOtId;
+  if (!otId) { showToast('error', 'No hay OT seleccionada'); return; }
+
+  const userSel = document.getElementById('lab-user');
+  const userVal = userSel?.value || '';
+  let user_id = null;
+  let worker_name = '';
+
+  if (userVal === '__manual__' || userVal === '') {
+    // Manual: tomar del input
+    worker_name = (document.getElementById('lab-user-manual')?.value || '').trim();
+    if (!worker_name && userVal === '') {
+      // Si no eligió nada ni escribió nada, error
+      showToast('error', 'Indicá quién trabajó');
+      return;
+    }
+  } else {
+    // Seleccionó un usuario del dropdown
+    user_id = userVal;
+    const opt = userSel.options[userSel.selectedIndex];
+    worker_name = opt?.dataset?.name || opt?.text?.split(' (')[0] || 'Trabajador';
+  }
+
+  if (!worker_name) { showToast('error', 'Indicá quién trabajó'); return; }
+
+  const hours = parseFloat(document.getElementById('lab-hours')?.value);
+  const rate  = parseFloat(document.getElementById('lab-rate')?.value) || 0;
+  const work_date = document.getElementById('lab-date')?.value || null;
+  const notes = (document.getElementById('lab-notes')?.value || '').trim() || null;
+
+  if (!hours || hours <= 0) { showToast('error', 'Ingresá las horas trabajadas'); return; }
+
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/labor`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id, worker_name, hours, rate, work_date, notes })
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
+    showToast('ok', `Parte agregado: ${worker_name} · ${hours}h · $${Math.round(hours*rate).toLocaleString('es-AR')}`);
+    closeModal();
+    // Reabrir modal de edición y refrescar
+    openEditOTModal(otId);
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+// Eliminar un parte
+async function _labDelete(laborId) {
+  const otId = window._labCurrentOtId;
+  if (!otId) return;
+  if (!confirm('¿Eliminar este parte de trabajo?')) return;
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/labor/${laborId}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
+    showToast('ok', 'Parte eliminado');
+    _labLoadList();
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+// Helper: cargar labor_rate al config global de App en loadInitialData
+async function loadLaborRate() {
+  try {
+    const r = await apiFetch('/api/config');
+    if (r.ok) {
+      const cfg = await r.json();
+      App.config = App.config || {};
+      App.config.labor_rate = parseFloat(cfg.labor_rate) || 0;
+    }
+  } catch(e) { /* silent */ }
 }
