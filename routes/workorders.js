@@ -425,4 +425,205 @@ router.delete('/:id/labor/:laborId',
   }
 );
 
+// ═══════════════════════════════════════════════════════════
+//  REPUESTOS EN OT EXISTENTE (agregar/eliminar después de crear)
+//  Replica la lógica de creación: valida stock con FOR UPDATE, descuenta,
+//  registra movimiento, y recalcula parts_cost de la OT.
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/workorders/:id/parts — listar repuestos de una OT
+router.get('/:id/parts', authenticate, validateUUID('id'), async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT wop.*, si.code AS stock_code, si.name AS stock_name_ref
+       FROM work_order_parts wop
+       LEFT JOIN stock_items si ON si.id = wop.stock_id
+       WHERE wop.wo_id = $1
+       ORDER BY wop.created_at ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/workorders/:id/parts — AGREGAR repuesto a OT existente
+router.post('/:id/parts',
+  authenticate,
+  requireRole('dueno','gerencia','jefe_mantenimiento','mecanico','paniol'),
+  validateUUID('id'),
+  async (req, res) => {
+    const client = await require('../db/pool').pool.connect();
+    try {
+      const { name, origin, stock_id, qty, unit, unit_cost } = req.body;
+
+      // Validaciones básicas
+      const nameClean = (name || '').trim();
+      if (!nameClean || nameClean.length < 2) {
+        return res.status(400).json({ error: 'El nombre del repuesto debe tener al menos 2 caracteres' });
+      }
+      const qtyNum = parseFloat(qty);
+      if (!qtyNum || qtyNum <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+      const originClean = (origin === 'stock' && stock_id) ? 'stock' : 'externo';
+      const unitCostNum = parseFloat(unit_cost) || 0;
+
+      if (originClean === 'externo' && unitCostNum > 10000000) {
+        return res.status(400).json({ error: `Precio unitario fuera de rango. Máximo $10.000.000 por unidad.` });
+      }
+
+      await client.query('BEGIN');
+
+      // Verificar OT existe y no está cerrada
+      const wo = await client.query(
+        'SELECT id, code, status, parts_cost FROM work_orders WHERE id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      if (!wo.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'OT no encontrada' });
+      }
+      if (wo.rows[0].status === 'Cerrada') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'No se pueden agregar repuestos a una OT cerrada' });
+      }
+
+      const otCode = wo.rows[0].code;
+      let finalUnitCost = unitCostNum;
+      let finalStockId = null;
+
+      // Si es del pañol → descontar con FOR UPDATE + registrar movimiento
+      if (originClean === 'stock') {
+        const stock = await client.query(
+          'SELECT qty_current, unit_cost FROM stock_items WHERE id = $1 FOR UPDATE',
+          [stock_id]
+        );
+        if (!stock.rows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Ítem de stock no encontrado' });
+        }
+        if (parseFloat(stock.rows[0].qty_current) < qtyNum) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: `Stock insuficiente. Disponible: ${stock.rows[0].qty_current}` });
+        }
+
+        await client.query(
+          'UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2',
+          [qtyNum, stock_id]
+        );
+        await client.query(
+          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id)
+           VALUES ($1, 'Egreso', $2, $3, $4, $5)`,
+          [stock_id, qtyNum, `OT ${otCode} (agregado después de crear)`, req.params.id, req.user.id]
+        );
+
+        // Usar el precio del stock si no se envió uno explícito
+        if (!unitCostNum || unitCostNum === 0) {
+          finalUnitCost = parseFloat(stock.rows[0].unit_cost) || 0;
+        }
+        finalStockId = stock_id;
+      }
+
+      // Insertar el repuesto en work_order_parts
+      const ins = await client.query(
+        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING *`,
+        [req.params.id, finalStockId, nameClean, originClean,
+         qtyNum, (unit || 'un'), finalUnitCost]
+      );
+
+      // Recalcular parts_cost de la OT = SUMA de todos los repuestos
+      await client.query(
+        `UPDATE work_orders
+         SET parts_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_parts WHERE wo_id = $1), 0)
+         WHERE id = $1`,
+        [req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json(ins.rows[0]);
+    } catch(err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally { client.release(); }
+  }
+);
+
+// DELETE /api/workorders/:id/parts/:partId — ELIMINAR repuesto y revertir stock
+router.delete('/:id/parts/:partId',
+  authenticate,
+  requireRole('dueno','gerencia','jefe_mantenimiento'),
+  validateUUID('id'),
+  validateUUID('partId'),
+  async (req, res) => {
+    const client = await require('../db/pool').pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar OT no cerrada
+      const wo = await client.query(
+        'SELECT code, status FROM work_orders WHERE id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      if (!wo.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'OT no encontrada' });
+      }
+      if (wo.rows[0].status === 'Cerrada') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'No se pueden eliminar repuestos de una OT cerrada' });
+      }
+
+      // Traer el repuesto (para saber si hay que devolver stock)
+      const part = await client.query(
+        'SELECT * FROM work_order_parts WHERE id = $1 AND wo_id = $2',
+        [req.params.partId, req.params.id]
+      );
+      if (!part.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Repuesto no encontrado' });
+      }
+
+      const p = part.rows[0];
+
+      // Si es del pañol → devolver al stock con FOR UPDATE
+      if (p.origin === 'stock' && p.stock_id) {
+        const stock = await client.query(
+          'SELECT qty_current FROM stock_items WHERE id = $1 FOR UPDATE',
+          [p.stock_id]
+        );
+        if (stock.rows[0]) {
+          await client.query(
+            'UPDATE stock_items SET qty_current = qty_current + $1 WHERE id = $2',
+            [p.qty, p.stock_id]
+          );
+          await client.query(
+            `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id)
+             VALUES ($1, 'Ingreso', $2, $3, $4, $5)`,
+            [p.stock_id, p.qty,
+             `Reverso por eliminación de repuesto en OT ${wo.rows[0].code}`,
+             req.params.id, req.user.id]
+          );
+        }
+      }
+
+      // Eliminar el repuesto
+      await client.query('DELETE FROM work_order_parts WHERE id = $1', [req.params.partId]);
+
+      // Recalcular parts_cost de la OT
+      await client.query(
+        `UPDATE work_orders
+         SET parts_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_parts WHERE wo_id = $1), 0)
+         WHERE id = $1`,
+        [req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.json({ ok: true, restored_to_stock: p.origin === 'stock' });
+    } catch(err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally { client.release(); }
+  }
+);
+
 module.exports = router;
