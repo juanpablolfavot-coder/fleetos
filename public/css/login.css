@@ -33,7 +33,7 @@
 }
 .login-logo-mark {
   width: 48px; height: 48px;
-  background: linear-gradient(135deg, #2563eb, #1946c8);
+  background: linear-gradient(135deg, #ea580c, #c2410c);
   border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 18px; color: white;
