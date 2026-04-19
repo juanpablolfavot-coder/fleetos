@@ -1,13 +1,12 @@
 /* ══════════════════════════════════
-   FleetOS — Login & Role styles
+   FleetOS — Login & Role styles (light mode)
+   Comparte variables con main.css (:root)
 ══════════════════════════════════ */
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
-  background: #0a0e14;
-  color: #e2e8f0;
-  min-height: 100vh;
-}
+
+/* NOTA: NO redefinir el body acá — lo hace main.css con las variables del theme.
+   Antes había un `body { background:#0a0e14 ... }` que pisaba el light mode. */
+
 /* ==== Login Screen ==== */
 .login-screen {
   display: flex;
@@ -15,16 +14,16 @@ body {
   justify-content: center;
   min-height: 100vh;
   padding: 24px;
-  background: linear-gradient(135deg, #0a0e14 0%, #0f1726 50%, #0a0f1a 100%);
+  background: linear-gradient(135deg, #f7f9fc 0%, #eef2f8 50%, #e2e8f0 100%);
 }
 .login-box {
   width: 100%;
   max-width: 440px;
-  background: #121a28;
-  border: 1px solid #1e2d44;
+  background: #ffffff;
+  border: 1px solid var(--border2, #b8c2d3);
   border-radius: 16px;
   padding: 40px;
-  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  box-shadow: 0 24px 64px rgba(15,23,42,.12);
 }
 .login-logo {
   display: flex;
@@ -39,10 +38,10 @@ body {
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 18px; color: white;
 }
-.login-logo-text { font-size: 20px; font-weight: 700; color: #f1f5f9; }
-.login-logo-sub  { font-size: 11px; color: #64748b; margin-top: 2px; }
-.login-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.login-sub   { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+.login-logo-text { font-size: 20px; font-weight: 700; color: var(--text, #0f172a); }
+.login-logo-sub  { font-size: 11px; color: var(--text3, #475569); margin-top: 2px; }
+.login-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--text, #0f172a); }
+.login-sub   { font-size: 13px; color: var(--text3, #475569); margin-bottom: 20px; }
 .role-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -50,21 +49,21 @@ body {
   margin-bottom: 20px;
 }
 .role-card {
-  background: #1a263e;
-  border: 1px solid #1e2d44;
+  background: var(--bg2, #f7f9fc);
+  border: 1px solid var(--border, #d1d9e6);
   border-radius: 8px;
   padding: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
-.role-card:hover   { border-color: #2563eb; background: #1e305a; }
-.role-card.selected { border-color: #2563eb; background: rgba(37,99,235,.15); }
+.role-card:hover   { border-color: var(--accent, #2563eb); background: var(--bg3, #eef2f8); }
+.role-card.selected { border-color: var(--accent, #2563eb); background: rgba(37,99,235,.08); }
 .rc-icon { font-size: 18px; display: block; margin-bottom: 4px; }
-.rc-name { font-size: 12px; font-weight: 600; color: #e2e8f0; display: block; }
-.rc-desc { font-size: 11px; color: #64748b; display: block; margin-top: 2px; }
+.rc-name { font-size: 12px; font-weight: 600; color: var(--text, #0f172a); display: block; }
+.rc-desc { font-size: 11px; color: var(--text3, #475569); display: block; margin-top: 2px; }
 .login-divider {
   text-align: center;
-  color: #64748b;
+  color: var(--text3, #475569);
   font-size: 12px;
   margin: 16px 0;
 }
@@ -87,27 +86,29 @@ body {
 .form-select {
   width: 100%;
   padding: 10px 12px;
-  background: #1a263e;
-  color: #e2e8f0;
-  border: 1px solid #1e2d44;
+  background: var(--bg, #ffffff);
+  color: var(--text, #0f172a);
+  border: 1px solid var(--border2, #b8c2d3);
   border-radius: 6px;
   font-size: 14px;
 }
-.form-label { font-size: 11px; color: #94a3b8; margin-bottom: 6px; display: block; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.form-label { font-size: 11px; color: var(--text2, #334155); margin-bottom: 6px; display: block; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .login-footer {
   text-align: center;
   font-size: 11px;
-  color: #475569;
+  color: var(--text3, #475569);
   margin-top: 20px;
 }
-/* Role badges en sidebar */
+
+/* ==== Role badges en sidebar ====
+   Colores más saturados para mejor contraste sobre fondo claro */
 .role-badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-.role-dueno      { background: rgba(124,58,237,.2); color: #a78bfa; }
-.role-gerencia   { background: rgba(37,99,235,.2);  color: #60a5fa; }
-.role-jefe       { background: rgba(217,119,6,.2);  color: #fbbf24; }
-.role-mecanico   { background: rgba(8,145,178,.2);  color: #22d3ee; }
-.role-chofer     { background: rgba(22,163,74,.2);  color: #4ade80; }
-.role-combustible{ background: rgba(217,119,6,.2);  color: #fbbf24; }
-.role-stock      { background: rgba(8,145,178,.2);  color: #22d3ee; }
-.role-contador   { background: rgba(124,58,237,.2); color: #a78bfa; }
-.role-auditor    { background: rgba(220,38,38,.2);  color: #f87171; }
+.role-dueno      { background: rgba(124,58,237,.12); color: #6d28d9; }
+.role-gerencia   { background: rgba(37,99,235,.12);  color: #1d4ed8; }
+.role-jefe       { background: rgba(217,119,6,.12);  color: #b45309; }
+.role-mecanico   { background: rgba(8,145,178,.12);  color: #0e7490; }
+.role-chofer     { background: rgba(22,163,74,.12);  color: #15803d; }
+.role-combustible{ background: rgba(217,119,6,.12);  color: #b45309; }
+.role-stock      { background: rgba(8,145,178,.12);  color: #0e7490; }
+.role-contador   { background: rgba(124,58,237,.12); color: #6d28d9; }
+.role-auditor    { background: rgba(220,38,38,.12);  color: #b91c1c; }
