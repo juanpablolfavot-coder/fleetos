@@ -2,7 +2,7 @@
 //  FleetOS — Motor de datos y lógica central
 // ═══════════════════════════════════════════
 
-// ── ESTADO GLOBAL ── 
+// ── ESTADO GLOBAL ──
 const App = {
   currentPage: 'dashboard',
   currentUser: null,
@@ -3938,7 +3938,7 @@ async function renderUsers() {
   root.innerHTML = `
     <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div>
-        <h2 style="font-size:18px;font-weight:700;color:var(--text1);margin:0">Gestión de usuarios</h2>
+        <h2 style="font-size:18px;font-weight:700;color:var(--text);margin:0">Gestión de usuarios</h2>
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Crear, administrar y aprobar accesos al sistema</p>
       </div>
       ${userHasRole('dueno') ? `<button class="btn btn-secondary" onclick="downloadBackupDB()" style="margin-right:8px;background:rgba(59,130,246,.15);color:var(--accent);border:1px solid rgba(59,130,246,.3)" title="Descargar backup completo de la base de datos">🔒 Backup DB</button>` : ''}<button class="btn btn-primary" onclick="openNewUserModal()">+ Nuevo usuario</button>
@@ -4000,7 +4000,7 @@ async function renderUsers() {
           <tbody>
             ${active.map(u => `
               <tr style="border-bottom:1px solid var(--border1)">
-                <td style="padding:12px 16px;font-weight:600;color:var(--text1)">${u.name}</td>
+                <td style="padding:12px 16px;font-weight:600;color:var(--text)">${u.name}</td>
                 <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
                 <td style="padding:12px 16px">
                   <span style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--text2)">
@@ -4323,11 +4323,11 @@ function renderChoferPanel() {
         ${lastFuel ? `
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
             <div>
-              <div style="font-size:28px;font-weight:700;color:var(--text1)">${lastFuel.liters}</div>
+              <div style="font-size:28px;font-weight:700;color:var(--text)">${lastFuel.liters}</div>
               <div style="font-size:11px;color:var(--text3)">litros</div>
             </div>
             <div>
-              <div style="font-size:28px;font-weight:700;color:var(--text1)">${(lastFuel.km||0).toLocaleString()}</div>
+              <div style="font-size:28px;font-weight:700;color:var(--text)">${(lastFuel.km||0).toLocaleString()}</div>
               <div style="font-size:11px;color:var(--text3)">km</div>
             </div>
             <div>
