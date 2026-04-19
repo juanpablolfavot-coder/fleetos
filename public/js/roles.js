@@ -314,7 +314,7 @@ async function loadInitialData() {
         brand:     t.brand,
         model:     t.model,
         size:      t.size,
-        vehicle:   t.status === 'stock' ? 'STOCK' : t.status === 'baja' ? 'BAJA' : t.status === 'recapado' ? 'RECAP' : (t.vehicle_code || 'STOCK'),
+        vehicle:   t.status === 'stock' ? 'STOCK' : t.status === 'baja' ? 'BAJA' : t.status === 'recapado' ? 'RECAPADO' : (t.vehicle_code || 'STOCK'),
         pos:       t.current_position || null,
         position:  t.current_position || '—',
         status:    t.tread_depth >= 4 ? 'ok' : t.tread_depth >= 2 ? 'warn' : 'danger',
