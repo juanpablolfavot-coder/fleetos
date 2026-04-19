@@ -2959,20 +2959,20 @@ function openNewStockModal() {
 }
 
 async function saveNewStockItem() {
-  const code     = (document.getElementById('si-code')?.value  || '').trim();
-  const name     = (document.getElementById('si-name')?.value  || '').trim();
-  const category = document.getElementById('si-cat')?.value    || 'general';
-  const unit     = document.getElementById('si-unit')?.value   || 'un';
-  const qty      = parseFloat(document.getElementById('si-qty')?.value)   || 0;
-  const min_qty  = parseFloat(document.getElementById('si-min')?.value)   || 0;
-  const cost     = parseFloat(document.getElementById('si-cost')?.value)  || 0;
-  const location = (document.getElementById('si-loc')?.value   || '').trim();
+  const code     = (document.getElementById('ns-code')?.value  || '').trim();
+  const name     = (document.getElementById('ns-name')?.value  || '').trim();
+  const category = document.getElementById('ns-cat')?.value    || 'general';
+  const unit     = document.getElementById('ns-unit')?.value   || 'un';
+  const qty      = parseFloat(document.getElementById('ns-qty')?.value)   || 0;
+  const min_qty  = parseFloat(document.getElementById('ns-min')?.value)   || 0;
+  const cost     = parseFloat(document.getElementById('ns-cost')?.value)  || 0;
+  const supplier = (document.getElementById('ns-supplier')?.value || '').trim();
 
-  if (!name) { showToast('error','Ingresá el nombre del ítem'); return; }
+  if (!name) { showToast('error','Ingresá el nombre / descripción del ítem'); return; }
 
   const res = await apiFetch('/api/stock', {
     method: 'POST',
-    body: JSON.stringify({ code, name, category, unit, qty, min_qty, unit_cost: cost, location })
+    body: JSON.stringify({ code, name, category, unit, qty, min_qty, unit_cost: cost, supplier })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al guardar stock'); return; }
 
