@@ -1,5 +1,13 @@
-process.on('uncaughtException',(e)=>{console.error('CRASH:',e.message,e.stack);process.exit(1);});
-process.on('unhandledRejection',(r)=>{console.error('REJECT:',r);process.exit(1);});
+// Manejo global de errores: loguea pero NO mata el proceso
+// (matar el proceso hacía que Render reiniciara el server ante CUALQUIER error, interrumpiendo a todos)
+process.on('uncaughtException', (e) => {
+  console.error('UNCAUGHT EXCEPTION:', e.message, e.stack);
+  // NO process.exit — dejamos que el server siga sirviendo otros requests
+});
+process.on('unhandledRejection', (r) => {
+  console.error('UNHANDLED REJECTION:', r);
+  // NO process.exit
+});
 require('dotenv').config();
 const express=require('express');
 const helmet=require('helmet');
@@ -61,9 +69,16 @@ app.use('/api/config',configRouter);
 app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
-app.get('/api/health',async(req,res)=>{
-  try{const{pool}=require('./db/pool');await pool.query('SELECT 1');res.json({status:'ok',db:'connected'});}
-  catch(e){res.status(503).json({status:'error',db:'disconnected',msg:e.message});}
+app.get('/api/health', async (req, res) => {
+  try {
+    const { pool } = require('./db/pool');
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (e) {
+    // Log interno completo, cliente solo recibe info básica
+    console.error('[health]', e.message);
+    res.status(503).json({ status: 'error', db: 'disconnected' });
+  }
 });
 // Forzar no-cache en archivos JS y CSS
 app.use((req, res, next) => {
@@ -93,12 +108,15 @@ app.get(/^(?!\/api).*/, (req, res) => {
 app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
 // ── Endpoints GPS ──
-app.get('/api/gps/status', async (req, res) => {
+// Importar middleware de autenticación
+const { authenticate, requireRole } = require('./middleware/auth');
+
+app.get('/api/gps/status', authenticate, async (req, res) => {
   res.json(getGPSStatus());
 });
 
-// Debug: forzar sync y esperar resultado
-app.post('/api/gps/force-sync', async (req, res) => {
+// Debug: forzar sync y esperar resultado (SOLO dueño/gerencia)
+app.post('/api/gps/force-sync', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   const { syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
   syncGPSData();
   // Esperar 20s y devolver el resultado
@@ -106,7 +124,7 @@ app.post('/api/gps/force-sync', async (req, res) => {
   res.json(getGPSStatus());
 });
 
-app.post('/api/gps/sync', async (req, res) => {
+app.post('/api/gps/sync', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   syncGPSData();
   res.json({ ok: true, message: 'Sync iniciado' });
 });
