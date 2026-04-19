@@ -57,6 +57,22 @@ router.get('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/purchase-orders/aux/proveedores — nombres históricos de proveedores usados en OCs
+// (Para autocompletado en el modal de Nueva OC, como fallback al catálogo)
+// IMPORTANTE: esta ruta DEBE ir antes de /:id para evitar que Express la interprete como id
+router.get('/aux/proveedores', authenticate, async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT DISTINCT proveedor
+       FROM purchase_orders
+       WHERE proveedor IS NOT NULL AND proveedor <> ''
+       ORDER BY proveedor ASC
+       LIMIT 100`
+    );
+    res.json(r.rows.map(row => row.proveedor));
+  } catch(err) { res.status(500).json({ error: 'Error al obtener proveedores' }); }
+});
+
 router.get('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','contador','auditor'), async (req, res) => {
   try {
     const po = await query(`SELECT po.*,
