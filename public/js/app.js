@@ -8767,7 +8767,7 @@ async function _supSave(id) {
     moneda:        val('sup-moneda') || 'ARS',
     discount_pct:  numOrNull('sup-disc'),
     delivery_time_days: numOrNull('sup-deliv'),
-    rating:        numOrNull('sup-rating'),
+    rating:        (() => { const v = numOrNull('sup-rating'); if (v == null) return null; if (v > 5) return 5; if (v < 0) return 0; return v; })(),
     bank_name:     val('sup-bank'),
     bank_cbu:      val('sup-cbu'),
     bank_alias:    val('sup-alias'),
