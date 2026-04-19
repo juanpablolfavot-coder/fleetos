@@ -332,10 +332,12 @@ configRouter.get('/', authenticate, async (req, res) => {
     const bases = await query(`SELECT value FROM app_config WHERE key='bases'`);
     const vtypes = await query(`SELECT value FROM app_config WHERE key='vehicle_types'`);
     const lrate = await query(`SELECT value FROM app_config WHERE key='labor_rate'`);
+    const areas = await query(`SELECT value FROM app_config WHERE key='areas'`);
     res.json({
       bases:  bases.rows[0]  ? bases.rows[0].value  : DEFAULT_BASES,
       vehicle_types: vtypes.rows[0] ? vtypes.rows[0].value : DEFAULT_VTYPES,
       labor_rate: lrate.rows[0] ? parseFloat(lrate.rows[0].value) : 0,
+      areas: areas.rows[0] ? areas.rows[0].value : {},
     });
   } catch (err) { res.status(500).json({ error: 'Error config' }); }
 });
@@ -343,9 +345,19 @@ configRouter.get('/', authenticate, async (req, res) => {
 configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   try {
     await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
-    const { bases, vehicle_types, labor_rate } = req.body;
+    const { bases, vehicle_types, labor_rate, areas } = req.body;
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
     if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(vehicle_types)]);
+    if (areas && typeof areas === 'object') {
+      // Validación básica: debe ser objeto con arrays de strings
+      const clean = {};
+      for (const suc of Object.keys(areas)) {
+        if (Array.isArray(areas[suc])) {
+          clean[suc] = areas[suc].filter(a => typeof a === 'string' && a.trim().length > 0);
+        }
+      }
+      await query(`INSERT INTO app_config(key,value) VALUES('areas',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(clean)]);
+    }
     if (labor_rate !== undefined && labor_rate !== null && labor_rate !== '') {
       const rateNum = parseFloat(labor_rate);
       if (isNaN(rateNum) || rateNum < 0) return res.status(400).json({ error: 'labor_rate inválido' });
