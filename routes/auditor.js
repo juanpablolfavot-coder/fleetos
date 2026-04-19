@@ -1,3 +1,4 @@
+
 // ═══════════════════════════════════════════════════════════
 //  FleetOS — Panel Auditor
 //  Todos los endpoints son solo lectura (GET)
