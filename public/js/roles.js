@@ -303,26 +303,27 @@ async function loadInitialData() {
       apiFetch('/api/tires'),
     ]);
 
-    if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
+   if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
     if (usersRes?.ok)       App.data.users       = await usersRes.json();
     if (tiresRes?.ok) {
       const rawTires = await tiresRes.json();
       // Normalizar campos de la API al formato del frontend
       App.data.tires = rawTires.map(t => ({
-        id:        t.id,
-        serial:    t.serial_no,
-        brand:     t.brand,
-        model:     t.model,
-        size:      t.size,
-        vehicle:   t.status === 'stock' ? 'STOCK' : t.status === 'baja' ? 'BAJA' : t.status === 'recapado' ? 'RECAPADO' : (t.vehicle_code || 'STOCK'),
-        pos:       t.current_position || null,
-        position:  t.current_position || '—',
-        status:    t.tread_depth >= 4 ? 'ok' : t.tread_depth >= 2 ? 'warn' : 'danger',
-        tread:     parseFloat(t.tread_depth) || 0,
-        km:        parseFloat(t.km_total) || 0,
-        price:     parseFloat(t.purchase_price) || 0,
-        notes:     t.notes || '',
-        _raw:      t
+        id:              t.id,
+        serial:          t.serial_no,
+        brand:           t.brand,
+        model:           t.model,
+        size:            t.size,
+        vehicle:         t.status === 'stock' ? 'STOCK' : t.status === 'baja' ? 'BAJA' : t.status === 'recapado' ? 'RECAPADO' : (t.vehicle_code || 'STOCK'),
+        pos:             t.current_position || null,
+        position:        t.current_position || '—',
+        physical_status: t.status,
+        status:          t.tread_depth >= 4 ? 'ok' : t.tread_depth >= 2 ? 'warn' : 'danger',
+        tread:           parseFloat(t.tread_depth) || 0,
+        km:              parseFloat(t.km_total) || 0,
+        price:           parseFloat(t.purchase_price) || 0,
+        notes:           t.notes || '',
+        _raw:            t
       }));
     }
     if (workordersRes?.ok)  App.data.workOrders  = await workordersRes.json();
@@ -336,7 +337,6 @@ async function loadInitialData() {
       App.config.bases        = cfg.bases        || ['Central','Norte','Sur'];
       App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
     }
-
     // Inicializar arrays si alguna API falló
     if (!App.data.vehicles)   App.data.vehicles   = [];
     if (!App.data.workOrders) App.data.workOrders = [];
