@@ -231,6 +231,22 @@ async function doLogin() {
 }
 
 // ── API HELPER con token ──
+// ═══════════════════════════════════════════════════════════
+//  apiFetch con auto-refresh de datos
+//  Después de cualquier POST/PUT/DELETE/PATCH exitoso, recarga la data en segundo plano.
+//  Esto elimina la necesidad de Ctrl+F5 después de cargar algo.
+// ═══════════════════════════════════════════════════════════
+
+// Variables de control del auto-refresh
+window._autoRefreshEnabled = true;   // Se puede deshabilitar temporalmente si molesta
+window._autoRefreshTimer   = null;   // Debounce: agrupa múltiples llamadas seguidas
+window._autoRefreshSuppressPatterns = [
+  // No auto-refresh para estos endpoints (son internos o no cambian data visible)
+  '/api/auth/',         // login/refresh/logout
+  '/api/gps/',          // sync GPS es automático
+  '/api/admin/backup',  // streaming de backup
+];
+
 window.apiFetch = async function(url, options = {}) {
   const token = window._getToken ? window._getToken() : null;
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -241,6 +257,34 @@ window.apiFetch = async function(url, options = {}) {
     logout();
     return null;
   }
+
+  // Auto-refresh después de acciones exitosas de modificación
+  const method = (options.method || 'GET').toUpperCase();
+  const isWrite = method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
+  const isSuccess = res.ok;
+  const shouldSkip = window._autoRefreshSuppressPatterns.some(p => url.startsWith(p));
+
+  if (window._autoRefreshEnabled && isWrite && isSuccess && !shouldSkip) {
+    // Debounce: si hay múltiples calls seguidos (ej: recibir OC que hace varios updates),
+    // se agrupan y se hace UN solo refresh al final
+    if (window._autoRefreshTimer) clearTimeout(window._autoRefreshTimer);
+    window._autoRefreshTimer = setTimeout(async () => {
+      try {
+        if (typeof loadInitialData === 'function') {
+          await loadInitialData();
+        }
+        // Re-renderizar la pantalla actual SOLO si no hay un modal abierto
+        // (si el usuario tiene un modal abierto, no queremos interrumpirlo)
+        const modalOpen = document.getElementById('modal-overlay')?.classList.contains('active')
+                       || document.querySelector('.modal-overlay.active');
+        if (!modalOpen && typeof renderPage === 'function' && window.App && App.currentPage) {
+          try { renderPage(App.currentPage); } catch(e) { /* silent */ }
+        }
+      } catch(e) { /* silent — el usuario verá el estado anterior */ }
+      window._autoRefreshTimer = null;
+    }, 300);
+  }
+
   return res;
 };
 
