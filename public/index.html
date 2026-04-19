@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Expreso Biletta — FleetOS</title>
-  <link rel="stylesheet" href="css/main.css?v=1776034539">
-  <link rel="stylesheet" href="css/login.css?v=1776034539">
+  <link rel="stylesheet" href="css/main.css?v=v2light-20260419">
+  <link rel="stylesheet" href="css/login.css?v=v2light-20260419">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 /* MODAL - CSS crítico inline para evitar problemas de cache */
@@ -13,7 +13,7 @@
   position: fixed !important;
   top: 0 !important; left: 0 !important;
   width: 100vw !important; height: 100vh !important;
-  background: rgba(0,0,0,0.75) !important;
+  background: rgba(15,23,42,0.5) !important;
   z-index: 99999 !important;
   display: none !important;
   align-items: center !important;
@@ -26,8 +26,8 @@
 .modal-overlay.open .modal {
   display: block !important;
   flex-direction: column !important;
-  background: #1a263e !important;
-  border: 1px solid #2a3f5f !important;
+  background: var(--bg2) !important;
+  border: 1px solid var(--border2) !important;
   border-radius: 14px !important;
   width: 90% !important;
   max-width: 720px !important;
@@ -35,6 +35,7 @@
   overflow: visible !important;
   position: relative !important;
   z-index: 100000 !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 .modal-overlay.open .modal .modal-body {
   overflow-y: auto !important;
@@ -45,18 +46,18 @@
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
-  border-bottom: 1px solid #1e2d44 !important;
-  background: #1a263e !important;
+  border-bottom: 1px solid var(--border) !important;
+  background: var(--bg2) !important;
 }
 .modal-title {
   font-size: 15px !important;
   font-weight: 600 !important;
-  color: #e2e8f0 !important;
+  color: var(--text) !important;
 }
 .modal-close {
   background: none !important;
   border: none !important;
-  color: #64748b !important;
+  color: var(--text3) !important;
   font-size: 20px !important;
   cursor: pointer !important;
   padding: 0 4px !important;
@@ -65,15 +66,15 @@
   padding: 20px !important;
   overflow-y: auto !important;
   flex: 1 !important;
-  color: #e2e8f0 !important;
+  color: var(--text) !important;
 }
 .modal-footer {
   padding: 12px 20px !important;
   display: flex !important;
   gap: 8px !important;
   justify-content: flex-end !important;
-  border-top: 1px solid #1e2d44 !important;
-  background: #1a263e !important;
+  border-top: 1px solid var(--border) !important;
+  background: var(--bg2) !important;
 }
 /* html y body siempre con tamaño correcto */
 html, body {
