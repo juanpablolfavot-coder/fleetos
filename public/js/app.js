@@ -2,6 +2,40 @@
 //  FleetOS — Motor de datos y lógica central
 // ═══════════════════════════════════════════
 
+// ── HELPERS DE FECHA/HORA EN ZONA HORARIA ARGENTINA ──
+// Resuelve el bug de que toISOString() devuelve UTC (3h adelante).
+// Todos los inputs type=date y los timestamps visibles deben usar estos helpers.
+
+// YYYY-MM-DD en zona horaria local (Argentina)
+function todayISO() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().slice(0, 10);
+}
+
+// YYYY-MM-DDTHH:MM para inputs datetime-local
+function nowDatetimeLocal() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+}
+
+// Hora "HH:MM" en formato argentino
+function nowTimeAR() {
+  return new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+// Fecha "DD/MM/YYYY" en formato argentino
+function nowDateAR() {
+  return new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+// Exponer globalmente por si otros archivos las necesitan
+window.todayISO = todayISO;
+window.nowDatetimeLocal = nowDatetimeLocal;
+window.nowTimeAR = nowTimeAR;
+window.nowDateAR = nowDateAR;
+
 // ── ESTADO GLOBAL ──
 const App = {
   currentPage: 'dashboard',
@@ -1462,7 +1496,7 @@ function printOT(id) {
     </div>
 
     <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
-      FleetOS · Orden de Trabajo ${ot.id} · Generado el ${new Date().toLocaleDateString('es-AR')} ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}
+      FleetOS · Orden de Trabajo ${ot.id} · Generado el ${nowDateAR()} ${nowTimeAR()}
     </div>
 
     <script>window.onload=function(){window.print();}<\/script>
@@ -1486,7 +1520,7 @@ function renderFuel() {
   const ureaClass   = ureaPct   < 20 ? 'warn' : 'info';
 
   // ── Litros cargados HOY ──
-  const today = new Date().toISOString().slice(0,10);
+  const today = todayISO();
   const logsHoy = App.data.fuelLogs.filter(f => f.date && f.date.startsWith(today));
   const litrosHoy = logsHoy.reduce((a,b) => a + (b.liters||0), 0);
 
@@ -2374,7 +2408,7 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
       </div>
       <div class="form-group">
         <label class="form-label">Fecha de montaje</label>
-        <input class="form-input" type="date" id="ms-date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" type="date" id="ms-date" value="${todayISO()}">
       </div>
     </div>
     <div class="form-group">
@@ -2680,7 +2714,7 @@ function openManualMoveModal() {
       </div>
       <div class="form-group">
         <label class="form-label">Fecha</label>
-        <input class="form-input" type="date" id="mm-date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" type="date" id="mm-date" value="${todayISO()}">
       </div>
     </div>
     <div class="form-group">
@@ -3061,16 +3095,27 @@ async function saveNewStockItem() {
   const cost     = parseFloat(document.getElementById('ns-cost')?.value)  || 0;
   const supplier = (document.getElementById('ns-supplier')?.value || '').trim();
 
+  if (!code) { showToast('error','Ingresá el código del ítem'); return; }
   if (!name) { showToast('error','Ingresá el nombre / descripción del ítem'); return; }
 
+  // IMPORTANTE: el backend espera qty_current y qty_min (nombres reales de la columna),
+  // no qty y min_qty. Sin este mapeo, el stock inicial quedaba en 0.
   const res = await apiFetch('/api/stock', {
     method: 'POST',
-    body: JSON.stringify({ code, name, category, unit, qty, min_qty, unit_cost: cost, supplier })
+    body: JSON.stringify({
+      code, name, category, unit,
+      qty_current: qty,
+      qty_min: min_qty,
+      qty_reorder: Math.max(min_qty * 2, 1),
+      unit_cost: cost,
+      supplier: supplier || null
+    })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al guardar stock'); return; }
 
-  closeModal(); showToast('ok','Ítem de stock creado');
-  renderStock(); loadInitialData().then(()=>renderStock());
+  closeModal();
+  showToast('ok', `Ítem "${name}" creado con stock inicial de ${qty} ${unit}`);
+  // El auto-refresh ya va a re-cargar la data
 }
 
 
@@ -3615,7 +3660,7 @@ function openCostDrillDown(vehicleCode) {
       </div>
     </div>
   `, [
-    { label:'Ver OT de esta unidad', cls:'btn-secondary', fn:()=>{ closeModal(); navigate('workorders'); } },
+    { label:'📋 Ver historial del vehículo', cls:'btn-primary', fn:()=>{ closeModal(); openVehicleHistoryModal(vehicleCode); } },
     { label:'Cerrar',                cls:'btn-secondary', fn: closeModal },
   ]);
 
@@ -4705,7 +4750,7 @@ function _otExportPDF() {
   doc.setFont('helvetica','bold');
   doc.text(`TOTAL VISIBLE: $${Math.round(totalCost).toLocaleString('es-AR')}`, 40, finalY + 20);
 
-  const fileDate = new Date().toISOString().slice(0,10);
+  const fileDate = todayISO();
   doc.save(`OTs-Biletta-${fileDate}.pdf`);
   showToast?.('ok','PDF descargado');
 }
@@ -7446,7 +7491,7 @@ function _poExportPDF() {
   doc.setFont('helvetica','bold');
   doc.text(`TOTAL VISIBLE: $${Math.round(totalMonto).toLocaleString('es-AR')}`, 40, finalY + 20);
 
-  doc.save(`OCs-Biletta-${new Date().toISOString().slice(0,10)}.pdf`);
+  doc.save(`OCs-Biletta-${todayISO()}.pdf`);
   showToast?.('ok','PDF descargado');
 }
 
@@ -9335,7 +9380,7 @@ function _supExportPDF() {
     headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [247, 249, 252] },
   });
-  doc.save(`Proveedores-Biletta-${new Date().toISOString().slice(0,10)}.pdf`);
+  doc.save(`Proveedores-Biletta-${todayISO()}.pdf`);
   showToast('ok', 'PDF descargado');
 }
 
@@ -9464,7 +9509,7 @@ function _labAddRow() {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Fecha del trabajo</label>
-        <input class="form-input" type="date" id="lab-date" value="${new Date().toISOString().slice(0,10)}">
+        <input class="form-input" type="date" id="lab-date" value="${todayISO()}">
       </div>
       <div class="form-group">
         <label class="form-label">Total calculado</label>
@@ -10273,4 +10318,167 @@ async function deleteAsset(id) {
   } catch(err) {
     showToast('error', err.message);
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MODAL HISTORIAL DE VEHÍCULO (OTs + OCs + Combustible)
+//  Accesible desde Costos operativos (botón "Ver historial")
+// ═══════════════════════════════════════════════════════════
+
+function openVehicleHistoryModal(vehicleCode) {
+  const v = (App.data.vehicles || []).find(x => x.code === vehicleCode);
+  if (!v) { showToast('error', 'Vehículo no encontrado'); return; }
+
+  // Traer OTs del vehículo
+  const ots = (App.data.workOrders || []).filter(o =>
+    o.vehicle === vehicleCode || o.vehicle_id === v.id
+  ).slice(0, 10);
+
+  // Traer OCs del vehículo (las que tengan vehicle_id asociado)
+  const ocs = (App.data.purchaseOrders || []).filter(p =>
+    p.vehicle_id === v.id || p.vehicle_code === vehicleCode
+  ).slice(0, 10);
+
+  // Traer cargas de combustible
+  const fuels = (App.data.fuel || []).filter(f =>
+    f.vehicle === vehicleCode || f.vehicle_id === v.id
+  ).slice(0, 10);
+
+  const statusColors = {
+    'Pendiente': 'var(--warn)',
+    'En proceso': 'var(--accent)',
+    'Cerrada': 'var(--ok)',
+    'Esperando repuesto': 'var(--warn)',
+    'Esperando tercerizado': 'var(--warn)',
+    'Asignada': 'var(--text2)',
+  };
+
+  const ocStatusColors = {
+    'en_revision': 'var(--warn)',
+    'aprobada': 'var(--accent)',
+    'rechazada': 'var(--danger)',
+    'recibida': 'var(--ok)',
+    'pagada': 'var(--ok)',
+    'cancelada': 'var(--text3)',
+  };
+
+  openModal(`📋 Historial completo — ${v.code} (${v.plate || '—'})`, `
+    <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div><b>${v.brand || '—'} ${v.model || ''}</b></div>
+        <div>Año: ${v.year || '—'}</div>
+        <div>Km: ${v.km ? v.km.toLocaleString('es-AR') : '—'}</div>
+        <div>Estado: <span style="color:var(--${v.status==='ok'?'ok':v.status==='taller'?'warn':'danger'})">${v.status || '—'}</span></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Órdenes de trabajo</div>
+        <div style="font-size:24px;font-weight:700;color:var(--accent)">${ots.length}</div>
+        <div style="font-size:10px;color:var(--text3)">últimas 10</div>
+      </div>
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Órdenes de compra</div>
+        <div style="font-size:24px;font-weight:700;color:var(--accent)">${ocs.length}</div>
+        <div style="font-size:10px;color:var(--text3)">últimas 10</div>
+      </div>
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Cargas combustible</div>
+        <div style="font-size:24px;font-weight:700;color:var(--accent)">${fuels.length}</div>
+        <div style="font-size:10px;color:var(--text3)">últimas 10</div>
+      </div>
+    </div>
+
+    <!-- OTs -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">🔧 Órdenes de trabajo recientes</div>
+      ${ots.length === 0 ? '<div style="color:var(--text3);font-size:12px;padding:10px;text-align:center">Sin OTs registradas para esta unidad</div>' : `
+        <table style="width:100%;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3);font-size:11px">
+              <th style="text-align:left;padding:6px">Código</th>
+              <th style="text-align:left;padding:6px">Fecha</th>
+              <th style="text-align:left;padding:6px">Tipo</th>
+              <th style="text-align:left;padding:6px">Descripción</th>
+              <th style="text-align:right;padding:6px">Costo</th>
+              <th style="text-align:left;padding:6px">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ots.map(o => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px;font-family:var(--mono);font-weight:600"><a onclick="closeModal();navigate('workorders');setTimeout(()=>{const ot=(App.data.workOrders||[]).find(x=>x.id==='${o.id}'||x.code==='${o.code || o.id}');if(ot)openEditOTModal(ot.id);},200)" style="color:var(--accent);cursor:pointer">${o.code || o.id}</a></td>
+              <td style="padding:8px">${(o.opened || o.created_at || '—').toString().slice(0,10)}</td>
+              <td style="padding:8px">${o.type || '—'}</td>
+              <td style="padding:8px">${(o.desc || o.description || '—').substring(0, 50)}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString('es-AR')}</td>
+              <td style="padding:8px"><span style="color:${statusColors[o.status] || 'var(--text3)'};font-weight:600">● ${o.status || '—'}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+
+    <!-- OCs -->
+    <div style="margin-bottom:18px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">🛒 Órdenes de compra recientes</div>
+      ${ocs.length === 0 ? '<div style="color:var(--text3);font-size:12px;padding:10px;text-align:center">Sin OCs registradas para esta unidad</div>' : `
+        <table style="width:100%;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3);font-size:11px">
+              <th style="text-align:left;padding:6px">Código</th>
+              <th style="text-align:left;padding:6px">Fecha</th>
+              <th style="text-align:left;padding:6px">Proveedor</th>
+              <th style="text-align:right;padding:6px">Total</th>
+              <th style="text-align:left;padding:6px">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ocs.map(p => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px;font-family:var(--mono);font-weight:600">${p.code || '—'}</td>
+              <td style="padding:8px">${(p.created_at || '—').toString().slice(0,10)}</td>
+              <td style="padding:8px">${p.proveedor || '—'}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round(p.factura_monto || p.total_estimado || 0).toLocaleString('es-AR')}</td>
+              <td style="padding:8px"><span style="color:${ocStatusColors[p.status] || 'var(--text3)'};font-weight:600">● ${p.status || '—'}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+
+    <!-- Combustible -->
+    <div style="margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">⛽ Cargas de combustible recientes</div>
+      ${fuels.length === 0 ? '<div style="color:var(--text3);font-size:12px;padding:10px;text-align:center">Sin cargas de combustible registradas</div>' : `
+        <table style="width:100%;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3);font-size:11px">
+              <th style="text-align:left;padding:6px">Fecha</th>
+              <th style="text-align:right;padding:6px">Litros</th>
+              <th style="text-align:right;padding:6px">$/L</th>
+              <th style="text-align:right;padding:6px">Total</th>
+              <th style="text-align:right;padding:6px">Km</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fuels.map(f => `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px">${(f.date || f.created_at || '—').toString().slice(0,10)}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.liters || '—'}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round(f.price_per_l || 0).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono);color:var(--accent);font-weight:600">$${Math.round((f.liters||0)*(f.price_per_l||0)).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.km ? f.km.toLocaleString('es-AR') : '—'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      `}
+    </div>
+
+    <div style="font-size:10px;color:var(--text3);text-align:center;padding-top:10px;border-top:1px solid var(--border)">
+      Mostrando las últimas 10 entradas de cada tipo. Para ver historial completo, ir al módulo correspondiente.
+    </div>
+  `, [
+    { label: '🔧 Ir a OTs', cls: 'btn-secondary', fn: () => { closeModal(); navigate('workorders'); } },
+    { label: '🛒 Ir a OCs', cls: 'btn-secondary', fn: () => { closeModal(); navigate('purchase_orders'); } },
+    { label: 'Cerrar', cls: 'btn-primary', fn: closeModal },
+  ]);
 }
