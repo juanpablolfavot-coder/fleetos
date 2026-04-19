@@ -14,6 +14,31 @@ function userHasRole(...roles) {
   return roles.includes(role);
 }
 
+// ── HELPER CENTRAL: refrescar UI después de cualquier acción que modifica datos ──
+// Cada "save" del sistema lo llama al final para que nada requiera Ctrl+F5.
+// Recarga toda la data desde la API y re-renderiza la página activa.
+// Silencioso: si falla, no muestra error (el save ya mostró el toast de éxito).
+async function afterSave(options) {
+  const opts = options || {};
+  try {
+    // Recargar toda la data del sistema (vehículos, OTs, stock, etc.)
+    if (typeof loadInitialData === 'function') {
+      await loadInitialData();
+    }
+  } catch(e) {
+    console.warn('[afterSave] loadInitialData falló (no crítico):', e?.message);
+  }
+  try {
+    // Re-renderizar la página activa (o la que piden explícitamente)
+    const page = opts.page || App.currentPage;
+    if (typeof renderPage === 'function') {
+      renderPage(page);
+    }
+  } catch(e) {
+    console.warn('[afterSave] renderPage falló:', e?.message);
+  }
+}
+
 
 
 
@@ -935,7 +960,7 @@ async function saveNewOT() {
   window._otParts = [];
   closeModal();
   showToast('ok', `OT ${ot.code} creada · Repuestos: $${Math.round(ot.parts_cost||0).toLocaleString()} · MO: $${Math.round(ot.labor_cost||0).toLocaleString()}`);
-  loadInitialData().then(() => renderWorkOrders());
+  await afterSave({ page: 'workorders' });
 }
 
 
@@ -1069,7 +1094,7 @@ async function saveEditOT(id) {
   ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor; ot.parts_cost = parts_cost;
   closeModal();
   showToast('ok', `${id} actualizada correctamente`);
-  renderWorkOrders();
+  await afterSave({ page: 'workorders' });
 }
 
 
@@ -1153,7 +1178,7 @@ function openCloseOTModal(id) {
     <div class="form-row">
       ${(App.currentUser?.role === 'mecanico') ?
         '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn)">El costo de mano de obra debe ser cargado por el Jefe de Mantenimiento.</div>'
-        : '<div class="form-group"><label class="form-label">Costo mano de obra ($)</label><input class="form-input" type="number" id="cl-labor" value="${ot.labor_cost||0}"></div>'
+        : `<div class="form-group"><label class="form-label">Costo mano de obra ($) <span style="font-size:10px;color:var(--text3);font-weight:400">· autocalculado desde los partes</span></label><input class="form-input" type="number" id="cl-labor" value="${parseFloat(ot.labor_cost)||0}" readonly style="background:var(--bg3)"></div>`
       }
       <div style="display:none">
       <div class="form-group">
@@ -1277,7 +1302,7 @@ async function closeOTConfirmed(id) {
   ot.status = 'Cerrada'; ot.labor_cost = labor;
   closeModal();
   showToast('ok', `${id} cerrada${descuentos>0?' · '+descuentos+' ítems descontados del stock':''}`);
-  renderWorkOrders();
+  await afterSave({ page: 'workorders' });
 }
 
 
@@ -1755,7 +1780,7 @@ async function saveFuelLoad() {
     ? `Carga registrada — ${liters}L descontados de cisterna`
     : `Carga registrada — ${place}${ticketImg ? ' · con ticket 📄' : ''}`;
   closeModal(); showToast('ok', msg);
-  loadInitialData().then(() => renderFuel());
+  await afterSave({ page: 'fuel' });
 }
 
 
@@ -2570,9 +2595,18 @@ async function saveTireAction(serial) {
       body: JSON.stringify({ depth_mm: depth, notes: obs })
     });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al actualizar profundidad'); return; }
+    // Actualizar los campos que usa el render
+    t.depth = depth;
     t.depth_mm = depth;
+    // Recalcular status según el porcentaje de desgaste
+    if (t.maxDepth && t.maxDepth > 0) {
+      const pct = (depth / t.maxDepth) * 100;
+      t.status = pct < 25 ? 'danger' : (pct < 50 ? 'warn' : 'ok');
+    }
     closeModal();
     showToast('ok', `${serial}: profundidad actualizada a ${depth}mm`);
+    // Recargar todos los datos del sistema para reflejar cambios en todas las vistas
+    try { await loadInitialData(); } catch(e) {}
     renderTires();
     return;
   }
@@ -2600,6 +2634,8 @@ async function saveTireAction(serial) {
     baja:  `${serial} dada de baja definitivamente`
   };
   showToast('ok', msgs[action]);
+  // Recargar todos los datos para reflejar cambios (cubierta montada/desmontada afecta vehículos)
+  try { await loadInitialData(); } catch(e) {}
   renderTires();
 }
 
