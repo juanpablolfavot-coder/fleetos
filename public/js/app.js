@@ -7154,8 +7154,12 @@ async function openNewPOModal() {
   try { await loadSucursalesFromAPI(); } catch(e){}
   window._poTipo = 'flota';
   window._poIvaPct = 0;
+  window._poSupplierId = null; // para guardar el ID del proveedor del catálogo si se elige uno
 
-  // Traer proveedores existentes para el datalist
+  // Proveedores del catálogo nuevo (módulo Proveedores)
+  const catalogoProveedores = (App.data.suppliers || []).filter(s => s.status === 'activo');
+
+  // Fallback: si no hay catálogo cargado, traer los nombres históricos usados en OCs anteriores
   var proveedoresPrev = [];
   try {
     const rp = await apiFetch('/api/purchase-orders/aux/proveedores');
@@ -7210,11 +7214,26 @@ async function openNewPOModal() {
       </div>
       <div class="form-group" style="margin:0">
         <label class="form-label">Proveedor <span style="color:var(--danger)">*</span></label>
-        <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor" autocomplete="off">
-        <datalist id="po-proveedores-datalist">
-          ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
-        </datalist>
-        <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Escribí para autocompletar o tipeá uno nuevo</div>
+        ${catalogoProveedores.length > 0 ? `
+          <select class="form-select" id="po-supplier-select" onchange="_poOnSupplierChange(this.value)">
+            <option value="">— Seleccioná del catálogo —</option>
+            ${catalogoProveedores.map(s => `<option value="${s.id}" data-name="${s.name}" data-fpago="${s.forma_pago||''}" data-ccdias="${s.cc_dias||''}" data-moneda="${s.moneda||'ARS'}">${s.name}${s.cuit ? ' · ' + s.cuit : ''}</option>`).join('')}
+            <option value="__manual__">✍️ Escribir uno manualmente (no está en el catálogo)</option>
+          </select>
+          <div id="po-supplier-manual" style="display:none;margin-top:6px">
+            <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor (se creará en el catálogo luego)" autocomplete="off">
+            <datalist id="po-proveedores-datalist">
+              ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
+            </datalist>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Elegí del catálogo para autocompletar forma de pago y condiciones</div>
+        ` : `
+          <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor" autocomplete="off">
+          <datalist id="po-proveedores-datalist">
+            ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
+          </datalist>
+          <div style="font-size:11px;color:var(--warn);margin-top:3px">⚠️ No hay proveedores en el catálogo. Cargalos en el módulo "🏢 Proveedores" para autocompletar.</div>
+        `}
       </div>
     </div>
 
@@ -7362,7 +7381,21 @@ async function saveNewPO() {
     const notes    = document.getElementById('po-notes')?.value?.trim() || '';
     const sucursal = document.getElementById('po-sucursal')?.value || '';
     const area     = document.getElementById('po-area')?.value || '';
-    const proveedor = document.getElementById('po-proveedor')?.value?.trim() || '';
+
+    // Proveedor: puede venir del catálogo (supplier_id) o manual (texto)
+    let proveedor = '';
+    let supplier_id = null;
+    const supplierSel = document.getElementById('po-supplier-select');
+    if (supplierSel && supplierSel.value && supplierSel.value !== '__manual__') {
+      // Elegido del catálogo
+      supplier_id = supplierSel.value;
+      const opt = supplierSel.options[supplierSel.selectedIndex];
+      proveedor = opt?.dataset?.name || opt?.text || '';
+    } else {
+      // Escrito a mano (sin catálogo o modo manual)
+      proveedor = document.getElementById('po-proveedor')?.value?.trim() || '';
+    }
+
     const tipo     = window._poTipo || 'flota';
     const extra    = getPOExtraFields();
     const vehicle_id = document.getElementById('po-vehicle')?.value || null;
@@ -7381,23 +7414,70 @@ async function saveNewPO() {
     if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
     if (!sucursal)  { showToast('warn','Seleccioná una sucursal'); return; }
     if (!area)      { showToast('warn','Seleccioná un área');    return; }
-    if (!proveedor) { showToast('warn','Cargá el proveedor');     return; }
+    if (!proveedor) { showToast('warn','Seleccioná o escribí un proveedor'); return; }
 
     const ivaPct = window._poIvaPct || 0;
     const res = await apiFetch('/api/purchase-orders', {
       method: 'POST',
-      body: JSON.stringify({ notes, sucursal, area, proveedor, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
+      body: JSON.stringify({ notes, sucursal, area, proveedor, supplier_id, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
     });
     window._poIvaPct = 0;
+    window._poSupplierId = null;
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
     const po = await res.json();
     closeModal();
     showToast('ok', `OC ${po.code} creada`);
     _poItemCount = 1;
-    await loadPOList(_poCurrentFilter);
+    // Recargar listado (usa la nueva loadPOList sin parámetros)
+    await loadPOList();
   } catch(err) {
     showToast('error', err.message || 'Error al crear OC');
   }
+}
+
+// Handler al cambiar el dropdown de proveedor del catálogo en el modal OC
+function _poOnSupplierChange(value) {
+  const manualDiv = document.getElementById('po-supplier-manual');
+  const sel = document.getElementById('po-supplier-select');
+  if (!sel) return;
+
+  if (value === '__manual__') {
+    // Mostrar input manual
+    if (manualDiv) manualDiv.style.display = 'block';
+    window._poSupplierId = null;
+    return;
+  }
+  if (manualDiv) manualDiv.style.display = 'none';
+
+  if (!value) {
+    window._poSupplierId = null;
+    return;
+  }
+
+  // Si elegimos un proveedor, autocompletar forma de pago / moneda / cc_dias
+  const opt = sel.options[sel.selectedIndex];
+  window._poSupplierId = value;
+
+  const fpago = opt.dataset.fpago;
+  const ccdias = opt.dataset.ccdias;
+  const moneda = opt.dataset.moneda;
+
+  // Autocompletar si los campos existen (se renderizan por setPOTipo -> getPOExtraFields)
+  setTimeout(() => {
+    const fpagoEl  = document.getElementById('po-forma-pago');
+    const ccdiasEl = document.getElementById('po-cc-dias');
+    const monedaEl = document.getElementById('po-moneda');
+
+    if (fpagoEl && fpago)  fpagoEl.value = fpago;
+    if (ccdiasEl && ccdias) ccdiasEl.value = ccdias;
+    if (monedaEl && moneda) monedaEl.value = moneda;
+
+    if (fpagoEl && fpago && typeof updatePOCCVisibility === 'function') {
+      updatePOCCVisibility();
+    }
+  }, 50);
+
+  showToast?.('ok', 'Condiciones del proveedor cargadas automáticamente');
 }
 
 // ── Ver detalle de OC ────────────────────────────────────
@@ -8639,15 +8719,15 @@ function _openSupplierModal(existing) {
     </div>
   `;
 
-  openModal({
-    title: isEdit ? `Editar proveedor — ${s.name}` : 'Nuevo proveedor',
-    body: body,
-    buttons: [
+  openModal(
+    isEdit ? `Editar proveedor — ${s.name}` : 'Nuevo proveedor',
+    body,
+    [
       ...(isEdit ? [{ label: '🗑 Eliminar', cls: 'btn-danger', fn: () => _supDelete(s.id) }] : []),
       { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal },
       { label: isEdit ? 'Guardar cambios' : 'Crear proveedor', cls: 'btn-primary', fn: () => _supSave(isEdit ? s.id : null) },
-    ],
-  });
+    ]
+  );
 
   // Toggle del campo razón de blacklist según status elegido
   setTimeout(() => {
@@ -8800,15 +8880,15 @@ async function openSupplierDetail(id) {
     </div>
   `;
 
-  openModal({
-    title: `Proveedor: ${sup.name}`,
-    body: body,
-    buttons: [
+  openModal(
+    `Proveedor: ${sup.name}`,
+    body,
+    [
       { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
       ...(['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role) ?
         [{ label: '✎ Editar', cls: 'btn-primary', fn: () => { closeModal(); openEditSupplierModal(id); } }] : []),
-    ],
-  });
+    ]
+  );
 }
 
 // Export PDF de proveedores
