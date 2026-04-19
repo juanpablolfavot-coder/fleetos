@@ -270,14 +270,14 @@ function logout() {
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
-    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs','users','encargado_panel','contador_panel','auditor_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs','users','contador_panel','auditor_panel'], canEdit:['all'] },
-    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','encargado_panel'], canEdit:['workorders','fleet'] },
+    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs','users','encargado_panel','contador_panel','auditor_panel'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs','users','contador_panel','auditor_panel'], canEdit:['all'] },
+    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','suppliers','encargado_panel'], canEdit:['workorders','fleet'] },
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
-    paniol:                { label:'Pañol / Stock',            badge:'role-stock',      modules:['stock','workorders'], canEdit:['stock'] },
-    contador:              { label:'Contador / Administración',badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel'], canEdit:[] },
+    paniol:                { label:'Pañol / Stock',            badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
+    contador:              { label:'Contador / Administración',badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel','suppliers'], canEdit:[] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
   };
   return roles[role] || roles['auditor'];
@@ -499,7 +499,7 @@ async function loadInitialData() {
   try {
     showToast('ok', 'Cargando datos...');
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -510,6 +510,8 @@ async function loadInitialData() {
       apiFetch('/api/users'),
       apiFetch('/api/tires'),
       apiFetch('/api/tires/history'),
+      apiFetch('/api/suppliers'),
+      apiFetch('/api/assets'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -527,6 +529,8 @@ async function loadInitialData() {
     if (stockRes?.ok)       App.data.stock       = await stockRes.json();
     if (docsRes?.ok)        App.data.documents   = await docsRes.json();
     if (tanksRes?.ok)       App.data.tanks       = await tanksRes.json();
+    if (suppliersRes?.ok)   App.data.suppliers   = await suppliersRes.json();
+    if (assetsRes?.ok)      App.data.assets      = await assetsRes.json();
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};
@@ -541,6 +545,8 @@ async function loadInitialData() {
     if (!App.data.stock)       App.data.stock       = [];
     if (!App.data.documents)   App.data.documents   = [];
     if (!App.data.users)       App.data.users       = [];
+    if (!App.data.suppliers)   App.data.suppliers   = [];
+    if (!App.data.assets)      App.data.assets      = [];
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];
