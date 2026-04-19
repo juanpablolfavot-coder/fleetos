@@ -536,6 +536,7 @@ async function loadInitialData() {
       App.config = App.config || {};
       App.config.bases         = cfg.bases         || ['Central','Norte','Sur'];
       App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
+      App.config.labor_rate    = parseFloat(cfg.labor_rate) || 0;
     }
 
     // Inicializar arrays si alguna API falló
@@ -550,7 +551,8 @@ async function loadInitialData() {
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];
-    if (!App.config) App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'] };
+    if (!App.config) App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'], labor_rate: 0 };
+    if (App.config.labor_rate === undefined) App.config.labor_rate = 0;
 
     // Normalizar campos de la API al formato que usa el frontend
     App.data.vehicles   = App.data.vehicles.map(_mapVehicle);
