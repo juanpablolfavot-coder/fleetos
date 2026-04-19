@@ -1343,75 +1343,127 @@ async function closeOTConfirmed(id) {
 function closeOT(id) { openCloseOTModal(id); }
 
 // ── IMPRIMIR OT ──
-function printOT(id) {
-  const ot = App.data.workOrders.find(o=>o.id===id);
+async function printOT(id) {
+  const ot = App.data.workOrders.find(o => o.id === id);
   if (!ot) return;
-  const v = App.data.vehicles.find(x=>x.code===ot.vehicle);
+  const v = App.data.vehicles.find(x => x.code === ot.vehicle);
 
-  // Combinar repuestos del alta + del cierre (closeParts si la OT aún no cerró)
-  const allParts = [].concat(ot.parts||[], ot.closeParts||[]);
+  // Traer repuestos y partes de trabajo desde el backend (datos frescos)
+  let partsData = [];
+  let laborData = [];
+  try {
+    const woUUID = ot._uuid || ot.id;
+    const [partsRes, laborRes] = await Promise.all([
+      apiFetch(`/api/workorders/${woUUID}/parts`),
+      apiFetch(`/api/workorders/${woUUID}/labor`),
+    ]);
+    if (partsRes?.ok) partsData = await partsRes.json();
+    if (laborRes?.ok) laborData = await laborRes.json();
+  } catch(e) { /* usar datos en memoria */ }
 
-  // Calcular total correcto: qty × costo unitario
-  const partsTotal = allParts.reduce(function(a,p){ return a + (p.cost||0)*(p.qty||1); }, 0);
-  const totalCost  = partsTotal + (ot.labor_cost||0);
+  // Si no se pudo traer del backend, caer en los datos de memoria
+  if (partsData.length === 0) {
+    partsData = [].concat(ot.parts || [], ot.closeParts || []).map(p => ({
+      name: p.name,
+      qty: p.qty || 1,
+      unit: p.unit || 'un',
+      unit_cost: p.cost || p.unit_cost || 0,
+      origin: p.origin || 'externo',
+      subtotal: (p.cost || p.unit_cost || 0) * (p.qty || 1),
+    }));
+  }
 
-  // Generar filas de repuestos
+  // Calcular totales
+  const partsTotal = partsData.reduce((a, p) => a + (parseFloat(p.subtotal) || (p.qty * p.unit_cost)), 0);
+  const laborTotal = laborData.reduce((a, l) => a + (parseFloat(l.subtotal) || 0), 0);
+  const laborHours = laborData.reduce((a, l) => a + (parseFloat(l.hours) || 0), 0);
+  // labor_cost de la OT (por si es distinto del calculado, priorizamos el del backend)
+  const laborCostFinal = laborTotal > 0 ? laborTotal : (parseFloat(ot.labor_cost) || 0);
+  const totalCost = partsTotal + laborCostFinal;
+
+  // Filas de repuestos
   let partsRows = '';
-  if (allParts.length > 0) {
-    allParts.forEach(function(p) {
-      const subtotal = (p.cost||0) * (p.qty||1);
-      const origen   = p.origin==='stock' ? 'Pañol / stock' : 'Compra externa';
-      partsRows += '<tr>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb">' + p.name + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center">' + (p.qty||1) + ' ' + (p.unit||'un') + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:center">' + origen + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right">$' + (p.cost||0).toLocaleString() + '</td>'
-        + '<td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:600">$' + subtotal.toLocaleString() + '</td>'
-        + '</tr>';
+  if (partsData.length > 0) {
+    partsData.forEach(p => {
+      const qty = parseFloat(p.qty) || 1;
+      const unitCost = parseFloat(p.unit_cost) || 0;
+      const subtotal = parseFloat(p.subtotal) || (qty * unitCost);
+      const origenBadge = p.origin === 'stock'
+        ? '<span class="badge-stock">📦 Pañol</span>'
+        : '<span class="badge-compra">🛒 Externo</span>';
+      partsRows += `<tr>
+        <td>${p.name || '—'}</td>
+        <td style="text-align:center">${qty} ${p.unit || 'un'}</td>
+        <td style="text-align:center">${origenBadge}</td>
+        <td style="text-align:right">$${Math.round(unitCost).toLocaleString('es-AR')}</td>
+        <td style="text-align:right;font-weight:600">$${Math.round(subtotal).toLocaleString('es-AR')}</td>
+      </tr>`;
     });
   } else {
     partsRows = '<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Sin repuestos registrados</td></tr>';
   }
 
+  // Filas de partes de trabajo (MO)
+  let laborRows = '';
+  if (laborData.length > 0) {
+    laborData.forEach(l => {
+      const hours = parseFloat(l.hours) || 0;
+      const rate = parseFloat(l.rate) || 0;
+      const subtotal = parseFloat(l.subtotal) || (hours * rate);
+      const fecha = l.work_date ? new Date(l.work_date).toLocaleDateString('es-AR') : '—';
+      laborRows += `<tr>
+        <td>${l.worker_name || '—'}</td>
+        <td style="text-align:center">${fecha}</td>
+        <td style="text-align:right">${hours.toFixed(2)} h</td>
+        <td style="text-align:right">$${Math.round(rate).toLocaleString('es-AR')}/h</td>
+        <td style="text-align:right;font-weight:600">$${Math.round(subtotal).toLocaleString('es-AR')}</td>
+      </tr>`;
+    });
+  } else {
+    laborRows = `<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Sin partes de trabajo registrados${laborCostFinal > 0 ? ` · Costo MO global: $${Math.round(laborCostFinal).toLocaleString('es-AR')}` : ''}</td></tr>`;
+  }
 
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html><html lang="es"><head>
     <meta charset="UTF-8">
-    <title>Orden de Trabajo ${ot.id}</title>
+    <title>Orden de Trabajo ${ot.id} — Biletta</title>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; background: #fff; padding: 32px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 2px solid #111; }
-      .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
-      .logo span { color: #2563eb; }
-      .logo-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
-      .ot-id { font-size: 24px; font-weight: 700; font-family: monospace; color: #111; text-align: right; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 3px solid #1e3a8a; }
+      .logo-wrap { display: flex; align-items: center; gap: 14px; }
+      .logo-square { width: 52px; height: 52px; background: #1e3a8a; color: #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; letter-spacing: 1px; }
+      .empresa { font-size: 20px; font-weight: 700; color: #111; }
+      .empresa-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
+      .ot-id { font-size: 22px; font-weight: 700; font-family: monospace; color: #1e3a8a; text-align: right; }
       .ot-date { font-size: 11px; color: #6b7280; text-align: right; margin-top: 4px; }
-      .status-bar { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; margin-top: 4px; }
+      .status-bar { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 6px; }
       .status-cerrada { background: #dcfce7; color: #166534; }
-      .status-proceso  { background: #dbeafe; color: #1e40af; }
-      .status-other    { background: #f3f4f6; color: #374151; }
+      .status-proceso { background: #dbeafe; color: #1e40af; }
+      .status-pendiente { background: #fef3c7; color: #92400e; }
+      .status-other { background: #f3f4f6; color: #374151; }
       .section { margin-bottom: 22px; }
-      .section-title { font-size: 10px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 5px; }
-      .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .section-title { font-size: 11px; font-weight: 700; color: #1e3a8a; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
       .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-      .field { margin-bottom: 10px; }
+      .field { margin-bottom: 8px; }
       .field-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
       .field-value { font-size: 13px; font-weight: 500; color: #111; }
-      .desc-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; font-size: 13px; line-height: 1.6; color: #374151; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      thead tr { background: #f9fafb; }
-      th { text-align: left; padding: 8px; border-bottom: 2px solid #e5e7eb; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #6b7280; }
+      .desc-box { background: #f9fafb; border-left: 3px solid #1e3a8a; padding: 12px; font-size: 13px; line-height: 1.6; color: #374151; border-radius: 4px; }
+      table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+      thead tr { background: #eff6ff; }
+      th { text-align: left; padding: 8px; border-bottom: 2px solid #1e3a8a; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #1e3a8a; font-weight: 700; }
+      td { padding: 7px 8px; border-bottom: 1px solid #f3f4f6; }
       .total-row { background: #f9fafb; }
       .total-row td { padding: 8px; font-weight: 700; border-top: 2px solid #111; }
+      .grand-total-row td { background: #1e3a8a; color: #fff; font-size: 15px; padding: 10px 8px; }
       .firma-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; margin-top: 40px; }
       .firma-box { border-top: 1px solid #111; padding-top: 8px; font-size: 11px; color: #6b7280; text-align: center; }
-      .badge-stock   { background: #dbeafe; color: #1e40af; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
-      .badge-compra  { background: #ede9fe; color: #5b21b6; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+      .badge-stock { background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+      .badge-compra { background: #fef3c7; color: #92400e; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
       .badge-urgente { background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
-      .badge-normal  { background: #f3f4f6; color: #374151; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
-      .badge-prev    { background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
-      .badge-corr    { background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+      .badge-normal { background: #f3f4f6; color: #374151; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+      .badge-prev { background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+      .badge-corr { background: #fee2e2; color: #991b1b; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
       @media print {
         body { padding: 16px; }
         @page { margin: 12mm; }
@@ -1420,16 +1472,19 @@ function printOT(id) {
   </head><body>
 
     <div class="header">
-      <div>
-        <div class="logo">Fleet<span>OS</span></div>
-        <div class="logo-sub">Sistema de gestión de flota pesada</div>
+      <div class="logo-wrap">
+        <div class="logo-square">B</div>
+        <div>
+          <div class="empresa">Expreso Biletta S.A.</div>
+          <div class="empresa-sub">Sistema de gestión de flota y taller</div>
+        </div>
       </div>
       <div style="text-align:right">
-        <div class="ot-id">${ot.id}</div>
+        <div class="ot-id">ORDEN DE TRABAJO ${ot.id}</div>
         <div class="ot-date">Apertura: ${ot.opened}</div>
         ${ot.closed ? `<div class="ot-date">Cierre: ${ot.closed}</div>` : ''}
         <div style="margin-top:6px">
-          <span class="status-${ot.status==='Cerrada'?'cerrada':ot.status==='En proceso'?'proceso':'other'}">${ot.status}</span>
+          <span class="status-${ot.status==='Cerrada'?'cerrada':ot.status==='En proceso'?'proceso':ot.status==='Pendiente'?'pendiente':'other'}">${ot.status}</span>
         </div>
       </div>
     </div>
@@ -1439,10 +1494,10 @@ function printOT(id) {
       <div class="grid-3">
         <div class="field"><div class="field-label">Código interno</div><div class="field-value">${ot.vehicle}</div></div>
         <div class="field"><div class="field-label">Patente</div><div class="field-value">${v?v.plate:ot.plate||'—'}</div></div>
-        <div class="field"><div class="field-label">Marca / Modelo</div><div class="field-value">${v?v.brand+' '+v.model:'—'}</div></div>
-        <div class="field"><div class="field-label">Km al momento</div><div class="field-value">${v?v.km.toLocaleString()+' km':'—'}</div></div>
-        <div class="field"><div class="field-label">Base operativa</div><div class="field-value">${v?v.base:'—'}</div></div>
-        <div class="field"><div class="field-label">Chofer habitual</div><div class="field-value">${v?v.driver:'—'}</div></div>
+        <div class="field"><div class="field-label">Marca / Modelo</div><div class="field-value">${v?(v.brand||'')+' '+(v.model||''):'—'}</div></div>
+        <div class="field"><div class="field-label">Km al momento</div><div class="field-value">${v?(v.km||0).toLocaleString('es-AR')+' km':'—'}</div></div>
+        <div class="field"><div class="field-label">Base operativa</div><div class="field-value">${v?v.base||'—':'—'}</div></div>
+        <div class="field"><div class="field-label">Chofer habitual</div><div class="field-value">${v?v.driver||'—':'—'}</div></div>
       </div>
     </div>
 
@@ -1451,10 +1506,10 @@ function printOT(id) {
       <div class="grid-3" style="margin-bottom:12px">
         <div class="field"><div class="field-label">Tipo de trabajo</div><div class="field-value"><span class="${ot.type==='Preventivo'?'badge-prev':'badge-corr'}">${ot.type}</span></div></div>
         <div class="field"><div class="field-label">Prioridad</div><div class="field-value"><span class="${ot.priority==='Urgente'?'badge-urgente':'badge-normal'}">${ot.priority}</span></div></div>
-        <div class="field"><div class="field-label">Mecánico asignado</div><div class="field-value">${ot.mechanic}</div></div>
+        <div class="field"><div class="field-label">Mecánico asignado</div><div class="field-value">${ot.mechanic || '—'}</div></div>
       </div>
       <div class="field"><div class="field-label">Descripción / diagnóstico</div></div>
-      <div class="desc-box">${ot.desc}</div>
+      <div class="desc-box">${ot.desc || '—'}</div>
       ${ot.causa_raiz && ot.causa_raiz !== '—' ? `
         <div class="field" style="margin-top:12px"><div class="field-label">Causa raíz / resolución</div></div>
         <div class="desc-box">${ot.causa_raiz}</div>
@@ -1462,7 +1517,7 @@ function printOT(id) {
     </div>
 
     <div class="section">
-      <div class="section-title">Repuestos e insumos utilizados</div>
+      <div class="section-title">🔧 Repuestos e insumos utilizados</div>
       <table>
         <thead><tr>
           <th>Repuesto / insumo</th>
@@ -1474,19 +1529,45 @@ function printOT(id) {
         <tbody>${partsRows}</tbody>
         <tfoot>
           <tr class="total-row">
-            <td colspan="4">Subtotal repuestos</td>
-            <td style="text-align:right">$${partsTotal.toLocaleString()}</td>
-          </tr>
-          <tr class="total-row">
-            <td colspan="4">Mano de obra</td>
-            <td style="text-align:right">$${(ot.labor_cost||0).toLocaleString()}</td>
-          </tr>
-          <tr class="total-row" style="font-size:14px">
-            <td colspan="4" style="font-size:14px">TOTAL ORDEN DE TRABAJO</td>
-            <td style="text-align:right;font-size:14px">$${totalCost.toLocaleString()}</td>
+            <td colspan="4" style="text-align:right">Subtotal repuestos:</td>
+            <td style="text-align:right">$${Math.round(partsTotal).toLocaleString('es-AR')}</td>
           </tr>
         </tfoot>
       </table>
+    </div>
+
+    <div class="section">
+      <div class="section-title">⏱️ Mano de obra — partes de trabajo</div>
+      <table>
+        <thead><tr>
+          <th>Trabajador</th>
+          <th style="text-align:center">Fecha</th>
+          <th style="text-align:right">Horas</th>
+          <th style="text-align:right">Tarifa</th>
+          <th style="text-align:right">Subtotal</th>
+        </tr></thead>
+        <tbody>${laborRows}</tbody>
+        ${laborData.length > 0 ? `<tfoot>
+          <tr class="total-row">
+            <td colspan="2" style="text-align:right">Totales:</td>
+            <td style="text-align:right">${laborHours.toFixed(2)} h</td>
+            <td></td>
+            <td style="text-align:right">$${Math.round(laborCostFinal).toLocaleString('es-AR')}</td>
+          </tr>
+        </tfoot>` : ''}
+      </table>
+    </div>
+
+    <div class="section">
+      <table>
+        <tr class="grand-total-row">
+          <td style="font-weight:700">TOTAL ORDEN DE TRABAJO</td>
+          <td style="text-align:right;font-weight:700">$${Math.round(totalCost).toLocaleString('es-AR')}</td>
+        </tr>
+      </table>
+      <div style="font-size:10px;color:#6b7280;margin-top:6px;text-align:right">
+        Repuestos: $${Math.round(partsTotal).toLocaleString('es-AR')} · Mano de obra: $${Math.round(laborCostFinal).toLocaleString('es-AR')}
+      </div>
     </div>
 
     <div class="firma-row">
@@ -1496,10 +1577,10 @@ function printOT(id) {
     </div>
 
     <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
-      FleetOS · Orden de Trabajo ${ot.id} · Generado el ${nowDateAR()} ${nowTimeAR()}
+      Expreso Biletta S.A. · Orden de Trabajo ${ot.id} · Generado el ${nowDateAR()} ${nowTimeAR()}
     </div>
 
-    <script>window.onload=function(){window.print();}<\/script>
+    <script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>
   </body></html>`);
   win.document.close();
 }
@@ -1580,29 +1661,38 @@ function renderFuel() {
     </div>
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
-      <button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" id="fuel-search" placeholder="🔍 Buscar por unidad, chofer, fecha..."
+          oninput="_filterFuelLogs()" style="width:260px;font-size:13px">
+        <select class="form-select" id="fuel-type-filter" onchange="_filterFuelLogs()" style="width:130px;font-size:13px">
+          <option value="all">Todos los tipos</option>
+          <option value="diesel">🟡 Gasoil</option>
+          <option value="urea">🔵 Urea</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="exportFuelPDF()">📄 Exportar PDF</button>
+        <button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>
+      </div>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
-        <table><thead><tr><th>Fecha</th><th>Unidad</th><th>Chofer</th><th>Tipo</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th><th>Estado</th><th>Ticket</th></tr></thead>
-        <tbody>${App.data.fuelLogs.map(f=>`<tr>
-          <td class="td-mono" style="font-size:11px">${f.date}</td>
-          <td class="td-main">${f.vehicle}</td>
-          <td>${f.driver}</td>
-          <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
-          <td class="td-mono">${f.liters} L</td>
-          <td class="td-mono">${f.km > 0 ? f.km.toLocaleString()+' km' : '—'}</td>
-          <td class="td-mono">$${f.ppu.toLocaleString()}</td>
-          <td class="td-mono">$${f.total.toLocaleString()}</td>
-          <td>${f.place}</td>
-          <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
-          <td>
-            <div style="display:flex;gap:4px">
-              ${f.ticket_image ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')">📄 Ver</button>` : '<span style="color:var(--text3);font-size:11px">—</span>'}
-              ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar carga" style="padding:4px 8px">🗑</button>` : ''}
-            </div>
-          </td>
-        </tr>`).join('')}</tbody></table>
+        <table><thead><tr>
+          <th onclick="_fuelSortBy('date')" style="cursor:pointer;user-select:none">Fecha <span id="fuel-sort-date" style="opacity:.3">⇅</span></th>
+          <th onclick="_fuelSortBy('vehicle')" style="cursor:pointer;user-select:none">Unidad <span id="fuel-sort-vehicle" style="opacity:.3">⇅</span></th>
+          <th onclick="_fuelSortBy('driver')" style="cursor:pointer;user-select:none">Chofer <span id="fuel-sort-driver" style="opacity:.3">⇅</span></th>
+          <th>Tipo</th>
+          <th onclick="_fuelSortBy('liters')" style="cursor:pointer;user-select:none">Litros <span id="fuel-sort-liters" style="opacity:.3">⇅</span></th>
+          <th>Odómetro</th>
+          <th>Precio/L</th>
+          <th onclick="_fuelSortBy('total')" style="cursor:pointer;user-select:none">Total <span id="fuel-sort-total" style="opacity:.3">⇅</span></th>
+          <th>Lugar</th>
+          <th>Estado</th>
+          <th>Ticket</th>
+        </tr></thead>
+        <tbody id="fuel-logs-tbody">${_renderFuelLogRows((App.data.fuelLogs||[]).slice(0, 10))}</tbody>
+        </table>
+      </div>
+      <div id="fuel-count-info" style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
+        Mostrando <b>${Math.min(10, App.data.fuelLogs.length)}</b> de ${App.data.fuelLogs.length} cargas${App.data.fuelLogs.length > 10 ? ` · <a onclick="_fuelLoadMore()" style="color:var(--accent);cursor:pointer;font-weight:600">Ver más →</a>` : ''}
       </div>
     </div>
   `;
@@ -1818,19 +1908,7 @@ async function saveFuelLoad() {
 }
 
 
-function viewTicket(fuelLogId) {
-  const log = App.data.fuelLogs.find(f => f.id === fuelLogId);
-  if (!log?.ticket_image) { showToast('warn','No hay ticket guardado para esta carga'); return; }
-  openModal(`📄 Ticket — ${log.vehicle} (${log.date})`, `
-    <div style="text-align:center">
-      <img src="${log.ticket_image}" style="max-width:100%;max-height:65vh;border-radius:8px;object-fit:contain;box-shadow:0 4px 20px rgba(0,0,0,.4)">
-      <div style="margin-top:10px;font-size:12px;color:var(--text3)">${log.liters} L · ${log.place} · $${log.total.toLocaleString()}</div>
-    </div>
-    <div style="text-align:center;margin-top:12px">
-      <a href="${log.ticket_image}" download="ticket-${log.vehicle}-${log.date?.replace(/[: ]/g,'-')}.jpg" class="btn btn-secondary btn-sm">⬇ Descargar</a>
-    </div>
-  `, [{ label:'Cerrar', cls:'btn-secondary', fn: closeModal }]);
-}
+// viewTicket está definido más abajo con versión mejorada (vista con metadatos)
 
 function openFuelEntryModal() {
   const tanks = App.data.tanks || [];
@@ -3544,25 +3622,108 @@ let _costSelectedUnit  = null;
 let _costExpandedRubro = null;
 let _costPeriod        = 'mes';
 
-function exportCostCSV() {
+function exportCostPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast?.('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+
   const now = new Date();
   const yr = now.getFullYear(), mo = now.getMonth()+1;
   const mesStr = yr+'-'+String(mo).padStart(2,'0');
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const mesNombre = meses[mo-1];
 
-  let csv = 'Unidad,Marca,Modelo,Km mes,Combustible ($),Preventivo ($),Correctivo ($),Total ($),$/km\n';
+  // Recopilar datos
+  const rows = [];
+  let totalCombustible = 0, totalPreventivo = 0, totalCorrectivo = 0, totalGeneral = 0, totalKm = 0;
   App.data.vehicles.forEach(v => {
     const d = getCostDetail(v.code);
     if (!d || d.totalMes === 0) return;
-    csv += `${v.code},${v.brand},${v.model},${d.kmMes},${Math.round(d.rubros[0].total)},${Math.round(d.rubros[1].total)},${Math.round(d.rubros[2].total)},${Math.round(d.totalMes)},${d.costKmReal>0?d.costKmReal.toFixed(3):'—'}\n`;
+    const comb = Math.round(d.rubros[0].total);
+    const prev = Math.round(d.rubros[1].total);
+    const corr = Math.round(d.rubros[2].total);
+    totalCombustible += comb;
+    totalPreventivo  += prev;
+    totalCorrectivo  += corr;
+    totalGeneral     += Math.round(d.totalMes);
+    totalKm          += d.kmMes;
+    rows.push([
+      v.code,
+      `${v.brand||''} ${v.model||''}`.trim() || '—',
+      d.kmMes.toLocaleString('es-AR'),
+      '$'+comb.toLocaleString('es-AR'),
+      '$'+prev.toLocaleString('es-AR'),
+      '$'+corr.toLocaleString('es-AR'),
+      '$'+Math.round(d.totalMes).toLocaleString('es-AR'),
+      d.costKmReal>0 ? '$'+d.costKmReal.toFixed(3) : '—',
+    ]);
   });
 
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = `costos-operativos-${mesStr}.csv`; a.click();
-  URL.revokeObjectURL(url);
-  showToast('ok', 'CSV exportado');
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  // Encabezado
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Costos Operativos — Expreso Biletta', 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`, 40, 58);
+  doc.setFontSize(8);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+
+  // Tabla principal
+  doc.autoTable({
+    startY: 90,
+    head: [['Unidad','Marca/Modelo','Km mes','Combustible','Preventivo','Correctivo','Total mes','$/km real']],
+    body: rows,
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 60, fontStyle: 'bold' },
+      1: { cellWidth: 130 },
+      2: { halign: 'right', cellWidth: 65 },
+      3: { halign: 'right', cellWidth: 85 },
+      4: { halign: 'right', cellWidth: 85 },
+      5: { halign: 'right', cellWidth: 85 },
+      6: { halign: 'right', cellWidth: 90, fontStyle: 'bold' },
+      7: { halign: 'right', cellWidth: 70 },
+    },
+  });
+
+  // Totales
+  const finalY = doc.lastAutoTable.finalY || 100;
+  doc.setFontSize(11);
+  doc.setFont('helvetica','bold');
+  doc.setTextColor(0);
+  doc.text(`TOTALES DEL MES:`, 40, finalY + 25);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.text(`Km totales: ${totalKm.toLocaleString('es-AR')}`, 40, finalY + 42);
+  doc.text(`Combustible: $${totalCombustible.toLocaleString('es-AR')}`, 180, finalY + 42);
+  doc.text(`Preventivo: $${totalPreventivo.toLocaleString('es-AR')}`, 340, finalY + 42);
+  doc.text(`Correctivo: $${totalCorrectivo.toLocaleString('es-AR')}`, 490, finalY + 42);
+  doc.setFont('helvetica','bold');
+  doc.setTextColor(37, 99, 235);
+  doc.setFontSize(12);
+  doc.text(`TOTAL GENERAL: $${totalGeneral.toLocaleString('es-AR')}`, 40, finalY + 65);
+
+  if (totalKm > 0) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(100);
+    doc.text(`Costo promedio de la flota: $${(totalGeneral/totalKm).toFixed(3)} / km`, 40, finalY + 82);
+  }
+
+  doc.save(`Costos-Biletta-${mesStr}.pdf`);
+  showToast('ok', 'PDF de costos descargado');
 }
+
+// Wrapper para mantener compatibilidad con botones viejos que llaman exportCostCSV
+function exportCostCSV() { exportCostPDF(); }
 
 function renderCosts() {
   // Calcular costo real de cada vehículo este mes
@@ -3620,7 +3781,7 @@ function renderCosts() {
     <div class="section-header">
       <div><div class="section-title">Detalle por unidad — clic en una fila para el desglose completo</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="exportCostCSV()">↓ Exportar CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCostPDF()">📄 Exportar PDF</button>
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -5326,7 +5487,7 @@ function _buildContadorPanel(mesStr) {
       <div class="section-title" style="margin:0">📊 Panel contable — ${mesLabel.charAt(0).toUpperCase()+mesLabel.slice(1)}</div>
       <div style="display:flex;gap:8px;align-items:center">
         <select class="form-select" style="width:220px" onchange="_buildContadorPanel(this.value)">${meses.join('')}</select>
-        <button class="btn btn-secondary btn-sm" onclick="_exportContadorCSV('${mesStr}')">⬇ Exportar CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="_exportContadorPDF('${mesStr}')">📄 Exportar PDF</button>
       </div>
     </div>
     <div class="kpi-row" style="margin-bottom:20px">
@@ -5380,24 +5541,106 @@ function _buildContadorPanel(mesStr) {
     </div>`;
 }
 
-function _exportContadorCSV(mesStr) {
+function _exportContadorPDF(mesStr) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast?.('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+
   const [yr, mo] = mesStr.split('-').map(Number);
-  const fuelMes = App.data.fuelLogs.filter(f => { const d=new Date(f.date); return d.getFullYear()===yr && d.getMonth()+1===mo; });
-  const otsMes  = App.data.workOrders.filter(o => { if(o.status!=='Cerrada') return false; const d=new Date(o.closed_at||o.date); return d.getFullYear()===yr && d.getMonth()+1===mo; });
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const mesNombre = meses[mo-1];
+
+  const fuelMes = (App.data.fuelLogs||[]).filter(f => { const d=new Date(f.date); return d.getFullYear()===yr && d.getMonth()+1===mo; });
+  const otsMes  = (App.data.workOrders||[]).filter(o => { if(o.status!=='Cerrada') return false; const d=new Date(o.closed_at||o.date); return d.getFullYear()===yr && d.getMonth()+1===mo; });
+
   const byVeh = {};
-  fuelMes.forEach(f => { if(!byVeh[f.vehicle]) byVeh[f.vehicle]={combustible:0,litros:0,mano:0,repuestos:0}; byVeh[f.vehicle].combustible+=f.liters*f.ppu; byVeh[f.vehicle].litros+=f.liters; });
-  otsMes.forEach(o  => { const vc=o.vehicle_code||o.vehicle||''; if(!byVeh[vc]) byVeh[vc]={combustible:0,litros:0,mano:0,repuestos:0}; byVeh[vc].mano+=o.labor_cost||0; byVeh[vc].repuestos+=o.parts_cost||0; });
-  let csv = 'Unidad,Combustible ($),Litros,Mano de obra ($),Repuestos ($),Total ($)\n';
-  Object.entries(byVeh).sort((a,b)=>(b[1].combustible+b[1].mano+b[1].repuestos)-(a[1].combustible+a[1].mano+a[1].repuestos)).forEach(([code,v]) => {
-    const total = v.combustible+v.mano+v.repuestos;
-    if(total>0) csv += `${code},${Math.round(v.combustible)},${Math.round(v.litros)},${Math.round(v.mano)},${Math.round(v.repuestos)},${Math.round(total)}\n`;
+  fuelMes.forEach(f => {
+    if(!byVeh[f.vehicle]) byVeh[f.vehicle]={combustible:0,litros:0,mano:0,repuestos:0,ots:0};
+    byVeh[f.vehicle].combustible += (f.liters||0)*(f.ppu||0);
+    byVeh[f.vehicle].litros += (f.liters||0);
   });
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a'); a.href=url; a.download=`costos-${mesStr}.csv`; a.click();
-  URL.revokeObjectURL(url);
-  showToast('ok','CSV descargado');
+  otsMes.forEach(o => {
+    const vc = o.vehicle_code||o.vehicle||'';
+    if(!byVeh[vc]) byVeh[vc]={combustible:0,litros:0,mano:0,repuestos:0,ots:0};
+    byVeh[vc].mano += parseFloat(o.labor_cost)||0;
+    byVeh[vc].repuestos += parseFloat(o.parts_cost)||0;
+    byVeh[vc].ots++;
+  });
+
+  const entries = Object.entries(byVeh)
+    .sort((a,b)=>(b[1].combustible+b[1].mano+b[1].repuestos)-(a[1].combustible+a[1].mano+a[1].repuestos))
+    .filter(([,v]) => (v.combustible+v.mano+v.repuestos) > 0);
+
+  let tCombustible=0, tLitros=0, tMano=0, tRepuestos=0, tOts=0, tTotal=0;
+  const rows = entries.map(([code, v]) => {
+    const total = v.combustible + v.mano + v.repuestos;
+    tCombustible += v.combustible;
+    tLitros      += v.litros;
+    tMano        += v.mano;
+    tRepuestos   += v.repuestos;
+    tOts         += v.ots;
+    tTotal       += total;
+    return [
+      code,
+      v.combustible>0 ? '$'+Math.round(v.combustible).toLocaleString('es-AR') : '—',
+      v.litros>0 ? Math.round(v.litros).toLocaleString('es-AR')+' L' : '—',
+      v.mano>0 ? '$'+Math.round(v.mano).toLocaleString('es-AR') : '—',
+      v.repuestos>0 ? '$'+Math.round(v.repuestos).toLocaleString('es-AR') : '—',
+      v.ots > 0 ? String(v.ots) : '—',
+      '$'+Math.round(total).toLocaleString('es-AR'),
+    ];
+  });
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  // Encabezado
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Panel Contable — Expreso Biletta', 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`, 40, 58);
+  doc.setFontSize(8);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+
+  // Tabla
+  doc.autoTable({
+    startY: 90,
+    head: [['Unidad','Combustible','Litros','Mano de obra','Repuestos','OTs','Total']],
+    body: rows,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 70 },
+      1: { halign: 'right', cellWidth: 100 },
+      2: { halign: 'right', cellWidth: 80 },
+      3: { halign: 'right', cellWidth: 100 },
+      4: { halign: 'right', cellWidth: 100 },
+      5: { halign: 'center', cellWidth: 50 },
+      6: { halign: 'right', fontStyle: 'bold', cellWidth: 100 },
+    },
+    foot: [[
+      'TOTALES',
+      '$'+Math.round(tCombustible).toLocaleString('es-AR'),
+      Math.round(tLitros).toLocaleString('es-AR')+' L',
+      '$'+Math.round(tMano).toLocaleString('es-AR'),
+      '$'+Math.round(tRepuestos).toLocaleString('es-AR'),
+      String(tOts),
+      '$'+Math.round(tTotal).toLocaleString('es-AR'),
+    ]],
+    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'right' },
+  });
+
+  doc.save(`Contable-Biletta-${mesStr}.pdf`);
+  showToast('ok','PDF contable descargado');
 }
+
+// Wrapper de compatibilidad
+function _exportContadorCSV(mesStr) { _exportContadorPDF(mesStr); }
 
 
 // ── FUNCIONES FALTANTES ──────────────────────────────────────────────────────
@@ -8147,96 +8390,138 @@ async function printPO(id) {
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
     const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+    const ivaMonto = Math.round(totalReal * parseFloat(po.iva_pct||0) / 100);
+    const totalConIva = Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100));
+
+    // Helper: badge de estado con color
+    const statusBadge = {
+      'en_revision': 'background:#fef3c7;color:#92400e',
+      'aprobada':    'background:#dbeafe;color:#1e40af',
+      'recibida':    'background:#dcfce7;color:#166534',
+      'pagada':      'background:#dcfce7;color:#166534',
+      'rechazada':   'background:#fee2e2;color:#991b1b',
+      'cancelada':   'background:#f3f4f6;color:#374151',
+    }[po.status] || 'background:#f3f4f6;color:#374151';
 
     const win = window.open('', '_blank');
-    win.document.write(`<!DOCTYPE html><html><head>
+    win.document.write(`<!DOCTYPE html><html lang="es"><head>
       <meta charset="UTF-8">
-      <title>OC ${po.code}</title>
+      <title>OC ${po.code} — Biletta</title>
       <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family: Arial, sans-serif; font-size:13px; color:#111; padding:32px; }
-        .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; border-bottom:2px solid #111; padding-bottom:16px; }
-        .company { font-size:22px; font-weight:700; }
-        .doc-title { text-align:right; }
-        .doc-code { font-size:28px; font-weight:700; color:#2563eb; }
-        .doc-sub { font-size:12px; color:#666; }
-        .section { margin-bottom:20px; }
-        .section-title { font-size:11px; font-weight:700; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; border-bottom:1px solid #ddd; padding-bottom:4px; }
-        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; font-size:13px; color:#111; padding:32px; background:#fff; }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; padding-bottom:20px; border-bottom:3px solid #1e3a8a; }
+        .logo-wrap { display:flex; align-items:center; gap:14px; }
+        .logo-square { width:52px; height:52px; background:#1e3a8a; color:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; letter-spacing:1px; }
+        .empresa { font-size:20px; font-weight:700; color:#111; }
+        .empresa-sub { font-size:11px; color:#6b7280; margin-top:2px; }
+        .doc-code { font-size:22px; font-weight:700; font-family:monospace; color:#1e3a8a; text-align:right; }
+        .doc-sub { font-size:11px; color:#6b7280; text-align:right; margin-top:4px; }
+        .status-pill { display:inline-block; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700; margin-top:6px; text-transform:uppercase; letter-spacing:.5px; }
+        .section { margin-bottom:22px; }
+        .section-title { font-size:11px; font-weight:700; color:#1e3a8a; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
+        .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
         .field { margin-bottom:8px; }
-        .field-label { font-size:11px; color:#666; }
-        .field-value { font-weight:600; font-size:13px; border-bottom:1px solid #ccc; min-height:22px; padding:2px 0; }
-        table { width:100%; border-collapse:collapse; }
-        th { background:#f3f4f6; font-size:11px; font-weight:700; text-transform:uppercase; padding:8px; border:1px solid #ddd; }
-        td { padding:8px; border:1px solid #ddd; }
-        .total-row td { font-weight:700; background:#f9fafb; }
+        .field-label { font-size:10px; color:#9ca3af; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+        .field-value { font-size:13px; font-weight:500; color:#111; }
+        table { width:100%; border-collapse:collapse; font-size:12px; }
+        thead tr { background:#eff6ff; }
+        th { text-align:left; padding:8px; border-bottom:2px solid #1e3a8a; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#1e3a8a; font-weight:700; }
+        td { padding:7px 8px; border-bottom:1px solid #f3f4f6; }
+        .total-row td { background:#f9fafb; font-weight:700; }
+        .grand-total td { background:#1e3a8a; color:#fff; font-size:14px; font-weight:700; padding:10px 8px; }
         .firma-section { display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; margin-top:40px; }
-        .firma-box { border-top:1px solid #333; padding-top:8px; text-align:center; font-size:11px; color:#666; }
-        @media print { body { padding:16px; } }
+        .firma-box { border-top:1px solid #333; padding-top:8px; text-align:center; font-size:11px; color:#6b7280; }
+        .observ-box { background:#f9fafb; border-left:3px solid #1e3a8a; padding:10px 14px; font-size:12px; border-radius:4px; margin-top:6px; }
+        @media print { body { padding:16px; } @page { margin:12mm; } }
       </style>
     </head><body>
       <div class="header">
-        <div>
-          <div class="company">Expreso Biletta</div>
-          <div style="font-size:12px;color:#666">Sistema de gestión de flota pesada</div>
+        <div class="logo-wrap">
+          <div class="logo-square">B</div>
+          <div>
+            <div class="empresa">Expreso Biletta S.A.</div>
+            <div class="empresa-sub">Sistema de gestión de flota y taller</div>
+          </div>
         </div>
-        <div class="doc-title">
+        <div>
           <div class="doc-code">${po.code}</div>
           <div class="doc-sub">ORDEN DE COMPRA</div>
           <div class="doc-sub">Fecha: ${new Date(po.created_at).toLocaleDateString('es-AR')}</div>
+          <div style="margin-top:6px;text-align:right">
+            <span class="status-pill" style="${statusBadge}">${(po.status||'').replace('_',' ')}</span>
+          </div>
         </div>
       </div>
 
       <div class="section">
-        <div class="section-title">Datos del pedido</div>
-        <div class="grid2">
+        <div class="section-title">📋 Datos del pedido</div>
+        <div class="grid3">
           <div class="field"><div class="field-label">Sucursal</div><div class="field-value">${po.sucursal||'—'}</div></div>
           <div class="field"><div class="field-label">Área</div><div class="field-value">${po.area||'—'}</div></div>
           <div class="field"><div class="field-label">Solicitado por</div><div class="field-value">${po.solicitante_nombre||'—'}</div></div>
-          <div class="field"><div class="field-label">Estado</div><div class="field-value">${po.status.toUpperCase()}</div></div>
           <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${po.proveedor||'—'}</div></div>
-          <div class="field"><div class="field-label">Vehículo</div><div class="field-value">${po.vehicle_code||'—'}</div></div>
-          <div class="field"><div class="field-label">Nro. Factura</div><div class="field-value">${po.factura_nro||'—'}</div></div>
-          <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
-          <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
-          <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>           <div class="field"><div class="field-label">Moneda</div><div class="field-value">${po.moneda==="USD" ? "Dólares (USD)" : "Pesos (ARS)"}</div></div>           <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${po.forma_pago==="contado" ? "Contado" : (po.forma_pago==="cuenta_corriente" ? ("Cuenta corriente a "+(po.cc_dias||0)+" dias") : "—")}</div></div>
+          <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${po.vehicle_code||'—'}${po.vehicle_plate?' ('+po.vehicle_plate+')':''}</div></div>
+          <div class="field"><div class="field-label">Moneda</div><div class="field-value">${po.moneda==="USD" ? "Dólares (USD)" : "Pesos (ARS)"}</div></div>
+        </div>
       </div>
 
-     
+      ${po.factura_nro || po.factura_fecha || po.factura_monto ? `
       <div class="section">
-        <div class="section-title">Artículos solicitados</div>
+        <div class="section-title">💰 Datos de facturación</div>
+        <div class="grid3">
+          <div class="field"><div class="field-label">Nº Factura</div><div class="field-value">${po.factura_nro||'—'}</div></div>
+          <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
+          <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
+          <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
+          <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${po.forma_pago==="contado" ? "Contado" : (po.forma_pago==="cuenta_corriente" ? ("Cta. cte. a "+(po.cc_dias||0)+" días") : "—")}</div></div>
+          <div class="field"><div class="field-label">Estado</div><div class="field-value">${(po.status||'').replace('_',' ')}</div></div>
+        </div>
+      </div>
+      ` : ''}
+
+      <div class="section">
+        <div class="section-title">🛒 Artículos solicitados</div>
         <table>
           <thead><tr>
-            <th style="width:40%;text-align:left">Descripción</th>
-            <th style="text-align:center">Cantidad</th>
+            <th style="width:45%">Descripción</th>
+            <th style="text-align:center">Cant.</th>
             <th style="text-align:center">Unidad</th>
-            <th style="text-align:right">Precio Unit.</th>
+            <th style="text-align:right">Precio unit.</th>
             <th style="text-align:right">Subtotal</th>
           </tr></thead>
           <tbody>
             ${po.items.map(i => `<tr>
               <td>${i.descripcion}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
-              <td style="text-align:center">${i.unidad}</td>
+              <td style="text-align:center">${i.unidad||'un'}</td>
               <td style="text-align:right">$${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
-              <td style="text-align:right"><strong>$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</strong></td>
+              <td style="text-align:right;font-weight:600">$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
             </tr>`).join('')}
             ${parseFloat(po.iva_pct||0) > 0 ? `
-            <tr>
-              <td colspan="4" style="text-align:right;color:#6b7280">Subtotal</td>
+            <tr class="total-row">
+              <td colspan="4" style="text-align:right">Subtotal neto</td>
               <td style="text-align:right">$${Math.round(totalReal).toLocaleString('es-AR')}</td>
             </tr>
-            <tr>
-              <td colspan="4" style="text-align:right;color:#6b7280">IVA (${po.iva_pct}%)</td>
-              <td style="text-align:right">$${Math.round(totalReal * parseFloat(po.iva_pct||0) / 100).toLocaleString('es-AR')}</td>
+            <tr class="total-row">
+              <td colspan="4" style="text-align:right">IVA (${po.iva_pct}%)</td>
+              <td style="text-align:right">$${ivaMonto.toLocaleString('es-AR')}</td>
             </tr>` : ''}
-          <tr class="total-row">
-              <td colspan="4" style="text-align:right">TOTAL</td>
-              <td style="text-align:right;font-size:15px">$${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</td>
+            <tr class="grand-total">
+              <td colspan="4" style="text-align:right">TOTAL${parseFloat(po.iva_pct||0) > 0 ? ' CON IVA' : ''}</td>
+              <td style="text-align:right">$${totalConIva.toLocaleString('es-AR')}</td>
             </tr>
           </tbody>
         </table>
       </div>
+
+      ${po.observaciones ? `
+      <div class="section">
+        <div class="section-title">📝 Observaciones</div>
+        <div class="observ-box">${po.observaciones}</div>
+      </div>
+      ` : ''}
 
       <div class="firma-section">
         <div class="firma-box">Solicitado por<br><br><br></div>
@@ -8244,8 +8529,8 @@ async function printPO(id) {
         <div class="firma-box">Recibido / Conforme<br><br><br></div>
       </div>
 
-      <div style="margin-top:32px;font-size:10px;color:#999;text-align:center">
-        Documento generado por FleetOS · ${new Date().toLocaleString('es-AR')} · ${po.code}
+      <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
+        Expreso Biletta S.A. · Orden de Compra ${po.code} · Generado el ${nowDateAR()} ${nowTimeAR()}
       </div>
     </body></html>`);
     win.document.close();
@@ -10139,7 +10424,7 @@ function _renderAssetsRows(assets, typeLabels, statusLabels, statusColors, canEd
   }
   return assets.map(a => `
     <tr>
-      <td class="td-mono">${a.code}</td>
+      <td class="td-mono"><a onclick="openAssetDetailModal('${a.id}')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-weight:600">${a.code}</a></td>
       <td><b>${a.name}</b></td>
       <td>${typeLabels[a.type] || a.type}</td>
       <td>${a.location || '<span style="color:var(--text3)">—</span>'}</td>
@@ -10148,6 +10433,7 @@ function _renderAssetsRows(assets, typeLabels, statusLabels, statusColors, canEd
       <td style="text-align:right;font-family:var(--mono)">${a.purchase_price ? '$' + Math.round(parseFloat(a.purchase_price)).toLocaleString('es-AR') : '<span style="color:var(--text3)">—</span>'}</td>
       <td>
         <div style="display:flex;gap:4px">
+          <button class="btn btn-secondary btn-sm" onclick="openAssetDetailModal('${a.id}')" title="Ver detalle">👁️</button>
           ${canEdit ? `<button class="btn btn-secondary btn-sm" onclick="openEditAssetModal('${a.id}')" title="Editar">✏️</button>` : ''}
           ${canDelete ? `<button class="btn btn-secondary btn-sm" onclick="deleteAsset('${a.id}')" title="Eliminar" style="color:var(--danger)">🗑️</button>` : ''}
         </div>
@@ -10584,4 +10870,463 @@ function openVehicleHistoryModal(vehicleCode) {
     { label: '🛒 Ir a OCs', cls: 'btn-secondary', fn: () => { closeModal(); navigate('purchase_orders'); } },
     { label: 'Cerrar', cls: 'btn-primary', fn: closeModal },
   ]);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  COMBUSTIBLE — buscador, filtros, ver ticket, exportar PDF
+// ═══════════════════════════════════════════════════════════
+
+// Render de una fila de la tabla de combustible (refactorizada para poder filtrar)
+function _renderFuelLogRows(logs) {
+  if (!logs || logs.length === 0) {
+    return `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
+  }
+  return logs.map(f => `<tr>
+    <td class="td-mono" style="font-size:11px">${f.date || '—'}</td>
+    <td class="td-main">${f.vehicle || '—'}</td>
+    <td>${f.driver || '—'}</td>
+    <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
+    <td class="td-mono">${f.liters || 0} L</td>
+    <td class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
+    <td class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
+    <td class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
+    <td>${f.place || '—'}</td>
+    <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status||'—'}</span></td>
+    <td>
+      <div style="display:flex;gap:4px">
+        ${f.ticket_image
+          ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')" title="Ver ticket">🧾 Ver</button>`
+          : '<span style="color:var(--text3);font-size:11px">sin ticket</span>'}
+        ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar" style="padding:4px 8px">🗑</button>` : ''}
+      </div>
+    </td>
+  </tr>`).join('');
+}
+
+// Filtrar cargas por texto de búsqueda y tipo (con paginación)
+function _filterFuelLogs() {
+  const q = (document.getElementById('fuel-search')?.value || '').toLowerCase().trim();
+  const typeFilter = document.getElementById('fuel-type-filter')?.value || 'all';
+  const tbody = document.getElementById('fuel-logs-tbody');
+  const countInfo = document.getElementById('fuel-count-info');
+
+  // Resetear paginación si cambió el filtro
+  window._fuelPageSize = window._fuelPageSize || 10;
+
+  let filtered = App.data.fuelLogs || [];
+
+  // Filtro por tipo
+  if (typeFilter === 'diesel') {
+    filtered = filtered.filter(f => f.fuel_type !== 'urea');
+  } else if (typeFilter === 'urea') {
+    filtered = filtered.filter(f => f.fuel_type === 'urea');
+  }
+
+  // Filtro por texto (busca en unidad, chofer, fecha, lugar)
+  if (q) {
+    filtered = filtered.filter(f => {
+      const hay = [f.vehicle, f.driver, f.date, f.place, f.plate].filter(Boolean)
+        .map(s => String(s).toLowerCase());
+      return hay.some(h => h.includes(q));
+    });
+  }
+
+  // Paginación: mostrar solo los primeros N
+  const shown = filtered.slice(0, window._fuelPageSize);
+
+  if (tbody) tbody.innerHTML = _renderFuelLogRows(shown);
+
+  if (countInfo) {
+    const total = (App.data.fuelLogs || []).length;
+    const totalLitros = filtered.reduce((a,b) => a + (b.liters||0), 0);
+    const totalPesos  = filtered.reduce((a,b) => a + (b.total||0), 0);
+    const verMasBtn = (filtered.length > window._fuelPageSize)
+      ? ` · <a onclick="_fuelLoadMore()" style="color:var(--accent);cursor:pointer;font-weight:600">Ver ${Math.min(10, filtered.length - window._fuelPageSize)} más →</a>`
+      : '';
+
+    if (filtered.length === total) {
+      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${total} cargas · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${Math.round(totalPesos).toLocaleString('es-AR')}${verMasBtn}`;
+    } else {
+      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${filtered.length} filtrados (${total} total) · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${Math.round(totalPesos).toLocaleString('es-AR')}${verMasBtn}`;
+    }
+  }
+}
+
+// Cargar 10 más en la tabla de combustible
+function _fuelLoadMore() {
+  window._fuelPageSize = (window._fuelPageSize || 10) + 10;
+  _filterFuelLogs();
+}
+
+// Exportar cargas filtradas a PDF
+function exportFuelPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast?.('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+
+  // Aplicar mismos filtros que la tabla
+  const q = (document.getElementById('fuel-search')?.value || '').toLowerCase().trim();
+  const typeFilter = document.getElementById('fuel-type-filter')?.value || 'all';
+  let filtered = App.data.fuelLogs || [];
+  if (typeFilter === 'diesel') filtered = filtered.filter(f => f.fuel_type !== 'urea');
+  else if (typeFilter === 'urea') filtered = filtered.filter(f => f.fuel_type === 'urea');
+  if (q) {
+    filtered = filtered.filter(f => {
+      const hay = [f.vehicle, f.driver, f.date, f.place, f.plate].filter(Boolean).map(s => String(s).toLowerCase());
+      return hay.some(h => h.includes(q));
+    });
+  }
+
+  if (filtered.length === 0) { showToast('warn', 'No hay cargas con los filtros actuales'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Cargas de combustible — Expreso Biletta', 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`${filtered.length} carga${filtered.length===1?'':'s'}${q?` · Filtro: "${q}"`:''}${typeFilter!=='all'?` · Tipo: ${typeFilter}`:''}`, 40, 58);
+  doc.setFontSize(8);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+
+  const totalLitros = filtered.reduce((a,b) => a + (b.liters||0), 0);
+  const totalPesos  = filtered.reduce((a,b) => a + (b.total||0), 0);
+
+  const tableData = filtered.map(f => [
+    f.date || '—',
+    f.vehicle || '—',
+    f.driver || '—',
+    f.fuel_type === 'urea' ? 'Urea' : 'Gasoil',
+    (f.liters||0).toString() + ' L',
+    f.km > 0 ? f.km.toLocaleString('es-AR') : '—',
+    '$' + (f.ppu||0).toLocaleString('es-AR'),
+    '$' + (f.total||0).toLocaleString('es-AR'),
+    f.place || '—',
+    f.status || '—',
+  ]);
+
+  doc.autoTable({
+    startY: 88,
+    head: [['Fecha','Unidad','Chofer','Tipo','Litros','Odómetro','Precio/L','Total','Lugar','Estado']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 75 },
+      1: { cellWidth: 60, fontStyle: 'bold' },
+      4: { halign: 'right' },
+      5: { halign: 'right' },
+      6: { halign: 'right' },
+      7: { halign: 'right', fontStyle: 'bold' },
+    },
+    foot: [[
+      'TOTALES', '', '', '',
+      Math.round(totalLitros).toLocaleString('es-AR') + ' L',
+      '', '',
+      '$' + Math.round(totalPesos).toLocaleString('es-AR'),
+      '', '',
+    ]],
+    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+  });
+
+  doc.save(`Combustible-Biletta-${todayISO()}.pdf`);
+  showToast('ok', `PDF descargado · ${filtered.length} cargas`);
+}
+
+// Ver ticket (imagen) de una carga — mejorado
+function viewTicket(logId) {
+  const f = (App.data.fuelLogs || []).find(x => x.id === logId);
+  if (!f) { showToast('error', 'Carga no encontrada'); return; }
+
+  if (!f.ticket_image) {
+    openModal('🧾 Ticket de carga', `
+      <div style="text-align:center;padding:20px">
+        <div style="font-size:36px;margin-bottom:12px">📭</div>
+        <div style="font-size:14px;color:var(--text3)">Esta carga no tiene ticket adjunto.</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:12px">
+          Fecha: <b>${f.date}</b> · Unidad: <b>${f.vehicle}</b><br>
+          Litros: <b>${f.liters} L</b> · Total: <b>$${(f.total||0).toLocaleString('es-AR')}</b>
+        </div>
+      </div>
+    `, [{ label:'Cerrar', cls:'btn-primary', fn: closeModal }]);
+    return;
+  }
+
+  openModal(`🧾 Ticket — ${f.vehicle} · ${f.date}`, `
+    <div style="background:var(--bg3);padding:10px;border-radius:var(--radius);margin-bottom:14px;font-size:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div><b>Unidad</b><br>${f.vehicle}</div>
+      <div><b>Chofer</b><br>${f.driver || '—'}</div>
+      <div><b>Litros</b><br>${f.liters} L</div>
+      <div><b>Total</b><br>$${(f.total||0).toLocaleString('es-AR')}</div>
+    </div>
+    <div style="text-align:center;background:#000;padding:10px;border-radius:var(--radius);max-height:70vh;overflow:auto">
+      <img src="${f.ticket_image}" alt="Ticket de carga"
+        style="max-width:100%;max-height:65vh;border-radius:4px;display:block;margin:0 auto">
+    </div>
+    <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px">
+      Click derecho → "Guardar imagen como..." para descargar
+    </div>
+  `, [
+    { label:'Cerrar', cls:'btn-primary', fn: closeModal },
+  ]);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HELPER DE ORDENAMIENTO DE TABLAS
+//  Permite click en headers para ordenar asc/desc
+// ═══════════════════════════════════════════════════════════
+
+// Estado global de ordenamiento (una por tabla)
+window._sortState = window._sortState || {};
+
+// Ordena un array por una columna. Si ya estaba ordenado por la misma, invierte.
+function sortTableData(tableKey, data, getField) {
+  const currentSort = window._sortState[tableKey];
+  const newDir = (currentSort?.dir === 'asc') ? 'desc' : 'asc';
+  window._sortState[tableKey] = { field: getField.toString(), dir: newDir };
+
+  return [...data].sort((a, b) => {
+    const va = getField(a);
+    const vb = getField(b);
+    // Numérico
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return newDir === 'asc' ? va - vb : vb - va;
+    }
+    // Fechas
+    const da = new Date(va), db = new Date(vb);
+    if (!isNaN(da) && !isNaN(db)) {
+      return newDir === 'asc' ? da - db : db - da;
+    }
+    // Strings
+    const sa = String(va || '').toLowerCase();
+    const sb = String(vb || '').toLowerCase();
+    if (sa < sb) return newDir === 'asc' ? -1 : 1;
+    if (sa > sb) return newDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+// Render de icono de ordenamiento (para headers)
+function sortIcon(tableKey, fieldKey) {
+  const s = window._sortState[tableKey];
+  if (!s || s.field !== fieldKey) return '<span style="opacity:.3">⇅</span>';
+  return s.dir === 'asc' ? '<span style="color:var(--accent)">↑</span>' : '<span style="color:var(--accent)">↓</span>';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DETALLE DE ACTIVOS PATRIMONIALES (ficha completa)
+// ═══════════════════════════════════════════════════════════
+
+function openAssetDetailModal(id) {
+  const a = (App.data.assets || []).find(x => x.id === id);
+  if (!a) { showToast('error', 'Activo no encontrado'); return; }
+
+  const typeLabels = {
+    edilicio: '🏢 Edificio / Oficina',
+    herramienta: '🔧 Herramienta',
+    equipo: '⚙️ Equipo',
+    informatica: '💻 Equipo informático',
+    instalacion: '🏗️ Instalación',
+    otro: '📦 Otro activo',
+  };
+
+  const statusLabels = {
+    operativo: 'Operativo',
+    en_reparacion: 'En reparación',
+    fuera_servicio: 'Fuera de servicio',
+    baja: 'De baja',
+  };
+
+  const statusColors = {
+    operativo: 'var(--ok)',
+    en_reparacion: 'var(--warn)',
+    fuera_servicio: 'var(--danger)',
+    baja: 'var(--text3)',
+  };
+
+  // Antigüedad del activo
+  let antiguedad = '—';
+  if (a.purchase_date) {
+    const pd = new Date(a.purchase_date);
+    const hoy = new Date();
+    const anios = ((hoy - pd) / (365.25 * 24 * 60 * 60 * 1000));
+    if (anios >= 1) antiguedad = `${anios.toFixed(1)} años`;
+    else antiguedad = `${Math.round(anios * 12)} meses`;
+  }
+
+  // Garantía
+  let garantiaStatus = '—';
+  let garantiaColor = 'var(--text3)';
+  if (a.warranty_until) {
+    const w = new Date(a.warranty_until);
+    const hoy = new Date();
+    const diasRestantes = Math.ceil((w - hoy) / (24 * 60 * 60 * 1000));
+    if (diasRestantes > 0) {
+      garantiaStatus = `${diasRestantes} días restantes (hasta ${a.warranty_until.slice(0,10)})`;
+      garantiaColor = diasRestantes < 30 ? 'var(--warn)' : 'var(--ok)';
+    } else {
+      garantiaStatus = `Vencida hace ${Math.abs(diasRestantes)} días`;
+      garantiaColor = 'var(--danger)';
+    }
+  }
+
+  // Buscar OTs asociadas a este activo (si hay)
+  const otsDelActivo = (App.data.workOrders || []).filter(o =>
+    o.asset_id === a.id || o.asset_code === a.code
+  );
+
+  const canEdit = userHasRole('dueno', 'gerencia', 'jefe_mantenimiento');
+
+  openModal(`🏗️ ${a.code} — ${a.name}`, `
+    <!-- Header con foto placeholder + info principal -->
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:20px;margin-bottom:20px">
+      <div style="width:120px;height:120px;background:var(--bg3);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:52px">
+        ${(typeLabels[a.type] || '📦').split(' ')[0]}
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${typeLabels[a.type] || 'Activo'}</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:4px">${a.name}</div>
+        <div style="font-size:13px;color:var(--text3);margin-bottom:10px">
+          ${a.brand || ''} ${a.model || ''} ${a.serial_no ? ` · S/N: ${a.serial_no}` : ''}
+        </div>
+        <div>
+          <span style="display:inline-block;padding:4px 12px;background:${statusColors[a.status]};color:white;border-radius:20px;font-size:11px;font-weight:700">
+            ● ${statusLabels[a.status] || a.status}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px">
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Antigüedad</div>
+        <div style="font-size:18px;font-weight:700;margin-top:4px">${antiguedad}</div>
+      </div>
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Precio compra</div>
+        <div style="font-size:18px;font-weight:700;margin-top:4px">${a.purchase_price ? '$'+Math.round(parseFloat(a.purchase_price)).toLocaleString('es-AR') : '—'}</div>
+      </div>
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Ubicación</div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px">${a.location || '—'}</div>
+      </div>
+      <div class="kpi-card info" style="padding:12px">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase">OTs asociadas</div>
+        <div style="font-size:18px;font-weight:700;margin-top:4px">${otsDelActivo.length}</div>
+      </div>
+    </div>
+
+    <!-- Ficha técnica -->
+    <div style="margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">📋 Ficha técnica</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:13px">
+        <div><span style="color:var(--text3);font-size:11px">Código interno:</span> <b>${a.code}</b></div>
+        <div><span style="color:var(--text3);font-size:11px">Categoría:</span> ${a.category || '—'}</div>
+        <div><span style="color:var(--text3);font-size:11px">Marca:</span> ${a.brand || '—'}</div>
+        <div><span style="color:var(--text3);font-size:11px">Modelo:</span> ${a.model || '—'}</div>
+        <div><span style="color:var(--text3);font-size:11px">N° de serie:</span> <span class="td-mono">${a.serial_no || '—'}</span></div>
+        <div><span style="color:var(--text3);font-size:11px">Fecha de compra:</span> ${a.purchase_date ? a.purchase_date.slice(0,10) : '—'}</div>
+        <div style="grid-column:span 2"><span style="color:var(--text3);font-size:11px">Garantía:</span> <span style="color:${garantiaColor};font-weight:600">${garantiaStatus}</span></div>
+      </div>
+    </div>
+
+    ${a.notes ? `
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📝 Notas</div>
+        <div style="background:var(--bg3);padding:10px 14px;border-radius:var(--radius);font-size:13px;color:var(--text)">
+          ${a.notes}
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Historial de OTs -->
+    <div style="margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">🔧 Historial de mantenimiento</div>
+      ${otsDelActivo.length === 0 ? `
+        <div style="background:var(--bg3);padding:16px;text-align:center;color:var(--text3);font-size:12px;border-radius:var(--radius)">
+          Este activo no tiene órdenes de trabajo asociadas todavía.
+        </div>
+      ` : `
+        <table style="width:100%;font-size:12px">
+          <thead>
+            <tr style="color:var(--text3);font-size:11px">
+              <th style="text-align:left;padding:6px">Código</th>
+              <th style="text-align:left;padding:6px">Fecha</th>
+              <th style="text-align:left;padding:6px">Descripción</th>
+              <th style="text-align:right;padding:6px">Costo</th>
+              <th style="text-align:left;padding:6px">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${otsDelActivo.slice(0, 10).map(o => `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:6px;font-family:var(--mono);font-weight:600">${o.code || o.id.substring(0,8)}</td>
+                <td style="padding:6px">${(o.opened || '—').toString().slice(0,10)}</td>
+                <td style="padding:6px">${((o.desc || o.description || '—')+'').substring(0,40)}</td>
+                <td style="padding:6px;text-align:right;font-family:var(--mono)">$${Math.round((parseFloat(o.parts_cost)||0)+(parseFloat(o.labor_cost)||0)).toLocaleString('es-AR')}</td>
+                <td style="padding:6px">${o.status || '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ${otsDelActivo.length > 10 ? `<div style="font-size:10px;color:var(--text3);text-align:center;padding:6px">Mostrando 10 de ${otsDelActivo.length} OTs</div>` : ''}
+      `}
+    </div>
+  `, [
+    ...(canEdit ? [{ label: '✏️ Editar activo', cls: 'btn-secondary', fn: () => { closeModal(); openEditAssetModal(id); } }] : []),
+    { label: 'Cerrar', cls: 'btn-primary', fn: closeModal },
+  ]);
+}
+
+// Ordenamiento de la tabla de combustible por campo
+function _fuelSortBy(field) {
+  window._fuelSort = window._fuelSort || { field: null, dir: 'desc' };
+
+  // Si clickean el mismo campo, invertir dirección
+  if (window._fuelSort.field === field) {
+    window._fuelSort.dir = window._fuelSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    window._fuelSort.field = field;
+    window._fuelSort.dir = 'desc';  // Default: descendente (más nuevo primero)
+  }
+
+  // Ordenar el array maestro (para que afecte tanto a la vista como a exportación)
+  App.data.fuelLogs.sort((a, b) => {
+    const va = a[field];
+    const vb = b[field];
+    let cmp = 0;
+
+    if (field === 'date') {
+      cmp = new Date(va || 0) - new Date(vb || 0);
+    } else if (typeof va === 'number' && typeof vb === 'number') {
+      cmp = va - vb;
+    } else {
+      cmp = String(va || '').localeCompare(String(vb || ''));
+    }
+
+    return window._fuelSort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  // Resetear todos los iconos
+  ['date','vehicle','driver','liters','total'].forEach(f => {
+    const el = document.getElementById('fuel-sort-' + f);
+    if (el) { el.textContent = '⇅'; el.style.opacity = '.3'; el.style.color = ''; }
+  });
+
+  // Marcar el campo activo
+  const icon = document.getElementById('fuel-sort-' + field);
+  if (icon) {
+    icon.textContent = window._fuelSort.dir === 'asc' ? '↑' : '↓';
+    icon.style.opacity = '1';
+    icon.style.color = 'var(--accent)';
+  }
+
+  // Re-renderizar la tabla con los filtros actuales
+  _filterFuelLogs();
 }
