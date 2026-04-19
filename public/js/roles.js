@@ -377,6 +377,28 @@ function _mapTire(t) {
   };
 }
 
+function _mapTireMovement(m) {
+  // Formato esperado por renderTireHistory en app.js:
+  // { date, serial, fromPos, toPos, type, vehicle, km, user, obs }
+  const d = m.created_at ? new Date(m.created_at) : null;
+  const dateStr = d
+    ? d.toISOString().slice(0,16).replace('T',' ')
+    : '—';
+  return {
+    id:      m.id,
+    date:    dateStr,
+    serial:  m.serial_no || '[eliminada]',
+    fromPos: m.from_pos || '—',
+    toPos:   m.to_pos   || '—',
+    type:    m.type     || 'Movimiento',
+    vehicle: m.vehicle_code || '—',
+    km:      parseFloat(m.km_at_move) || 0,
+    user:    m.user_name || '—',
+    obs:     m.notes || '',
+    _raw:    m,
+  };
+}
+
 function _mapVehicle(v) {
   return {
     id:          v.id,
@@ -477,7 +499,7 @@ async function loadInitialData() {
   try {
     showToast('ok', 'Cargando datos...');
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -487,6 +509,7 @@ async function loadInitialData() {
       apiFetch('/api/fuel/tanks'),
       apiFetch('/api/users'),
       apiFetch('/api/tires'),
+      apiFetch('/api/tires/history'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -494,6 +517,10 @@ async function loadInitialData() {
     if (tiresRes?.ok) {
       const rawTires = await tiresRes.json();
       App.data.tires = rawTires.map(_mapTire);
+    }
+    if (tireHistoryRes?.ok) {
+      const rawHist = await tireHistoryRes.json();
+      App.data.tireHistory = rawHist.map(_mapTireMovement);
     }
     if (workordersRes?.ok)  App.data.workOrders  = await workordersRes.json();
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
