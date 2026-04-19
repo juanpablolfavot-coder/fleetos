@@ -3987,7 +3987,7 @@ async function renderUsers() {
       <div class="card" style="padding:0;overflow:hidden">
         <table style="width:100%;border-collapse:collapse">
           <thead>
-            <tr style="background:var(--bg3);border-bottom:1px solid var(--border1)">
+            <tr style="background:var(--bg3);border-bottom:1px solid var(--border)">
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Nombre</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Email</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Rol</th>
@@ -3999,7 +3999,7 @@ async function renderUsers() {
           </thead>
           <tbody>
             ${active.map(u => `
-              <tr style="border-bottom:1px solid var(--border1)">
+              <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:12px 16px;font-weight:600;color:var(--text)">${u.name}</td>
                 <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
                 <td style="padding:12px 16px">
@@ -4286,19 +4286,19 @@ function renderChoferPanel() {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
         <button onclick="openChoferNovedadModal()" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:24px 16px;cursor:pointer;text-align:center;transition:.2s" onmouseover="this.style.background='rgba(239,68,68,.25)'" onmouseout="this.style.background='rgba(239,68,68,.15)'">
           <div style="font-size:28px;margin-bottom:8px">⚠️</div>
-          <div style="color:#f87171;font-weight:600;font-size:14px">Reportar novedad</div>
+          <div style="color:var(--danger);font-weight:600;font-size:14px">Reportar novedad</div>
         </button>
         <button onclick="openChoferCargaModal('diesel')" style="background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.3);border-radius:var(--radius);padding:24px 16px;cursor:pointer;text-align:center;transition:.2s" onmouseover="this.style.background='rgba(59,130,246,.25)'" onmouseout="this.style.background='rgba(59,130,246,.15)'">
           <div style="font-size:28px;margin-bottom:8px">⛽</div>
-          <div style="color:#60a5fa;font-weight:600;font-size:14px">Cargar combustible</div>
+          <div style="color:var(--accent);font-weight:600;font-size:14px">Cargar combustible</div>
         </button>
         <button onclick="openChoferChecklistModal()" style="background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:var(--radius);padding:24px 16px;cursor:pointer;text-align:center;transition:.2s" onmouseover="this.style.background='rgba(34,197,94,.25)'" onmouseout="this.style.background='rgba(34,197,94,.15)'">
           <div style="font-size:28px;margin-bottom:8px">✅</div>
-          <div style="color:#4ade80;font-weight:600;font-size:14px">Checklist salida</div>
+          <div style="color:var(--ok);font-weight:600;font-size:14px">Checklist salida</div>
         </button>
         <button onclick="openChoferCargaModal('urea')" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:var(--radius);padding:24px 16px;cursor:pointer;text-align:center;transition:.2s" onmouseover="this.style.background='rgba(99,102,241,.25)'" onmouseout="this.style.background='rgba(99,102,241,.15)'">
           <div style="font-size:28px;margin-bottom:8px">🔵</div>
-          <div style="color:#a5b4fc;font-weight:600;font-size:14px">Cargar urea</div>
+          <div style="color:var(--info);font-weight:600;font-size:14px">Cargar urea</div>
         </button>
       </div>
 
