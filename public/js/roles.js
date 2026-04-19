@@ -626,6 +626,7 @@ async function loadInitialData() {
       App.config.bases         = cfg.bases         || ['Central','Norte','Sur'];
       App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
       App.config.labor_rate    = parseFloat(cfg.labor_rate) || 0;
+      App.config.areas         = cfg.areas         || {};
     }
 
     // Inicializar arrays si alguna API falló
