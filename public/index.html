@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Expreso Biletta — FleetOS</title>
-  <link rel="stylesheet" href="css/main.css?v=v2light-20260419">
-  <link rel="stylesheet" href="css/login.css?v=v2light-20260419">
+  <link rel="stylesheet" href="css/main.css?v=v2light-20260419b">
+  <link rel="stylesheet" href="css/login.css?v=v2light-20260419b">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
 /* MODAL - CSS crítico inline para evitar problemas de cache */
@@ -80,10 +80,12 @@
 html, body {
   width: 100% !important;
   min-height: 100vh !important;
+  background: var(--bg) !important;
 }
 #app-shell {
   width: 100% !important;
   min-height: 100vh !important;
+  background: var(--bg) !important;
 }
 .main {
   margin-left: 220px !important;
@@ -91,6 +93,7 @@ html, body {
   height: 100vh !important;
   overflow-y: auto !important;
   display: block !important;
+  background: var(--bg) !important;
 }
 @media (max-width: 900px) {
   .main { margin-left: 60px !important; width: calc(100% - 60px) !important; }
