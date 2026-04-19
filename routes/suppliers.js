@@ -8,6 +8,16 @@ const { query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
 const { validateUUID } = require('../middleware/security');
 
+// Helper: clampa rating a rango [0..5] para que NUMERIC(2,1) no se queje
+function clampRating(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = parseFloat(v);
+  if (isNaN(n)) return null;
+  if (n < 0) return 0;
+  if (n > 5) return 5;
+  return n;
+}
+
 // Auto-create de la tabla
 (async () => {
   try {
@@ -120,7 +130,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         b.moneda||'ARS',
         (b.discount_pct!==undefined && b.discount_pct!=='')?parseFloat(b.discount_pct):0,
         (b.delivery_time_days!==undefined && b.delivery_time_days!=='')?parseInt(b.delivery_time_days):null,
-        (b.rating!==undefined && b.rating!=='')?parseFloat(b.rating):null,
+        clampRating(b.rating),
         b.bank_name||null, b.bank_cbu||null, b.bank_alias||null,
         b.notes||null, b.status||'activo', b.blacklist_reason||null
       ]
@@ -173,7 +183,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
         b.moneda||null,
         (b.discount_pct!==undefined && b.discount_pct!=='')?parseFloat(b.discount_pct):null,
         (b.delivery_time_days!==undefined && b.delivery_time_days!=='')?parseInt(b.delivery_time_days):null,
-        (b.rating!==undefined && b.rating!=='')?parseFloat(b.rating):null,
+        clampRating(b.rating),
         b.bank_name||null, b.bank_cbu||null, b.bank_alias||null,
         b.notes||null, b.status||null, b.blacklist_reason||null,
         req.params.id
