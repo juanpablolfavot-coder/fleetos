@@ -527,14 +527,34 @@ function _mapStockItem(s) {
 
 function _mapDocument(d) {
   const days = Math.ceil((new Date(d.expiry_date) - new Date()) / 86400000);
+  const isUser = d.entity_type === 'user';
+
+  // Etiqueta visible según el tipo de entidad
+  let displayName, displaySub;
+  if (isUser) {
+    // Es un chofer/usuario
+    displayName = d.user_name || '[Chofer eliminado]';
+    displaySub  = d.user_vehicle_code || (d.user_role === 'chofer' ? 'Chofer' : (d.user_role || '—'));
+  } else {
+    // Es un vehículo (comportamiento histórico)
+    displayName = d.vehicle_code || d.entity_label || '[Vehículo eliminado]';
+    displaySub  = d.vehicle_plate || '—';
+  }
+
   return {
-    id:      d.id,
-    vehicle: d.entity_id,
-    type:    d.doc_type,
-    expiry:  d.expiry_date?.slice(0,10),
-    status:  days < 0 ? 'danger' : days < 30 ? 'warn' : 'ok',
-    ref:     d.reference || '—',
-    plate:   '—',
+    id:          d.id,
+    entity_type: d.entity_type || 'vehicle',
+    entity_id:   d.entity_id,
+    // Campos compatibles con el render existente
+    vehicle:     displayName,
+    plate:       displaySub,
+    // Info adicional para mostrar "chofer" vs "vehículo" en la UI
+    isUser:      isUser,
+    displayName: displayName,
+    type:        d.doc_type,
+    expiry:      d.expiry_date ? d.expiry_date.slice(0,10) : '',
+    status:      days < 0 ? 'danger' : days < 30 ? 'warn' : 'ok',
+    ref:         d.reference || '—',
   };
 }
 
