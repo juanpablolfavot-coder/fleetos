@@ -1,4 +1,3 @@
-
 // ═══════════════════════════════════════════════════════════
 //  FleetOS — Panel Auditor
 //  Todos los endpoints son solo lectura (GET)
@@ -394,6 +393,69 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
     }
     res.json({ meses });
   } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── 7. Uso de flota (heatmap de actividad por vehículo × día) ──
+// Devuelve: array de vehículos con array de días (1..31) indicando nivel de actividad
+// Fuentes combinadas: checklists + fuel_logs + work_orders (cualquier actividad cuenta)
+auditorRouter.get('/uso-flota', authenticate, canAudit, async (req, res) => {
+  try {
+    const { mes } = req.query;
+    const now = new Date();
+    const yr  = mes ? parseInt(mes.split('-')[0]) : now.getFullYear();
+    const mo  = mes ? parseInt(mes.split('-')[1]) : now.getMonth() + 1;
+    const desde = `${yr}-${String(mo).padStart(2,'0')}-01`;
+    const lastDay = new Date(yr, mo, 0).getDate();
+    const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+
+    // Asegurar tablas por si aún no existen (mismo patrón que resumen)
+    await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, vehicle_code VARCHAR(20), created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+
+    // Una sola query que une 3 fuentes y cuenta actividad por vehículo × día
+    const r = await query(`
+      WITH actividad AS (
+        SELECT vehicle_id AS vid, DATE(created_at) AS dia FROM checklists
+          WHERE created_at BETWEEN $1 AND $2 AND vehicle_id IS NOT NULL
+        UNION ALL
+        SELECT vehicle_id AS vid, DATE(logged_at) AS dia FROM fuel_logs
+          WHERE logged_at BETWEEN $1 AND $2 AND vehicle_id IS NOT NULL
+        UNION ALL
+        SELECT vehicle_id AS vid, DATE(opened_at) AS dia FROM work_orders
+          WHERE opened_at BETWEEN $1 AND $2 AND vehicle_id IS NOT NULL
+      )
+      SELECT v.id, v.code, v.plate,
+        EXTRACT(DAY FROM a.dia)::int AS dia,
+        COUNT(*)::int AS eventos
+      FROM vehicles v
+      LEFT JOIN actividad a ON a.vid = v.id
+      WHERE v.active = TRUE
+      GROUP BY v.id, v.code, v.plate, a.dia
+      ORDER BY v.code ASC, dia ASC
+    `, [desde, hasta + ' 23:59:59']);
+
+    // Agrupar por vehículo
+    const byVehicle = {};
+    r.rows.forEach(row => {
+      if (!byVehicle[row.id]) {
+        byVehicle[row.id] = {
+          id: row.id, code: row.code, plate: row.plate,
+          dias: {}, total: 0
+        };
+      }
+      if (row.dia !== null) {
+        byVehicle[row.id].dias[row.dia] = (byVehicle[row.id].dias[row.dia] || 0) + row.eventos;
+        byVehicle[row.id].total += row.eventos;
+      }
+    });
+
+    res.json({
+      periodo: { año: yr, mes: mo, desde, hasta, dias_mes: lastDay },
+      vehiculos: Object.values(byVehicle).sort((a,b)=>b.total-a.total),
+    });
+  } catch(err) {
+    console.error('auditor uso-flota:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = auditorRouter;
