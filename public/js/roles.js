@@ -559,22 +559,47 @@ async function loadInitialData() {
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
+    else App.data.vehicles = App.data.vehicles || [];
+
     if (usersRes?.ok)       App.data.users       = await usersRes.json();
+    else App.data.users = App.data.users || [];
+
     if (tiresRes?.ok) {
       const rawTires = await tiresRes.json();
       App.data.tires = rawTires.map(_mapTire);
+    } else {
+      App.data.tires = App.data.tires || [];
     }
     if (tireHistoryRes?.ok) {
       const rawHist = await tireHistoryRes.json();
       App.data.tireHistory = rawHist.map(_mapTireMovement);
+    } else {
+      App.data.tireHistory = App.data.tireHistory || [];
     }
     if (workordersRes?.ok)  App.data.workOrders  = await workordersRes.json();
+    else App.data.workOrders = App.data.workOrders || [];
+
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
+    else App.data.fuelLogs = App.data.fuelLogs || [];
+
     if (stockRes?.ok)       App.data.stock       = await stockRes.json();
+    else App.data.stock = App.data.stock || [];
+
     if (docsRes?.ok)        App.data.documents   = await docsRes.json();
+    else App.data.documents = App.data.documents || [];
+
     if (tanksRes?.ok)       App.data.tanks       = await tanksRes.json();
+    else App.data.tanks = App.data.tanks || [];
+
     if (suppliersRes?.ok)   App.data.suppliers   = await suppliersRes.json();
+    else App.data.suppliers = App.data.suppliers || [];
+
     if (assetsRes?.ok)      App.data.assets      = await assetsRes.json();
+    else App.data.assets = App.data.assets || [];
+
+    // Alias usado por algunos renders
+    App.data.fuel = App.data.fuelLogs;
+    App.data.purchaseOrders = App.data.purchaseOrders || [];
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};
