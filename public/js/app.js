@@ -1859,8 +1859,8 @@ function getAxleConfig(vehicle) {
 }
 // ─────────────────────────────────────────
 function renderTires() {
-  const mounted  = App.data.tires.filter(t=>t.vehicle!=='STOCK'&&t.vehicle!=='RECAP'&&t.vehicle!=='BAJA');
-  const inStock  = App.data.tires.filter(t=>t.vehicle==='STOCK');
+  const mounted  = App.data.tires.filter(t=>t.vehicle!=='STOCK'&&t.vehicle!=='RECAP'&&t.vehicle!=='RECAPADO'&&t.vehicle!=='BAJA');
+  const inStock  = App.data.tires.filter(t=>t.vehicle==='STOCK');   const inRecap  = App.data.tires.filter(t=>t.vehicle==='RECAPADO');   const inBaja   = App.data.tires.filter(t=>t.vehicle==='BAJA');
   const crit     = mounted.filter(t=>t.status==='danger').length;
   const warn     = mounted.filter(t=>t.status==='warn').length;
 
@@ -1869,7 +1869,7 @@ function renderTires() {
     .slice(0,12);
 
   document.getElementById('page-tires').innerHTML = `
-    <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+    <div class="kpi-row" style="grid-template-columns:repeat(6,1fr);margin-bottom:20px">
       <div class="kpi-card ok">
         <div class="kpi-label">Cubiertas montadas</div>
         <div class="kpi-value ok">${mounted.length}</div>
@@ -1888,7 +1888,7 @@ function renderTires() {
       <div class="kpi-card info">
         <div class="kpi-label">En stock disponible</div>
         <div class="kpi-value white">${inStock.length}</div>
-        <div class="kpi-trend">listas para montar</div>
+        <div class="kpi-trend">listas para montar</div>       </div>       <div class="kpi-card ${inRecap.length>0?'warn':'ok'}">         <div class="kpi-label">🔄 En recapado</div>         <div class="kpi-value ${inRecap.length>0?'warn':'ok'}">${inRecap.length}</div>         <div class="kpi-trend">enviadas a recapar</div>       </div>       <div class="kpi-card ${inBaja.length>0?'danger':'ok'}">         <div class="kpi-label">❌ Dadas de baja</div>         <div class="kpi-value ${inBaja.length>0?'danger':'ok'}">${inBaja.length}</div>         <div class="kpi-trend">fuera de servicio</div>
       </div>
     </div>
 
@@ -1952,7 +1952,7 @@ function renderTires() {
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
             <td class="td-mono">$${(t.purchase||0).toLocaleString()}</td>
             <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
-          </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
+          </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}           </tbody>         </table>       </div>     </div>      <div class="card" style="margin-bottom:16px">       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">         <div class="card-title" style="margin:0">🔄 Cubiertas en recapado</div>         <span style="font-size:12px;color:var(--text3)">${inRecap.length} cubierta${inRecap.length===1?'':'s'} enviada${inRecap.length===1?'':'s'} a recapar</span>       </div>       <div class="table-wrap">         <table>           <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km acum.</th><th>Dibujo</th><th>Precio compra</th><th></th></tr></thead>           <tbody>${inRecap.map(t=>`<tr>             <td class="td-mono td-main">${t.serial}</td>             <td>${t.brand||'—'}</td>             <td class="td-mono">${t.size||'—'}</td>             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>             <td class="td-mono" style="color:var(--warn)">${(t.tread||0)}mm</td>             <td class="td-mono">$${(t.price||0).toLocaleString()}</td>             <td><button class="btn btn-secondary btn-sm" onclick="openTireActionModal('${t.serial}')">Acción</button></td>           </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:16px">Ninguna cubierta en recapado</td></tr>'}           </tbody>         </table>       </div>     </div>      <div class="card" style="margin-bottom:16px">       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">         <div class="card-title" style="margin:0">❌ Cubiertas dadas de baja</div>         <span style="font-size:12px;color:var(--text3)">${inBaja.length} cubierta${inBaja.length===1?'':'s'} fuera de servicio</span>       </div>       <div class="table-wrap">         <table>           <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km total</th><th>Último dibujo</th><th>Precio compra</th></tr></thead>           <tbody>${inBaja.map(t=>`<tr style="opacity:0.7">             <td class="td-mono td-main">${t.serial}</td>             <td>${t.brand||'—'}</td>             <td class="td-mono">${t.size||'—'}</td>             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>             <td class="td-mono" style="color:var(--danger)">${(t.tread||0)}mm</td>             <td class="td-mono">$${(t.price||0).toLocaleString()}</td>           </tr>`).join('')||'<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:16px">Ninguna cubierta dada de baja</td></tr>'}           </tbody>         </table>       </div>     </div>      <div class="card" style="display:none">       <!-- cierre fantasma para compensar estructura anterior -->
           </tbody>
         </table>
       </div>
