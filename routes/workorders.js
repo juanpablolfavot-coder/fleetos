@@ -3,13 +3,31 @@ const { query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 
-// Auto-migrate: agregar campos ot_tipo y asset_id si no existen
+// Auto-migrate: agregar campos ot_tipo, asset_id, y crear tabla work_order_labor
 (async () => {
   try {
     await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS ot_tipo VARCHAR(20) DEFAULT 'vehiculo'`).catch(()=>{});
     await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
     // Backfill: las OTs viejas sin ot_tipo se marcan como 'vehiculo'
     await query(`UPDATE work_orders SET ot_tipo = 'vehiculo' WHERE ot_tipo IS NULL`).catch(()=>{});
+
+    // Partes de trabajo por mecánico (Opción B: trazabilidad MO)
+    await query(`CREATE TABLE IF NOT EXISTS work_order_labor (
+      id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      wo_id       UUID NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+      user_id     UUID REFERENCES users(id),
+      worker_name VARCHAR(200) NOT NULL,
+      hours       NUMERIC(5,2) NOT NULL CHECK (hours > 0 AND hours <= 24),
+      rate        NUMERIC(10,2) NOT NULL DEFAULT 0,
+      subtotal    NUMERIC(12,2) GENERATED ALWAYS AS (hours * rate) STORED,
+      work_date   DATE NOT NULL DEFAULT CURRENT_DATE,
+      notes       TEXT,
+      created_by  UUID REFERENCES users(id),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`).catch(()=>{});
+    await query(`CREATE INDEX IF NOT EXISTS idx_wol_wo ON work_order_labor(wo_id)`).catch(()=>{});
+    await query(`CREATE INDEX IF NOT EXISTS idx_wol_user ON work_order_labor(user_id)`).catch(()=>{});
+    await query(`CREATE INDEX IF NOT EXISTS idx_wol_date ON work_order_labor(work_date)`).catch(()=>{});
   } catch(e) { /* silent */ }
 })();
 
@@ -270,5 +288,141 @@ router.delete('/preventivas-hoy', authenticate, requireRole('dueno'), async (req
     res.status(500).json({ error: err.message });
   }
 });
+
+// ═══════════════════════════════════════════════════════════
+//  PARTES DE TRABAJO (OPCIÓN B — trazabilidad MO)
+//  Cada OT puede tener múltiples "partes": quién trabajó, horas, tarifa
+//  El costo MO se consolida desde los partes (no se ingresa a mano)
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/workorders/:id/labor — Listar partes de trabajo de una OT
+router.get('/:id/labor', authenticate, validateUUID('id'), async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT wol.*, u.name AS user_name_ref, cb.name AS created_by_name
+       FROM work_order_labor wol
+       LEFT JOIN users u ON u.id = wol.user_id
+       LEFT JOIN users cb ON cb.id = wol.created_by
+       WHERE wol.wo_id = $1
+       ORDER BY wol.work_date ASC, wol.created_at ASC`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch(err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/workorders/:id/labor — Agregar parte de trabajo
+router.post('/:id/labor',
+  authenticate,
+  requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'),
+  validateUUID('id'),
+  async (req, res) => {
+    const client = await require('../db/pool').pool.connect();
+    try {
+      const { user_id, worker_name, hours, rate, work_date, notes } = req.body;
+
+      // Validaciones básicas
+      const name = (worker_name || '').trim();
+      if (!name) return res.status(400).json({ error: 'worker_name es obligatorio' });
+      const hoursNum = parseFloat(hours);
+      if (!hoursNum || hoursNum <= 0 || hoursNum > 24) {
+        return res.status(400).json({ error: 'hours debe ser un número entre 0.01 y 24' });
+      }
+      const rateNum = parseFloat(rate) || 0;
+      if (rateNum < 0) return res.status(400).json({ error: 'rate no puede ser negativo' });
+
+      await client.query('BEGIN');
+
+      // Verificar que la OT existe y no está cerrada
+      const wo = await client.query(
+        'SELECT id, status, labor_cost FROM work_orders WHERE id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      if (!wo.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'OT no encontrada' });
+      }
+      if (wo.rows[0].status === 'Cerrada') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'No se pueden agregar partes a una OT cerrada' });
+      }
+
+      // Insertar el parte
+      const ins = await client.query(
+        `INSERT INTO work_order_labor (wo_id, user_id, worker_name, hours, rate, work_date, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8)
+         RETURNING *`,
+        [req.params.id, user_id || null, name, hoursNum, rateNum,
+         work_date || null, (notes || null), req.user.id]
+      );
+
+      // Recalcular labor_cost de la OT = SUMA de todos los partes
+      await client.query(
+        `UPDATE work_orders
+         SET labor_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_labor WHERE wo_id = $1), 0)
+         WHERE id = $1`,
+        [req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.status(201).json(ins.rows[0]);
+    } catch(err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally { client.release(); }
+  }
+);
+
+// DELETE /api/workorders/:id/labor/:laborId — Eliminar parte
+router.delete('/:id/labor/:laborId',
+  authenticate,
+  requireRole('dueno','gerencia','jefe_mantenimiento'),
+  validateUUID('id'),
+  validateUUID('laborId'),
+  async (req, res) => {
+    const client = await require('../db/pool').pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Verificar OT no cerrada
+      const wo = await client.query(
+        'SELECT status FROM work_orders WHERE id = $1 FOR UPDATE',
+        [req.params.id]
+      );
+      if (!wo.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'OT no encontrada' });
+      }
+      if (wo.rows[0].status === 'Cerrada') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'No se pueden eliminar partes de una OT cerrada' });
+      }
+
+      // Eliminar
+      const del = await client.query(
+        'DELETE FROM work_order_labor WHERE id = $1 AND wo_id = $2 RETURNING id',
+        [req.params.laborId, req.params.id]
+      );
+      if (!del.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Parte de trabajo no encontrado' });
+      }
+
+      // Recalcular labor_cost de la OT
+      await client.query(
+        `UPDATE work_orders
+         SET labor_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_labor WHERE wo_id = $1), 0)
+         WHERE id = $1`,
+        [req.params.id]
+      );
+
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch(err) {
+      await client.query('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    } finally { client.release(); }
+  }
+);
 
 module.exports = router;
