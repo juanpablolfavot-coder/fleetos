@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════
 //  FleetOS — Autenticación real con JWT
+//  Gestión de sesión, roles, y carga inicial
 // ═══════════════════════════════════════════
 
 // Token JWT solo en memoria — la sesión se restaura con la cookie refreshToken
@@ -64,14 +65,16 @@ async function _tryAutoLogin(attempt = 1) {
       roleData: getRoleData(u.role),
     };
 
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-shell').style.display    = '';
+    const loginScreen = document.getElementById('login-screen');
+    const appShell    = document.getElementById('app-shell');
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (appShell)    appShell.style.display    = '';
     bootApp();
 
   } catch(e) {
     // Error de red — puede ser que Render está despertando (plan gratuito duerme)
     if (attempt < MAX_ATTEMPTS) {
-      // Reintentar con backoff: 3s, 6s, 10s
+      // Reintentar con backoff: 3s, 6s, 9s, 12s
       const delay = attempt * 3000;
       if (btn) btn.textContent = `Servidor iniciando, esperando ${delay/1000}s...`;
       setTimeout(() => _tryAutoLogin(attempt + 1), delay);
@@ -100,17 +103,29 @@ function toggleAuthMode(e) {
   if (e) e.preventDefault();
   _authMode = _authMode === 'login' ? 'register' : 'login';
   const isReg = _authMode === 'register';
-  document.getElementById('auth-title').textContent    = isReg ? 'Registrarse como chofer' : 'Iniciar sesión';
-  document.getElementById('auth-sub').textContent      = isReg ? 'Tu cuenta quedará pendiente de aprobación.' : 'Ingresá con tu email y contraseña.';
-  document.getElementById('login-form').style.display  = isReg ? 'none' : '';
-  document.getElementById('register-form').style.display = isReg ? '' : 'none';
-  document.getElementById('auth-toggle-text').textContent  = isReg ? '¿Ya tenés cuenta?' : '¿Sos chofer y no tenés cuenta?';
-  document.getElementById('auth-toggle-link').textContent  = isReg ? 'Iniciá sesión' : 'Registrate acá';
-  const btn = document.getElementById('btn-login');
-  btn.textContent = isReg ? 'Solicitar acceso' : 'Ingresar al sistema';
-  btn.onclick = isReg ? doRegister : doLogin;
-  document.getElementById('login-error').textContent = '';
-  document.getElementById('reg-error').textContent = '';
+
+  const elTitle     = document.getElementById('auth-title');
+  const elSub       = document.getElementById('auth-sub');
+  const elLogin     = document.getElementById('login-form');
+  const elRegister  = document.getElementById('register-form');
+  const elToggleTxt = document.getElementById('auth-toggle-text');
+  const elToggleLnk = document.getElementById('auth-toggle-link');
+  const elLoginErr  = document.getElementById('login-error');
+  const elRegErr    = document.getElementById('reg-error');
+  const btn         = document.getElementById('btn-login');
+
+  if (elTitle)     elTitle.textContent    = isReg ? 'Registrarse como chofer' : 'Iniciar sesión';
+  if (elSub)       elSub.textContent      = isReg ? 'Tu cuenta quedará pendiente de aprobación.' : 'Ingresá con tu email y contraseña.';
+  if (elLogin)     elLogin.style.display  = isReg ? 'none' : '';
+  if (elRegister)  elRegister.style.display = isReg ? '' : 'none';
+  if (elToggleTxt) elToggleTxt.textContent = isReg ? '¿Ya tenés cuenta?' : '¿Sos chofer y no tenés cuenta?';
+  if (elToggleLnk) elToggleLnk.textContent = isReg ? 'Iniciá sesión' : 'Registrate acá';
+  if (btn) {
+    btn.textContent = isReg ? 'Solicitar acceso' : 'Ingresar al sistema';
+    btn.onclick = isReg ? doRegister : doLogin;
+  }
+  if (elLoginErr) elLoginErr.textContent = '';
+  if (elRegErr)   elRegErr.textContent = '';
 }
 
 async function doRegister() {
@@ -122,11 +137,19 @@ async function doRegister() {
   const okDiv    = document.getElementById('reg-success');
   const btn      = document.getElementById('btn-login');
 
-  errDiv.textContent = ''; okDiv.style.display = 'none';
-  if (!name || !email || !password) { errDiv.textContent = 'Completá todos los campos obligatorios'; return; }
-  if (password.length < 6) { errDiv.textContent = 'La contraseña debe tener al menos 6 caracteres'; return; }
+  if (errDiv) errDiv.textContent = '';
+  if (okDiv)  okDiv.style.display = 'none';
 
-  btn.disabled = true; btn.textContent = 'Enviando solicitud...';
+  if (!name || !email || !password) {
+    if (errDiv) errDiv.textContent = 'Completá todos los campos obligatorios';
+    return;
+  }
+  if (password.length < 6) {
+    if (errDiv) errDiv.textContent = 'La contraseña debe tener al menos 6 caracteres';
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando solicitud...'; }
   try {
     const res = await fetch('/api/auth/register', {
       method: 'POST',
@@ -134,16 +157,22 @@ async function doRegister() {
       body: JSON.stringify({ name, email, password, vehicle_code: vehicle || null })
     });
     const data = await res.json();
-    if (!res.ok) { errDiv.textContent = data.error || 'Error al registrarse'; btn.disabled=false; btn.textContent='Solicitar acceso'; return; }
-    okDiv.textContent = '✓ Solicitud enviada. El administrador debe aprobar tu cuenta antes de que puedas ingresar.';
-    okDiv.style.display = 'block';
-    btn.textContent = 'Solicitud enviada';
-    setTimeout(()=>{ toggleAuthMode(null); btn.disabled=false; }, 4000);
+    if (!res.ok) {
+      if (errDiv) errDiv.textContent = data.error || 'Error al registrarse';
+      if (btn) { btn.disabled = false; btn.textContent = 'Solicitar acceso'; }
+      return;
+    }
+    if (okDiv) {
+      okDiv.textContent = '✓ Solicitud enviada. El administrador debe aprobar tu cuenta antes de que puedas ingresar.';
+      okDiv.style.display = 'block';
+    }
+    if (btn) btn.textContent = 'Solicitud enviada';
+    setTimeout(() => { toggleAuthMode(null); if (btn) btn.disabled = false; }, 4000);
   } catch(e) {
-    errDiv.textContent = 'Error de conexión'; btn.disabled=false; btn.textContent='Solicitar acceso';
+    if (errDiv) errDiv.textContent = 'Error de conexión';
+    if (btn) { btn.disabled = false; btn.textContent = 'Solicitar acceso'; }
   }
 }
-
 
 async function doLogin() {
   const email    = document.getElementById('login-email')?.value?.trim();
@@ -188,11 +217,14 @@ async function doLogin() {
       roleData: getRoleData(u.role),
     };
 
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-shell').style.display    = '';
+    const loginScreen = document.getElementById('login-screen');
+    const appShell    = document.getElementById('app-shell');
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (appShell)    appShell.style.display    = '';
     bootApp();
 
   } catch(err) {
+    console.error('[doLogin]', err);
     if (errorDiv) errorDiv.textContent = 'Error de conexión. Intentá de nuevo.';
     if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
   }
@@ -215,9 +247,14 @@ window.apiFetch = async function(url, options = {}) {
 function logout() {
   _clearToken();
   App.data = {};
-  document.getElementById('app-shell').style.display = 'none';
+  if (window._keepaliveInterval) {
+    clearInterval(window._keepaliveInterval);
+    window._keepaliveInterval = null;
+  }
+  const appShell = document.getElementById('app-shell');
+  if (appShell) appShell.style.display = 'none';
   const ls = document.getElementById('login-screen');
-  ls.style.display = '';
+  if (ls) ls.style.display = '';
   const emailEl = document.getElementById('login-email');
   const passEl  = document.getElementById('login-password');
   const errEl   = document.getElementById('login-error');
@@ -227,7 +264,7 @@ function logout() {
   const btn = document.getElementById('btn-login');
   if (btn) { btn.disabled = false; btn.textContent = 'Ingresar al sistema'; }
   // Llamar al servidor para invalidar refresh token
-  fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
 // ── ROLES y PERMISOS ──
@@ -247,7 +284,17 @@ function getRoleData(role) {
 }
 
 function getRoleColor(role) {
-  const map = { dueno:'#7c3aed', gerencia:'#2563eb', jefe_mantenimiento:'#d97706', mecanico:'#0891b2', chofer:'#16a34a', encargado_combustible:'#d97706', paniol:'#0891b2', contador:'#7c3aed', auditor:'#dc2626' };
+  const map = {
+    dueno:                 '#7c3aed',
+    gerencia:              '#2563eb',
+    jefe_mantenimiento:    '#d97706',
+    mecanico:              '#0891b2',
+    chofer:                '#16a34a',
+    encargado_combustible: '#ea580c',
+    paniol:                '#059669',
+    contador:              '#db2777',
+    auditor:               '#dc2626'
+  };
   return map[role] || '#2563eb';
 }
 
@@ -258,7 +305,11 @@ function bootApp() {
 
   const un = document.querySelector('.user-info .user-name'); if(un) un.textContent = u.name;
   const ur = document.querySelector('.user-info .user-role'); if(ur) ur.textContent = role.label;
-  const av = document.getElementById('user-avatar'); if(av) { av.textContent = u.initials; av.style.background = getRoleColor(u.role); }
+  const av = document.getElementById('user-avatar');
+  if (av) {
+    av.textContent = u.initials;
+    av.style.background = getRoleColor(u.role);
+  }
 
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) logoutBtn.onclick = logout;
@@ -266,10 +317,12 @@ function bootApp() {
   buildNavForRole(role);
 
   // Keepalive: ping cada 10 min para que Render no duerma el servidor
+  // Usa apiFetch para que si el token expira se haga logout automático
   if (!window._keepaliveInterval) {
     window._keepaliveInterval = setInterval(() => {
-      fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + (window._getToken ? window._getToken() : '') } })
-        .catch(() => {});
+      if (window.apiFetch) {
+        window.apiFetch('/api/auth/me').catch(() => {});
+      }
     }, 10 * 60 * 1000);
   }
 
@@ -286,10 +339,143 @@ function bootApp() {
   });
 }
 
+// ── MAPPERS: API → Frontend ──
+// Separados en funciones para poder reutilizar y testear individualmente
+
+function _mapTire(t) {
+  // vehicle: string artificial que usa el frontend para filtrar
+  // - Código de vehículo si está montada (ej: "INT-23")
+  // - 'STOCK' si está en stock
+  // - 'RECAPADO' si está en recapado
+  // - 'BAJA' si está dada de baja
+  const vehicle = t.status === 'stock'    ? 'STOCK'
+                : t.status === 'baja'     ? 'BAJA'
+                : t.status === 'recapado' ? 'RECAPADO'
+                : (t.vehicle_code || 'STOCK');
+
+  // condition: estado de desgaste basado en profundidad
+  const tread = parseFloat(t.tread_depth) || 0;
+  const condition = tread >= 4 ? 'ok' : tread >= 2 ? 'warn' : 'danger';
+
+  return {
+    id:              t.id,
+    serial:          t.serial_no,
+    brand:           t.brand,
+    model:           t.model,
+    size:            t.size,
+    vehicle:         vehicle,
+    pos:             t.current_position || null,
+    position:        t.current_position || '—',
+    physical_status: t.status,         // montada/stock/recapado/baja (DB real)
+    condition:       condition,        // ok/warn/danger (por desgaste)
+    status:          condition,        // compat: código viejo espera ok/warn/danger
+    tread:           tread,
+    km:              parseFloat(t.km_total) || 0,
+    price:           parseFloat(t.purchase_price) || 0,
+    notes:           t.notes || '',
+    _raw:            t
+  };
+}
+
+function _mapVehicle(v) {
+  return {
+    id:          v.id,
+    code:        v.code,
+    plate:       v.plate,
+    brand:       v.brand,
+    model:       v.model,
+    year:        v.year,
+    type:        v.type,
+    status:      v.status || 'ok',
+    km:          v.km_current || 0,
+    base:        v.base || 'Central',
+    driver:      v.driver_name || v.driver_name_joined || '—',
+    cost_km:     parseFloat(v.cost_km) || 0,
+    vin:         v.vin,
+    engine_no:   v.engine_no,
+    cost_center: v.cost_center,
+    driver_id:   v.driver_id,
+    gps_lat:     parseFloat(v.gps_lat)    || null,
+    gps_lng:     parseFloat(v.gps_lng)    || null,
+    gps_speed:   parseFloat(v.gps_speed)  || 0,
+    gps_status:  v.gps_status || 'unknown',
+    gps_updated: v.gps_updated_at || null,
+    tech_spec:   v.tech_spec || {},
+  };
+}
+
+function _mapWorkOrder(o) {
+  return {
+    id:         o.code || o.id,
+    vehicle:    o.vehicle_code || '—',
+    plate:      o.plate || '—',
+    type:       o.type || 'Correctivo',
+    status:     o.status || 'Pendiente',
+    priority:   o.priority || 'Normal',
+    desc:       o.description || '—',
+    mechanic:   o.mechanic_name || '—',
+    opened:     o.opened_at ? o.opened_at.slice(0,16).replace('T',' ') : '—',
+    closed:     o.closed_at ? o.closed_at.slice(0,16).replace('T',' ') : null,
+    causa_raiz: o.root_cause || '',
+    parts:      [],
+    parts_cost: parseFloat(o.parts_cost) || 0,
+    labor_cost: parseFloat(o.labor_cost) || 0,
+    closed_at:  o.closed_at || null,
+    _id:        o.id,
+    _uuid:      o.id,
+  };
+}
+
+function _mapFuelLog(f) {
+  return {
+    id:           f.id,
+    vehicle:      f.vehicle_code || '—',
+    plate:        f.plate || '—',
+    driver:       f.driver_name || '—',
+    fuel_type:    f.fuel_type || 'diesel',
+    liters:       parseFloat(f.liters) || 0,
+    km:           f.odometer_km || 0,
+    ppu:          parseFloat(f.price_per_l) || 0,
+    total:        parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
+    date:         f.logged_at ? f.logged_at.slice(0,16).replace('T',' ') : '—',
+    place:        f.location || 'Cisterna',
+    status:       'OK',
+    ticket_image: f.ticket_image || null,
+  };
+}
+
+function _mapStockItem(s) {
+  return {
+    id:       s.id,
+    code:     s.code,
+    name:     s.name,
+    cat:      s.category || 'General',
+    unit:     s.unit || 'un',
+    qty:      parseFloat(s.qty_current) || 0,
+    min:      parseFloat(s.qty_min) || 1,
+    reorder:  parseFloat(s.qty_reorder) || 2,
+    cost:     parseFloat(s.unit_cost) || 0,
+    supplier: s.supplier || '—',
+  };
+}
+
+function _mapDocument(d) {
+  const days = Math.ceil((new Date(d.expiry_date) - new Date()) / 86400000);
+  return {
+    id:      d.id,
+    vehicle: d.entity_id,
+    type:    d.doc_type,
+    expiry:  d.expiry_date?.slice(0,10),
+    status:  days < 0 ? 'danger' : days < 30 ? 'warn' : 'ok',
+    ref:     d.reference || '—',
+    plate:   '—',
+  };
+}
+
 // ── CARGAR DATOS DESDE LA API ──
 async function loadInitialData() {
   try {
-    showToast('info', 'Cargando datos...');
+    showToast('ok', 'Cargando datos...');
 
     const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes] = await Promise.all([
       apiFetch('/api/vehicles'),
@@ -303,28 +489,11 @@ async function loadInitialData() {
       apiFetch('/api/tires'),
     ]);
 
-   if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
+    if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
     if (usersRes?.ok)       App.data.users       = await usersRes.json();
     if (tiresRes?.ok) {
       const rawTires = await tiresRes.json();
-      // Normalizar campos de la API al formato del frontend
-      App.data.tires = rawTires.map(t => ({
-        id:              t.id,
-        serial:          t.serial_no,
-        brand:           t.brand,
-        model:           t.model,
-        size:            t.size,
-        vehicle:         t.status === 'stock' ? 'STOCK' : t.status === 'baja' ? 'BAJA' : t.status === 'recapado' ? 'RECAPADO' : (t.vehicle_code || 'STOCK'),
-        pos:             t.current_position || null,
-        position:        t.current_position || '—',
-        physical_status: t.status,
-        status:          t.tread_depth >= 4 ? 'ok' : t.tread_depth >= 2 ? 'warn' : 'danger',
-        tread:           parseFloat(t.tread_depth) || 0,
-        km:              parseFloat(t.km_total) || 0,
-        price:           parseFloat(t.purchase_price) || 0,
-        notes:           t.notes || '',
-        _raw:            t
-      }));
+      App.data.tires = rawTires.map(_mapTire);
     }
     if (workordersRes?.ok)  App.data.workOrders  = await workordersRes.json();
     if (fuelRes?.ok)        App.data.fuelLogs    = await fuelRes.json();
@@ -334,108 +503,28 @@ async function loadInitialData() {
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};
-      App.config.bases        = cfg.bases        || ['Central','Norte','Sur'];
+      App.config.bases         = cfg.bases         || ['Central','Norte','Sur'];
       App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
     }
+
     // Inicializar arrays si alguna API falló
-    if (!App.data.vehicles)   App.data.vehicles   = [];
-    if (!App.data.workOrders) App.data.workOrders = [];
-    if (!App.data.fuelLogs)   App.data.fuelLogs   = [];
-    if (!App.data.stock)      App.data.stock      = [];
-    if (!App.data.documents)  App.data.documents  = [];
-    if (!App.data.users)      App.data.users      = [];
+    if (!App.data.vehicles)    App.data.vehicles    = [];
+    if (!App.data.workOrders)  App.data.workOrders  = [];
+    if (!App.data.fuelLogs)    App.data.fuelLogs    = [];
+    if (!App.data.stock)       App.data.stock       = [];
+    if (!App.data.documents)   App.data.documents   = [];
+    if (!App.data.users)       App.data.users       = [];
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];
-    if (!App.config)          App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'] };
+    if (!App.config) App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'] };
 
     // Normalizar campos de la API al formato que usa el frontend
-    App.data.vehicles = App.data.vehicles.map(v => ({
-      id:       v.id,
-      code:     v.code,
-      plate:    v.plate,
-      brand:    v.brand,
-      model:    v.model,
-      year:     v.year,
-      type:     v.type,
-      status:   v.status || 'ok',
-      km:       v.km_current || 0,
-      base:     v.base || 'Central',
-      driver:   v.driver_name || v.driver_name_joined || '—',
-      cost_km:  parseFloat(v.cost_km) || 0,
-      vin:      v.vin,
-      engine_no:v.engine_no,
-      cost_center: v.cost_center,
-      driver_id:  v.driver_id,
-      gps_lat:    parseFloat(v.gps_lat)    || null,
-      gps_lng:    parseFloat(v.gps_lng)    || null,
-      gps_speed:  parseFloat(v.gps_speed)  || 0,
-      gps_status: v.gps_status || 'unknown',
-      gps_updated: v.gps_updated_at || null,
-      tech_spec:  v.tech_spec || {},
-    }));
-
-    App.data.workOrders = App.data.workOrders.map(o => ({
-      id:         o.code || o.id,
-      vehicle:    o.vehicle_code || '—',
-      plate:      o.plate || '—',
-      type:       o.type || 'Correctivo',
-      status:     o.status || 'Pendiente',
-      priority:   o.priority || 'Normal',
-      desc:       o.description || '—',
-      mechanic:   o.mechanic_name || '—',
-      opened:     o.opened_at ? o.opened_at.slice(0,16).replace('T',' ') : '—',
-      closed:     o.closed_at ? o.closed_at.slice(0,16).replace('T',' ') : null,
-      causa_raiz: o.root_cause || '',
-      parts:      [],
-      parts_cost: parseFloat(o.parts_cost) || 0,
-      labor_cost: parseFloat(o.labor_cost) || 0,
-      closed_at:  o.closed_at || null,
-      _id:        o.id,
-      _uuid:      o.id,
-    }));
-
-    App.data.fuelLogs = App.data.fuelLogs.map(f => ({
-      id:           f.id,
-      vehicle:      f.vehicle_code || '—',
-      plate:        f.plate || '—',
-      driver:       f.driver_name || '—',
-      fuel_type:    f.fuel_type || 'diesel',
-      liters:       parseFloat(f.liters) || 0,
-      km:           f.odometer_km || 0,
-      ppu:          parseFloat(f.price_per_l) || 0,
-      total:        parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
-      date:         f.logged_at ? f.logged_at.slice(0,16).replace('T',' ') : '—',
-      place:        f.location || 'Cisterna',
-      status:       'OK',
-      ticket_image: f.ticket_image || null,
-    }));
-
-    App.data.stock = App.data.stock.map(s => ({
-      id:       s.id,
-      code:     s.code,
-      name:     s.name,
-      cat:      s.category || 'General',
-      unit:     s.unit || 'un',
-      qty:      parseFloat(s.qty_current) || 0,
-      min:      parseFloat(s.qty_min) || 1,
-      reorder:  parseFloat(s.qty_reorder) || 2,
-      cost:     parseFloat(s.unit_cost) || 0,
-      supplier: s.supplier || '—',
-    }));
-
-    App.data.documents = App.data.documents.map(d => {
-      const days = Math.ceil((new Date(d.expiry_date) - new Date()) / 86400000);
-      return {
-        id:      d.id,
-        vehicle: d.entity_id,
-        type:    d.doc_type,
-        expiry:  d.expiry_date?.slice(0,10),
-        status:  days < 0 ? 'danger' : days < 30 ? 'warn' : 'ok',
-        ref:     d.reference || '—',
-        plate:   '—',
-      };
-    });
+    App.data.vehicles   = App.data.vehicles.map(_mapVehicle);
+    App.data.workOrders = App.data.workOrders.map(_mapWorkOrder);
+    App.data.fuelLogs   = App.data.fuelLogs.map(_mapFuelLog);
+    App.data.stock      = App.data.stock.map(_mapStockItem);
+    App.data.documents  = App.data.documents.map(_mapDocument);
 
     showToast('ok', `${App.data.vehicles.length} vehículos · ${App.data.workOrders.length} OTs cargadas`);
 
@@ -446,17 +535,17 @@ async function loadInitialData() {
     if (logoSubApp) logoSubApp.textContent = `${App.data.vehicles.length} unidades`;
 
   } catch(err) {
-    console.error('Error cargando datos:', err);
+    console.error('[loadInitialData]', err.message || err, err.stack);
     showToast('warn', 'Error cargando datos de la API');
     // Inicializar vacíos para que la app no crashee
-    App.data.vehicles   = App.data.vehicles   || [];
-    App.data.workOrders = App.data.workOrders || [];
-    App.data.fuelLogs   = App.data.fuelLogs   || [];
-    App.data.stock      = App.data.stock      || [];
-    App.data.documents  = App.data.documents  || [];
-    App.data.tires      = [];
-    App.data.tireHistory= [];
-    App.data.stockHistory=[];
+    App.data.vehicles    = App.data.vehicles    || [];
+    App.data.workOrders  = App.data.workOrders  || [];
+    App.data.fuelLogs    = App.data.fuelLogs    || [];
+    App.data.stock       = App.data.stock       || [];
+    App.data.documents   = App.data.documents   || [];
+    App.data.tires       = App.data.tires       || [];
+    App.data.tireHistory = App.data.tireHistory || [];
+    App.data.stockHistory = App.data.stockHistory || [];
   }
 }
 
