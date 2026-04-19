@@ -122,6 +122,42 @@ tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_ma
   await client.query('COMMIT');res.json({message:'Movimiento registrado'});}catch(err){await client.query('ROLLBACK');res.status(500).json({error:'Error mover cubierta'});}finally{client.release();}
 });
 
+// GET /api/tires/history — blanqueo de movimientos de cubiertas (auditoría)
+// Lee tire_movements con JOIN a tires, vehicles y users.
+// Si una cubierta fue eliminada (raro), el serial aparece como '[eliminada]'.
+tireRouter.get('/history', authenticate, async (req, res) => {
+  try {
+    const { serial, limit = 200 } = req.query;
+    let sql = `
+      SELECT
+        tm.id,
+        tm.created_at,
+        tm.type,
+        tm.from_pos,
+        tm.to_pos,
+        tm.km_at_move,
+        tm.tread_at_move,
+        tm.notes,
+        COALESCE(t.serial_no, '[eliminada]') AS serial_no,
+        v.code AS vehicle_code,
+        u.name AS user_name
+      FROM tire_movements tm
+      LEFT JOIN tires    t ON t.id = tm.tire_id
+      LEFT JOIN vehicles v ON v.id = tm.vehicle_id
+      LEFT JOIN users    u ON u.id = tm.user_id
+      WHERE 1=1`;
+    const p = [];
+    if (serial) { p.push(serial); sql += ` AND t.serial_no = $${p.length}`; }
+    sql += ` ORDER BY tm.created_at DESC LIMIT $${p.length + 1}`;
+    p.push(Math.min(parseInt(limit) || 200, 500));
+    const r = await query(sql, p);
+    res.json(r.rows);
+  } catch (err) {
+    console.error('GET tires/history:', err.message);
+    res.status(500).json({ error: 'Error historial cubiertas' });
+  }
+});
+
 // ======= DOCUMENTOS =======
 docRouter.get('/',authenticate,async(req,res)=>{
   try{const{entity_type,entity_id,status}=req.query;let sql='SELECT * FROM documents WHERE 1=1';const p=[];
