@@ -4199,47 +4199,415 @@ async function saveEditUser(id) {
 // ── INIT ──
 
 // ── ÓRDENES DE TRABAJO ──
+// ═══════════════════════════════════════════════════════════
+//  ÓRDENES DE TRABAJO — Tabla mejorada con filtros, sort,
+//  inline edit, progreso, export PDF.
+// ═══════════════════════════════════════════════════════════
+
+// Estado global de la tabla (filtros, ordenamiento)
+App.otTable = App.otTable || {
+  search: '',
+  status: 'all',
+  priority: 'all',
+  type: 'all',
+  hideClosed: false,
+  sortKey: 'opened',
+  sortDir: 'desc',
+};
+
 function renderWorkOrders() {
-  const open   = App.data.workOrders.filter(o=>o.status!=='Cerrada');
-  const closed = App.data.workOrders.filter(o=>o.status==='Cerrada');
-  document.getElementById('page-workorders').innerHTML = `
-    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
-      <div class="kpi-card ${open.length<5?'ok':'warn'}"><div class="kpi-label">OT abiertas</div><div class="kpi-value ${open.length<5?'ok':'warn'}">${open.length}</div><div class="kpi-trend">requieren atención</div></div>
-      <div class="kpi-card info"><div class="kpi-label">En proceso hoy</div><div class="kpi-value info">${open.filter(o=>o.status==='En proceso').length}</div><div class="kpi-trend">en ejecución activa</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Cerradas este mes</div><div class="kpi-value ok">${closed.length}</div><div class="kpi-trend">completadas con éxito</div></div>
-    </div>
-    <div class="section-header">
-      <div><div class="section-title">Órdenes de trabajo</div></div>
-      <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
-    </div>
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Vehículo</th><th>Tipo</th><th>Descripción</th><th>Mecánico</th><th>Estado</th><th>Prioridad</th><th>Costo total</th><th>Fecha</th><th></th></tr></thead>
-          <tbody>${App.data.workOrders.length === 0 ? '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:32px">Sin órdenes de trabajo registradas</td></tr>' :
-            App.data.workOrders.map(o=>`<tr>
-            <td class="td-mono td-main">${o.id||o._id||'—'}</td>
-            <td class="td-main">${o.vehicle||'—'}<br><span style="color:var(--text3);font-size:11px;font-family:var(--mono)">${o.plate||'—'}</span></td>
-            <td><span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-danger'}">${o.type||'—'}</span></td>
-            <td style="max-width:180px;color:var(--text2)">${o.desc||o.title||'—'}</td>
-            <td>${o.mechanic||'—'}</td>
-            <td><span class="badge ${
-              o.status==='Cerrada'?'badge-ok':
-              o.status==='En proceso'?'badge-info':
-              o.status==='Esperando repuesto'?'badge-warn':'badge-gray'
-            }">${o.status||'—'}</span></td>
-            <td><span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}">${o.priority||'—'}</span></td>
-            <td class="td-mono">${(o.parts_cost||0)+(o.labor_cost||0)>0?'$'+Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString():'—'}</td>
-            <td class="td-mono" style="font-size:11px">${(o.opened||'—').toString().split('T')[0]}</td>
-            <td style="white-space:nowrap">
-              ${o.status!=='Cerrada'?`   <button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Editar</button>   <button class="btn btn-primary btn-sm" onclick="closeOT('${o.id||o._id}')">Cerrar OT</button> `:'<span style="color:var(--ok);font-size:12px">✓ Cerrada</span>'}
-            </td>
-          </tr>`).join('')}
-          </tbody>
-        </table>
+  const root = document.getElementById('page-workorders');
+  if (!root) return;
+
+  const all    = App.data.workOrders || [];
+  const open   = all.filter(o => o.status !== 'Cerrada');
+  const inProc = open.filter(o => o.status === 'En proceso');
+  const waiting= open.filter(o => (o.status||'').includes('Esperando'));
+  const closed = all.filter(o => o.status === 'Cerrada');
+
+  // Filtros únicos para los dropdowns
+  const allStatuses  = [...new Set(all.map(o => o.status).filter(Boolean))];
+  const allPriorities = [...new Set(all.map(o => o.priority).filter(Boolean))];
+  const allTypes      = [...new Set(all.map(o => o.type).filter(Boolean))];
+
+  root.innerHTML = `
+    <div class="kpi-row kpi-row-4" style="margin-bottom:20px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+      <div class="kpi-card ${open.length<5?'ok':'warn'}">
+        <div class="kpi-label">OT abiertas</div>
+        <div class="kpi-value ${open.length<5?'ok':'warn'}">${open.length}</div>
+        <div class="kpi-trend">requieren atención</div>
+      </div>
+      <div class="kpi-card info">
+        <div class="kpi-label">En proceso</div>
+        <div class="kpi-value info">${inProc.length}</div>
+        <div class="kpi-trend">en ejecución activa</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(217,119,6,.35)">
+        <div class="kpi-label">Esperando</div>
+        <div class="kpi-value" style="color:var(--warn)">${waiting.length}</div>
+        <div class="kpi-trend">repuesto / aprobación</div>
+      </div>
+      <div class="kpi-card ok">
+        <div class="kpi-label">Cerradas (mes)</div>
+        <div class="kpi-value ok">${closed.length}</div>
+        <div class="kpi-trend">completadas</div>
       </div>
     </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input id="ot-search" type="text" placeholder="🔍 Buscar ID, vehículo, descripción..." value="${App.otTable.search}"
+        oninput="App.otTable.search=this.value;_otRenderRows()"
+        style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:13px">
+
+      <select id="ot-f-status" onchange="App.otTable.status=this.value;_otRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all" ${App.otTable.status==='all'?'selected':''}>Estado: Todos</option>
+        ${allStatuses.map(s => `<option value="${s}" ${App.otTable.status===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+
+      <select id="ot-f-priority" onchange="App.otTable.priority=this.value;_otRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all" ${App.otTable.priority==='all'?'selected':''}>Prioridad: Todas</option>
+        ${allPriorities.map(p => `<option value="${p}" ${App.otTable.priority===p?'selected':''}>${p}</option>`).join('')}
+      </select>
+
+      <select id="ot-f-type" onchange="App.otTable.type=this.value;_otRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all" ${App.otTable.type==='all'?'selected':''}>Tipo: Todos</option>
+        ${allTypes.map(t => `<option value="${t}" ${App.otTable.type===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer">
+        <input type="checkbox" ${App.otTable.hideClosed?'checked':''} onchange="App.otTable.hideClosed=this.checked;_otRenderRows()">
+        Ocultar cerradas
+      </label>
+
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-secondary btn-sm" onclick="_otExportPDF()" title="Descargar PDF con las OTs visibles">📄 PDF</button>
+        <button class="btn btn-primary" onclick="openNewOTModal()">+ Nueva OT</button>
+      </div>
+    </div>
+
+    <div id="ot-table-wrap" class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table id="ot-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead id="ot-thead"></thead>
+          <tbody id="ot-tbody"></tbody>
+        </table>
+      </div>
+      <div id="ot-footer" style="padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;justify-content:space-between;align-items:center;background:var(--bg2)"></div>
+    </div>
   `;
+
+  _otRenderRows();
+}
+
+// Renderiza thead + tbody según filtros y sort actuales
+function _otRenderRows() {
+  const thead = document.getElementById('ot-thead');
+  const tbody = document.getElementById('ot-tbody');
+  const footer= document.getElementById('ot-footer');
+  if (!thead || !tbody) return;
+
+  const all = App.data.workOrders || [];
+  const T   = App.otTable;
+
+  // Filtrar
+  let rows = all.filter(o => {
+    if (T.hideClosed && o.status === 'Cerrada') return false;
+    if (T.status !== 'all' && o.status !== T.status) return false;
+    if (T.priority !== 'all' && o.priority !== T.priority) return false;
+    if (T.type !== 'all' && o.type !== T.type) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic].filter(Boolean).map(s=>String(s).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+
+  // Ordenar
+  const getSortVal = (o, k) => {
+    if (k === 'cost') return (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0);
+    if (k === 'opened') return o.opened || '';
+    if (k === 'priority') {
+      const order = {'Urgente':4,'Crítica':4,'Alta':3,'Media':2,'Normal':1,'Baja':0};
+      return order[o.priority] ?? 0;
+    }
+    return (o[k] || '').toString().toLowerCase();
+  };
+  rows.sort((a,b) => {
+    const va = getSortVal(a, T.sortKey);
+    const vb = getSortVal(b, T.sortKey);
+    if (va < vb) return T.sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return T.sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Header con sort
+  const cols = [
+    ['id',       'ID'],
+    ['vehicle',  'Vehículo'],
+    ['type',     'Tipo'],
+    ['desc',     'Descripción'],
+    ['mechanic', 'Mecánico'],
+    ['status',   'Estado'],
+    ['priority', 'Prioridad'],
+    ['progress', 'Progreso', true],
+    ['cost',     'Costo'],
+    ['opened',   'Apertura'],
+    ['actions',  '', true],
+  ];
+  thead.innerHTML = `<tr style="background:var(--bg3);border-bottom:2px solid var(--border)">${cols.map(([k, label, noSort]) => {
+    const isSorted = !noSort && T.sortKey === k;
+    const arrow = isSorted ? (T.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    const cls = isSorted ? 'color:var(--accent)' : 'color:var(--text3)';
+    const cursor = noSort ? 'default' : 'pointer';
+    return `<th onclick="${noSort?'':'_otSort(\''+k+'\')'}" style="text-align:left;padding:10px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;cursor:${cursor};white-space:nowrap;font-family:var(--mono);${cls}">${label}${arrow}</th>`;
+  }).join('')}</tr>`;
+
+  // Body
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--text3)">
+      Sin órdenes de trabajo ${T.search||T.status!=='all'||T.priority!=='all'?'que coincidan con los filtros':'registradas'}
+    </td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(o => _otRenderRow(o)).join('');
+  }
+
+  // Footer con conteo
+  if (footer) {
+    const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0), 0);
+    footer.innerHTML = `
+      <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OTs</span>
+      <span>Costo total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalCost).toLocaleString('es-AR')}</b></span>
+    `;
+  }
+}
+
+function _otSort(key) {
+  const T = App.otTable;
+  if (T.sortKey === key) {
+    T.sortDir = T.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    T.sortKey = key;
+    T.sortDir = 'asc';
+  }
+  _otRenderRows();
+}
+
+// Render de UNA fila (con inline edit en status y priority)
+function _otRenderRow(o) {
+  const priorityBar = {
+    'Urgente':  'var(--danger)', 'Crítica':'var(--danger)',
+    'Alta':     'var(--warn)',   'Media':  'var(--warn)',
+    'Normal':   'var(--accent)', 'Baja':   'var(--text3)',
+  }[o.priority] || 'var(--border2)';
+
+  const progress = _otProgress(o.status);
+  const progColor = o.status === 'Cerrada' ? 'var(--ok)' :
+                    o.status === 'En proceso' ? 'var(--info)' :
+                    (o.status||'').includes('Esperando') ? 'var(--warn)' : 'var(--text3)';
+
+  const totalCost = (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0);
+  const isClosed = o.status === 'Cerrada';
+
+  // Opciones de estados/prioridades para inline edit
+  const statusOpts = ['Pendiente','Asignada','En proceso','Esperando repuesto','Esperando tercerizado','Cerrada'];
+  const prioOpts   = ['Normal','Media','Urgente'];
+
+  const canEdit = !isClosed && ['dueno','gerencia','jefe_mantenimiento','mecanico'].includes(App.currentUser?.role);
+
+  return `<tr style="border-left:3px solid ${priorityBar};border-bottom:1px solid var(--border);transition:background .1s"
+    onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:600;color:var(--accent)">${o.id||'—'}</td>
+
+    <td style="padding:10px 12px">
+      <div style="font-family:var(--mono);font-weight:700;font-size:13px;color:var(--text)">${o.vehicle||'—'}</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3)">${o.plate||'—'}</div>
+    </td>
+
+    <td style="padding:10px 12px">
+      <span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-gray'}" style="font-size:10px">${o.type||'—'}</span>
+    </td>
+
+    <td style="padding:10px 12px;max-width:220px;color:var(--text2);font-size:12px;line-height:1.4">
+      ${(o.desc||'—').substring(0,120)}${(o.desc||'').length>120?'…':''}
+    </td>
+
+    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${o.mechanic||'—'}</td>
+
+    <td style="padding:10px 12px">
+      ${canEdit ? `
+        <select onchange="_otInlineEdit('${o._uuid||o.id}','status',this.value)"
+          style="padding:3px 8px;border:1px solid var(--border2);border-radius:12px;background:var(--bg);color:var(--text);font-family:var(--mono);font-size:10px;cursor:pointer">
+          ${statusOpts.map(s => `<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      ` : `<span class="badge ${isClosed?'badge-ok':(o.status||'').includes('Esperando')?'badge-warn':o.status==='En proceso'?'badge-info':'badge-gray'}" style="font-size:10px">${o.status||'—'}</span>`}
+    </td>
+
+    <td style="padding:10px 12px">
+      ${canEdit ? `
+        <select onchange="_otInlineEdit('${o._uuid||o.id}','priority',this.value)"
+          style="padding:3px 8px;border:1px solid var(--border2);border-radius:12px;background:var(--bg);color:${priorityBar};font-weight:600;font-family:var(--mono);font-size:10px;cursor:pointer">
+          ${prioOpts.map(p => `<option value="${p}" ${p===o.priority?'selected':''}>${p}</option>`).join('')}
+        </select>
+      ` : `<span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}" style="font-size:10px">${o.priority||'—'}</span>`}
+    </td>
+
+    <td style="padding:10px 12px;min-width:120px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:50px;max-width:80px">
+          <div style="height:100%;background:${progColor};width:${progress}%;transition:width .3s"></div>
+        </div>
+        <span style="font-size:10px;font-family:var(--mono);color:var(--text3);min-width:30px">${progress}%</span>
+      </div>
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:600;font-size:12px;color:${totalCost>0?'var(--text)':'var(--text3)'}">
+      ${totalCost>0 ? '$'+Math.round(totalCost).toLocaleString('es-AR') : '—'}
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
+      ${(o.opened||'—').toString().split(' ')[0]}
+    </td>
+
+    <td style="padding:10px 12px;white-space:nowrap;text-align:right">
+      ${isClosed ? `
+        <button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Ver</button>
+      ` : `
+        <button class="btn btn-secondary btn-sm" onclick="openEditOTModal('${o.id||o._id}')">Editar</button>
+        ${['dueno','gerencia','jefe_mantenimiento','mecanico'].includes(App.currentUser?.role) ?
+          `<button class="btn btn-primary btn-sm" onclick="closeOT('${o.id||o._id}')" style="margin-left:4px">Cerrar</button>` : ''}
+      `}
+    </td>
+  </tr>`;
+}
+
+// Calcula % de progreso según status
+function _otProgress(status) {
+  const map = {
+    'Pendiente': 0,
+    'Asignada': 15,
+    'Esperando repuesto': 30,
+    'Esperando tercerizado': 30,
+    'En proceso': 60,
+    'Cerrada': 100,
+  };
+  return map[status] ?? 10;
+}
+
+// Inline edit: cambiar un campo vía API sin abrir modal
+async function _otInlineEdit(uuid, field, newValue) {
+  const ot = (App.data.workOrders || []).find(o => (o._uuid||o.id) === uuid);
+  if (!ot) { showToast?.('error','OT no encontrada'); return; }
+
+  // Backup para revertir si falla
+  const oldValue = ot[field];
+  ot[field] = newValue;
+
+  const body = {
+    status:       ot.status,
+    mechanic_id: null,
+    description:  ot.desc,
+    labor_cost:   parseFloat(ot.labor_cost) || 0,
+    parts_cost:   parseFloat(ot.parts_cost) || 0,
+    priority:     ot.priority,
+  };
+
+  try {
+    const res = await apiFetch(`/api/workorders/${uuid}`, {
+      method: 'PUT', body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error('Error HTTP');
+    showToast?.('ok', `${field==='status'?'Estado':'Prioridad'} actualizado: ${newValue}`);
+    _otRenderRows();
+  } catch(err) {
+    ot[field] = oldValue; // revertir
+    showToast?.('error', 'No se pudo actualizar. Revisá permisos.');
+    _otRenderRows();
+  }
+}
+
+// Export a PDF con las OTs actualmente visibles (respeta filtros)
+function _otExportPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast?.('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+
+  const all = App.data.workOrders || [];
+  const T   = App.otTable;
+
+  // Aplicar mismos filtros que la tabla
+  let rows = all.filter(o => {
+    if (T.hideClosed && o.status === 'Cerrada') return false;
+    if (T.status !== 'all' && o.status !== T.status) return false;
+    if (T.priority !== 'all' && o.priority !== T.priority) return false;
+    if (T.type !== 'all' && o.type !== T.type) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic].filter(Boolean).map(s=>String(s).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  // Encabezado
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Órdenes de Trabajo — Expreso Biletta', 40, 40);
+  doc.setFontSize(9);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  const hoy = new Date().toLocaleString('es-AR');
+  doc.text(`Generado: ${hoy}  ·  ${rows.length} OT${rows.length===1?'':'s'}`, 40, 58);
+
+  // Tabla
+  const tableData = rows.map(o => [
+    o.id || '—',
+    o.vehicle || '—',
+    o.plate || '—',
+    o.type || '—',
+    (o.desc || '—').substring(0,60),
+    o.mechanic || '—',
+    o.status || '—',
+    o.priority || '—',
+    `$${Math.round((parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0)).toLocaleString('es-AR')}`,
+    (o.opened||'—').split(' ')[0],
+  ]);
+
+  doc.autoTable({
+    startY: 72,
+    head: [['ID','Veh','Patente','Tipo','Descripción','Mecánico','Estado','Prioridad','Costo','Apertura']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 50, fontStyle: 'bold' },
+      1: { cellWidth: 60 },
+      2: { cellWidth: 60 },
+      3: { cellWidth: 60 },
+      4: { cellWidth: 180 },
+      8: { halign: 'right', fontStyle: 'bold' },
+    },
+  });
+
+  // Total en el pie
+  const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0), 0);
+  const finalY = doc.lastAutoTable.finalY || 90;
+  doc.setFontSize(10);
+  doc.setFont('helvetica','bold');
+  doc.text(`TOTAL VISIBLE: $${Math.round(totalCost).toLocaleString('es-AR')}`, 40, finalY + 20);
+
+  const fileDate = new Date().toISOString().slice(0,10);
+  doc.save(`OTs-Biletta-${fileDate}.pdf`);
+  showToast?.('ok','PDF descargado');
 }
 
 // ── PANEL CHOFER ──
@@ -6290,120 +6658,413 @@ async function deleteFuelLog(id, vehicle, liters) {
   } catch(err) { showToast('error', err.message||'Error'); }
 }
 
-async function renderPurchaseOrders() {   try { await loadSucursalesFromAPI(); } catch(e){}
+// ═══════════════════════════════════════════════════════════
+//  ÓRDENES DE COMPRA — Tabla mejorada
+// ═══════════════════════════════════════════════════════════
+
+// Estado global de la tabla de OCs
+App.poTable = App.poTable || {
+  search: '',
+  status: 'all',
+  area:   'all',
+  sucursal:'all',
+  sortKey: 'created_at',
+  sortDir: 'desc',
+  rawData: [],     // cache local de la lista traída del server
+};
+
+async function renderPurchaseOrders() {
+  try { await loadSucursalesFromAPI(); } catch(e){}
   const root = document.getElementById('page-purchase_orders');
   if (!root) return;
 
   const canCreate = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
 
   root.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
       <div>
         <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">📋 Órdenes de Compra</h2>
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Gestión de compras · firma manual · enlace con factura</p>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="_poExportPDF()" title="Descargar PDF con las OCs visibles">📄 PDF</button>
         ${canCreate ? `<button class="btn btn-primary" onclick="openNewPOModal()">+ Nueva OC</button>` : ''}
       </div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      ${['','borrador','emitida','en_curso','recibida','cancelada'].map(s => `
-        <button onclick="filterPO('${s}')" id="po-filter-${s||'all'}"
-          style="padding:6px 14px;border-radius:20px;border:1px solid var(--border2);background:${s===''?'var(--accent)':'transparent'};
-          color:${s===''?'white':'var(--text3)'};cursor:pointer;font-size:12px;font-weight:600;transition:.15s">
-          ${s===''?'Todas':s.charAt(0).toUpperCase()+s.slice(1)}
-        </button>`).join('')}
+    <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+      <div class="kpi-card"><div class="kpi-label">Total OCs</div><div class="kpi-value" style="color:var(--text)" id="po-kpi-total">—</div><div class="kpi-trend">todos los estados</div></div>
+      <div class="kpi-card" style="border-color:rgba(217,119,6,.35)"><div class="kpi-label">En revisión</div><div class="kpi-value" style="color:var(--warn)" id="po-kpi-borr">—</div><div class="kpi-trend">esperando aprobación</div></div>
+      <div class="kpi-card info"><div class="kpi-label">Aprobadas</div><div class="kpi-value info" id="po-kpi-curso">—</div><div class="kpi-trend">por recibir mercadería</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Recibidas / Pagadas</div><div class="kpi-value ok" id="po-kpi-rec">—</div><div class="kpi-trend">proceso completado</div></div>
     </div>
 
-    <div id="po-area-filter" style="display:none;margin-bottom:12px;padding:10px 14px;background:var(--bg3);border-radius:var(--radius)">
-      <span style="font-size:12px;color:var(--text3);font-weight:600;margin-right:8px">ÁREA:</span>
-      <span id="po-area-filter-btns"></span>
-    </div>
-    <div id="po-list">
-      <div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando...</div>
-    </div>`;
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input id="po-search" type="text" placeholder="🔍 Buscar código, proveedor, factura..." value="${App.poTable.search}"
+        oninput="App.poTable.search=this.value;_poRenderRows()"
+        style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:13px">
 
-  await loadPOList('');
+      <select id="po-f-status" onchange="App.poTable.status=this.value;_poRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all">Estado: Todos</option>
+        <option value="en_revision">En revisión</option>
+        <option value="aprobada">Aprobada</option>
+        <option value="rechazada">Rechazada</option>
+        <option value="recibida">Recibida</option>
+        <option value="pagada">Pagada</option>
+        <option value="cancelada">Cancelada</option>
+      </select>
+
+      <select id="po-f-sucursal" onchange="App.poTable.sucursal=this.value;_poRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all">Sucursal: Todas</option>
+      </select>
+
+      <select id="po-f-area" onchange="App.poTable.area=this.value;_poRenderRows()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
+        <option value="all">Área: Todas</option>
+      </select>
+    </div>
+
+    <div id="po-table-wrap" class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table id="po-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead id="po-thead"></thead>
+          <tbody id="po-tbody"><tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando...</td></tr></tbody>
+        </table>
+      </div>
+      <div id="po-footer" style="padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--text3);display:flex;justify-content:space-between;align-items:center;background:var(--bg2)"></div>
+    </div>
+  `;
+
+  await loadPOList();
 }
 
-let _poCurrentFilter = '';
+// Mantener filterPO para compatibilidad con otras partes del código
 async function filterPO(status) {
-  _poCurrentFilter = status;
-  // Actualizar botones
-  ['','borrador','emitida','recibida','cancelada'].forEach(s => {
-    const btn = document.getElementById('po-filter-' + (s||'all'));
-    if (!btn) return;
-    btn.style.background = s === status ? 'var(--accent)' : 'transparent';
-    btn.style.color      = s === status ? 'white' : 'var(--text3)';
-  });
-  await loadPOList(status);
+  App.poTable.status = status || 'all';
+  const sel = document.getElementById('po-f-status');
+  if (sel) sel.value = App.poTable.status;
+  _poRenderRows();
 }
 
-async function loadPOList(status) {
-  const el = document.getElementById('po-list');
-  if (!el) return;
+async function loadPOList() {
   try {
-    const url = '/api/purchase-orders' + (status ? `?status=${status}` : '');
-    const res = await apiFetch(url);
-    if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar OCs</div>`; return; }
-    const list = await res.json();
-
-    if (list.length === 0) {
-      el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
-        <div style="font-size:32px;margin-bottom:12px">📋</div>
-        <div style="font-weight:600">Sin órdenes de compra</div>
-        <div style="font-size:13px;color:var(--text3);margin-top:8px">Creá la primera con el botón "Nueva OC"</div>
-      </div>`;
+    const res = await apiFetch('/api/purchase-orders');
+    if (!res.ok) {
+      const tbody = document.getElementById('po-tbody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar OCs</td></tr>`;
       return;
     }
+    App.poTable.rawData = await res.json();
 
-    const statusColors = { borrador:'var(--warn)', emitida:'var(--accent)', recibida:'var(--ok)', cancelada:'var(--danger)' };
-    const statusLabels = { borrador:'✏️ Borrador', emitida:'📤 Emitida', en_curso:'🔄 En curso', recibida:'✅ Recibida', cancelada:'❌ Cancelada' };
-    const statusIcons  = { borrador:'✏️', emitida:'📤', en_curso:'🔄', recibida:'✅', cancelada:'❌' };
+    // Populate los filtros de sucursal y área con valores reales
+    const sucs = [...new Set(App.poTable.rawData.map(p=>p.sucursal).filter(Boolean))];
+    const areas = [...new Set(App.poTable.rawData.map(p=>p.area).filter(Boolean))];
+    const sucSel = document.getElementById('po-f-sucursal');
+    const areaSel = document.getElementById('po-f-area');
+    if (sucSel) sucSel.innerHTML = `<option value="all">Sucursal: Todas</option>` + sucs.map(s=>`<option value="${s}">${s}</option>`).join('');
+    if (areaSel) areaSel.innerHTML = `<option value="all">Área: Todas</option>` + areas.map(a=>`<option value="${a}">${a}</option>`).join('');
 
-    el.innerHTML = `
-      <div class="card" style="padding:0">
-        <table>
-          <thead><tr>
-            <th>Código</th><th>Estado</th><th>Sucursal</th><th>Área</th><th>Solicitante</th>
-            <th>Proveedor</th><th>Factura Nro</th>
-            <th style="text-align:right">Total estimado</th>
-            <th>Fecha</th><th>Acciones</th>
-          </tr></thead>
-          <tbody>
-            ${list.map(po => `<tr>
-              <td><span style="font-family:monospace;font-weight:700;color:var(--accent)">${po.code}</span></td>
-              <td><span style="background:${statusColors[po.status]||'var(--text3)'}22;color:${statusColors[po.status]||'var(--text3)'};
-                padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">
-                ${statusLabels[po.status]||po.status}
-              </span></td>
-              <td style="font-size:13px">${po.sucursal ? `<span style='background:var(--accent)22;color:var(--accent);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>${po.sucursal}</span>` : '<span style="color:var(--text3)">—</span>'}</td>
-              <td style="font-size:12px">${po.area ? `<span style='color:var(--text3)'>${po.area}</span>` : '<span style="color:var(--border2)">—</span>'}</td>
-              <td style="font-size:13px">${po.solicitante_nombre||'—'}</td>
-              <td style="font-size:13px">${po.proveedor||'<span style="color:var(--text3)">Sin asignar</span>'}</td>
-              <td style="font-size:12px;font-family:monospace">${po.factura_nro||'<span style="color:var(--text3)">—</span>'}</td>
-              <td style="text-align:right;font-family:monospace;font-weight:600">
-                $${Math.round(parseFloat(po.total_real||po.total_estimado||0)).toLocaleString('es-AR')}
-                ${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:10px;color:var(--text3)">IVA ${po.iva_pct}%</div>` : ''}
-              </td>
-              <td style="font-size:12px;color:var(--text3)">${new Date(po.created_at).toLocaleDateString('es-AR')}</td>
-              <td>
-                <div style="display:flex;gap:4px">
-                  <button class="btn btn-secondary btn-sm" onclick="openPODetail('${po.id}')">Ver</button>
-                  <button class="btn btn-secondary btn-sm" onclick="printPO('${po.id}')" title="Imprimir">🖨</button>
-                  ${['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role) && po.status === 'borrador' ?
-                    `<button class="btn btn-danger btn-sm" onclick="deletePO('${po.id}')">✕</button>` : ''}
-                </div>
-              </td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
+    _poRenderKPIs();
+    _poRenderRows();
   } catch(err) {
-    el.innerHTML = `<div class="card" style="color:var(--danger)">Error: ${err.message}</div>`;
+    const tbody = document.getElementById('po-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error: ${err.message}</td></tr>`;
   }
+}
+
+function _poRenderKPIs() {
+  const data = App.poTable.rawData || [];
+  const set = (id, val, color) => {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = val; if (color) el.style.color = color; }
+  };
+  set('po-kpi-total', data.length);
+  set('po-kpi-borr',  data.filter(p => p.status === 'en_revision').length);
+  set('po-kpi-curso', data.filter(p => p.status === 'aprobada').length);
+  set('po-kpi-rec',   data.filter(p => p.status === 'recibida' || p.status === 'pagada').length);
+}
+
+function _poRenderRows() {
+  const thead = document.getElementById('po-thead');
+  const tbody = document.getElementById('po-tbody');
+  const footer= document.getElementById('po-footer');
+  if (!thead || !tbody) return;
+
+  const all = App.poTable.rawData || [];
+  const T   = App.poTable;
+
+  let rows = all.filter(p => {
+    if (T.status !== 'all' && p.status !== T.status) return false;
+    if (T.sucursal !== 'all' && p.sucursal !== T.sucursal) return false;
+    if (T.area !== 'all' && p.area !== T.area) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [p.code, p.proveedor, p.factura_nro, p.solicitante_nombre].filter(Boolean).map(s=>String(s).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+
+  const getSortVal = (p, k) => {
+    if (k === 'total') return parseFloat(p.total_real || p.total_estimado || 0);
+    if (k === 'created_at') return p.created_at || '';
+    if (k === 'status') {
+      const order = {'en_revision':1,'aprobada':2,'rechazada':3,'recibida':4,'pagada':5,'cancelada':6};
+      return order[p.status] ?? 0;
+    }
+    return (p[k] || '').toString().toLowerCase();
+  };
+  rows.sort((a,b) => {
+    const va = getSortVal(a, T.sortKey);
+    const vb = getSortVal(b, T.sortKey);
+    if (va < vb) return T.sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return T.sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const cols = [
+    ['code',       'Código'],
+    ['status',     'Estado'],
+    ['sucursal',   'Sucursal'],
+    ['area',       'Área'],
+    ['solicitante_nombre', 'Solicitante'],
+    ['proveedor',  'Proveedor'],
+    ['factura_nro','Factura'],
+    ['progress',   'Progreso', true],
+    ['total',      'Total'],
+    ['created_at', 'Fecha'],
+    ['actions',    '', true],
+  ];
+  thead.innerHTML = `<tr style="background:var(--bg3);border-bottom:2px solid var(--border)">${cols.map(([k,label,noSort]) => {
+    const isSorted = !noSort && T.sortKey === k;
+    const arrow = isSorted ? (T.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    const cls = isSorted ? 'color:var(--accent)' : 'color:var(--text3)';
+    const cursor = noSort ? 'default' : 'pointer';
+    return `<th onclick="${noSort?'':'_poSort(\''+k+'\')'}" style="text-align:left;padding:10px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;cursor:${cursor};white-space:nowrap;font-family:var(--mono);${cls}">${label}${arrow}</th>`;
+  }).join('')}</tr>`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center;padding:40px;color:var(--text3)">
+      ${all.length===0 ? 'Sin órdenes de compra registradas' : 'Sin OCs que coincidan con los filtros'}
+    </td></tr>`;
+  } else {
+    tbody.innerHTML = rows.map(p => _poRenderRow(p)).join('');
+  }
+
+  if (footer) {
+    const totalMonto = rows.reduce((a,p) => a + parseFloat(p.total_real||p.total_estimado||0), 0);
+    footer.innerHTML = `
+      <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OCs</span>
+      <span>Monto total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalMonto).toLocaleString('es-AR')}</b></span>
+    `;
+  }
+}
+
+function _poSort(key) {
+  const T = App.poTable;
+  if (T.sortKey === key) {
+    T.sortDir = T.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    T.sortKey = key;
+    T.sortDir = 'asc';
+  }
+  _poRenderRows();
+}
+
+function _poRenderRow(po) {
+  const statusColors = {
+    en_revision: 'var(--warn)',
+    aprobada:    'var(--accent)',
+    rechazada:   'var(--danger)',
+    recibida:    'var(--ok)',
+    pagada:      'var(--ok)',
+    cancelada:   'var(--text3)',
+  };
+  const statusLabels = {
+    en_revision: '⏳ En revisión',
+    aprobada:    '✅ Aprobada',
+    rechazada:   '❌ Rechazada',
+    recibida:    '📦 Recibida',
+    pagada:      '💰 Pagada',
+    cancelada:   '🚫 Cancelada',
+  };
+  const statusBar = statusColors;
+
+  const progress = _poProgress(po.status);
+  const progColor = statusBar[po.status] || 'var(--text3)';
+
+  const statusOpts = ['en_revision','aprobada','rechazada','recibida','pagada','cancelada'];
+  const canInlineEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
+  const canDelete     = canInlineEdit && po.status === 'en_revision';
+
+  const sideColor = statusBar[po.status] || 'var(--border2)';
+  const total = parseFloat(po.total_real || po.total_estimado || 0);
+
+  return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
+    onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent)">${po.code||'—'}</td>
+
+    <td style="padding:10px 12px">
+      ${canInlineEdit ? `
+        <select onchange="_poInlineEdit('${po.id}','status',this.value)"
+          style="padding:3px 8px;border:1px solid var(--border2);border-radius:12px;background:var(--bg);color:${statusColors[po.status]||'var(--text)'};font-weight:600;font-family:var(--mono);font-size:10px;cursor:pointer">
+          ${statusOpts.map(s => `<option value="${s}" ${s===po.status?'selected':''}>${statusLabels[s]||s}</option>`).join('')}
+        </select>
+      ` : `<span style="background:${statusColors[po.status]||'var(--text3)'}22;color:${statusColors[po.status]||'var(--text3)'};padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;font-family:var(--mono)">${statusLabels[po.status]||po.status}</span>`}
+    </td>
+
+    <td style="padding:10px 12px;font-size:12px">
+      ${po.sucursal ? `<span style='background:rgba(37,99,235,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--mono)'>${po.sucursal}</span>` : '<span style="color:var(--text3)">—</span>'}
+    </td>
+
+    <td style="padding:10px 12px;font-size:12px;color:var(--text3)">${po.area||'—'}</td>
+
+    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.solicitante_nombre||'—'}</td>
+
+    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.proveedor || '<span style="color:var(--text3)">Sin asignar</span>'}</td>
+
+    <td style="padding:10px 12px;font-size:11px;font-family:var(--mono);color:var(--text2)">${po.factura_nro || '<span style="color:var(--text3)">—</span>'}</td>
+
+    <td style="padding:10px 12px;min-width:120px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:50px;max-width:80px">
+          <div style="height:100%;background:${progColor};width:${progress}%;transition:width .3s"></div>
+        </div>
+        <span style="font-size:10px;font-family:var(--mono);color:var(--text3);min-width:30px">${progress}%</span>
+      </div>
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
+      $${Math.round(total).toLocaleString('es-AR')}
+      ${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}
+    </td>
+
+    <td style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
+      ${po.created_at ? new Date(po.created_at).toLocaleDateString('es-AR') : '—'}
+    </td>
+
+    <td style="padding:10px 12px;white-space:nowrap;text-align:right">
+      <button class="btn btn-secondary btn-sm" onclick="openPODetail('${po.id}')">Ver</button>
+      <button class="btn btn-secondary btn-sm" onclick="printPO('${po.id}')" title="Imprimir" style="margin-left:4px">🖨</button>
+      ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="deletePO('${po.id}')" style="margin-left:4px">✕</button>` : ''}
+    </td>
+  </tr>`;
+}
+
+function _poProgress(status) {
+  const map = {
+    'en_revision': 20,
+    'aprobada':    50,
+    'rechazada':   0,
+    'recibida':    80,
+    'pagada':      100,
+    'cancelada':   0,
+  };
+  return map[status] ?? 10;
+}
+
+// Inline edit de estado de OC
+async function _poInlineEdit(id, field, newValue) {
+  const po = (App.poTable.rawData || []).find(p => p.id === id);
+  if (!po) { showToast?.('error','OC no encontrada'); return; }
+
+  const oldValue = po[field];
+  po[field] = newValue;
+
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ [field]: newValue })
+    });
+    if (!res.ok) throw new Error('Error HTTP');
+    showToast?.('ok', `OC actualizada: ${newValue}`);
+    _poRenderKPIs();
+    _poRenderRows();
+  } catch(err) {
+    po[field] = oldValue; // revertir
+    showToast?.('error', 'No se pudo actualizar. Revisá permisos.');
+    _poRenderRows();
+  }
+}
+
+// Export PDF de OCs (respeta filtros activos)
+function _poExportPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast?.('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+
+  const all = App.poTable.rawData || [];
+  const T   = App.poTable;
+
+  let rows = all.filter(p => {
+    if (T.status !== 'all' && p.status !== T.status) return false;
+    if (T.sucursal !== 'all' && p.sucursal !== T.sucursal) return false;
+    if (T.area !== 'all' && p.area !== T.area) return false;
+    if (T.search) {
+      const q = T.search.toLowerCase();
+      const hay = [p.code, p.proveedor, p.factura_nro, p.solicitante_nombre].filter(Boolean).map(s=>String(s).toLowerCase());
+      if (!hay.some(h => h.includes(q))) return false;
+    }
+    return true;
+  });
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Órdenes de Compra — Expreso Biletta', 40, 40);
+  doc.setFontSize(9);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`Generado: ${new Date().toLocaleString('es-AR')}  ·  ${rows.length} OC${rows.length===1?'':'s'}`, 40, 58);
+
+  const statusLabels = {
+    en_revision: 'En revisión',
+    aprobada:    'Aprobada',
+    rechazada:   'Rechazada',
+    recibida:    'Recibida',
+    pagada:      'Pagada',
+    cancelada:   'Cancelada',
+  };
+  const tableData = rows.map(p => [
+    p.code || '—',
+    statusLabels[p.status] || p.status || '—',
+    p.sucursal || '—',
+    p.area || '—',
+    p.solicitante_nombre || '—',
+    p.proveedor || '—',
+    p.factura_nro || '—',
+    `$${Math.round(parseFloat(p.total_real||p.total_estimado||0)).toLocaleString('es-AR')}`,
+    p.created_at ? new Date(p.created_at).toLocaleDateString('es-AR') : '—',
+  ]);
+
+  doc.autoTable({
+    startY: 72,
+    head: [['Código','Estado','Sucursal','Área','Solicitante','Proveedor','Factura','Total','Fecha']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 70, fontStyle: 'bold' },
+      7: { halign: 'right', fontStyle: 'bold' },
+    },
+  });
+
+  const totalMonto = rows.reduce((a,p) => a + parseFloat(p.total_real||p.total_estimado||0), 0);
+  const finalY = doc.lastAutoTable.finalY || 90;
+  doc.setFontSize(10);
+  doc.setFont('helvetica','bold');
+  doc.text(`TOTAL VISIBLE: $${Math.round(totalMonto).toLocaleString('es-AR')}`, 40, finalY + 20);
+
+  doc.save(`OCs-Biletta-${new Date().toISOString().slice(0,10)}.pdf`);
+  showToast?.('ok','PDF descargado');
 }
 
 // ── Modal nueva OC ────────────────────────────────────────
