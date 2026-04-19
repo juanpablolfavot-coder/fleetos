@@ -20,6 +20,9 @@ async function ensureTables() {
     ot_id UUID REFERENCES work_orders(id),
     total_estimado NUMERIC(14,2) DEFAULT 0
   )`).catch(()=>{});
+  // Campos nuevos: supplier_id (relación con catálogo) y asset_id (para OCs asociadas a activos no-vehículo)
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS supplier_id UUID`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
   await query(`CREATE TABLE IF NOT EXISTS purchase_order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     po_id UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
@@ -76,16 +79,37 @@ router.get('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
 
 router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
-    const { notes, sucursal, area, tipo='flota', vehicle_id, iva_pct=0, items=[], forma_pago, cc_dias, moneda } = req.body;
+    const { notes, sucursal, area, tipo='flota', vehicle_id, ot_id, asset_id, supplier_id, proveedor, iva_pct=0, items=[], forma_pago, cc_dias, moneda } = req.body;
     if (!items.length) return res.status(400).json({ error: 'La OC debe tener al menos un artículo' });
+
+    // Regla soft: advertir si es OC de flota y NO tiene ot_id
+    // (Se permite igual — es advertencia, no bloqueo.)
+    const warnings = [];
+    if (tipo === 'flota' && !ot_id) {
+      warnings.push('OC de flota sin OT vinculada — se recomienda asociar una OT primero');
+    }
+
     const code = await nextOCCode();
     const subtotal = items.reduce((a,i) => a + (parseFloat(i.cantidad||1) * parseFloat(i.precio_unit||0)), 0);
     const total = subtotal * (1 + parseFloat(iva_pct||0) / 100);
     const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
     const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD') ? 'USD' : 'ARS';
-    const po = await query(`INSERT INTO purchase_orders (code,status,requested_by,sucursal,area,tipo,vehicle_id,notes,iva_pct,total_estimado,forma_pago,cc_dias,moneda) VALUES ($1,'en_revision',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [code,req.user.id,sucursal||null,area||null,tipo||'flota',vehicle_id||null,notes||null,parseFloat(iva_pct||0),total,_fp,_cc,_mon]);
+
+    // Si se pasó supplier_id, auto-llenar el campo proveedor (texto) con el nombre del proveedor
+    let _proveedor = proveedor || null;
+    if (supplier_id && !_proveedor) {
+      const s = await query('SELECT name FROM suppliers WHERE id = $1', [supplier_id]);
+      if (s.rows[0]) _proveedor = s.rows[0].name;
+    }
+
+    const po = await query(
+      `INSERT INTO purchase_orders (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id, supplier_id, proveedor, notes, iva_pct, total_estimado, forma_pago, cc_dias, moneda)
+       VALUES ($1,'en_revision',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+      [code, req.user.id, sucursal||null, area||null, tipo||'flota',
+       vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
+       _proveedor, notes||null, parseFloat(iva_pct||0), total, _fp, _cc, _mon]
+    );
     const poId = po.rows[0].id;
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
@@ -94,7 +118,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     }
     const full = await query('SELECT * FROM purchase_orders WHERE id=$1',[poId]);
     const itemsResult = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at',[poId]);
-    res.status(201).json({ ...full.rows[0], items: itemsResult.rows });
+    res.status(201).json({ ...full.rows[0], items: itemsResult.rows, warnings });
   } catch(err) { res.status(500).json({ error: err.message }); }
 });
 
