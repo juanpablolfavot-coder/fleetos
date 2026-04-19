@@ -1005,8 +1005,10 @@ function openEditOTModal(id) {
 
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Costo repuestos ($)</label>
-        <input class="form-input" type="number" id="eo-parts" value="${ot.parts_cost||0}">
+        <label class="form-label">Costo repuestos ($)
+          <span style="font-size:10px;color:var(--text3);font-weight:400">· autocalculado desde los repuestos</span>
+        </label>
+        <input class="form-input" type="number" id="eo-parts" value="${ot.parts_cost||0}" readonly style="background:var(--bg3)">
       </div>
       <div class="form-group">
         <label class="form-label">Costo mano de obra ($)
@@ -1016,20 +1018,37 @@ function openEditOTModal(id) {
       </div>
     </div>
     ${(ot.parts||[]).length>0?`
-      <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3)">
-        Esta OT tiene ${ot.parts.length} repuesto/s cargado/s. Para modificarlos cerrá y creá una nueva OT.
+      <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3);margin-bottom:12px">
+        ℹ️ Esta OT ya tiene ${ot.parts.length} repuesto/s cargado/s desde la creación.
       </div>`:''
     }
+
+    <!-- 🔧 REPUESTOS EN OT EXISTENTE ─────────────────────────── -->
+    <div style="margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div>
+          <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos de la OT</label>
+          <div style="font-size:11px;color:var(--text3)">Agregá repuestos del pañol o de compras externas. Se suma automáticamente al costo.</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button>
+      </div>
+      <div id="eo-parts-list" style="margin-bottom:8px">
+        <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando repuestos...</div>
+      </div>
+      <div id="eo-parts-total" style="text-align:right;font-size:13px;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);display:none">
+        Total repuestos: <strong id="eo-parts-total-val" style="color:var(--accent)">$0</strong>
+      </div>
+    </div>
   `, [
     { label:'Guardar cambios', cls:'btn-primary',   fn: () => saveEditOT(id) },
     { label:'Cancelar',        cls:'btn-secondary', fn: closeModal }
   ]);
 
-  // Guardar el ID de la OT en una variable global del modal, para que las funciones
-  // de partes sepan a qué OT agregar los registros
+  // Guardar el ID de la OT en una variable global del modal
   window._labCurrentOtId = ot._uuid || ot.id;
-  // Cargar los partes existentes de esta OT
+  // Cargar los partes de trabajo Y los repuestos de esta OT
   _labLoadList();
+  _partsLoadList();
 }
 
 async function saveEditOT(id) {
@@ -9520,4 +9539,300 @@ async function loadLaborRate() {
       App.config.labor_rate = parseFloat(cfg.labor_rate) || 0;
     }
   } catch(e) { /* silent */ }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REPUESTOS EN OT EXISTENTE (agregar/eliminar después de crear)
+// ═══════════════════════════════════════════════════════════
+
+async function _partsLoadList() {
+  const otId = window._labCurrentOtId;
+  const container = document.getElementById('eo-parts-list');
+  if (!otId || !container) return;
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/parts`);
+    if (!r.ok) {
+      container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error al cargar repuestos</div>`;
+      return;
+    }
+    const parts = await r.json();
+    _partsRender(parts);
+  } catch(err) {
+    container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error: ${err.message}</div>`;
+  }
+}
+
+function _partsRender(parts) {
+  const container = document.getElementById('eo-parts-list');
+  const totalDiv  = document.getElementById('eo-parts-total');
+  const totalVal  = document.getElementById('eo-parts-total-val');
+  const eoParts   = document.getElementById('eo-parts');
+  if (!container) return;
+
+  if (!parts || parts.length === 0) {
+    container.innerHTML = `<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px;background:var(--bg3);border-radius:var(--radius);border:1px dashed var(--border2)">
+      Aún no hay repuestos cargados en esta OT.<br>Click en <b>"+ Agregar repuesto"</b> para incorporarlos.
+    </div>`;
+    if (totalDiv) totalDiv.style.display = 'none';
+    if (eoParts) eoParts.value = 0;
+    return;
+  }
+
+  container.innerHTML = parts.map(p => {
+    const qty = parseFloat(p.qty || 0);
+    const cost = parseFloat(p.unit_cost || 0);
+    const subtotal = parseFloat(p.subtotal || (qty * cost));
+    const origenLabel = p.origin === 'stock' ? '📦 Pañol' : '🛒 Externo';
+    const origenColor = p.origin === 'stock' ? 'var(--ok)' : 'var(--text3)';
+    const stockCode = p.stock_code ? ` · <span style="font-family:var(--mono);font-size:10px">${p.stock_code}</span>` : '';
+    return `<div style="display:grid;grid-template-columns:70px 1fr 70px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
+      <div style="color:${origenColor};font-weight:600;font-size:11px">${origenLabel}</div>
+      <div>
+        <div style="font-weight:600">${p.name}</div>
+        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}</div>
+      </div>
+      <div style="text-align:center;font-family:var(--mono)">${qty}</div>
+      <div style="text-align:right;font-family:var(--mono);color:var(--text3)">$${Math.round(cost).toLocaleString('es-AR')}</div>
+      <div style="text-align:right;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(subtotal).toLocaleString('es-AR')}</div>
+      <button type="button" onclick="_partsDelete('${p.id}', ${p.origin === 'stock' ? 'true' : 'false'})"
+        title="${p.origin === 'stock' ? 'Eliminar y devolver al stock' : 'Eliminar repuesto'}"
+        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>
+    </div>`;
+  }).join('');
+
+  const totalM = parts.reduce((a,p) => a + parseFloat(p.subtotal || (p.qty * p.unit_cost) || 0), 0);
+  if (totalDiv) totalDiv.style.display = 'block';
+  if (totalVal) totalVal.textContent = '$' + Math.round(totalM).toLocaleString('es-AR');
+  if (eoParts)  eoParts.value = totalM.toFixed(2);
+}
+
+function _partsAddRow() {
+  if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
+
+  const body = `
+    <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
+      💡 Elegí el origen del repuesto: 📦 Pañol (descuenta stock) o 🛒 Externo (compra afuera).
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Origen *</label>
+      <select class="form-select" id="pnew-origin" onchange="_partsOriginChanged()">
+        <option value="externo">🛒 Externo (compra afuera)</option>
+        <option value="stock">📦 Pañol (usar stock existente)</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="position:relative">
+      <label class="form-label">Descripción del repuesto *</label>
+      <input class="form-input" id="pnew-name" placeholder="Descripción del repuesto" autocomplete="off"
+        oninput="_partsNameInput(this.value)">
+      <div id="pnew-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:0 0 var(--radius) var(--radius);z-index:100;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.25)"></div>
+      <div id="pnew-stock-info" style="display:none;font-size:11px;color:var(--text3);margin-top:4px"></div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Cantidad *</label>
+        <input class="form-input" type="number" id="pnew-qty" min="0.01" step="0.01" value="1"
+          oninput="_partsQtyChanged()" style="font-size:14px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unidad</label>
+        <input class="form-input" id="pnew-unit" value="un" style="font-size:14px">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Precio unitario ($)</label>
+        <input class="form-input" type="number" id="pnew-cost" min="0" value="0"
+          oninput="_partsRecalc()" style="font-size:14px">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total calculado</label>
+        <input class="form-input" id="pnew-subtotal" readonly style="background:var(--bg3);font-weight:700;color:var(--accent);font-size:14px" value="$0">
+      </div>
+    </div>
+  `;
+  openModal('🔧 Agregar repuesto a la OT', body, [
+    { label: 'Cancelar', cls: 'btn-secondary', fn: () => { closeModal(); openEditOTModal(window._labCurrentOtId); } },
+    { label: 'Agregar', cls: 'btn-primary', fn: _partsSave },
+  ]);
+
+  // Limpiar dataset para nueva entrada
+  window._pnewStockId = null;
+  window._pnewStockAvailable = 0;
+}
+
+function _partsOriginChanged() {
+  const origin = document.getElementById('pnew-origin')?.value;
+  const nameEl = document.getElementById('pnew-name');
+  const costEl = document.getElementById('pnew-cost');
+  const sugEl = document.getElementById('pnew-suggestions');
+  const infoEl = document.getElementById('pnew-stock-info');
+
+  if (origin === 'externo') {
+    if (nameEl) { nameEl.placeholder = 'Descripción del repuesto (compra externa)'; nameEl.value = ''; nameEl.style.borderLeft = ''; }
+    if (costEl) { costEl.readOnly = false; costEl.style.background = ''; costEl.value = 0; }
+    if (sugEl)  sugEl.style.display = 'none';
+    if (infoEl) infoEl.style.display = 'none';
+    window._pnewStockId = null;
+    window._pnewStockAvailable = 0;
+  } else {
+    if (nameEl) { nameEl.placeholder = 'Escribí para buscar en el pañol...'; nameEl.value = ''; nameEl.style.borderLeft = ''; }
+    if (costEl) { costEl.value = 0; costEl.readOnly = false; costEl.style.background = ''; }
+    if (infoEl) { infoEl.style.display = 'block'; infoEl.innerHTML = '<span style="color:var(--accent)">📦 Elegí un ítem del pañol</span>'; }
+    window._pnewStockId = null;
+  }
+  _partsRecalc();
+}
+
+function _partsNameInput(val) {
+  const origin = document.getElementById('pnew-origin')?.value;
+  const sugEl = document.getElementById('pnew-suggestions');
+  if (!sugEl) return;
+
+  if (origin !== 'stock') { sugEl.style.display = 'none'; return; }
+
+  // Si el usuario edita después de haber seleccionado, desvincular
+  if (window._pnewStockId) {
+    window._pnewStockId = null;
+    window._pnewStockAvailable = 0;
+    const nameEl = document.getElementById('pnew-name');
+    if (nameEl) nameEl.style.borderLeft = '';
+  }
+
+  if (!val || val.length < 2) { sugEl.style.display = 'none'; return; }
+  const q = val.toLowerCase();
+  const stock = (App.data.stock || []).filter(s =>
+    (s.name||'').toLowerCase().includes(q) || (s.code||'').toLowerCase().includes(q)
+  ).slice(0, 8);
+
+  if (!stock.length) {
+    sugEl.innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center">Sin resultados en el pañol. Cambiá a "Externo" si es compra de afuera.</div>';
+    sugEl.style.display = 'block';
+    return;
+  }
+
+  sugEl.innerHTML = stock.map(s => {
+    const qty = parseFloat(s.qty_current || 0);
+    const color = qty <= parseFloat(s.qty_min || 0) ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
+    const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return `<div onclick="_partsSelectStock('${s.id}','${safeName}','${s.unit||'un'}',${parseFloat(s.unit_cost||0)},${qty})"
+      style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
+      onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      <div>
+        <div style="font-weight:600">${s.name}</div>
+        <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost||0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
+        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
+      </div>
+    </div>`;
+  }).join('');
+  sugEl.style.display = 'block';
+}
+
+function _partsSelectStock(stockId, name, unit, unitCost, qtyAvailable) {
+  const nameEl = document.getElementById('pnew-name');
+  const unitEl = document.getElementById('pnew-unit');
+  const costEl = document.getElementById('pnew-cost');
+  const sugEl = document.getElementById('pnew-suggestions');
+  const infoEl = document.getElementById('pnew-stock-info');
+
+  if (nameEl) { nameEl.value = name; nameEl.style.borderLeft = '3px solid var(--ok)'; }
+  if (unitEl) unitEl.value = unit;
+  if (costEl) { costEl.value = unitCost; costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; }
+  if (sugEl) sugEl.style.display = 'none';
+
+  window._pnewStockId = stockId;
+  window._pnewStockAvailable = qtyAvailable;
+
+  if (infoEl) {
+    const color = qtyAvailable > 0 ? 'var(--ok)' : 'var(--danger)';
+    infoEl.innerHTML = `<span style="color:${color}">✓ Vinculado al pañol · Disponible: <b>${qtyAvailable} ${unit}</b></span>`;
+  }
+  _partsQtyChanged();
+  _partsRecalc();
+}
+
+function _partsQtyChanged() {
+  const qty = parseFloat(document.getElementById('pnew-qty')?.value) || 0;
+  const origin = document.getElementById('pnew-origin')?.value;
+  const qtyEl = document.getElementById('pnew-qty');
+  const infoEl = document.getElementById('pnew-stock-info');
+
+  if (origin === 'stock' && window._pnewStockId) {
+    const available = window._pnewStockAvailable;
+    if (qty > available) {
+      if (qtyEl) qtyEl.style.borderColor = 'var(--danger)';
+      if (infoEl) infoEl.innerHTML = `<span style="color:var(--danger)">⚠️ Cantidad mayor al disponible (${available})</span>`;
+    } else {
+      if (qtyEl) qtyEl.style.borderColor = '';
+      if (infoEl) infoEl.innerHTML = `<span style="color:var(--ok)">✓ Disponible: <b>${available}</b> · Usando: <b>${qty}</b> · Queda: <b>${available - qty}</b></span>`;
+    }
+  }
+  _partsRecalc();
+}
+
+function _partsRecalc() {
+  const qty = parseFloat(document.getElementById('pnew-qty')?.value) || 0;
+  const cost = parseFloat(document.getElementById('pnew-cost')?.value) || 0;
+  const subtotalEl = document.getElementById('pnew-subtotal');
+  if (subtotalEl) subtotalEl.value = '$' + Math.round(qty * cost).toLocaleString('es-AR');
+}
+
+async function _partsSave() {
+  const otId = window._labCurrentOtId;
+  if (!otId) { showToast('error', 'No hay OT seleccionada'); return; }
+
+  const origin = document.getElementById('pnew-origin')?.value || 'externo';
+  const name = (document.getElementById('pnew-name')?.value || '').trim();
+  const qty = parseFloat(document.getElementById('pnew-qty')?.value);
+  const unit = document.getElementById('pnew-unit')?.value || 'un';
+  const unit_cost = parseFloat(document.getElementById('pnew-cost')?.value) || 0;
+
+  if (!name || name.length < 2) { showToast('error', 'Ingresá el nombre del repuesto'); return; }
+  if (!qty || qty <= 0) { showToast('error', 'Cantidad inválida'); return; }
+  if (origin === 'stock' && !window._pnewStockId) { showToast('error', 'Seleccioná un ítem del pañol o cambiá a Externo'); return; }
+  if (origin === 'stock' && qty > window._pnewStockAvailable) { showToast('error', `Cantidad mayor al stock disponible (${window._pnewStockAvailable})`); return; }
+
+  const payload = { name, origin, qty, unit, unit_cost };
+  if (origin === 'stock') payload.stock_id = window._pnewStockId;
+
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/parts`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
+    showToast('ok', `Repuesto agregado: ${name} · $${Math.round(qty*unit_cost).toLocaleString('es-AR')}`);
+    closeModal();
+    // Refrescar stock global (si vino del pañol) y reabrir modal edit
+    try { await loadInitialData(); } catch(e) {}
+    openEditOTModal(otId);
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+async function _partsDelete(partId, wasFromStock) {
+  const otId = window._labCurrentOtId;
+  if (!otId) return;
+  const msg = wasFromStock
+    ? '¿Eliminar este repuesto? La cantidad se devolverá al stock.'
+    : '¿Eliminar este repuesto?';
+  if (!confirm(msg)) return;
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/parts/${partId}`, { method: 'DELETE' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
+    const data = await r.json();
+    showToast('ok', data.restored_to_stock ? 'Repuesto eliminado y devuelto al stock' : 'Repuesto eliminado');
+    // Refrescar stock global y la lista
+    try { await loadInitialData(); } catch(e) {}
+    _partsLoadList();
+  } catch(err) {
+    showToast('error', err.message);
+  }
 }
