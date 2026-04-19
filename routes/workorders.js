@@ -3,17 +3,29 @@ const { query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 
+// Auto-migrate: agregar campos ot_tipo y asset_id si no existen
+(async () => {
+  try {
+    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS ot_tipo VARCHAR(20) DEFAULT 'vehiculo'`).catch(()=>{});
+    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
+    // Backfill: las OTs viejas sin ot_tipo se marcan como 'vehiculo'
+    await query(`UPDATE work_orders SET ot_tipo = 'vehiculo' WHERE ot_tipo IS NULL`).catch(()=>{});
+  } catch(e) { /* silent */ }
+})();
+
 // GET /api/workorders
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { status, vehicle_id, priority, limit = 50, offset = 0 } = req.query;
+    const { status, vehicle_id, asset_id, ot_tipo, priority, limit = 50, offset = 0 } = req.query;
     let sql = `
       SELECT wo.*,
              v.code AS vehicle_code, v.plate, v.brand, v.model,
+             a.code AS asset_code, a.name AS asset_name, a.type AS asset_type,
              m.name AS mechanic_name
       FROM work_orders wo
       LEFT JOIN vehicles v ON v.id = wo.vehicle_id
-      LEFT JOIN users m ON m.id = wo.mechanic_id
+      LEFT JOIN assets a   ON a.id = wo.asset_id
+      LEFT JOIN users m    ON m.id = wo.mechanic_id
       WHERE 1=1
     `;
     const params = [];
@@ -24,6 +36,8 @@ router.get('/', authenticate, async (req, res) => {
     }
     if (status)     { params.push(status);     sql += ` AND wo.status = $${params.length}`; }
     if (vehicle_id) { params.push(vehicle_id); sql += ` AND wo.vehicle_id = $${params.length}`; }
+    if (asset_id)   { params.push(asset_id);   sql += ` AND wo.asset_id = $${params.length}`; }
+    if (ot_tipo)    { params.push(ot_tipo);    sql += ` AND wo.ot_tipo = $${params.length}`; }
     if (priority)   { params.push(priority);   sql += ` AND wo.priority = $${params.length}`; }
 
     sql += ` ORDER BY wo.opened_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
@@ -73,9 +87,17 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const { vehicle_id, type, priority, description, mechanic_id, parts = [], labor_cost = 0 } = req.body;
-    if (!vehicle_id || !description) {
-      return res.status(400).json({ error: 'vehicle_id y description son requeridos' });
+    const { vehicle_id, asset_id, ot_tipo = 'vehiculo', type, priority, description, mechanic_id, parts = [], labor_cost = 0 } = req.body;
+
+    // Validación: según ot_tipo se requiere vehicle_id o asset_id
+    if (!description) {
+      return res.status(400).json({ error: 'description es requerida' });
+    }
+    if (ot_tipo === 'vehiculo' && !vehicle_id) {
+      return res.status(400).json({ error: 'Para OT de vehículo se requiere vehicle_id' });
+    }
+    if (ot_tipo !== 'vehiculo' && !asset_id) {
+      return res.status(400).json({ error: 'Para OT no-vehicular se requiere asset_id' });
     }
 
     await client.query('BEGIN');
@@ -91,15 +113,22 @@ router.post('/', authenticate, async (req, res) => {
     const seq = await client.query(`UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val`);
     const code = 'OT-' + String(seq.rows[0].last_val).padStart(5, '0');
 
-    const veh = await client.query('SELECT km_current FROM vehicles WHERE id = $1', [vehicle_id]);
-    const km  = veh.rows[0]?.km_current || 0;
+    // km_at_open solo aplica a vehículos
+    let km = 0;
+    if (ot_tipo === 'vehiculo' && vehicle_id) {
+      const veh = await client.query('SELECT km_current FROM vehicles WHERE id = $1', [vehicle_id]);
+      km = veh.rows[0]?.km_current || 0;
+    }
 
     const woType = req.user.role === 'chofer' ? 'Correctivo' : (type || 'Correctivo');
 
     const wo = await client.query(
-      `INSERT INTO work_orders (code, vehicle_id, type, priority, description, mechanic_id, reporter_id, labor_cost, km_at_open)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [code, vehicle_id, woType, priority||'Normal', description, mechanic_id||null, req.user.id, labor_cost, km]
+      `INSERT INTO work_orders (code, vehicle_id, asset_id, ot_tipo, type, priority, description, mechanic_id, reporter_id, labor_cost, km_at_open)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [code,
+       ot_tipo === 'vehiculo' ? vehicle_id : null,
+       ot_tipo !== 'vehiculo' ? asset_id   : null,
+       ot_tipo, woType, priority||'Normal', description, mechanic_id||null, req.user.id, labor_cost, km]
     );
     const woId = wo.rows[0].id;
 
