@@ -2465,7 +2465,7 @@ function openTireDetail(serial) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="form-group" style="margin:0">
         <label class="form-label">Actualizar profundidad (mm)</label>
-        <input class="form-input" type="number" id="td-depth" value="${t.depth}" min="0" max="${t.maxDepth}">
+        <input class="form-input" type="number" id="td-depth" value="${t.depth||0}" min="0" max="${t.maxDepth||20}">
       </div>
       <div class="form-group" style="margin:0">
         <label class="form-label">Acción</label>
