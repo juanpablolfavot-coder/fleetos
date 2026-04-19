@@ -226,14 +226,51 @@ tireRouter.get('/history', authenticate, async (req, res) => {
 });
 
 // ======= DOCUMENTOS =======
-docRouter.get('/',authenticate,async(req,res)=>{
-  try{const{entity_type,entity_id,status}=req.query;let sql='SELECT * FROM documents WHERE 1=1';const p=[];
-  if(entity_type){p.push(entity_type);sql+=` AND entity_type=$${p.length}`;}if(entity_id){p.push(entity_id);sql+=` AND entity_id=$${p.length}`;}if(status){p.push(status);sql+=` AND status=$${p.length}`;}
-  sql+=' ORDER BY expiry_date ASC';res.json((await query(sql,p)).rows);}catch(err){res.status(500).json({error:'Error documentos'});}
+// GET /api/documents — trae documentos con JOIN a vehicles y users (choferes)
+// Devuelve los campos necesarios para mostrar código/patente/nombre en el frontend
+docRouter.get('/', authenticate, async (req, res) => {
+  try {
+    const { entity_type, entity_id, status } = req.query;
+    let sql = `
+      SELECT
+        d.*,
+        -- Info del vehículo (si entity_type = 'vehicle')
+        v.code  AS vehicle_code,
+        v.plate AS vehicle_plate,
+        v.brand AS vehicle_brand,
+        v.model AS vehicle_model,
+        -- Info del chofer (si entity_type = 'user')
+        u.name  AS user_name,
+        u.role  AS user_role,
+        u.vehicle_code AS user_vehicle_code,
+        -- Campo "referencia visible" que el frontend usa
+        CASE
+          WHEN d.entity_type = 'vehicle' THEN COALESCE(v.code, 'Vehículo eliminado')
+          WHEN d.entity_type = 'user'    THEN COALESCE(u.name, 'Chofer eliminado')
+          ELSE d.entity_id::text
+        END AS entity_label
+      FROM documents d
+      LEFT JOIN vehicles v ON d.entity_type = 'vehicle' AND v.id = d.entity_id
+      LEFT JOIN users    u ON d.entity_type = 'user'    AND u.id = d.entity_id
+      WHERE 1=1
+    `;
+    const p = [];
+    if (entity_type) { p.push(entity_type); sql += ` AND d.entity_type = $${p.length}`; }
+    if (entity_id)   { p.push(entity_id);   sql += ` AND d.entity_id = $${p.length}`; }
+    if (status)      { p.push(status);      sql += ` AND d.status = $${p.length}`; }
+    sql += ' ORDER BY d.expiry_date ASC';
+    res.json((await query(sql, p)).rows);
+  } catch(err) {
+    console.error('[documents GET]', err.message);
+    res.status(500).json({ error: 'Error al obtener documentos' });
+  }
 });
+
 docRouter.post('/',authenticate,requireRole('dueno','gerencia','jefe_mantenimiento','contador'),async(req,res)=>{
   try{const{entity_type,entity_id,doc_type,reference,issue_date,expiry_date,notes}=req.body;
   if(!entity_type||!entity_id||!doc_type||!expiry_date) return res.status(400).json({error:'Campos requeridos'});
+  // Validar que entity_type sea válido
+  if (!['vehicle','user'].includes(entity_type)) return res.status(400).json({error:'entity_type debe ser "vehicle" o "user"'});
   const r=await query(`INSERT INTO documents(entity_type,entity_id,doc_type,reference,issue_date,expiry_date,notes,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,[entity_type,entity_id,doc_type,reference||null,issue_date||null,expiry_date,notes||null,req.user.id]);
   res.status(201).json(r.rows[0]);}catch(err){res.status(500).json({error:'Error documento'});}
 });
