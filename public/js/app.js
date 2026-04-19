@@ -128,25 +128,121 @@ function renderPage(page) {
 
 // ── DASHBOARD ──
 function renderDashboard() {
-  const v = App.data.vehicles;
+  const v = App.data.vehicles || [];
   const ok = v.filter(x=>x.status==='ok').length;
   const taller = v.filter(x=>x.status==='taller').length;
   const detenida = v.filter(x=>x.status==='detenida').length;
   const warn = v.filter(x=>x.status==='warn').length;
-  const doRate = ((ok+warn)/v.length*100).toFixed(1);
-  const alerts = App.data.documents.filter(d=>d.status!=='ok').length;
+  const doRate = v.length > 0 ? ((ok+warn)/v.length*100).toFixed(1) : '0';
+  const alerts = (App.data.documents||[]).filter(d=>d.status!=='ok').length;
 
+  // ═══ MÉTRICAS PARA PENDIENTES CRÍTICOS ═══
+  const dangerDocs  = (App.data.documents||[]).filter(d=>d.status==='danger');
+  const warnDocs    = (App.data.documents||[]).filter(d=>d.status==='warn');
+  const otsUrgentes = (App.data.workOrders||[]).filter(o => o.priority === 'Urgente' && o.status !== 'Cerrada');
+  const otsAbiertas = (App.data.workOrders||[]).filter(o => o.status !== 'Cerrada');
+  const stockBajo   = (App.data.stock||[]).filter(s => {
+    const cur = parseFloat(s.qty_current) || 0;
+    const min = parseFloat(s.qty_min) || 0;
+    return min > 0 && cur <= min;
+  });
+  const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'en_revision');
+  const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada');
+
+  // Mantenimientos vencidos (>=95% del intervalo)
+  const maintAlerts = v.map(veh => {
+    const km = veh.km || 0;
+    const ts = veh.tech_spec || {};
+    const interval = parseInt(ts.maint_interval_km) || 15000;
+    const pct = interval > 0 ? (km % interval / interval * 100) : 0;
+    return { code: veh.code, pct: Math.round(pct), km, interval, nextKm: Math.ceil(km/interval)*interval };
+  }).filter(m => m.pct >= 80).sort((a,b) => b.pct - a.pct);
+  const maintVencidos = maintAlerts.filter(m => m.pct >= 95);
+  const maintProximos = maintAlerts.filter(m => m.pct >= 80 && m.pct < 95);
+
+  // ═══ MÉTRICAS DEL MES ═══
+  const ahora = new Date();
+  const yr = ahora.getFullYear();
+  const mo = ahora.getMonth();
+  const enMesActual = (fecha) => {
+    if (!fecha) return false;
+    const d = new Date(fecha);
+    return d.getFullYear() === yr && d.getMonth() === mo;
+  };
+
+  const fuelMes = (App.data.fuelLogs||[]).filter(f => enMesActual(f.date));
+  const litrosMes = fuelMes.reduce((a,b) => a + (parseFloat(b.liters)||0), 0);
+  const combustibleMesCosto = fuelMes.reduce((a,b) => a + ((parseFloat(b.liters)||0) * (parseFloat(b.ppu)||0)), 0);
+
+  const otsCerradasMes = (App.data.workOrders||[]).filter(o =>
+    o.status === 'Cerrada' && enMesActual(o.closed_at || o.closed || o.date)
+  );
+  const costoOTsMes = otsCerradasMes.reduce((a,o) => a + (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0), 0);
+
+  const ocsMes = (App.data.purchaseOrders||[]).filter(p => enMesActual(p.created_at));
+  const ocsMesTotal = ocsMes.reduce((a,p) => a + (parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0), 0);
+
+  // Total pendientes críticos
+  const totalPendientes = dangerDocs.length + otsUrgentes.length + stockBajo.length + ocsRevision.length + maintVencidos.length;
+
+  // ═══ ACTIVIDAD RECIENTE ═══
+  const actividad = [];
+  (App.data.workOrders||[]).slice(0, 3).forEach(o => {
+    if (!o.opened && !o.created_at) return;
+    const fecha = new Date(o.opened || o.created_at);
+    actividad.push({
+      when: fecha,
+      icon: '🔧',
+      text: `OT <b>${o.id || o.code}</b> creada (${o.vehicle || '—'})`,
+      action: `navigate('workorders')`,
+    });
+  });
+  (App.data.purchaseOrders||[]).slice(0, 3).forEach(p => {
+    if (!p.created_at) return;
+    actividad.push({
+      when: new Date(p.created_at),
+      icon: '🛒',
+      text: `OC <b>${p.code}</b> · ${p.proveedor || '—'} · ${p.status}`,
+      action: `navigate('purchase_orders')`,
+    });
+  });
+  (App.data.fuelLogs||[]).slice(0, 3).forEach(f => {
+    if (!f.date) return;
+    actividad.push({
+      when: new Date(f.date),
+      icon: '⛽',
+      text: `Carga <b>${f.vehicle || '—'}</b> · ${f.liters} L · $${(parseFloat(f.total)||0).toLocaleString('es-AR')}`,
+      action: `navigate('fuel')`,
+    });
+  });
+  actividad.sort((a,b) => b.when - a.when);
+  const actividadReciente = actividad.slice(0, 8);
+
+  // Helper: tiempo transcurrido
+  const tiempoAgo = (d) => {
+    const diff = (new Date() - d) / 1000;
+    if (diff < 60) return 'hace instantes';
+    if (diff < 3600) return `hace ${Math.round(diff/60)} min`;
+    if (diff < 86400) return `hace ${Math.round(diff/3600)} h`;
+    const dias = Math.round(diff/86400);
+    if (dias === 1) return 'ayer';
+    if (dias < 7) return `hace ${dias} días`;
+    return d.toLocaleDateString('es-AR');
+  };
+
+  // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card ${ok>=40?'ok':'warn'}">
+    <!-- KPIs superiores -->
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card ${ok>=v.length?'ok':'warn'}">
         <div class="kpi-label">Unidades operativas</div>
-        <div class="kpi-value ${ok>=40?'ok':'warn'}">${ok}</div>
-        <div class="kpi-trend">de ${App.data.vehicles.length} en flota</div>
+        <div class="kpi-value ${ok>=v.length?'ok':'warn'}">${ok}</div>
+        <div class="kpi-trend">de ${v.length} en flota</div>
       </div>
       <div class="kpi-card ${taller+detenida===0?'ok':'warn'}">
         <div class="kpi-label">En taller / detenidas</div>
         <div class="kpi-value ${taller+detenida===0?'ok':'danger'}">${taller+detenida}</div>
-        <div class="kpi-trend">${taller} en taller · ${detenida} detenida</div>
+        <div class="kpi-trend">${taller} en taller · ${detenida} detenida${detenida===1?'':'s'}</div>
       </div>
       <div class="kpi-card ${parseFloat(doRate)>=92?'ok':'warn'}">
         <div class="kpi-label">Disponibilidad operativa</div>
@@ -160,9 +256,47 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div class="two-col" style="margin-bottom:20px">
+    <!-- BLOQUE 1: PENDIENTES CRÍTICOS (6 tarjetas accionables) -->
+    <div class="card" style="margin-bottom:16px;${totalPendientes > 0 ? 'border-left:4px solid var(--danger)' : 'border-left:4px solid var(--ok)'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div class="card-title" style="margin:0">${totalPendientes > 0 ? '🔥 Requieren tu atención hoy' : '✅ Todo al día'}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${totalPendientes > 0 ? `${totalPendientes} pendientes críticos` : 'Ningún pendiente crítico ahora mismo'}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+        <div onclick="navigate('documents')" style="cursor:pointer;background:${dangerDocs.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${dangerDocs.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📄 Docs vencidos</div>
+          <div style="font-size:22px;font-weight:700;color:${dangerDocs.length>0?'var(--danger)':'var(--text3)'}">${dangerDocs.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${dangerDocs.length>0?'requieren renovar':'todo al día'}</div>
+        </div>
+        <div onclick="navigate('workorders')" style="cursor:pointer;background:${otsUrgentes.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${otsUrgentes.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🚨 OTs urgentes</div>
+          <div style="font-size:22px;font-weight:700;color:${otsUrgentes.length>0?'var(--danger)':'var(--text3)'}">${otsUrgentes.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${otsAbiertas.length} abiertas total</div>
+        </div>
+        <div onclick="navigate('maintenance')" style="cursor:pointer;background:${maintVencidos.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${maintVencidos.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🔧 Mant. vencidos</div>
+          <div style="font-size:22px;font-weight:700;color:${maintVencidos.length>0?'var(--danger)':'var(--text3)'}">${maintVencidos.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${maintProximos.length} próximos</div>
+        </div>
+        <div onclick="navigate('purchase_orders')" style="cursor:pointer;background:${ocsRevision.length>0?'rgba(245,158,11,.12)':'var(--bg3)'};border:1px solid ${ocsRevision.length>0?'rgba(245,158,11,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🛒 OCs por aprobar</div>
+          <div style="font-size:22px;font-weight:700;color:${ocsRevision.length>0?'var(--warn)':'var(--text3)'}">${ocsRevision.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${ocsAprobadas.length} aprobadas</div>
+        </div>
+        <div onclick="navigate('stock')" style="cursor:pointer;background:${stockBajo.length>0?'rgba(245,158,11,.12)':'var(--bg3)'};border:1px solid ${stockBajo.length>0?'rgba(245,158,11,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📦 Stock bajo</div>
+          <div style="font-size:22px;font-weight:700;color:${stockBajo.length>0?'var(--warn)':'var(--text3)'}">${stockBajo.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${stockBajo.length>0?'necesitan reposición':'todo abastecido'}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BLOQUE 2: Mapa de flota + Alertas detalladas -->
+    <div class="two-col" style="margin-bottom:16px">
       <div class="card">
-        <div class="card-title">Estado de la flota — ${(App.data.vehicles||[]).length} unidades</div>
+        <div class="card-title">Estado de la flota — ${v.length} unidades</div>
         <div class="fleet-grid" id="fleet-grid-mini"></div>
         <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono)">
           <span>● Verde: operativo</span><span>● Naranja: alerta</span><span>● Rojo: taller/detenida</span>
@@ -170,11 +304,39 @@ function renderDashboard() {
       </div>
       <div class="card">
         <div class="card-title">Alertas activas</div>
-        <div id="dash-alerts"></div>
+        <div id="dash-alerts" style="max-height:260px;overflow-y:auto"></div>
       </div>
     </div>
 
-    <div class="two-col">
+    <!-- BLOQUE 3: NÚMEROS DEL MES -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">📈 Números del mes · ${['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mo]} ${yr}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⛽ Combustible</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${Math.round(combustibleMesCosto).toLocaleString('es-AR')}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${Math.round(litrosMes).toLocaleString('es-AR')} L · ${fuelMes.length} cargas</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🔧 OTs cerradas</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">${otsCerradasMes.length}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">Costo: $${Math.round(costoOTsMes).toLocaleString('es-AR')}</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🛒 OCs del mes</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${Math.round(ocsMesTotal).toLocaleString('es-AR')}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">${ocsMes.length} órdenes</div>
+        </div>
+        <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
+          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">💰 Total gastado</div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(combustibleMesCosto + costoOTsMes).toLocaleString('es-AR')}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">combustible + mantenimiento</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BLOQUE 4: OTs abiertas + últimas cargas -->
+    <div class="two-col" style="margin-bottom:16px">
       <div class="card">
         <div class="section-header">
           <div><div class="section-title">Órdenes de trabajo abiertas</div></div>
@@ -190,79 +352,123 @@ function renderDashboard() {
         <div id="dash-fuel"></div>
       </div>
     </div>
+
+    <!-- BLOQUE 5: OCs recientes + Actividad reciente -->
+    <div class="two-col">
+      <div class="card">
+        <div class="section-header">
+          <div><div class="section-title">Órdenes de compra recientes</div></div>
+          <button class="btn btn-secondary btn-sm" onclick="navigate('purchase_orders')">Ver todas</button>
+        </div>
+        <div id="dash-oc"></div>
+      </div>
+      <div class="card">
+        <div class="section-header">
+          <div><div class="section-title">📋 Actividad reciente</div></div>
+        </div>
+        <div id="dash-activity"></div>
+      </div>
+    </div>
   `;
 
-  // Fleet grid
+  // ═══ FLEET GRID ═══
   const grid = document.getElementById('fleet-grid-mini');
   v.forEach(vc => {
     const cls = {ok:'ok',warn:'warn',taller:'danger',detenida:'danger'}[vc.status]||'ok';
     const el = document.createElement('div');
     el.className = `fleet-unit ${cls}`;
     el.textContent = vc.code;
-    el.title = `${vc.code} — ${vc.brand} ${vc.model} — ${vc.status.toUpperCase()}`;
+    el.title = `${vc.code} — ${vc.brand||''} ${vc.model||''} — ${(vc.status||'').toUpperCase()}`;
     el.addEventListener('click', () => { navigate('fleet'); setTimeout(()=>filterVehicle(vc.code),100); });
     grid.appendChild(el);
   });
 
-  // Alerts
+  // ═══ ALERTAS ═══
   const alertsEl = document.getElementById('dash-alerts');
-  const dangerDocs = App.data.documents.filter(d=>d.status==='danger');
-  const warnDocs = App.data.documents.filter(d=>d.status==='warn');
-  const detainedVehicles = App.data.vehicles.filter(v=>v.status==='detenida');
-
-  // Alertas de mantenimiento — calcular basado en km e intervalos configurados
-  const maintAlerts = (App.data.vehicles||[]).map(v => {
-    const km = v.km || 0;
-    const ts = v.tech_spec || {};
-    const interval = parseInt(ts.maint_interval_km) || 15000;
-    const pct = km % interval / interval * 100;
-    return { code: v.code, pct: Math.round(pct), km, interval, nextKm: Math.ceil(km/interval)*interval };
-  }).filter(m => m.pct >= 80).sort((a,b) => b.pct - a.pct);
-
+  const detainedVehicles = v.filter(x => x.status === 'detenida');
   let html = '';
-  detainedVehicles.forEach(v => {
-    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${v.code}</b> — Unidad detenida en base.</span></div>`;
+  detainedVehicles.forEach(veh => {
+    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${veh.code}</b> — Unidad detenida en base.</span></div>`;
   });
   dangerDocs.forEach(d => {
-    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
+    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
   });
-  // Mantenimiento vencido (>= 95%)
-  maintAlerts.filter(m=>m.pct>=95).forEach(m => {
-    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString()} / ${m.nextKm.toLocaleString()} km</span></div>`;
+  maintVencidos.forEach(m => {
+    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} km</span></div>`;
   });
-  // Mantenimiento próximo (80-94%)
-  maintAlerts.filter(m=>m.pct>=80&&m.pct<95).slice(0,3).forEach(m => {
-    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString()} km</span></div>`;
+  maintProximos.slice(0,3).forEach(m => {
+    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} km</span></div>`;
   });
   warnDocs.slice(0,2).forEach(d => {
     const days = Math.ceil((new Date(d.expiry)-new Date())/86400000);
-    html += `<div class="alert-row warn"><span>!</span><span class="alert-text"><b>${d.vehicle}</b> — ${d.type} vence en ${days} días</span></div>`;
+    html += `<div class="alert-row warn"><span>!</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vence en ${days} días</span></div>`;
   });
   if (!html) html = '<div class="alert-row ok"><span>✓</span><span class="alert-text">Sin alertas críticas activas</span></div>';
   alertsEl.innerHTML = html;
 
-  // OT
+  // ═══ OTs abiertas ═══
   const otEl = document.getElementById('dash-ot');
-  const openOT = App.data.workOrders.filter(o=>o.status!=='Cerrada').slice(0,5);
-  otEl.innerHTML = `<table><thead><tr><th>OT</th><th>Vehículo</th><th>Estado</th><th>Prioridad</th></tr></thead><tbody>
-    ${openOT.map(o=>`<tr>
-      <td class="td-mono">${o.id}</td>
-      <td class="td-main">${o.vehicle}</td>
-      <td><span class="badge ${o.status==='En proceso'?'badge-info':o.status==='Esperando repuesto'?'badge-warn':'badge-gray'}">${o.status}</span></td>
-      <td><span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}">${o.priority}</span></td>
-    </tr>`).join('')}
-  </tbody></table>`;
+  const openOT = (App.data.workOrders||[]).filter(o=>o.status!=='Cerrada').slice(0,5);
+  otEl.innerHTML = openOT.length === 0
+    ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">✓ No hay OTs abiertas</div>'
+    : `<table><thead><tr><th>OT</th><th>Vehículo</th><th>Estado</th><th>Prioridad</th></tr></thead><tbody>
+      ${openOT.map(o=>`<tr>
+        <td class="td-mono">${o.id}</td>
+        <td class="td-main">${o.vehicle}</td>
+        <td><span class="badge ${o.status==='En proceso'?'badge-info':o.status==='Esperando repuesto'?'badge-warn':'badge-gray'}">${o.status}</span></td>
+        <td><span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}">${o.priority}</span></td>
+      </tr>`).join('')}
+    </tbody></table>`;
 
-  // Fuel
+  // ═══ Combustible ═══
   const fuelEl = document.getElementById('dash-fuel');
-  fuelEl.innerHTML = `<table><thead><tr><th>Unidad</th><th>Litros</th><th>Rendimiento</th><th>Estado</th></tr></thead><tbody>
-    ${App.data.fuelLogs.slice(0,5).map(f=>`<tr>
-      <td class="td-main">${f.vehicle}</td>
-      <td class="td-mono">${f.liters} L</td>
-      <td class="td-mono">${(()=>{const logs=App.data.fuelLogs.filter(x=>x.vehicle===f.vehicle&&x.km>0).sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
-      <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
-    </tr>`).join('')}
-  </tbody></table>`;
+  const ultimasCargas = (App.data.fuelLogs||[]).slice(0,5);
+  fuelEl.innerHTML = ultimasCargas.length === 0
+    ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin cargas registradas</div>'
+    : `<table><thead><tr><th>Unidad</th><th>Litros</th><th>Rendimiento</th><th>Estado</th></tr></thead><tbody>
+      ${ultimasCargas.map(f=>`<tr>
+        <td class="td-main">${f.vehicle}</td>
+        <td class="td-mono">${f.liters} L</td>
+        <td class="td-mono">${(()=>{const logs=(App.data.fuelLogs||[]).filter(x=>x.vehicle===f.vehicle&&x.km>0).sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
+        <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+
+  // ═══ OCs recientes ═══
+  const ocEl = document.getElementById('dash-oc');
+  const recentOCs = (App.data.purchaseOrders||[]).slice(0,5);
+  const ocStatusBadge = {
+    'en_revision': 'badge-warn',
+    'aprobada': 'badge-info',
+    'recibida': 'badge-ok',
+    'pagada': 'badge-ok',
+    'rechazada': 'badge-danger',
+    'cancelada': 'badge-gray',
+  };
+  ocEl.innerHTML = recentOCs.length === 0
+    ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin órdenes de compra todavía</div>'
+    : `<table><thead><tr><th>OC</th><th>Proveedor</th><th>Total</th><th>Estado</th></tr></thead><tbody>
+      ${recentOCs.map(p => `<tr>
+        <td class="td-mono"><b>${p.code}</b></td>
+        <td>${(p.proveedor || '—').substring(0, 22)}</td>
+        <td class="td-mono">$${Math.round(parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0).toLocaleString('es-AR')}</td>
+        <td><span class="badge ${ocStatusBadge[p.status] || 'badge-gray'}">${(p.status||'').replace('_',' ')}</span></td>
+      </tr>`).join('')}
+    </tbody></table>`;
+
+  // ═══ Actividad reciente ═══
+  const actEl = document.getElementById('dash-activity');
+  actEl.innerHTML = actividadReciente.length === 0
+    ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin actividad reciente</div>'
+    : `<div style="display:flex;flex-direction:column;gap:6px">
+      ${actividadReciente.map(a => `
+        <div onclick="${a.action}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border-radius:var(--radius);cursor:pointer;transition:all .1s" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
+          <span style="font-size:16px">${a.icon}</span>
+          <span style="flex:1;font-size:12px;color:var(--text)">${a.text}</span>
+          <span style="font-size:10px;color:var(--text3);white-space:nowrap">${tiempoAgo(a.when)}</span>
+        </div>
+      `).join('')}
+    </div>`;
 }
 
 // ── FLOTA ──
@@ -8908,6 +9114,52 @@ async function openAreasConfigModal() {
     { label:'Guardar áreas',     cls:'btn-primary',   fn: saveAreasConfig },
   ]);
 }
+
+// Guardar configuración de áreas por sucursal
+async function saveAreasConfig() {
+  var bases = App.config?.bases || [];
+  var newAreas = {};
+
+  // Leer inputs de cada sucursal
+  bases.forEach(function(suc) {
+    var input = document.getElementById('areas-' + suc.replace(/\s+/g,'_'));
+    if (!input) return;
+    var raw = (input.value || '').trim();
+    if (!raw) { newAreas[suc] = []; return; }
+    // Separar por coma y limpiar espacios/duplicados
+    var list = raw.split(',')
+      .map(function(a){ return a.trim(); })
+      .filter(function(a){ return a.length > 0; });
+    // Eliminar duplicados manteniendo orden
+    var seen = {};
+    newAreas[suc] = list.filter(function(a){
+      var k = a.toLowerCase();
+      if (seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+  });
+
+  try {
+    var res = await apiFetch('/api/config', {
+      method: 'PUT',
+      body: JSON.stringify({ areas: newAreas })
+    });
+    if (!res.ok) {
+      var e = await res.json().catch(function(){ return {}; });
+      showToast('error', e.error || 'Error al guardar áreas');
+      return;
+    }
+    // Actualizar config local
+    App.config = App.config || {};
+    App.config.areas = newAreas;
+    closeModal();
+    showToast('ok', 'Áreas por sucursal actualizadas');
+  } catch(err) {
+    showToast('error', err.message || 'Error al guardar');
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════
    OC EXTRAS v1 — forma de pago, cc_dias, moneda + sucursales API
    ═══════════════════════════════════════════════════════════ */
