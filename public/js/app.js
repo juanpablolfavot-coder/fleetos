@@ -7404,11 +7404,13 @@ async function saveNewPO() {
       const idx   = descEl.id.replace('poi-desc-', '');
       const desc  = descEl.value.trim();
       if (!desc) return;
+      const stockLinked = descEl.dataset.stockLinked === 'true';
       items.push({
         descripcion: desc,
         cantidad:    parseFloat(document.getElementById(`poi-qty-${idx}`)?.value)   || 1,
         unidad:      document.getElementById(`poi-unit-${idx}`)?.value              || 'un',
         precio_unit: parseFloat(document.getElementById(`poi-price-${idx}`)?.value) || 0,
+        stock_item_id: stockLinked ? (descEl.dataset.stockId || null) : null,
       });
     });
     if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
@@ -7952,32 +7954,95 @@ async function recibirOC(id) {
       ? (App.data.vehicles||[]).find(function(v){ return v.id === po.vehicle_id; })
       : null;
 
-    var msg = vehiculo
-      ? 'Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nSe generará automáticamente la OT para el vehículo ' + vehiculo.code + ' (' + vehiculo.plate + ') con el costo de la factura ($' + parseFloat(po.factura_monto||po.total_estimado||0).toLocaleString('es-AR') + ').\n\n¿Confirmás?'
-      : 'Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nNo tiene vehículo asignado — no se generará OT.\n\n¿Confirmás?';
+    // Contar cuántos ítems están vinculados al stock (para el mensaje de confirmación)
+    const itemsVinculados = (po.items || []).filter(i => i.stock_item_id).length;
+    const itemsTotal = (po.items || []).length;
 
-    if (!confirm(msg)) return;
+    var partes = ['Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n'];
+    if (itemsVinculados > 0) {
+      partes.push('📦 ' + itemsVinculados + ' de ' + itemsTotal + ' ítems se INGRESARÁN automáticamente al stock.');
+    }
+    if (itemsTotal - itemsVinculados > 0) {
+      partes.push('⚠️  ' + (itemsTotal - itemsVinculados) + ' ítems NO están vinculados al stock (no ingresan).');
+    }
+    if (vehiculo) {
+      partes.push('\n🚛 Se generará OT para ' + vehiculo.code + ' (' + vehiculo.plate + ') con el costo de la factura.');
+    }
+    partes.push('\n¿Confirmás?');
+
+    if (!confirm(partes.join('\n'))) return;
 
     const r = await apiFetch('/api/purchase-orders/' + id + '/recibir', { method: 'POST' });
     if (!r.ok) { var e = await r.json(); showToast('error', e.error||'Error'); return; }
     var data = await r.json();
 
-    if (data.ot_generada) {
-      showToast('ok', '✅ OC recibida · OT ' + data.ot_code + ' generada para ' + data.vehicle + ' · $' + parseFloat(data.costo_aplicado).toLocaleString('es-AR') + ' al costo de la unidad');
-} else {
-      showToast('ok', '✅ OC marcada como recibida');
+    // Armar mensaje de resumen según lo que haya pasado
+    const ingresos = data.stock_ingresos || [];
+    const warnings = data.stock_warnings || [];
+    let toastMsg = '✅ OC recibida';
+    if (ingresos.length > 0) {
+      toastMsg += ' · ' + ingresos.length + ' ítem' + (ingresos.length===1?'':'s') + ' ingresado' + (ingresos.length===1?'':'s') + ' al stock';
     }
-    closeModal();
-    await loadPOList(_poCurrentFilter);
-    if (data.ot_generada) { try { await loadInitialData(); } catch(e){} }
-    // Si se generó OT ofrecer verla
     if (data.ot_generada) {
-      setTimeout(function() {
-        if (confirm('¿Querés ver la OT ' + data.ot_code + ' generada?')) {
-          navigate('workorders');
-        }
-      }, 500);
+      toastMsg += ' · OT ' + data.ot_code + ' generada';
     }
+    showToast('ok', toastMsg);
+
+    // Si hubo ingresos al stock, mostrar un modal informativo con detalle
+    if (ingresos.length > 0 || warnings.length > 0) {
+      setTimeout(() => {
+        const ingresosHTML = ingresos.length > 0 ? `
+          <div style="font-size:11px;color:var(--ok);font-weight:700;margin-top:12px;margin-bottom:8px">📦 INGRESADO AL STOCK</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:var(--bg3)">
+                <th style="text-align:left;padding:6px">Código</th>
+                <th style="text-align:left;padding:6px">Nombre</th>
+                <th style="text-align:right;padding:6px">Cant.</th>
+                <th style="text-align:right;padding:6px">Nuevo precio</th>
+                <th style="text-align:right;padding:6px">Stock total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ingresos.map(it => `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:6px;font-family:var(--mono);font-size:11px">${it.codigo}</td>
+                <td style="padding:6px">${it.nombre}</td>
+                <td style="padding:6px;text-align:right;font-weight:700">+${it.cantidad}</td>
+                <td style="padding:6px;text-align:right;color:var(--accent)">$${Math.round(it.precio_nuevo).toLocaleString('es-AR')}</td>
+                <td style="padding:6px;text-align:right;font-weight:700;color:var(--ok)">${it.nuevo_stock}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>` : '';
+
+        const warningsHTML = warnings.length > 0 ? `
+          <div style="font-size:11px;color:var(--warn);font-weight:700;margin-top:16px;margin-bottom:8px">⚠️ ÍTEMS NO INGRESADOS AL STOCK</div>
+          <div style="background:rgba(217,119,6,.10);border-left:3px solid var(--warn);padding:10px;border-radius:var(--radius);font-size:12px">
+            ${warnings.map(w => '• ' + w).join('<br>')}
+            <div style="margin-top:8px;color:var(--text3);font-size:11px">
+              Estos ítems no tenían un ítem de stock vinculado al crear la OC.
+              Si querés que entren al stock, cargalos manualmente desde el módulo <b>Stock y pañol</b>.
+            </div>
+          </div>` : '';
+
+        openModal(
+          '📥 OC ' + po.code + ' recibida',
+          `<div style="max-height:70vh;overflow-y:auto">
+            <p style="font-size:13px;color:var(--text2)">La orden de compra quedó registrada como recibida. ${ingresos.length > 0 ? 'El stock se actualizó automáticamente con los nuevos ingresos y precios.' : ''}</p>
+            ${ingresosHTML}
+            ${warningsHTML}
+            ${data.ot_generada ? `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-top:16px">🔧 OT GENERADA: ${data.ot_code}</div>` : ''}
+          </div>`,
+          [
+            { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
+            ...(data.ot_generada ? [{ label: 'Ver OT', cls: 'btn-primary', fn: () => { closeModal(); navigate('workorders'); } }] : []),
+          ]
+        );
+      }, 300);
+    }
+
+    // Refrescar listado y data
+    try { await loadInitialData(); } catch(e) {}
+    await loadPOList();
   } catch(err) { showToast('error', err.message||'Error'); }
 }
 
@@ -8024,6 +8089,18 @@ function searchPOStock(idx) {
   if (!sug) return;
   if (!val || val.length < 2) { sug.style.display = 'none'; return; }
 
+  // Si el usuario modificó el texto después de elegir del stock, se desvincula
+  const descInput = document.getElementById('poi-desc-'+idx);
+  if (descInput && descInput.dataset.stockLinked === 'true') {
+    const prevName = descInput.dataset.stockName || '';
+    if (descInput.value.trim() !== prevName) {
+      descInput.dataset.stockId = '';
+      descInput.dataset.stockLinked = 'false';
+      const hint = document.getElementById('poi-stock-hint-'+idx);
+      if (hint) hint.style.display = 'none';
+    }
+  }
+
   var stock = App.data.stock || [];
   var matches = stock.filter(function(s) {
     return (s.name||'').toLowerCase().includes(val) || (s.code||'').toLowerCase().includes(val);
@@ -8046,6 +8123,36 @@ function searchPOStock(idx) {
       +'</div></div>';
   }).join('');
   sug.style.display = 'block';
+}
+
+// Cuando el usuario elige un ítem del autocompletado, lo vinculamos al artículo de la OC
+function selectPOStockItem(idx, stockId, name, unit, unitCost, qtyCurrent) {
+  const descEl  = document.getElementById('poi-desc-' + idx);
+  const unitEl  = document.getElementById('poi-unit-' + idx);
+  const priceEl = document.getElementById('poi-price-' + idx);
+  const sugEl   = document.getElementById('poi-suggestions-' + idx);
+  const hintEl  = document.getElementById('poi-stock-hint-' + idx);
+  const qtyHintEl = document.getElementById('poi-stock-qty-' + idx);
+
+  if (descEl) {
+    descEl.value = name;
+    // Guardar el stock_item_id en un dataset para recuperarlo al enviar el form
+    descEl.dataset.stockId = stockId;
+    descEl.dataset.stockLinked = 'true';
+    descEl.dataset.stockName = name;
+    // Indicador visual: borde verde si está vinculado al stock
+    descEl.style.borderLeft = '3px solid var(--ok)';
+  }
+  if (unitEl && unit)   unitEl.value = unit;
+  if (priceEl && unitCost) priceEl.value = parseFloat(unitCost).toFixed(2);
+  if (sugEl)  sugEl.style.display = 'none';
+  if (hintEl) hintEl.style.display = 'block';
+  if (qtyHintEl) qtyHintEl.textContent = `${parseFloat(qtyCurrent)} ${unit} · vinculado al stock ✓`;
+
+  updatePOTotal();
+  if (typeof showToast === 'function') {
+    showToast('ok', `Vinculado al stock: ${name}`);
+  }
 }
 
 async function openAreasConfigModal() {
