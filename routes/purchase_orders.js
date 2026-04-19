@@ -31,6 +31,9 @@ async function ensureTables() {
     subtotal NUMERIC(14,2) GENERATED ALWAYS AS (cantidad * precio_unit) STORED,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`).catch(()=>{});
+  // Campos nuevos: stock_item_id para vincular con stock + ingresado_stock para no duplicar
+  await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
+  await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
 }
 ensureTables();
 
@@ -113,8 +116,15 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     const poId = po.rows[0].id;
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
-      await query(`INSERT INTO purchase_order_items (po_id,descripcion,cantidad,unidad,precio_unit) VALUES ($1,$2,$3,$4,$5)`,
-        [poId,item.descripcion.trim(),parseFloat(item.cantidad||1),item.unidad||'un',parseFloat(item.precio_unit||0)]);
+      await query(
+        `INSERT INTO purchase_order_items (po_id,descripcion,cantidad,unidad,precio_unit,stock_item_id)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [poId, item.descripcion.trim(),
+         parseFloat(item.cantidad||1),
+         item.unidad||'un',
+         parseFloat(item.precio_unit||0),
+         item.stock_item_id || null]
+      );
     }
     const full = await query('SELECT * FROM purchase_orders WHERE id=$1',[poId]);
     const itemsResult = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at',[poId]);
@@ -245,22 +255,103 @@ router.post('/:id/cancelar', authenticate, requireRole('dueno','gerencia'), asyn
 router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const po = await client.query(`SELECT po.*,v.code as vehicle_code,
-      json_agg(json_build_object('descripcion',poi.descripcion,'cantidad',poi.cantidad,
-        'unidad',poi.unidad,'precio_unit',poi.precio_unit,'subtotal',poi.subtotal)) as items
-      FROM purchase_orders po
-      LEFT JOIN vehicles v ON v.id=po.vehicle_id
-      LEFT JOIN purchase_order_items poi ON poi.po_id=po.id
-      WHERE po.id=$1 GROUP BY po.id,v.code`,[req.params.id]);
-    if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    const oc = po.rows[0];
+    // Traer OC + items separados (queremos el stock_item_id de cada item, no solo texto)
+    const poR = await client.query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!poR.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const oc = poR.rows[0];
     if (oc.status === 'recibida') return res.status(409).json({ error: 'La OC ya fue recibida' });
     if (oc.status !== 'aprobada') return res.status(409).json({ error: 'Solo se recibe una OC aprobada' });
+
+    const itemsR = await client.query(
+      `SELECT id, descripcion, cantidad, unidad, precio_unit, stock_item_id, ingresado_stock
+       FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at`,
+      [req.params.id]
+    );
+    const items = itemsR.rows;
+
     await client.query('BEGIN');
+
+    // 1. Marcar OC como recibida
     await client.query(
       "UPDATE purchase_orders SET status='recibida', recibido_por=$1, recibido_en=NOW() WHERE id=$2",
       [req.user.id, req.params.id]
     );
+
+    // 2. INGRESAR AUTOMÁTICAMENTE AL STOCK los ítems vinculados
+    const stockIngresos = [];     // lista de lo que se ingresó
+    const warnings     = [];      // lista de ítems sin vincular al stock
+
+    // Asegurarse que exista la tabla de movimientos de stock
+    await client.query(`CREATE TABLE IF NOT EXISTS stock_movements (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      stock_item_id UUID REFERENCES stock_items(id) ON DELETE CASCADE,
+      tipo VARCHAR(20) NOT NULL,
+      qty NUMERIC(12,2) NOT NULL,
+      balance_after NUMERIC(12,2),
+      ref_type VARCHAR(30),
+      ref_id UUID,
+      notes TEXT,
+      user_id UUID REFERENCES users(id),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`).catch(() => {});
+
+    for (const item of items) {
+      if (!item.stock_item_id || item.ingresado_stock) {
+        // Sin vinculación al stock o ya ingresado previamente → skip
+        if (!item.stock_item_id) warnings.push(`"${item.descripcion}" (sin vincular al stock)`);
+        continue;
+      }
+
+      // Verificar que el ítem de stock existe
+      const si = await client.query(
+        'SELECT id, code, name, qty_current, unit_cost FROM stock_items WHERE id=$1',
+        [item.stock_item_id]
+      );
+      if (!si.rows[0]) {
+        warnings.push(`"${item.descripcion}" (ítem de stock no existe, tal vez eliminado)`);
+        continue;
+      }
+      const stockItem = si.rows[0];
+
+      const qtyIngreso = parseFloat(item.cantidad) || 0;
+      const precioNuevo = parseFloat(item.precio_unit) || 0;
+      const nuevoQty = parseFloat(stockItem.qty_current || 0) + qtyIngreso;
+
+      // Actualizar stock: qty_current += cantidad, unit_cost = precio de esta OC (última compra)
+      await client.query(
+        `UPDATE stock_items
+         SET qty_current = qty_current + $1,
+             unit_cost   = CASE WHEN $2 > 0 THEN $2 ELSE unit_cost END,
+             updated_at  = NOW()
+         WHERE id=$3`,
+        [qtyIngreso, precioNuevo, item.stock_item_id]
+      );
+
+      // Registrar movimiento
+      await client.query(
+        `INSERT INTO stock_movements (stock_item_id, tipo, qty, balance_after, ref_type, ref_id, notes, user_id)
+         VALUES ($1, 'ingreso', $2, $3, 'purchase_order', $4, $5, $6)`,
+        [item.stock_item_id, qtyIngreso, nuevoQty, oc.id,
+         `Ingreso por OC ${oc.code}${oc.proveedor ? ' — ' + oc.proveedor : ''}`,
+         req.user.id]
+      );
+
+      // Marcar el ítem de la OC como ya ingresado (idempotente por si se re-recibe)
+      await client.query(
+        'UPDATE purchase_order_items SET ingresado_stock=TRUE WHERE id=$1',
+        [item.id]
+      );
+
+      stockIngresos.push({
+        codigo: stockItem.code,
+        nombre: stockItem.name,
+        cantidad: qtyIngreso,
+        precio_nuevo: precioNuevo,
+        nuevo_stock: nuevoQty,
+      });
+    }
+
+    // 3. Si la OC estaba vinculada a un vehículo, seguir generando la OT como antes
     let otId=null, otCode=null;
     if (oc.vehicle_id) {
       await client.query(`CREATE TABLE IF NOT EXISTS ot_sequence (
@@ -275,16 +366,24 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
         VALUES ($1,$2,'Correctivo','Pendiente','Normal',$3,$4,$5,0,
           COALESCE((SELECT km_current FROM vehicles WHERE id=$2),0))
         RETURNING id,code`,
-        [otCode,oc.vehicle_id,
+        [otCode, oc.vehicle_id,
          `OC ${oc.code}${oc.proveedor?' — '+oc.proveedor:''}`,
-         req.user.id,partsCost]);
+         req.user.id, partsCost]);
       otId=wo.rows[0].id; otCode=wo.rows[0].code;
       await client.query(`UPDATE work_orders SET root_cause=$1 WHERE id=$2`,
-        [`Generada desde OC ${oc.code}`,otId]);
-      await client.query('UPDATE purchase_orders SET ot_id=$1 WHERE id=$2',[otId,req.params.id]);
+        [`Generada desde OC ${oc.code}`, otId]);
+      await client.query('UPDATE purchase_orders SET ot_id=$1 WHERE id=$2', [otId, req.params.id]);
     }
+
     await client.query('COMMIT');
-    res.json({ ok:true, oc_status:'recibida', ot_generada:!!otId, ot_code:otCode });
+    res.json({
+      ok:true,
+      oc_status:'recibida',
+      ot_generada: !!otId,
+      ot_code: otCode,
+      stock_ingresos: stockIngresos,            // array de ítems que entraron al stock
+      stock_warnings: warnings,                  // array de ítems que NO entraron (sin vincular)
+    });
   } catch(err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
