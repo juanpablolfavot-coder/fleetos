@@ -2,7 +2,7 @@
 //  FleetOS — Motor de datos y lógica central
 // ═══════════════════════════════════════════
 
-// ── ESTADO GLOBAL ──
+// ── ESTADO GLOBAL ── 
 const App = {
   currentPage: 'dashboard',
   currentUser: null,
