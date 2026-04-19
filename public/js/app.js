@@ -5367,6 +5367,7 @@ async function renderAuditorPanel() {
     <div id="auditor-tabs" style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border2);padding-bottom:0">
       ${[
         ['resumen',    '📊 Resumen'],
+        ['visual',     '📈 Indicadores visuales'],
         ['combustible','⛽ Anomalías combustible'],
         ['ots',        '🔧 Anomalías OTs'],
         ['trazabilidad','📋 Trazabilidad'],
@@ -5405,6 +5406,7 @@ async function showAuditorTab(tab) {
 
   try {
     if (tab === 'resumen')      await renderAuditorResumen(content);
+    if (tab === 'visual')       await renderAuditorVisual(content);
     if (tab === 'combustible')  await renderAuditorCombustible(content);
     if (tab === 'ots')          await renderAuditorOTs(content);
     if (tab === 'trazabilidad') await renderAuditorTrazabilidad(content);
@@ -5463,6 +5465,404 @@ async function renderAuditorResumen(el) {
         <div style="font-size:13px;color:var(--text3)">usuarios con actividad en el mes</div>
       </div>
     </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Tab "📈 Indicadores visuales" — 4 gráficos analíticos
+// ═══════════════════════════════════════════════════════════
+async function renderAuditorVisual(el) {
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">⏱ Timeline de OTs por vehículo</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <select class="form-select" id="vis-timeline-vehicle" style="max-width:260px;padding:6px 10px;font-size:12px" onchange="renderAuditorVisualTimeline()">
+            <option value="">— Seleccioná un vehículo —</option>
+            ${App.data.vehicles.map(v=>`<option value="${v.code}">${v.code} · ${v.plate||'—'}</option>`).join('')}
+          </select>
+          <span style="font-size:11px;color:var(--text3)" id="vis-timeline-info"></span>
+        </div>
+        <div id="vis-timeline-wrap" style="min-height:220px">
+          <div style="color:var(--text3);font-size:13px;text-align:center;padding:40px 0">Elegí un vehículo para ver su línea de tiempo</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🎯 Cumplimiento de mantenimiento</div>
+        <div id="vis-gauge-wrap" style="display:flex;align-items:center;justify-content:center;min-height:220px">
+          <div style="color:var(--text3);font-size:13px">Calculando...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">🗓 Heatmap de uso de flota — ${new Date().toLocaleString('es-AR',{month:'long',year:'numeric'})}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">
+        Cada fila es un vehículo, cada columna un día del mes. El color indica nivel de actividad (checklists + cargas + OTs).
+      </div>
+      <div id="vis-heatmap-wrap" style="overflow-x:auto;padding-bottom:8px">
+        <div style="color:var(--text3);font-size:13px;padding:20px 0;text-align:center">Cargando mapa de calor...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">💸 Evolución mensual de costos por rubro</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px">
+        Stacked area de los últimos 6 meses — combustible (azul) vs mantenimiento (naranja).
+      </div>
+      <div style="position:relative;height:280px">
+        <canvas id="vis-stacked-canvas"></canvas>
+      </div>
+      <div id="vis-stacked-legend" style="display:flex;gap:16px;justify-content:center;margin-top:12px;font-size:12px"></div>
+    </div>
+  `;
+
+  // Renderizar los 3 gráficos que no dependen de selección del usuario
+  await Promise.all([
+    _renderAuditorGauge(),
+    _renderAuditorHeatmap(),
+    _renderAuditorStacked(),
+  ]);
+}
+
+// ── Gráfico 1: Timeline de OTs por vehículo ────────────────
+function renderAuditorVisualTimeline() {
+  const sel = document.getElementById('vis-timeline-vehicle');
+  const info = document.getElementById('vis-timeline-info');
+  const wrap = document.getElementById('vis-timeline-wrap');
+  if (!sel || !wrap) return;
+
+  const code = sel.value;
+  if (!code) {
+    wrap.innerHTML = `<div style="color:var(--text3);font-size:13px;text-align:center;padding:40px 0">Elegí un vehículo para ver su línea de tiempo</div>`;
+    if (info) info.textContent = '';
+    return;
+  }
+
+  const ots = (App.data.workOrders || [])
+    .filter(o => o.vehicle === code)
+    .map(o => ({
+      id: o.id,
+      opened: o.opened && o.opened !== '—' ? new Date(o.opened.replace(' ','T')) : null,
+      closed: o.closed_at ? new Date(o.closed_at) : null,
+      status: o.status,
+      priority: o.priority,
+      type: o.type,
+      desc: o.desc || '',
+    }))
+    .filter(o => o.opened && !isNaN(o.opened))
+    .sort((a,b) => a.opened - b.opened);
+
+  if (info) info.textContent = `${ots.length} OT${ots.length===1?'':'s'} registrada${ots.length===1?'':'s'}`;
+
+  if (!ots.length) {
+    wrap.innerHTML = `<div style="color:var(--text3);font-size:13px;text-align:center;padding:40px 0">Sin OTs registradas para ${code}</div>`;
+    return;
+  }
+
+  // Escala temporal: desde la primera OT hasta hoy (o última cerrada si todo está cerrado)
+  const minDate = ots[0].opened;
+  const maxDate = new Date(Math.max(
+    Date.now(),
+    ...ots.map(o => o.closed ? o.closed.getTime() : o.opened.getTime())
+  ));
+  const totalMs = maxDate - minDate || 1;
+
+  // Convertir a posición % en la línea
+  const toPct = d => Math.max(0, Math.min(100, ((d - minDate) / totalMs) * 100));
+
+  const colorByPriority = {
+    'Crítica': 'var(--danger)',
+    'Urgente': 'var(--warn)',
+    'Alta':    'var(--warn)',
+    'Normal':  'var(--accent)',
+    'Baja':    'var(--text3)',
+  };
+
+  const formatDate = d => d.toLocaleDateString('es-AR', { day:'2-digit', month:'short', year:'2-digit' });
+
+  wrap.innerHTML = `
+    <div style="padding:16px 8px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:8px">
+        <span>${formatDate(minDate)}</span>
+        <span>${formatDate(maxDate)}</span>
+      </div>
+      <div style="position:relative;height:6px;background:var(--bg3);border-radius:3px;margin-bottom:24px">
+        ${ots.map((o, i) => {
+          const left = toPct(o.opened);
+          const right = o.closed ? toPct(o.closed) : toPct(new Date());
+          const width = Math.max(0.8, right - left);
+          const color = colorByPriority[o.priority] || 'var(--accent)';
+          return `<div title="${o.id} · ${o.type} · ${o.priority} · ${o.status}"
+            style="position:absolute;left:${left}%;width:${width}%;height:6px;background:${color};border-radius:3px;cursor:pointer;opacity:.85"
+            onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.85"></div>`;
+        }).join('')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;max-height:220px;overflow-y:auto">
+        ${ots.slice(-12).reverse().map(o => {
+          const color = colorByPriority[o.priority] || 'var(--accent)';
+          const badgeCls = o.status === 'Cerrada' ? 'badge-ok' : o.status === 'En curso' ? 'badge-warn' : 'badge-info';
+          return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);border-left:3px solid ${color};background:var(--bg2)">
+            <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${formatDate(o.opened)}${o.closed ? ' → ' + formatDate(o.closed) : ' → (abierta)'}</div>
+            <div style="font-weight:600;font-size:12px;margin:2px 0">${o.id}</div>
+            <div style="font-size:11px;color:var(--text2);line-height:1.35">${(o.desc||'—').substring(0,60)}${o.desc && o.desc.length>60?'…':''}</div>
+            <div style="margin-top:4px"><span class="badge ${badgeCls}">${o.status}</span> <span style="font-size:10px;color:var(--text3)">${o.priority}</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:16px;font-size:11px;color:var(--text3);margin-top:10px;flex-wrap:wrap">
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--danger);border-radius:2px;vertical-align:-1px;margin-right:4px"></span>Crítica</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--warn);border-radius:2px;vertical-align:-1px;margin-right:4px"></span>Urgente/Alta</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--accent);border-radius:2px;vertical-align:-1px;margin-right:4px"></span>Normal</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--text3);border-radius:2px;vertical-align:-1px;margin-right:4px"></span>Baja</span>
+      </div>
+    </div>
+  `;
+}
+
+// ── Gráfico 2: Heatmap de uso de flota ─────────────────────
+async function _renderAuditorHeatmap() {
+  const wrap = document.getElementById('vis-heatmap-wrap');
+  if (!wrap) return;
+
+  try {
+    const res = await apiFetch('/api/auditor/uso-flota');
+    if (!res.ok) throw new Error('No se pudo cargar uso-flota');
+    const d = await res.json();
+    const dias = d.periodo.dias_mes;
+    const vehiculos = d.vehiculos || [];
+
+    if (!vehiculos.length) {
+      wrap.innerHTML = `<div style="color:var(--text3);padding:20px 0;text-align:center">Sin datos de uso en el mes</div>`;
+      return;
+    }
+
+    // Máximo de eventos en un día para normalizar la escala de colores
+    let maxEventos = 1;
+    vehiculos.forEach(v => {
+      Object.values(v.dias).forEach(n => { if (n > maxEventos) maxEventos = n; });
+    });
+
+    // Color según cantidad de eventos (verde claro → verde oscuro)
+    const colorFor = n => {
+      if (!n) return 'var(--bg3)';
+      const intensity = Math.min(1, n / maxEventos);
+      // Usar --ok con opacidad creciente
+      const alpha = 0.15 + intensity * 0.75;
+      return `rgba(22,163,74,${alpha.toFixed(2)})`;
+    };
+
+    const hoy = new Date().getDate();
+    const mesActual = new Date().getMonth() + 1 === d.periodo.mes;
+
+    wrap.innerHTML = `
+      <div style="min-width:${60 + dias*22}px">
+        <div style="display:grid;grid-template-columns:100px repeat(${dias},1fr);gap:2px;font-size:9px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">
+          <div></div>
+          ${Array.from({length:dias}, (_,i) => {
+            const d1 = i+1;
+            const esHoy = mesActual && d1 === hoy;
+            return `<div style="text-align:center;${esHoy?'color:var(--accent);font-weight:700':''}">${d1}</div>`;
+          }).join('')}
+        </div>
+        ${vehiculos.map(v => `
+          <div style="display:grid;grid-template-columns:100px repeat(${dias},1fr);gap:2px;margin-bottom:2px;align-items:center">
+            <div style="font-size:11px;font-family:var(--mono);color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${v.code} · ${v.plate} · ${v.total} eventos en el mes">${v.code}</div>
+            ${Array.from({length:dias}, (_,i) => {
+              const dia = i+1;
+              const n = v.dias[dia] || 0;
+              return `<div title="${v.code} · día ${dia}: ${n} evento${n===1?'':'s'}"
+                style="aspect-ratio:1;min-width:16px;background:${colorFor(n)};border-radius:3px;border:1px solid var(--border)"></div>`;
+            }).join('')}
+          </div>
+        `).join('')}
+        <div style="display:flex;gap:8px;align-items:center;font-size:11px;color:var(--text3);margin-top:14px">
+          <span>Menos actividad</span>
+          <div style="display:flex;gap:2px">
+            ${[0, 0.25, 0.5, 0.75, 1].map(p => {
+              const alpha = 0.15 + p * 0.75;
+              return `<div style="width:16px;height:16px;background:rgba(22,163,74,${alpha.toFixed(2)});border-radius:3px;border:1px solid var(--border)"></div>`;
+            }).join('')}
+          </div>
+          <span>Más actividad</span>
+          <span style="margin-left:auto">Máx: ${maxEventos} eventos/día</span>
+        </div>
+      </div>
+    `;
+  } catch(err) {
+    wrap.innerHTML = `<div style="color:var(--danger);padding:20px 0;text-align:center">Error: ${err.message}</div>`;
+  }
+}
+
+// ── Gráfico 3: Gauge de cumplimiento de mantenimiento ──────
+function _renderAuditorGauge() {
+  const wrap = document.getElementById('vis-gauge-wrap');
+  if (!wrap) return;
+
+  // Calcular a partir de OTs preventivas en App.data.workOrders
+  const preventivas = (App.data.workOrders || []).filter(o =>
+    (o.type || '').toLowerCase().includes('preventiv')
+  );
+
+  // Estadísticas: total abiertas, cerradas, abiertas "antiguas" (>30 días) = vencidas
+  const now = Date.now();
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+  let total = preventivas.length;
+  let cerradas = 0, abiertas = 0, vencidas = 0;
+
+  preventivas.forEach(o => {
+    if (o.status === 'Cerrada') { cerradas++; return; }
+    abiertas++;
+    const opened = o.opened && o.opened !== '—' ? new Date(o.opened.replace(' ','T')) : null;
+    if (opened && !isNaN(opened) && (now - opened.getTime()) > THIRTY_DAYS) {
+      vencidas++;
+    }
+  });
+
+  // % de cumplimiento = (cerradas + abiertas no vencidas) / total
+  const enDia = cerradas + (abiertas - vencidas);
+  const pct = total === 0 ? 100 : Math.round((enDia / total) * 100);
+
+  // Color según % cumplimiento
+  const color = pct >= 85 ? 'var(--ok)' : pct >= 60 ? 'var(--warn)' : 'var(--danger)';
+  const label = pct >= 85 ? 'Excelente' : pct >= 60 ? 'Aceptable' : 'Crítico';
+
+  // Gauge SVG (semicírculo)
+  const r = 80;
+  const cx = 100, cy = 100;
+  const startAngle = 180, endAngle = 360;
+  const sweepAngle = (endAngle - startAngle) * (pct/100);
+  const toRad = a => (a - 90) * Math.PI / 180;
+  const sx = cx + r * Math.cos(toRad(startAngle));
+  const sy = cy + r * Math.sin(toRad(startAngle));
+  const ex = cx + r * Math.cos(toRad(startAngle + sweepAngle));
+  const ey = cy + r * Math.sin(toRad(startAngle + sweepAngle));
+  const largeArc = sweepAngle > 180 ? 1 : 0;
+  const arcPath = `M ${sx} ${sy} A ${r} ${r} 0 ${largeArc} 1 ${ex} ${ey}`;
+  const bgPath  = `M ${cx-r} ${cy} A ${r} ${r} 0 0 1 ${cx+r} ${cy}`;
+
+  wrap.innerHTML = `
+    <div style="text-align:center;width:100%">
+      <svg viewBox="0 0 200 120" style="max-width:260px;width:100%;height:auto">
+        <path d="${bgPath}" stroke="var(--bg3)" stroke-width="14" fill="none" stroke-linecap="round"/>
+        ${pct > 0 ? `<path d="${arcPath}" stroke="${color}" stroke-width="14" fill="none" stroke-linecap="round"/>` : ''}
+        <text x="100" y="92" text-anchor="middle" style="font-family:var(--mono);font-size:28px;font-weight:700;fill:var(--text)">${pct}%</text>
+        <text x="100" y="110" text-anchor="middle" style="font-family:var(--font);font-size:11px;fill:${color};font-weight:600">${label}</text>
+      </svg>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;font-size:12px;max-width:320px;margin-left:auto;margin-right:auto">
+        <div>
+          <div style="font-weight:700;color:var(--ok);font-size:18px;font-family:var(--mono)">${cerradas}</div>
+          <div style="color:var(--text3);font-size:11px">Cerradas</div>
+        </div>
+        <div>
+          <div style="font-weight:700;color:var(--accent);font-size:18px;font-family:var(--mono)">${abiertas - vencidas}</div>
+          <div style="color:var(--text3);font-size:11px">Abiertas al día</div>
+        </div>
+        <div>
+          <div style="font-weight:700;color:var(--danger);font-size:18px;font-family:var(--mono)">${vencidas}</div>
+          <div style="color:var(--text3);font-size:11px">Vencidas (&gt;30d)</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">
+        Basado en ${total} OT${total===1?'':'s'} preventiva${total===1?'':'s'} del sistema
+      </div>
+    </div>
+  `;
+}
+
+// ── Gráfico 4: Stacked area de costos mensuales ────────────
+async function _renderAuditorStacked() {
+  const canvas = document.getElementById('vis-stacked-canvas');
+  const legend = document.getElementById('vis-stacked-legend');
+  if (!canvas) return;
+
+  try {
+    const res = await apiFetch('/api/auditor/comparativo');
+    if (!res.ok) throw new Error('No se pudo cargar comparativo');
+    const { meses } = await res.json();
+
+    // Destruir chart previo si existe
+    if (window._visStackedChart) {
+      try { window._visStackedChart.destroy(); } catch(e){}
+    }
+
+    const ctx = canvas.getContext('2d');
+    window._visStackedChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: meses.map(m => m.label),
+        datasets: [
+          {
+            label: 'Combustible',
+            data: meses.map(m => Math.round(m.costo_combustible)),
+            fill: true,
+            backgroundColor: 'rgba(37,99,235,0.22)',
+            borderColor: 'rgba(37,99,235,1)',
+            borderWidth: 2,
+            tension: 0.35,
+            pointRadius: 3,
+            pointBackgroundColor: 'rgba(37,99,235,1)',
+          },
+          {
+            label: 'Mantenimiento',
+            data: meses.map(m => Math.round(m.costo_mantenimiento)),
+            fill: true,
+            backgroundColor: 'rgba(217,119,6,0.22)',
+            borderColor: 'rgba(217,119,6,1)',
+            borderWidth: 2,
+            tension: 0.35,
+            pointRadius: 3,
+            pointBackgroundColor: 'rgba(217,119,6,1)',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString('es-AR')}`,
+              footer: items => {
+                const total = items.reduce((a,b)=>a+b.parsed.y,0);
+                return 'Total: $' + total.toLocaleString('es-AR');
+              },
+            },
+          },
+        },
+        scales: {
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            ticks: {
+              callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v),
+              font: { family: 'JetBrains Mono' },
+            },
+            grid: { color: 'rgba(148,163,184,0.15)' },
+          },
+          x: {
+            stacked: true,
+            ticks: { font: { family: 'JetBrains Mono' } },
+            grid: { display: false },
+          },
+        },
+      },
+    });
+
+    if (legend) {
+      const totalGeneral = meses.reduce((a,m)=>a+m.costo_combustible+m.costo_mantenimiento,0);
+      legend.innerHTML = `
+        <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:12px;background:rgba(37,99,235,0.6);border:2px solid rgba(37,99,235,1);border-radius:2px"></span>Combustible</span>
+        <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:12px;background:rgba(217,119,6,0.6);border:2px solid rgba(217,119,6,1);border-radius:2px"></span>Mantenimiento</span>
+        <span style="color:var(--text3);margin-left:12px">Total 6 meses: <strong style="color:var(--text);font-family:var(--mono)">$${Math.round(totalGeneral).toLocaleString('es-AR')}</strong></span>
+      `;
+    }
+  } catch(err) {
+    if (canvas.parentElement) {
+      canvas.parentElement.innerHTML = `<div style="color:var(--danger);padding:20px 0;text-align:center">Error: ${err.message}</div>`;
+    }
+  }
 }
 
 // ── Tab 2: Anomalías combustible ─────────────────────────
