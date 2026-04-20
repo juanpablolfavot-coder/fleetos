@@ -1,6 +1,6 @@
-// Ã¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢Â
-//  FleetOS Ã¢â¬â Rutas adicionales
-// Ã¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢ÂÃ¢â¢Â
+// ═══════════════════════════════════════════════════════════
+//  FleetOS — Rutas adicionales (combustible, cubiertas, documentos, usuarios, config, checklists, encargado)
+// ═══════════════════════════════════════════════════════════
 const express    = require('express');
 const fuelRouter = express.Router();
 const tireRouter = express.Router();
@@ -106,7 +106,7 @@ tireRouter.post('/',authenticate,requireRole('dueno','gerencia','jefe_mantenimie
   try{const{serial_no,brand,model,size,purchase_price,purchase_date,tread_depth}=req.body;
   if(!serial_no) return res.status(400).json({error:'serial_no requerido'});
   const r=await query(`INSERT INTO tires(serial_no,brand,model,size,purchase_price,purchase_date,tread_depth) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[serial_no,brand||null,model||null,size||null,purchase_price||null,purchase_date||null,tread_depth||null]);
-  res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'NÃÂºmero serie existe'});res.status(500).json({error:'Error cubierta'});}
+  res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'Número serie existe'});res.status(500).json({error:'Error cubierta'});}
 });
 tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'),validateUUID('id'),async(req,res)=>{
   const client=await require('../db/pool').pool.connect();
@@ -116,7 +116,7 @@ tireRouter.post('/:id/move',authenticate,requireRole('dueno','gerencia','jefe_ma
   if(!tire.rows[0]){await client.query('ROLLBACK');return res.status(404).json({error:'Cubierta no encontrada'});}
   const veh=to_vehicle_id?await client.query('SELECT km_current FROM vehicles WHERE id=$1',[to_vehicle_id]):null;
   const km=veh?.rows[0]?.km_current||0;
-  await client.query(`INSERT INTO tire_movements(tire_id,type,from_pos,to_pos,vehicle_id,km_at_move,tread_at_move,user_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[req.params.id,type||'RotaciÃÂ³n',tire.rows[0].current_position,to_position,to_vehicle_id||tire.rows[0].current_vehicle_id,km,tread_depth||tire.rows[0].tread_depth,req.user.id,notes||null]);
+  await client.query(`INSERT INTO tire_movements(tire_id,type,from_pos,to_pos,vehicle_id,km_at_move,tread_at_move,user_id,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[req.params.id,type||'Rotación',tire.rows[0].current_position,to_position,to_vehicle_id||tire.rows[0].current_vehicle_id,km,tread_depth||tire.rows[0].tread_depth,req.user.id,notes||null]);
   const ns=to_vehicle_id?'montada':({'STOCK':'stock','Stock':'stock','RECAP':'recapado','Recap':'recapado','Recapado':'recapado','recapado':'recapado','BAJA':'baja','Baja':'baja','baja':'baja'}[to_position]||'stock');
   await client.query(`UPDATE tires SET current_vehicle_id=$1,current_position=$2,status=$3,tread_depth=COALESCE($4,tread_depth),km_total=km_total+$5 WHERE id=$6`,[to_vehicle_id||null,to_position,ns,tread_depth||null,km,req.params.id]);
   await client.query('COMMIT');res.json({message:'Movimiento registrado'});}catch(err){await client.query('ROLLBACK');res.status(500).json({error:'Error mover cubierta'});}finally{client.release();}
@@ -439,7 +439,8 @@ const encargadoRouter = express.Router();
 encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
     await ensureChecklistTable();
-    const today = new Date().toISOString().slice(0,10);
+    // Fecha de hoy en Argentina (el server corre en UTC en Render; sin esto, cerca de medianoche AR los checklists del día no aparecían)
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 
     const [checklists, novedades, sinChecklist, fuelHoy, vehiculos] = await Promise.all([
       // Checklists de hoy
@@ -511,7 +512,7 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
     const r = await query(sql, params);
     if (!r.rows[0]) return res.status(404).json({ error: 'Carga no encontrada' });
     res.json({ ok: true, estado: r.rows[0].ticket_estado });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[fuel verificar]', err.message); res.status(500).json({ error: 'Error al verificar ticket' }); }
 });
 
 // ── Cargas pendientes de verificación ────────────────────
@@ -529,7 +530,7 @@ fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
     
     await query('DELETE FROM fuel_logs WHERE id=$1', [req.params.id]);
     res.json({ ok: true, liters_devueltos: fl.tank_id ? fl.liters : 0 });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[fuel DELETE]', err.message); res.status(500).json({ error: 'Error al eliminar carga' }); }
 });
 
 fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), async (req, res) => {
@@ -548,7 +549,7 @@ fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','ge
       WHERE fl.ticket_image IS NOT NULL AND (fl.ticket_estado IS NULL OR fl.ticket_estado = 'pendiente')
       ORDER BY fl.logged_at DESC LIMIT 50`);
     res.json(r.rows);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[fuel pendientes]', err.message); res.status(500).json({ error: 'Error al obtener pendientes' }); }
 });
 
 module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter, checklistRouter, encargadoRouter };
