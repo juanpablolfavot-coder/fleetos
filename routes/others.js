@@ -400,14 +400,37 @@ checklistRouter.post('/', authenticate, async (req, res) => {
        km_at_check||null, JSON.stringify(items||[]), observations||null, all_ok!==false]
     );
     // Si hay ítems críticos fallidos, crear OT automática
+    // FIX: usaba columnas/valores que no coinciden con el schema real.
+    //   - created_by → NO existe, la columna real es reporter_id
+    //   - status='Abierta' → el resto del sistema usa 'Pendiente'
+    //   - priority='urgente' → debe ser 'Urgente' (mayúscula)
+    //   - faltaba generar code (OT-00xxx) con ot_sequence como en workorders.js
+    // Si esto fallaba, se silenciaba con .catch(()=>{}) y nadie se enteraba.
     const critical = (items||[]).filter(i => !i.ok && i.critical);
     if (critical.length > 0) {
-      const desc = 'Checklist salida: ' + critical.map(i=>i.label).join(', ');
-      await query(
-        `INSERT INTO work_orders(vehicle_id,description,priority,status,type,created_by)
-         VALUES($1,$2,'urgente','Abierta','correctivo',$3)`,
-        [vehicle_id||null, desc, req.user.id]
-      ).catch(()=>{});
+      try {
+        const desc = 'Checklist salida: ' + critical.map(i=>i.label).join(', ');
+        // Generar código correlativo OT-00xxx (mismo patrón que routes/workorders.js)
+        await query(`CREATE TABLE IF NOT EXISTS ot_sequence (
+          dummy INT PRIMARY KEY DEFAULT 1,
+          last_val INT NOT NULL DEFAULT 0,
+          CHECK (dummy = 1)
+        )`);
+        await query(`INSERT INTO ot_sequence (dummy, last_val) VALUES (1, 0) ON CONFLICT DO NOTHING`);
+        const seq = await query(`UPDATE ot_sequence SET last_val = last_val + 1 RETURNING last_val`);
+        const code = 'OT-' + String(seq.rows[0].last_val).padStart(5, '0');
+        // km_at_open del vehículo (si viene del checklist, usamos ese)
+        const kmOpen = km_at_check || 0;
+        await query(
+          `INSERT INTO work_orders
+             (code, vehicle_id, ot_tipo, type, status, priority, description, reporter_id, km_at_open)
+           VALUES ($1, $2, 'vehiculo', 'Correctivo', 'Pendiente', 'Urgente', $3, $4, $5)`,
+          [code, vehicle_id||null, desc, req.user.id, kmOpen]
+        );
+      } catch(otErr) {
+        // No tiramos 500 porque el checklist ya se guardó; pero dejamos rastro.
+        console.error('[checklist] fallo al crear OT automática:', otErr.message);
+      }
     }
     // Actualizar km del vehículo
     if (km_at_check && vehicle_id) {
@@ -445,8 +468,12 @@ encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','je
     const [checklists, novedades, sinChecklist, fuelHoy, vehiculos] = await Promise.all([
       // Checklists de hoy
       query(`SELECT c.*, v.code as vcode FROM checklists c LEFT JOIN vehicles v ON v.id=c.vehicle_id WHERE DATE(c.created_at)=$1 ORDER BY c.created_at DESC`, [today]),
-      // Novedades abiertas (OTs)
-      query(`SELECT wo.*, v.code as vehicle_code FROM work_orders wo LEFT JOIN vehicles v ON v.id=wo.vehicle_id WHERE wo.status='Abierta' ORDER BY wo.created_at DESC LIMIT 20`),
+      // Novedades abiertas (OTs) — todas las que NO están Cerradas/canceladas
+      // FIX: antes filtraba status='Abierta' pero ninguna OT real usa ese estado.
+      //      Los estados reales son: Pendiente, Asignada, En proceso, Esperando repuesto,
+      //      Esperando tercerizado, Cerrada. También usaba ORDER BY created_at que
+      //      en work_orders es opened_at.
+      query(`SELECT wo.*, v.code as vehicle_code FROM work_orders wo LEFT JOIN vehicles v ON v.id=wo.vehicle_id WHERE wo.status <> 'Cerrada' ORDER BY wo.opened_at DESC LIMIT 20`),
       // Vehículos activos que NO hicieron checklist hoy
       query(`SELECT v.code, v.plate, v.driver_name, v.base FROM vehicles v WHERE v.active=TRUE AND v.id NOT IN (SELECT vehicle_id FROM checklists WHERE DATE(created_at)=$1 AND vehicle_id IS NOT NULL) ORDER BY v.code`, [today]),
       // Cargas de combustible hoy
