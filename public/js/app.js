@@ -3062,7 +3062,7 @@ function renderStock() {
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
-      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal('+s.id+')">Egreso</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
       +   bajaBtn
       + '</td>'
       + '</tr>';
