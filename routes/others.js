@@ -33,14 +33,18 @@ fuelRouter.get('/', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error combustible' }); }
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
-  try { res.json((await query('SELECT DISTINCT ON (type) id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC')).rows); }
+  try { res.json((await query('SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC, location ASC')).rows); }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const { vehicle_id, tank_id, fuel_type, liters, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
-    if (!vehicle_id || !liters || !price_per_l) return res.status(400).json({ error: 'vehicle_id, liters y price_per_l requeridos' });
+    const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
+    // ── Parseo numérico estricto — evita que "100" (string) rompa las restas SQL
+    const liters = parseFloat(litersRaw);
+    if (!vehicle_id || !Number.isFinite(liters) || liters <= 0 || !price_per_l) {
+      return res.status(400).json({ error: 'vehicle_id, liters (numero) y price_per_l requeridos' });
+    }
     // Chofer solo puede cargar a su propia unidad asignada
     if (req.user.role === 'chofer') {
       const veh = await client.query('SELECT code FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
@@ -70,9 +74,22 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     // Asegurar que existe la columna ticket_image
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});
     if (tank_id) {
-      const t = await client.query('SELECT current_l FROM tanks WHERE id=$1 FOR UPDATE',[tank_id]);
-      if (!t.rows[0] || t.rows[0].current_l < liters) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Combustible insuficiente' }); }
-      await client.query('UPDATE tanks SET current_l=current_l-$1,updated_at=NOW() WHERE id=$2',[liters,tank_id]);
+      const t = await client.query('SELECT id, current_l, location, type FROM tanks WHERE id=$1 FOR UPDATE',[tank_id]);
+      if (!t.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Cisterna no encontrada' });
+      }
+      const stockActual = parseFloat(t.rows[0].current_l);
+      if (stockActual < liters) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: `Combustible insuficiente en ${t.rows[0].location} (${stockActual.toFixed(0)}L disponibles, se piden ${liters}L)` });
+      }
+      // Descontar los litros de esa cisterna específica
+      const upd = await client.query(
+        'UPDATE tanks SET current_l = current_l - $1, updated_at = NOW() WHERE id = $2 RETURNING current_l, location',
+        [liters, tank_id]
+      );
+      console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L`);
     }
     // Tomar km del GPS (km_current del vehículo) si no viene odómetro manual
     const vehKm = await client.query('SELECT km_current FROM vehicles WHERE id=$1',[vehicle_id]);
@@ -80,7 +97,11 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,kmToSave,location||null,notes||null,ticket_image||null]);
     if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
-  } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: 'Error carga' }); } finally { client.release(); }
+  } catch (err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[fuel POST]', err.message);
+    res.status(500).json({ error: 'Error carga' });
+  } finally { client.release(); }
 });
 fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encargado_combustible'),validateUUID('id'),async(req,res)=>{
   try{
@@ -580,4 +601,3 @@ fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','ge
 });
 
 module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter, checklistRouter, encargadoRouter };
-
