@@ -2017,9 +2017,9 @@ async function updateFuelPlaceNote() {
     } catch(e) {}
 
     const tanks = App.data.tanks || [];
-    const tank  = type === 'urea'
-      ? tanks.find(t => t.type === 'urea')
-      : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+    const tipoDbPrice = type === 'urea' ? 'urea' : 'fuel';
+    let tank = tanks.find(t => (t.type === tipoDbPrice || (tipoDbPrice === 'fuel' && t.type === 'gasoil')) && (t.location || '').includes('Cisterna R3'));
+    if (!tank) tank = tanks.find(t => t.type === tipoDbPrice || (tipoDbPrice === 'fuel' && t.type === 'gasoil'));
     const precio = tank?.price_per_l ? parseFloat(tank.price_per_l) : null;
 
     if (ppuEl && precio && precio > 0) {
@@ -2086,12 +2086,21 @@ async function saveFuelLoad() {
   const esCisterna = place.includes('Cisterna');
   let tank_id = null;
   if (esCisterna) {
-    // Buscar la cisterna correspondiente según el tipo
+    // Matchear el tanque por TIPO + LOCATION (no solo por tipo)
+    // Así si hay varios tanques del mismo tipo, elige el correcto según el dropdown
     const tanks = App.data.tanks || [];
-    const tank = type === 'urea'
-      ? tanks.find(t => t.type === 'urea')
-      : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+    const tipoDb = type === 'urea' ? 'urea' : 'fuel';  // en DB se guarda 'fuel' o 'urea'
+    // Primero intento match exacto por location + tipo
+    let tank = tanks.find(t => (t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil')) && t.location === place);
+    // Si no encontró con match exacto, busca cualquier tanque del tipo correcto
+    if (!tank) {
+      tank = tanks.find(t => t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil'));
+    }
     tank_id = tank?.id || null;
+    if (!tank_id) {
+      showToast('error','No se encontró cisterna para ' + type + ' en ' + place);
+      return;
+    }
   }
 
   window._ticketImage = null;
@@ -2152,9 +2161,12 @@ async function saveFuelEntry() {
   if (liters <= 0) { showToast('error', 'Ingresá la cantidad de litros'); return; }
 
   const tanks = App.data.tanks || [];
-  const tank  = type === 'urea'
-    ? tanks.find(t => t.type === 'urea')
-    : tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+  const tipoDb = type === 'urea' ? 'urea' : 'fuel';
+  // Prefiere el tanque de "Cisterna R3" si existe. Si no, cualquiera del tipo correcto.
+  let tank = tanks.find(t => (t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil')) && (t.location || '').includes('Cisterna R3'));
+  if (!tank) {
+    tank = tanks.find(t => t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil'));
+  }
 
   if (!tank) { showToast('error', 'No se encontró la cisterna en el sistema'); return; }
 
@@ -3048,7 +3060,7 @@ function renderStock() {
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
     const bajaBtn = isDueno
-      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Solo dueño/gerencia">✕ Baja</button>'
+      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Solo dueño puede dar de baja">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+s.code+'</td>'
@@ -3062,7 +3074,7 @@ function renderStock() {
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
-      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal('+s.id+')">Egreso</button>'
       +   bajaBtn
       + '</td>'
       + '</tr>';
