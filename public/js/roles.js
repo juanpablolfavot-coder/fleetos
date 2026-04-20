@@ -323,6 +323,8 @@ function getRoleData(role) {
     paniol:                { label:'Pañol / Stock',            badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
     contador:              { label:'Contador / Administración',badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel','suppliers'], canEdit:[] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
+    compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers'], canEdit:['purchase_orders'] },
+    tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['purchase_orders'], canEdit:['purchase_orders'] },
   };
   return roles[role] || roles['auditor'];
 }
@@ -337,7 +339,9 @@ function getRoleColor(role) {
     encargado_combustible: '#ea580c',
     paniol:                '#059669',
     contador:              '#db2777',
-    auditor:               '#dc2626'
+    auditor:               '#dc2626',
+    compras:               '#0ea5e9',
+    tesoreria:             '#14b8a6'
   };
   return map[role] || '#2563eb';
 }
