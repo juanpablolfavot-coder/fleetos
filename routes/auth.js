@@ -9,6 +9,21 @@ const { authenticate } = require('../middleware/auth');
 const MAX_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS) || 5;
 const LOCK_MINS    = parseInt(process.env.LOCK_TIME_MINUTES)  || 15;
 
+// ═══════════════════════════════════════════════════════════
+//  AUTO-MIGRACIÓN: agregar roles nuevos "compras" y "tesoreria"
+//  al CHECK constraint de users.role (si existe el CHECK)
+// ═══════════════════════════════════════════════════════════
+(async () => {
+  try {
+    await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await query(`ALTER TABLE users ADD CONSTRAINT users_role_check
+      CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
+                      'encargado_combustible','paniol','contador','auditor',
+                      'compras','tesoreria'))`);
+    console.log('[auth migración] roles compras/tesoreria habilitados');
+  } catch(e) { console.error('[auth migración]', e.message); }
+})();
+
 // POST /api/auth/login
 router.post('/login', loginLimiter, checkAccountLock, async (req, res) => {
   const { email, password } = req.body;
