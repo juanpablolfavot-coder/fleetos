@@ -9612,11 +9612,14 @@ function setPODetailIva(val) {
   const totEl = document.getElementById('pod-total-display');
   if (!subEl || !totEl) return;
 
-  // Leer el subtotal actual (está como "$10.000" o "US$10.000")
+  // Leer el subtotal actual (está como "$15.000" o "US$15.000")
+  // OJO: el punto es separador de miles en es-AR, no decimal
   const subTxt = subEl.textContent || '';
   const isUSD = subTxt.startsWith('US$');
   const prefix = isUSD ? 'US$' : '$';
-  const subNum = parseFloat(subTxt.replace(/[^\d.-]/g,'')) || 0;
+  // Quitar símbolo de moneda y puntos de miles. Convertir coma decimal a punto.
+  const limpio = subTxt.replace(/US\$|\$/g, '').replace(/\./g,'').replace(',','.').trim();
+  const subNum = parseFloat(limpio) || 0;
   const ivaMonto = Math.round(subNum * pct / 100);
   const total = Math.round(subNum * (1 + pct/100));
 
