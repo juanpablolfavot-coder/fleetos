@@ -1,15 +1,34 @@
 // ═══════════════════════════════════════════════════════════
-//  FleetOS — Órdenes de Compra (con workflow)
+//  FleetOS — Órdenes de Compra (workflow profesional 6 estados)
+//
+//  Flujo:
+//   1. pendiente_cotizacion → Jefe Mant creó la OC, sin precios
+//   2. en_cotizacion        → Compras la tomó y está cotizando
+//   3. aprobada_compras     → Compras aprobó con precio/proveedor
+//   4. pagada               → Tesorería confirmó el pago
+//   5. recibida             → Jefe Mant confirma que llegó la mercadería
+//   6. rechazada            → Cualquiera la canceló (estado final)
+//
+//  Visibilidad por rol:
+//   - dueno/gerencia: TODO
+//   - jefe_mantenimiento: solo las que él creó, SIN precios en respuesta
+//   - compras: desde pendiente_cotizacion en adelante
+//   - tesoreria: desde aprobada_compras en adelante
+//   - contador/auditor: solo pagada y recibida (históricas)
 // ═══════════════════════════════════════════════════════════
+
 const router   = require('express').Router();
 const { query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 
+// ─────────────────────────────────────────────────────────────
+//  Migración / creación de tablas + columnas nuevas del workflow
+// ─────────────────────────────────────────────────────────────
 async function ensureTables() {
   await query(`CREATE TABLE IF NOT EXISTS purchase_orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     code VARCHAR(20) UNIQUE NOT NULL,
-    status VARCHAR(20) DEFAULT 'en_revision',
+    status VARCHAR(30) DEFAULT 'pendiente_cotizacion',
     requested_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     sucursal VARCHAR(200), notes TEXT, proveedor VARCHAR(200),
@@ -20,9 +39,29 @@ async function ensureTables() {
     ot_id UUID REFERENCES work_orders(id),
     total_estimado NUMERIC(14,2) DEFAULT 0
   )`).catch(()=>{});
-  // Campos nuevos: supplier_id (relación con catálogo) y asset_id (para OCs asociadas a activos no-vehículo)
+
+  // Columnas antiguas que pueden faltar
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS supplier_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(30)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS cc_dias INTEGER`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS moneda VARCHAR(10)`).catch(()=>{});
+
+  // ── NUEVAS COLUMNAS DEL WORKFLOW ──
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS presupuesto_imagen TEXT`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS presupuesto_monto_estimado NUMERIC(14,2)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS cotizado_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS cotizado_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS aprobado_compras_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS aprobado_compras_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS pagado_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS motivo_rechazo TEXT`).catch(()=>{});
+
   await query(`CREATE TABLE IF NOT EXISTS purchase_order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     po_id UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
@@ -31,7 +70,6 @@ async function ensureTables() {
     subtotal NUMERIC(14,2) GENERATED ALWAYS AS (cantidad * precio_unit) STORED,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`).catch(()=>{});
-  // Campos nuevos: stock_item_id para vincular con stock + ingresado_stock para no duplicar
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
 }
@@ -43,372 +81,515 @@ async function nextOCCode() {
   return 'OC-' + String(parseInt(r.rows[0].num)).padStart(4, '0');
 }
 
-router.get('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','contador','auditor'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  HELPERS DE PERMISOS
+// ─────────────────────────────────────────────────────────────
+
+// Estados que un rol PUEDE VER (filtro de listado)
+function estadosQueVe(role) {
+  if (role === 'dueno' || role === 'gerencia') return null; // null = todos
+  if (role === 'compras') {
+    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','pagada','recibida','rechazada'];
+  }
+  if (role === 'tesoreria') {
+    return ['aprobada_compras','pagada','recibida','rechazada'];
+  }
+  if (role === 'contador' || role === 'auditor') {
+    return ['pagada','recibida'];
+  }
+  if (role === 'jefe_mantenimiento') {
+    return null; // ve todos los estados, pero filtramos por requested_by abajo
+  }
+  return []; // otros roles: no ve nada
+}
+
+// Quita los precios de la respuesta si el rol no debe verlos (jefe_mant)
+function ocultarPreciosSiCorresponde(po, role) {
+  if (role !== 'jefe_mantenimiento') return po;
+  const copia = { ...po };
+  delete copia.total_estimado;
+  delete copia.factura_monto;
+  delete copia.presupuesto_monto_estimado;
+  delete copia.iva_pct;
+  delete copia.total_real;
+  if (Array.isArray(copia.items)) {
+    copia.items = copia.items.map(it => {
+      const { precio_unit, subtotal, ...rest } = it;
+      return rest;
+    });
+  }
+  return copia;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  GET / — Listado (filtra según rol)
+// ─────────────────────────────────────────────────────────────
+router.get('/', authenticate, async (req, res) => {
   try {
     const { status, limit = 100 } = req.query;
-    let sql = `SELECT po.*, u.name as solicitante_nombre,
-      COALESCE((SELECT SUM(subtotal) FROM purchase_order_items WHERE po_id = po.id), 0) as total_real
-      FROM purchase_orders po LEFT JOIN users u ON u.id = po.requested_by WHERE 1=1`;
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    // Roles sin acceso al módulo
+    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor'];
+    if (!rolesPermitidos.includes(role)) {
+      return res.status(403).json({ error: 'No tenés permiso para ver órdenes de compra' });
+    }
+
+    let sql = `
+      SELECT po.*, u.name as solicitante_nombre,
+        COALESCE((SELECT SUM(cantidad * precio_unit) FROM purchase_order_items WHERE po_id = po.id), 0) as total_real
+      FROM purchase_orders po
+      LEFT JOIN users u ON u.id = po.requested_by
+      WHERE 1=1`;
     const params = [];
-    if (status) { params.push(status); sql += ` AND po.status = $${params.length}`; }
-    sql += ` ORDER BY po.created_at DESC LIMIT $${params.length+1}`;
+
+    // Filtro de estados visibles por rol
+    const estVis = estadosQueVe(role);
+    if (estVis !== null) {
+      if (estVis.length === 0) {
+        return res.json([]);
+      }
+      params.push(estVis);
+      sql += ` AND po.status = ANY($${params.length})`;
+    }
+
+    // Jefe mant: SOLO las que él creó
+    if (role === 'jefe_mantenimiento') {
+      params.push(userId);
+      sql += ` AND po.requested_by = $${params.length}`;
+    }
+
+    // Filtro de estado específico si viene en query
+    if (status) {
+      params.push(status);
+      sql += ` AND po.status = $${params.length}`;
+    }
+
+    sql += ` ORDER BY po.created_at DESC LIMIT $${params.length + 1}`;
     params.push(parseInt(limit));
-    res.json((await query(sql, params)).rows);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+
+    const result = await query(sql, params);
+
+    // Ocultar precios si el rol no debe verlos
+    const rows = result.rows.map(po => ocultarPreciosSiCorresponde(po, role));
+    res.json(rows);
+  } catch(err) {
+    console.error('[OC listar]', err.message);
+    res.status(500).json({ error: 'Error al listar órdenes de compra' });
+  }
 });
 
-// GET /api/purchase-orders/aux/proveedores — nombres históricos de proveedores usados en OCs
-// (Para autocompletado en el modal de Nueva OC, como fallback al catálogo)
-// IMPORTANTE: esta ruta DEBE ir antes de /:id para evitar que Express la interprete como id
+// ─────────────────────────────────────────────────────────────
+//  GET /aux/proveedores
+// ─────────────────────────────────────────────────────────────
 router.get('/aux/proveedores', authenticate, async (req, res) => {
   try {
-    const r = await query(
-      `SELECT DISTINCT proveedor
-       FROM purchase_orders
-       WHERE proveedor IS NOT NULL AND proveedor <> ''
-       ORDER BY proveedor ASC
-       LIMIT 100`
-    );
-    res.json(r.rows.map(row => row.proveedor));
-  } catch(err) { res.status(500).json({ error: 'Error al obtener proveedores' }); }
+    const r = await query("SELECT DISTINCT proveedor FROM purchase_orders WHERE proveedor IS NOT NULL AND proveedor <> '' ORDER BY proveedor");
+    res.json(r.rows.map(x => x.proveedor));
+  } catch(err) {
+    console.error('[OC aux proveedores]', err.message);
+    res.status(500).json({ error: 'Error al obtener proveedores' });
+  }
 });
 
-router.get('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','contador','auditor'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  GET /:id — Detalle (con filtro por rol)
+// ─────────────────────────────────────────────────────────────
+router.get('/:id', authenticate, async (req, res) => {
   try {
-    const po = await query(`SELECT po.*,
-      u.name as solicitante_nombre,
-      v.code as vehicle_code, v.plate as vehicle_plate,
-      ua.name as aprobador_nombre,
-      urj.name as rechazador_nombre,
-      urc.name as receptor_nombre,
-      up.name as pagador_nombre
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    const po = await query(`
+      SELECT po.*, u.name as solicitante_nombre
       FROM purchase_orders po
-      LEFT JOIN users u   ON u.id   = po.requested_by
-      LEFT JOIN users ua  ON ua.id  = po.aprobado_por
-      LEFT JOIN users urj ON urj.id = po.rechazado_por
-      LEFT JOIN users urc ON urc.id = po.recibido_por
-      LEFT JOIN users up  ON up.id  = po.pagado_por
-      LEFT JOIN vehicles v ON v.id = po.vehicle_id
+      LEFT JOIN users u ON u.id = po.requested_by
       WHERE po.id = $1`, [req.params.id]);
     if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+
+    const oc = po.rows[0];
+
+    // Verificar acceso
+    const estVis = estadosQueVe(role);
+    if (estVis !== null && !estVis.includes(oc.status)) {
+      return res.status(403).json({ error: 'No tenés permiso para ver esta OC' });
+    }
+    if (role === 'jefe_mantenimiento' && oc.requested_by !== userId) {
+      return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
+    }
+
     const items = await query('SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at', [req.params.id]);
-    res.json({ ...po.rows[0], items: items.rows });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+    const resultado = { ...oc, items: items.rows };
+    res.json(ocultarPreciosSiCorresponde(resultado, role));
+  } catch(err) {
+    console.error('[OC detalle]', err.message);
+    res.status(500).json({ error: 'Error al obtener OC' });
+  }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  POST / — Crear nueva OC (Jefe mantenimiento)
+//           SIN PRECIOS — solo descripción + opcional presupuesto
+// ─────────────────────────────────────────────────────────────
 router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
-    const { notes, sucursal, area, tipo='flota', vehicle_id, ot_id, asset_id, supplier_id, proveedor, iva_pct=0, items=[], forma_pago, cc_dias, moneda } = req.body;
+    const {
+      notes, sucursal, area, tipo='flota',
+      vehicle_id, ot_id, asset_id, supplier_id,
+      items=[],
+      presupuesto_imagen, presupuesto_monto_estimado
+    } = req.body;
+
     if (!items.length) return res.status(400).json({ error: 'La OC debe tener al menos un artículo' });
 
-    // Regla soft: advertir si es OC de flota y NO tiene ot_id
-    // (Se permite igual — es advertencia, no bloqueo.)
-    const warnings = [];
-    if (tipo === 'flota' && !ot_id) {
-      warnings.push('OC de flota sin OT vinculada — se recomienda asociar una OT primero');
+    // Validar presupuesto_imagen si viene (tipo + tamaño)
+    if (presupuesto_imagen) {
+      const validTypes = ['data:image/jpeg','data:image/jpg','data:image/png','data:image/webp','data:application/pdf'];
+      if (!validTypes.some(t => presupuesto_imagen.startsWith(t))) {
+        return res.status(400).json({ error: 'El presupuesto debe ser JPG, PNG, WEBP o PDF' });
+      }
+      const sizeKB = Math.round(presupuesto_imagen.length * 0.75 / 1024);
+      if (sizeKB > 5120) return res.status(400).json({ error: 'El archivo de presupuesto no puede superar 5MB' });
     }
 
     const code = await nextOCCode();
-    const subtotal = items.reduce((a,i) => a + (parseFloat(i.cantidad||1) * parseFloat(i.precio_unit||0)), 0);
-    const total = subtotal * (1 + parseFloat(iva_pct||0) / 100);
-    const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
-    const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
-    const _mon = (moneda === 'USD') ? 'USD' : 'ARS';
 
-    // Si se pasó supplier_id, auto-llenar el campo proveedor (texto) con el nombre del proveedor
-    let _proveedor = proveedor || null;
-    if (supplier_id && !_proveedor) {
-      const s = await query('SELECT name FROM suppliers WHERE id = $1', [supplier_id]);
-      if (s.rows[0]) _proveedor = s.rows[0].name;
-    }
-
-    const po = await query(
-      `INSERT INTO purchase_orders (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id, supplier_id, proveedor, notes, iva_pct, total_estimado, forma_pago, cc_dias, moneda)
-       VALUES ($1,'en_revision',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    const po = await query(`
+      INSERT INTO purchase_orders (
+        code, status, requested_by, sucursal, area, tipo,
+        vehicle_id, ot_id, asset_id, supplier_id, notes,
+        presupuesto_imagen, presupuesto_monto_estimado
+      )
+      VALUES ($1, 'pendiente_cotizacion', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *`,
       [code, req.user.id, sucursal||null, area||null, tipo||'flota',
        vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
-       _proveedor, notes||null, parseFloat(iva_pct||0), total, _fp, _cc, _mon]
+       notes||null,
+       presupuesto_imagen||null,
+       presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null]
     );
+
     const poId = po.rows[0].id;
+    // Los items SIN precio — el jefe NO los carga
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
       await query(
-        `INSERT INTO purchase_order_items (po_id,descripcion,cantidad,unidad,precio_unit,stock_item_id)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [poId, item.descripcion.trim(),
-         parseFloat(item.cantidad||1),
-         item.unidad||'un',
-         parseFloat(item.precio_unit||0),
-         item.stock_item_id || null]
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
+         VALUES ($1, $2, $3, $4, 0, $5)`,
+        [poId, item.descripcion.trim(), parseFloat(item.cantidad||1), item.unidad||'un', item.stock_item_id||null]
       );
     }
-    const full = await query('SELECT * FROM purchase_orders WHERE id=$1',[poId]);
-    const itemsResult = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at',[poId]);
-    res.status(201).json({ ...full.rows[0], items: itemsResult.rows, warnings });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+
+    const full = await query('SELECT * FROM purchase_orders WHERE id=$1', [poId]);
+    const itemsResult = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at', [poId]);
+    const resultado = { ...full.rows[0], items: itemsResult.rows };
+    res.status(201).json(ocultarPreciosSiCorresponde(resultado, req.user.role));
+  } catch(err) {
+    console.error('[OC crear]', err.message);
+    res.status(500).json({ error: 'Error al crear la OC' });
+  }
 });
 
-router.patch('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  PATCH /:id — Editar cabecera (solo creador o dueño)
+// ─────────────────────────────────────────────────────────────
+router.patch('/:id', authenticate, async (req, res) => {
   try {
-    const { proveedor,factura_nro,factura_fecha,factura_monto,notes,status,sucursal,area,iva_pct,tipo,vehicle_id,forma_pago,cc_dias,moneda } = req.body;
-    const valid_status = ['en_revision','aprobada','rechazada','recibida','pagada','cancelada'];
-    if (status && !valid_status.includes(status)) return res.status(400).json({ error: 'Estado invalido' });
-    const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
-    const _cc = (_fp === 'contado') ? null : ((cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null);
-    const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : null;
-    const r = await query(`UPDATE purchase_orders SET
-      sucursal=COALESCE($1,sucursal), area=COALESCE($2,area),
-      vehicle_id=COALESCE($3::uuid,vehicle_id), tipo=COALESCE($4,tipo),
-      proveedor=COALESCE($5,proveedor), factura_nro=COALESCE($6,factura_nro),
-      factura_fecha=COALESCE($7::date,factura_fecha),
-      factura_monto=COALESCE($8::numeric,factura_monto),
-      notes=COALESCE($9,notes), status=COALESCE($10,status),
-      iva_pct=COALESCE($11::numeric,iva_pct),
-      forma_pago=COALESCE($13,forma_pago),
-      cc_dias=COALESCE($14::integer,cc_dias),
-      moneda=COALESCE($15,moneda)
-      WHERE id=$12 RETURNING *`,
-      [sucursal||null,area||null,vehicle_id||null,tipo||null,proveedor||null,
-       factura_nro||null,factura_fecha||null,
-       factura_monto?parseFloat(factura_monto):null,
-       notes||null,status||null,
-       (iva_pct!==undefined&&iva_pct!==null)?parseFloat(iva_pct):null,
-       req.params.id, _fp, _cc, _mon]);
-    if (!r.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    // Cargar OC actual
+    const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const oc = cur.rows[0];
+
+    // Solo el creador o dueño/gerencia puede editar la cabecera
+    const esCreador = oc.requested_by === userId;
+    const esAdmin   = ['dueno','gerencia'].includes(role);
+    if (!esCreador && !esAdmin) {
+      return res.status(403).json({ error: 'Solo el creador o admin puede editar la cabecera' });
+    }
+
+    // Solo se puede editar si está en pendiente_cotizacion
+    if (!esAdmin && oc.status !== 'pendiente_cotizacion') {
+      return res.status(400).json({ error: 'Solo se puede editar cuando está pendiente de cotizar' });
+    }
+
+    const { notes, sucursal, area, tipo, vehicle_id, presupuesto_imagen, presupuesto_monto_estimado } = req.body;
+
+    const r = await query(`
+      UPDATE purchase_orders SET
+        notes = COALESCE($1, notes),
+        sucursal = COALESCE($2, sucursal),
+        area = COALESCE($3, area),
+        tipo = COALESCE($4, tipo),
+        vehicle_id = COALESCE($5, vehicle_id),
+        presupuesto_imagen = COALESCE($6, presupuesto_imagen),
+        presupuesto_monto_estimado = COALESCE($7, presupuesto_monto_estimado)
+      WHERE id = $8 RETURNING *`,
+      [notes||null, sucursal||null, area||null, tipo||null,
+       vehicle_id||null, presupuesto_imagen||null,
+       presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null,
+       req.params.id]
+    );
+    res.json(ocultarPreciosSiCorresponde(r.rows[0], role));
+  } catch(err) {
+    console.error('[OC editar]', err.message);
+    res.status(500).json({ error: 'Error al editar OC' });
+  }
 });
 
-router.put('/:id/items', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  PUT /:id/items — Reemplazar items (compras carga precios)
+// ─────────────────────────────────────────────────────────────
+router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
   try {
     const { items=[] } = req.body;
-    if (!items.length) return res.status(400).json({ error: 'Debe haber al menos un articulo' });
-    await query('DELETE FROM purchase_order_items WHERE po_id=$1',[req.params.id]);
-    let total = 0;
+    if (!items.length) return res.status(400).json({ error: 'Debe haber al menos un artículo' });
+
+    // Cargar OC y validar estado
+    const cur = await query('SELECT status FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const estadosEditables = ['pendiente_cotizacion','en_cotizacion'];
+    if (!estadosEditables.includes(cur.rows[0].status)) {
+      return res.status(400).json({ error: 'Solo se pueden editar items mientras la OC está pendiente o en cotización' });
+    }
+
+    // Reemplazar todos los items
+    await query('DELETE FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
-      const qty=parseFloat(item.cantidad||1), price=parseFloat(item.precio_unit||0);
-      await query('INSERT INTO purchase_order_items (po_id,descripcion,cantidad,unidad,precio_unit) VALUES ($1,$2,$3,$4,$5)',
-        [req.params.id,item.descripcion.trim(),qty,item.unidad||'un',price]);
-      total += qty*price;
+      await query(
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [req.params.id, item.descripcion.trim(), parseFloat(item.cantidad||1),
+         item.unidad||'un', parseFloat(item.precio_unit||0), item.stock_item_id||null]
+      );
     }
-    await query('UPDATE purchase_orders SET total_estimado=$1 WHERE id=$2',[total,req.params.id]);
-    const updated = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at',[req.params.id]);
-    res.json({ ok:true, items:updated.rows, total_estimado:total });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+
+    // Recalcular total_estimado
+    const t = await query('SELECT COALESCE(SUM(cantidad * precio_unit),0) as total FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
+    await query('UPDATE purchase_orders SET total_estimado = $1 WHERE id = $2', [t.rows[0].total, req.params.id]);
+
+    const itemsResult = await query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at', [req.params.id]);
+    res.json({ items: itemsResult.rows, total_estimado: t.rows[0].total });
+  } catch(err) {
+    console.error('[OC items]', err.message);
+    res.status(500).json({ error: 'Error al actualizar items' });
+  }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  DELETE /:id — Borrar (solo dueño/gerencia/creador en estado inicial)
+// ─────────────────────────────────────────────────────────────
 router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
   try {
-    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
-    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    if (check.rows[0].status !== 'en_revision' && req.user.role !== 'dueno') return res.status(409).json({ error: 'Solo se pueden eliminar OCs en revision' });
-    await query('DELETE FROM purchase_orders WHERE id=$1',[req.params.id]);
-    res.json({ ok:true });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+    const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const oc = cur.rows[0];
+
+    if (req.user.role === 'jefe_mantenimiento') {
+      if (oc.requested_by !== req.user.id) {
+        return res.status(403).json({ error: 'Solo podés borrar OCs que creaste vos' });
+      }
+      if (oc.status !== 'pendiente_cotizacion') {
+        return res.status(400).json({ error: 'Solo se pueden borrar OCs pendientes de cotizar' });
+      }
+    }
+    await query('DELETE FROM purchase_orders WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch(err) {
+    console.error('[OC borrar]', err.message);
+    res.status(500).json({ error: 'Error al borrar OC' });
+  }
 });
 
-/* --- OC WORKFLOW v1 --- */
+// ═══════════════════════════════════════════════════════════════
+//                  TRANSICIONES DE ESTADO
+// ═══════════════════════════════════════════════════════════════
 
-router.post('/:id/aprobar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/tomar-cotizacion — Compras toma la OC
+//  pendiente_cotizacion → en_cotizacion
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/tomar-cotizacion', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
   try {
-    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
-    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    if (check.rows[0].status !== 'en_revision') return res.status(409).json({ error: 'Solo se aprueban OCs en revision' });
-    const r = await query(
-      "UPDATE purchase_orders SET status='aprobada', aprobado_por=$1, aprobado_en=NOW() WHERE id=$2 RETURNING *",
+    const cur = await query('SELECT status FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (cur.rows[0].status !== 'pendiente_cotizacion') {
+      return res.status(400).json({ error: 'Solo se puede tomar una OC pendiente de cotizar' });
+    }
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = 'en_cotizacion',
+        cotizado_por = $1,
+        cotizado_at = NOW()
+      WHERE id = $2 RETURNING *`,
       [req.user.id, req.params.id]
     );
     res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) {
+    console.error('[OC tomar-cotizacion]', err.message);
+    res.status(500).json({ error: 'Error al tomar la OC' });
+  }
 });
 
-router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/aprobar-compras — Compras aprueba
+//  en_cotizacion (o pendiente) → aprobada_compras (requiere precios cargados)
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
+  try {
+    const { proveedor, supplier_id, forma_pago, cc_dias, moneda, iva_pct } = req.body;
+
+    const cur = await query('SELECT status FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (!['en_cotizacion','pendiente_cotizacion'].includes(cur.rows[0].status)) {
+      return res.status(400).json({ error: 'Solo se puede aprobar una OC en cotización' });
+    }
+
+    // Validar que haya al menos un item con precio > 0
+    const items = await query('SELECT precio_unit FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
+    const hayPrecios = items.rows.some(it => parseFloat(it.precio_unit) > 0);
+    if (!hayPrecios) {
+      return res.status(400).json({ error: 'Debés cargar precios en los artículos antes de aprobar' });
+    }
+
+    // Validar forma_pago
+    const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
+    const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
+    const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
+
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = 'aprobada_compras',
+        proveedor = COALESCE($1, proveedor),
+        supplier_id = COALESCE($2, supplier_id),
+        forma_pago = $3,
+        cc_dias = $4,
+        moneda = $5,
+        iva_pct = COALESCE($6, iva_pct),
+        aprobado_compras_por = $7,
+        aprobado_compras_at = NOW()
+      WHERE id = $8 RETURNING *`,
+      [proveedor||null, supplier_id||null, _fp, _cc, _mon,
+       iva_pct != null ? parseFloat(iva_pct) : null,
+       req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) {
+    console.error('[OC aprobar-compras]', err.message);
+    res.status(500).json({ error: 'Error al aprobar OC' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/pagar — Tesorería confirma el pago
+//  aprobada_compras → pagada
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreria'), async (req, res) => {
+  try {
+    const { factura_nro, factura_fecha, factura_monto } = req.body;
+    const cur = await query('SELECT status FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (cur.rows[0].status !== 'aprobada_compras') {
+      return res.status(400).json({ error: 'Solo se puede pagar una OC aprobada por compras' });
+    }
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = 'pagada',
+        factura_nro = COALESCE($1, factura_nro),
+        factura_fecha = COALESCE($2, factura_fecha),
+        factura_monto = COALESCE($3, factura_monto),
+        pagado_por = $4,
+        pagado_at = NOW()
+      WHERE id = $5 RETURNING *`,
+      [factura_nro||null, factura_fecha||null,
+       factura_monto != null ? parseFloat(factura_monto) : null,
+       req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) {
+    console.error('[OC pagar]', err.message);
+    res.status(500).json({ error: 'Error al registrar pago' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/recibir — Jefe mant confirma recepción
+//  pagada → recibida
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  try {
+    const cur = await query('SELECT status, requested_by FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+
+    // Jefe mant: solo puede recibir las que creó él
+    if (req.user.role === 'jefe_mantenimiento' && cur.rows[0].requested_by !== req.user.id) {
+      return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
+    }
+    if (cur.rows[0].status !== 'pagada') {
+      return res.status(400).json({ error: 'Solo se puede recibir una OC pagada' });
+    }
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = 'recibida',
+        recibido_por = $1,
+        recibido_at = NOW()
+      WHERE id = $2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) {
+    console.error('[OC recibir]', err.message);
+    res.status(500).json({ error: 'Error al recibir OC' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/rechazar — Cualquier actor puede rechazar en su etapa
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria'), async (req, res) => {
   try {
     const { motivo } = req.body;
-    if (!motivo || !motivo.trim()) return res.status(400).json({ error: 'El motivo de rechazo es obligatorio' });
-    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
-    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    if (check.rows[0].status !== 'en_revision') return res.status(409).json({ error: 'Solo se rechazan OCs en revision' });
-    const r = await query(
-      "UPDATE purchase_orders SET status='rechazada', rechazado_por=$1, rechazado_en=NOW(), rechazo_motivo=$2 WHERE id=$3 RETURNING *",
-      [req.user.id, motivo.trim(), req.params.id]
-    );
-    res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','contador'), async (req, res) => {
-  try {
-    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
-    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    if (check.rows[0].status !== 'recibida') return res.status(409).json({ error: 'Solo se paga una OC en estado recibida' });
-    const r = await query(
-      "UPDATE purchase_orders SET status='pagada', pagado_por=$1, pagado_en=NOW() WHERE id=$2 RETURNING *",
-      [req.user.id, req.params.id]
-    );
-    res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
-});
-
-router.post('/:id/cancelar', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
-  try {
-    const check = await query('SELECT status FROM purchase_orders WHERE id=$1',[req.params.id]);
-    if (!check.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    const st = check.rows[0].status;
-    const terminales = ['pagada','rechazada','cancelada'];
-    if (terminales.includes(st)) return res.status(409).json({ error: 'No se puede cancelar una OC ' + st });
-    const r = await query(
-      "UPDATE purchase_orders SET status='cancelada' WHERE id=$1 RETURNING *",
-      [req.params.id]
-    );
-    res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
-});
-
-/* --- FIN OC WORKFLOW v1 --- */
-
-router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
-  const client = await require('../db/pool').pool.connect();
-  try {
-    // Traer OC + items separados (queremos el stock_item_id de cada item, no solo texto)
-    const poR = await client.query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
-    if (!poR.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
-    const oc = poR.rows[0];
-    if (oc.status === 'recibida') return res.status(409).json({ error: 'La OC ya fue recibida' });
-    if (oc.status !== 'aprobada') return res.status(409).json({ error: 'Solo se recibe una OC aprobada' });
-
-    const itemsR = await client.query(
-      `SELECT id, descripcion, cantidad, unidad, precio_unit, stock_item_id, ingresado_stock
-       FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at`,
-      [req.params.id]
-    );
-    const items = itemsR.rows;
-
-    await client.query('BEGIN');
-
-    // 1. Marcar OC como recibida
-    await client.query(
-      "UPDATE purchase_orders SET status='recibida', recibido_por=$1, recibido_en=NOW() WHERE id=$2",
-      [req.user.id, req.params.id]
-    );
-
-    // 2. INGRESAR AUTOMÁTICAMENTE AL STOCK los ítems vinculados
-    const stockIngresos = [];     // lista de lo que se ingresó
-    const warnings     = [];      // lista de ítems sin vincular al stock
-
-    // Asegurarse que exista la tabla de movimientos de stock
-    // IMPORTANTE: usa el mismo schema que db/schema.sql y routes/workorders.js
-    await client.query(`CREATE TABLE IF NOT EXISTS stock_movements (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      stock_id UUID REFERENCES stock_items(id) ON DELETE CASCADE,
-      type VARCHAR(20) NOT NULL,
-      qty NUMERIC(12,2) NOT NULL,
-      reason TEXT,
-      wo_id UUID,
-      user_id UUID REFERENCES users(id),
-      requires_approval BOOLEAN DEFAULT FALSE,
-      approved_by UUID REFERENCES users(id),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`).catch(() => {});
-
-    for (const item of items) {
-      if (!item.stock_item_id || item.ingresado_stock) {
-        // Sin vinculación al stock o ya ingresado previamente → skip
-        if (!item.stock_item_id) warnings.push(`"${item.descripcion}" (sin vincular al stock)`);
-        continue;
-      }
-
-      // Verificar que el ítem de stock existe — con FOR UPDATE para prevenir race conditions
-      const si = await client.query(
-        'SELECT id, code, name, qty_current, unit_cost FROM stock_items WHERE id=$1 FOR UPDATE',
-        [item.stock_item_id]
-      );
-      if (!si.rows[0]) {
-        warnings.push(`"${item.descripcion}" (ítem de stock no existe, tal vez eliminado)`);
-        continue;
-      }
-      const stockItem = si.rows[0];
-
-      const qtyIngreso = parseFloat(item.cantidad) || 0;
-      const precioNuevo = parseFloat(item.precio_unit) || 0;
-      const nuevoQty = parseFloat(stockItem.qty_current || 0) + qtyIngreso;
-
-      // Actualizar stock: qty_current += cantidad, unit_cost = precio de esta OC (última compra)
-      // La fila ya está bloqueada por el FOR UPDATE de arriba, nadie más puede modificarla
-      // hasta que hagamos COMMIT al final de la transacción.
-      await client.query(
-        `UPDATE stock_items
-         SET qty_current = qty_current + $1,
-             unit_cost   = CASE WHEN $2 > 0 THEN $2 ELSE unit_cost END,
-             updated_at  = NOW()
-         WHERE id=$3`,
-        [qtyIngreso, precioNuevo, item.stock_item_id]
-      );
-
-      // Registrar movimiento
-      // NOTA: usa el schema existente (stock_id, type, qty, reason, wo_id, user_id)
-      //       que ya existe por db/schema.sql y routes/workorders.js
-      await client.query(
-        `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id)
-         VALUES ($1, 'Ingreso', $2, $3, $4)`,
-        [item.stock_item_id, qtyIngreso,
-         `Ingreso por OC ${oc.code}${oc.proveedor ? ' — ' + oc.proveedor : ''} · Nuevo precio unit: $${precioNuevo}`,
-         req.user.id]
-      );
-
-      // Marcar el ítem de la OC como ya ingresado (idempotente por si se re-recibe)
-      await client.query(
-        'UPDATE purchase_order_items SET ingresado_stock=TRUE WHERE id=$1',
-        [item.id]
-      );
-
-      stockIngresos.push({
-        codigo: stockItem.code,
-        nombre: stockItem.name,
-        cantidad: qtyIngreso,
-        precio_nuevo: precioNuevo,
-        nuevo_stock: nuevoQty,
-      });
+    if (!motivo || motivo.trim().length < 5) {
+      return res.status(400).json({ error: 'Debés indicar un motivo de rechazo (mínimo 5 caracteres)' });
     }
 
-    // 3. Si la OC estaba vinculada a un vehículo, seguir generando la OT como antes
-    let otId=null, otCode=null;
-    if (oc.vehicle_id) {
-      await client.query(`CREATE TABLE IF NOT EXISTS ot_sequence (
-        dummy INTEGER PRIMARY KEY DEFAULT 1, last_val INTEGER DEFAULT 0,
-        CONSTRAINT only_one CHECK (dummy=1))`);
-      await client.query(`INSERT INTO ot_sequence (dummy,last_val) VALUES (1,0) ON CONFLICT DO NOTHING`);
-      const seqR = await client.query(`UPDATE ot_sequence SET last_val=last_val+1 RETURNING last_val`);
-      otCode = 'OT-'+String(parseInt(seqR.rows[0].last_val)).padStart(5,'0');
-      const partsCost = parseFloat(oc.factura_monto||oc.total_estimado||0);
-      const wo = await client.query(`INSERT INTO work_orders
-        (code,vehicle_id,type,status,priority,description,reporter_id,parts_cost,labor_cost,km_at_open)
-        VALUES ($1,$2,'Correctivo','Pendiente','Normal',$3,$4,$5,0,
-          COALESCE((SELECT km_current FROM vehicles WHERE id=$2),0))
-        RETURNING id,code`,
-        [otCode, oc.vehicle_id,
-         `OC ${oc.code}${oc.proveedor?' — '+oc.proveedor:''}`,
-         req.user.id, partsCost]);
-      otId=wo.rows[0].id; otCode=wo.rows[0].code;
-      await client.query(`UPDATE work_orders SET root_cause=$1 WHERE id=$2`,
-        [`Generada desde OC ${oc.code}`, otId]);
-      await client.query('UPDATE purchase_orders SET ot_id=$1 WHERE id=$2', [otId, req.params.id]);
+    const cur = await query('SELECT status, requested_by FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    if (cur.rows[0].status === 'rechazada' || cur.rows[0].status === 'recibida') {
+      return res.status(400).json({ error: 'Esta OC ya está en estado final' });
     }
 
-    await client.query('COMMIT');
-    res.json({
-      ok:true,
-      oc_status:'recibida',
-      ot_generada: !!otId,
-      ot_code: otCode,
-      stock_ingresos: stockIngresos,            // array de ítems que entraron al stock
-      stock_warnings: warnings,                  // array de ítems que NO entraron (sin vincular)
-    });
+    // Validar que el rol pueda rechazar en el estado actual
+    const estadoActual = cur.rows[0].status;
+    const rol = req.user.role;
+    const puedeRechazar = (
+      ['dueno','gerencia'].includes(rol) ||
+      (rol === 'jefe_mantenimiento' && cur.rows[0].requested_by === req.user.id && estadoActual === 'pendiente_cotizacion') ||
+      (rol === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(estadoActual)) ||
+      (rol === 'tesoreria' && estadoActual === 'aprobada_compras')
+    );
+    if (!puedeRechazar) {
+      return res.status(403).json({ error: 'No podés rechazar esta OC en su estado actual' });
+    }
+
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = 'rechazada',
+        motivo_rechazo = $1,
+        rechazado_por = $2,
+        rechazado_at = NOW()
+      WHERE id = $3 RETURNING *`,
+      [motivo.trim().substring(0, 500), req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
   } catch(err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
-  } finally { client.release(); }
+    console.error('[OC rechazar]', err.message);
+    res.status(500).json({ error: 'Error al rechazar OC' });
+  }
 });
 
 module.exports = router;
