@@ -7872,7 +7872,9 @@ async function filterPO(status) {
 
 async function loadPOList() {
   try {
-    const res = await apiFetch('/api/purchase-orders');
+    // Cache-busting para que el navegador siempre traiga datos frescos del server
+    const ts = Date.now();
+    const res = await apiFetch('/api/purchase-orders?_t=' + ts);
     if (!res.ok) {
       const tbody = document.getElementById('po-tbody');
       if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar OCs</td></tr>`;
@@ -8831,7 +8833,9 @@ function _poOnSupplierChange(value) {
 // ── Ver detalle de OC ────────────────────────────────────
 async function openPODetail(id) {
   try {
-    const res = await apiFetch(`/api/purchase-orders/${id}`);
+    // Cache-busting: siempre datos frescos al abrir el detalle
+    const ts = Date.now();
+    const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
 
@@ -9089,25 +9093,46 @@ async function openPODetail(id) {
 }
 async function savePODetail(id) {
   try {
-    const ivaPct = parseFloat(document.getElementById('pod-iva-pct')?.value) || 0;
-    const extra = getPODetailExtraFields();
-    const body = {
-      iva_pct:       ivaPct,
-      ...extra,
-      sucursal:      document.getElementById('pod-sucursal')?.value || null,
-      area:          document.getElementById('pod-area')?.value || null,
-      vehicle_id:    document.getElementById('pod-vehicle')?.value || null,
-      proveedor:     document.getElementById('pod-proveedor')?.value?.trim() || null,
-      factura_nro:   document.getElementById('pod-factura-nro')?.value?.trim() || null,
-      factura_fecha: document.getElementById('pod-factura-fecha')?.value || null,
-      factura_monto: parseFloat(document.getElementById('pod-factura-monto')?.value) || null,
-      notes:         document.getElementById('pod-notes')?.value?.trim() || null,
-      status:        document.getElementById('pod-status')?.value || null,
-    };
+    const body = {};
+
+    // IVA — si el hidden existe
+    const ivaEl = document.getElementById('pod-iva-pct');
+    if (ivaEl) body.iva_pct = parseFloat(ivaEl.value) || 0;
+
+    // Campos extras (forma_pago, cc_dias, moneda)
+    try {
+      const extra = (typeof getPODetailExtraFields === 'function') ? getPODetailExtraFields() : {};
+      Object.assign(body, extra);
+    } catch(e) {}
+
+    // Proveedor (solo si existe el input y tiene valor)
+    const provEl = document.getElementById('pod-proveedor');
+    if (provEl && provEl.value !== undefined) body.proveedor = provEl.value.trim() || null;
+
+    // Datos de factura (solo si existen los inputs)
+    const fnEl = document.getElementById('pod-factura-nro');
+    if (fnEl) body.factura_nro = fnEl.value.trim() || null;
+    const ffEl = document.getElementById('pod-factura-fecha');
+    if (ffEl) body.factura_fecha = ffEl.value || null;
+    const fmEl = document.getElementById('pod-factura-monto');
+    if (fmEl) body.factura_monto = fmEl.value ? parseFloat(fmEl.value) : null;
+
+    // Notas
+    const notesEl = document.getElementById('pod-notes');
+    if (notesEl) body.notes = notesEl.value.trim() || null;
+
+    // NO mandamos sucursal, area, vehicle_id porque NO existen esos inputs en el modal detalle.
+    // Esos campos solo se pueden editar al crear la OC.
+
+    if (Object.keys(body).length === 0) {
+      showToast('warn', 'Nada para guardar');
+      return;
+    }
+
     const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'PATCH', body: JSON.stringify(body) });
-    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al guardar'); return; }
     closeModal();
-    showToast('ok','OC actualizada');
+    showToast('ok','✅ Cambios guardados');
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message); }
 }
@@ -9125,7 +9150,9 @@ async function deletePO(id) {
 // ── Impresión de OC ──────────────────────────────────────
 async function printPO(id) {
   try {
-    const res = await apiFetch(`/api/purchase-orders/${id}`);
+    // Cache-busting para traer datos FRESCOS del servidor (no cache del browser)
+    const ts = Date.now();
+    const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
     const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
@@ -9576,6 +9603,27 @@ function setPODetailIva(val) {
     btn.style.background = v === val ? 'var(--accent)' : 'transparent';
     btn.style.color      = v === val ? 'white' : 'var(--text3)';
   });
+
+  // Recalcular en vivo: Subtotal, IVA, Total según el nuevo porcentaje
+  const subEl = document.getElementById('pod-subtotal-display');
+  const ivaRowEl = document.getElementById('pod-iva-row');
+  const ivaRowLabelEl = document.getElementById('pod-iva-row-label');
+  const ivaRowMontoEl = document.getElementById('pod-iva-row-monto');
+  const totEl = document.getElementById('pod-total-display');
+  if (!subEl || !totEl) return;
+
+  // Leer el subtotal actual (está como "$10.000" o "US$10.000")
+  const subTxt = subEl.textContent || '';
+  const isUSD = subTxt.startsWith('US$');
+  const prefix = isUSD ? 'US$' : '$';
+  const subNum = parseFloat(subTxt.replace(/[^\d.-]/g,'')) || 0;
+  const ivaMonto = Math.round(subNum * pct / 100);
+  const total = Math.round(subNum * (1 + pct/100));
+
+  if (ivaRowEl) ivaRowEl.style.opacity = pct === 0 ? '.4' : '1';
+  if (ivaRowLabelEl) ivaRowLabelEl.textContent = `IVA (${pct}%)`;
+  if (ivaRowMontoEl) ivaRowMontoEl.textContent = prefix + ivaMonto.toLocaleString('es-AR');
+  totEl.textContent = prefix + total.toLocaleString('es-AR');
 }
 
 function updatePODetailAreaSelect() {
@@ -9847,23 +9895,36 @@ async function tomarCotizacionOC(id) {
 // COMPRAS aprueba con precios cargados y proveedor elegido
 // Usa los campos que ya hay en el modal de detalle (proveedor, forma_pago, cc_dias, moneda, iva_pct)
 async function aprobarOC(id) {
-  // Leer proveedor y forma de pago del modal si está abierto
-  const pod_prov = document.getElementById('pod-proveedor')?.value?.trim() || null;
-  const pod_fp   = document.getElementById('pod-forma-pago')?.value || null;
-  const pod_cc   = document.getElementById('pod-cc-dias')?.value || null;
-  const pod_mon  = document.getElementById('pod-moneda')?.value || 'ARS';
-  const pod_iva  = document.getElementById('pod-iva')?.value || null;
+  // Leer los datos actuales del modal
+  const pod_prov_el = document.getElementById('pod-proveedor');
+  const pod_prov = pod_prov_el ? (pod_prov_el.value.trim() || null) : null;
+  const pod_iva_el = document.getElementById('pod-iva-pct');
+  const pod_iva = pod_iva_el ? parseFloat(pod_iva_el.value) : null;
 
-  if (!confirm('¿Aprobar esta OC con los precios y proveedor cargados? Pasará a tesorería para pagar.')) return;
+  // Forma de pago y moneda vienen del helper
+  let pod_fp = null, pod_cc = null, pod_mon = 'ARS';
+  try {
+    const extra = (typeof getPODetailExtraFields === 'function') ? getPODetailExtraFields() : {};
+    if (extra.forma_pago) pod_fp = extra.forma_pago;
+    if (extra.cc_dias != null) pod_cc = extra.cc_dias;
+    if (extra.moneda) pod_mon = extra.moneda;
+  } catch(e) {}
+
+  if (!pod_prov) {
+    if (!confirm('⚠️ No cargaste proveedor. ¿Aprobar sin proveedor?')) return;
+  } else {
+    if (!confirm('¿Aprobar esta OC con los precios y proveedor cargados? Pasará a tesorería para pagar.')) return;
+  }
+
   try {
     const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar-compras', {
       method: 'POST',
       body: JSON.stringify({
         proveedor: pod_prov,
         forma_pago: pod_fp,
-        cc_dias: pod_cc ? parseInt(pod_cc, 10) : null,
+        cc_dias: pod_cc,
         moneda: pod_mon,
-        iva_pct: pod_iva ? parseFloat(pod_iva) : null
+        iva_pct: (pod_iva != null && !isNaN(pod_iva)) ? pod_iva : null
       })
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
