@@ -133,6 +133,9 @@ function ocultarPreciosSiCorresponde(po, role) {
 // ─────────────────────────────────────────────────────────────
 router.get('/', authenticate, async (req, res) => {
   try {
+    // Nunca cachear el listado (datos cambian con cada transición de estado)
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+
     const { status, limit = 100 } = req.query;
     const role = req.user.role;
     const userId = req.user.id;
@@ -216,6 +219,9 @@ router.get('/aux/proveedores', authenticate, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get('/:id', authenticate, async (req, res) => {
   try {
+    // Nunca cachear el detalle (cambia con cada transición)
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+
     const role = req.user.role;
     const userId = req.user.id;
 
@@ -603,9 +609,9 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
         status = 'aprobada_compras',
         proveedor = COALESCE($1, proveedor),
         supplier_id = COALESCE($2, supplier_id),
-        forma_pago = $3,
-        cc_dias = $4,
-        moneda = $5,
+        forma_pago = COALESCE($3, forma_pago),
+        cc_dias = COALESCE($4, cc_dias),
+        moneda = COALESCE($5, moneda),
         iva_pct = COALESCE($6, iva_pct),
         aprobado_compras_por = $7,
         aprobado_compras_at = NOW()
