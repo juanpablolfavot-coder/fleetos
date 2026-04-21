@@ -4566,7 +4566,9 @@ function openModal(title, bodyHTML, actions=[]) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHTML;
   const footer = document.getElementById('modal-footer');
-  footer.innerHTML = actions.map((a,i)=>`<button class="btn ${a.cls}" id="modal-action-${i}">${a.label}</button>`).join('');
+  // Hacer que los botones envuelvan en múltiples líneas si no entran
+  footer.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:12px 16px';
+  footer.innerHTML = actions.map((a,i)=>`<button class="btn ${a.cls}" id="modal-action-${i}" style="white-space:nowrap">${a.label}</button>`).join('');
   actions.forEach((a,i) => { document.getElementById('modal-action-'+i).onclick = a.fn; });
   if (modal) modal.style.display = 'block';
   overlay.classList.add('open');
@@ -8836,6 +8838,8 @@ function _poOnSupplierChange(value) {
 // ── Ver detalle de OC ────────────────────────────────────
 async function openPODetail(id) {
   try {
+    // Resetear el contador de ids para los artículos editables inline
+    window._podItemNextIdx = 0;
     // Cache-busting: siempre datos frescos al abrir el detalle
     const ts = Date.now();
     const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
@@ -9008,29 +9012,54 @@ async function openPODetail(id) {
       ` : ''}
 
       <div class="card" style="padding:0;margin-bottom:16px">
-        <div style="padding:10px 16px;border-bottom:1px solid var(--border2);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</div>
-        <table style="font-size:13px">
-          <thead><tr>
-            <th>Descripción</th>
-            <th style="text-align:center">Cant.</th>
-            <th style="text-align:center">Unid.</th>
-            ${puedeVerPrecios ? `
-              <th style="text-align:right">P. Unit.</th>
-              <th style="text-align:right">Subtotal</th>
-            ` : ''}
-          </tr></thead>
-          <tbody>
-            ${po.items.map(i => `<tr>
-              <td>${i.descripcion}</td>
-              <td style="text-align:center">${parseFloat(i.cantidad)}</td>
-              <td style="text-align:center">${i.unidad}</td>
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</span>
+          ${canEdit && !esTerminal && puedeVerPrecios ? `
+            <button class="btn btn-secondary btn-sm" onclick="addPODetailItem()" style="font-size:11px;padding:4px 10px">+ Agregar</button>
+          ` : ''}
+        </div>
+
+        ${canEdit && !esTerminal && puedeVerPrecios ? `
+          <!-- MODO EDITABLE INLINE -->
+          <div style="padding:10px 16px">
+            <div style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.5px">
+              <div>Descripción</div>
+              <div style="text-align:center">Cant.</div>
+              <div style="text-align:center">Unid.</div>
+              <div style="text-align:right">P. Unit.</div>
+              <div style="text-align:right">Subtotal</div>
+              <div></div>
+            </div>
+            <div id="pod-items-container">
+              ${po.items.map((item, idx) => buildPODetailItemRow(idx, item)).join('')}
+            </div>
+          </div>
+        ` : `
+          <!-- MODO LECTURA (roles que no editan o estados finales) -->
+          <table style="font-size:13px">
+            <thead><tr>
+              <th>Descripción</th>
+              <th style="text-align:center">Cant.</th>
+              <th style="text-align:center">Unid.</th>
               ${puedeVerPrecios ? `
-                <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
-                <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+                <th style="text-align:right">P. Unit.</th>
+                <th style="text-align:right">Subtotal</th>
               ` : ''}
-            </tr>`).join('')}
-          </tbody>
-        </table>
+            </tr></thead>
+            <tbody>
+              ${po.items.map(i => `<tr>
+                <td>${i.descripcion}</td>
+                <td style="text-align:center">${parseFloat(i.cantidad)}</td>
+                <td style="text-align:center">${i.unidad}</td>
+                ${puedeVerPrecios ? `
+                  <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
+                  <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+                ` : ''}
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        `}
+
         ${puedeVerPrecios ? `
         <div style="padding:8px 16px;border-top:1px solid var(--border2);display:flex;justify-content:space-between">
           <span style="font-size:12px;color:var(--text3)">Subtotal</span>
@@ -9051,44 +9080,78 @@ async function openPODetail(id) {
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones</div>
         <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit && !esTerminal?'':'readonly'} placeholder="—">${po.notes||''}</textarea>
       </div>`,
-      [
-        { label:'Cerrar', cls:'btn-secondary', fn: closeModal },
-        { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
-        // Botones de EDICIÓN: solo compras/tesorería/dueño/gerencia (NO jefe mant)
-        ...(canEdit && !esTerminal ? [
-          { label:'✏️ Editar artículos', cls:'btn-secondary', fn: () => { closeModal(); openEditPOItemsModal(id); } },
-          { label:'💾 Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
-        ] : []),
-        // Acciones del workflow según rol y estado actual (disponibles para TODOS los roles según el flow)
-        ...(!esTerminal ? [
-          ...((po.status==='pendiente_cotizacion' && (role==='compras' || ['dueno','gerencia'].includes(role))) ? [
-            { label:'🔎 Tomar cotización', cls:'btn-primary', fn: () => tomarCotizacionOC(id) },
-          ] : []),
-          ...((['pendiente_cotizacion','en_cotizacion'].includes(po.status) && (role==='compras' || ['dueno','gerencia'].includes(role))) ? [
-            { label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) },
-          ] : []),
-          ...((po.status==='aprobada_compras' && (role==='tesoreria' || ['dueno','gerencia'].includes(role))) ? [
-            { label:'✓ Confirmar pago', cls:'btn-primary', fn: () => pagarOC(id) },
-          ] : []),
-          ...((po.status==='pagada' && ((['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) || ['dueno','gerencia'].includes(role))) ? [
-            { label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) },
-          ] : []),
-          // Devolver a etapa anterior (si corresponde al rol y estado)
-          ...(((role==='compras' && po.status==='en_cotizacion') ||
-               (role==='tesoreria' && po.status==='aprobada_compras') ||
-               (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status==='pagada') ||
-               (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','pagada'].includes(po.status))) ? [
-            { label:'⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) },
-          ] : []),
-          // Rechazar: según rol + estado (controlado por backend también)
-          ...(((['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status==='pendiente_cotizacion') ||
-               (role==='compras' && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)) ||
-               (role==='tesoreria' && po.status==='aprobada_compras') ||
-               ['dueno','gerencia'].includes(role)) ? [
-            { label:'❌ Rechazar', cls:'btn-danger', fn: () => rechazarOC(id) },
-          ] : []),
-        ] : [])
-      ]
+      (() => {
+        // ── Armar botones según rol + estado actual (lógica limpia) ──
+        const btns = [];
+
+        // Siempre presente
+        btns.push({ label:'Cerrar', cls:'btn-secondary', fn: closeModal });
+        btns.push({ label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } });
+
+        // Si la OC está en estado final (recibida/rechazada), solo cerrar e imprimir
+        if (esTerminal) return btns;
+
+        // Botón de guardar cambios — solo si el rol puede editar
+        // (Los artículos ya son editables inline cuando canEdit, no hace falta botón aparte)
+        if (canEdit) {
+          btns.push({ label:'💾 Guardar cambios', cls:'btn-primary', fn: () => savePODetail(id) });
+        }
+
+        // ══════════════════════════════════════════════
+        //  ACCIÓN PRINCIPAL: una sola por estado/rol
+        // ══════════════════════════════════════════════
+
+        // 📝 Pendiente cotización → compras/dueño toman
+        if (po.status === 'pendiente_cotizacion' && (role === 'compras' || ['dueno','gerencia'].includes(role))) {
+          btns.push({ label:'🔎 Tomar cotización', cls:'btn-primary', fn: () => tomarCotizacionOC(id) });
+        }
+
+        // 🔎 En cotización → compras/dueño aprueban (con datos completos)
+        if (po.status === 'en_cotizacion' && (role === 'compras' || ['dueno','gerencia'].includes(role))) {
+          btns.push({ label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) });
+        }
+
+        // ✅ Aprobada compras → tesorería/dueño confirman pago
+        if (po.status === 'aprobada_compras' && (role === 'tesoreria' || ['dueno','gerencia'].includes(role))) {
+          btns.push({ label:'✓ Confirmar pago', cls:'btn-primary', fn: () => pagarOC(id) });
+        }
+
+        // 💰 Pagada → solicitante/dueño confirman recepción
+        if (po.status === 'pagada' && (
+          (['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) ||
+          ['dueno','gerencia'].includes(role)
+        )) {
+          btns.push({ label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) });
+        }
+
+        // ══════════════════════════════════════════════
+        //  ACCIONES SECUNDARIAS: Devolver / Rechazar
+        // ══════════════════════════════════════════════
+
+        // ⏪ Devolver (retrocede etapa con motivo)
+        const puedeDevolver = (
+          (role === 'compras' && po.status === 'en_cotizacion') ||
+          (role === 'tesoreria' && po.status === 'aprobada_compras') ||
+          (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status === 'pagada') ||
+          (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','pagada'].includes(po.status))
+        );
+        if (puedeDevolver) {
+          btns.push({ label:'⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) });
+        }
+
+        // ❌ Rechazar (cierre definitivo)
+        const puedeRechazar = (
+          (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status === 'pendiente_cotizacion') ||
+          (role === 'compras' && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)) ||
+          (role === 'tesoreria' && po.status === 'aprobada_compras') ||
+          ['dueno','gerencia'].includes(role)
+        );
+        if (puedeRechazar) {
+          btns.push({ label:'❌ Rechazar', cls:'btn-danger', fn: () => rechazarOC(id) });
+        }
+
+        return btns;
+      })()
     );
 
     if (typeof renderPOExtraFields === 'function') {
@@ -9126,19 +9189,41 @@ async function savePODetail(id) {
     const notesEl = document.getElementById('pod-notes');
     if (notesEl) body.notes = notesEl.value.trim() || null;
 
-    // NO mandamos sucursal, area, vehicle_id porque NO existen esos inputs en el modal detalle.
-    // Esos campos solo se pueden editar al crear la OC.
+    // ── Leer artículos si están en modo editable inline ──
+    let itemsEditados = null;
+    if (document.querySelector('[id^="podi-desc-"]')) {
+      itemsEditados = readPODetailItems();
+      if (itemsEditados.length === 0) {
+        showToast('warn', 'Debe haber al menos un artículo con descripción');
+        return;
+      }
+    }
 
-    if (Object.keys(body).length === 0) {
+    if (Object.keys(body).length === 0 && !itemsEditados) {
       showToast('warn', 'Nada para guardar');
       return;
     }
 
-    const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'PATCH', body: JSON.stringify(body) });
-    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al guardar'); return; }
-    closeModal();
+    // 1) PATCH con datos de cabecera
+    if (Object.keys(body).length > 0) {
+      const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'PATCH', body: JSON.stringify(body) });
+      if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al guardar cabecera'); return; }
+    }
+
+    // 2) PUT con los artículos (si hubo edición)
+    if (itemsEditados) {
+      const res2 = await apiFetch(`/api/purchase-orders/${id}/items`, {
+        method: 'PUT',
+        body: JSON.stringify({ items: itemsEditados })
+      });
+      if (!res2.ok) { const e = await res2.json(); showToast('error', e.error||'Error al guardar artículos'); return; }
+    }
+
     showToast('ok','✅ Cambios guardados');
-    await loadPOList(_poCurrentFilter);
+    // Reabrir el modal con datos frescos (no sacar al usuario del contexto)
+    await openPODetail(id);
+    // Refrescar listado en paralelo
+    loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message); }
 }
 
@@ -9609,6 +9694,111 @@ function setPODetailTipo(tipo) {
   renderPOExtraFields(tipo, 'pod-extra-fields');
 }
 
+// ══════════════════════════════════════════════════
+//  HELPERS: edición inline de artículos en el modal detalle
+// ══════════════════════════════════════════════════
+
+// Contador global para ids únicos (se reinicia cada vez que abre el modal)
+window._podItemNextIdx = 0;
+
+// Construye una fila de artículo editable inline
+function buildPODetailItemRow(idx, item) {
+  item = item || {};
+  const desc  = (item.descripcion || '').replace(/"/g, '&quot;');
+  const qty   = parseFloat(item.cantidad || 1);
+  const unit  = (item.unidad || 'un').replace(/"/g, '&quot;');
+  const price = parseFloat(item.precio_unit || 0);
+  const sub   = Math.round(qty * price);
+  // Actualizar contador
+  if (idx >= (window._podItemNextIdx || 0)) window._podItemNextIdx = idx + 1;
+  return `<div id="podi-row-${idx}" style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;align-items:center">
+    <input class="form-input" id="podi-desc-${idx}" value="${desc}" placeholder="Descripción" style="font-size:12px" oninput="updatePODetailItemsTotal()">
+    <input class="form-input" type="number" id="podi-qty-${idx}" value="${qty}" min="0.01" step="0.01" style="font-size:12px;text-align:center" oninput="updatePODetailItemsTotal()">
+    <input class="form-input" id="podi-unit-${idx}" value="${unit}" style="font-size:12px;text-align:center" oninput="updatePODetailItemsTotal()">
+    <input class="form-input" type="number" id="podi-price-${idx}" value="${price}" min="0" step="0.01" style="font-size:12px;text-align:right" oninput="updatePODetailItemsTotal()">
+    <div id="podi-sub-${idx}" style="font-size:12px;text-align:right;font-family:monospace;color:var(--text2);padding:4px 8px">$${sub.toLocaleString('es-AR')}</div>
+    <button onclick="removePODetailItem(${idx})" title="Quitar"
+      style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0;width:28px;height:28px">✕</button>
+  </div>`;
+}
+
+// Agregar nuevo artículo vacío al final
+function addPODetailItem() {
+  const container = document.getElementById('pod-items-container');
+  if (!container) return;
+  const idx = window._podItemNextIdx || 0;
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = buildPODetailItemRow(idx, {});
+  container.appendChild(wrapper.firstElementChild);
+  window._podItemNextIdx = idx + 1;
+  // Focus en la descripción nueva
+  setTimeout(() => { document.getElementById('podi-desc-' + idx)?.focus(); }, 50);
+  updatePODetailItemsTotal();
+}
+
+// Quitar un artículo
+function removePODetailItem(idx) {
+  const el = document.getElementById('podi-row-' + idx);
+  if (!el) return;
+  // Validar que quede al menos uno
+  const container = document.getElementById('pod-items-container');
+  if (container && container.children.length <= 1) {
+    showToast('warn', 'Debe haber al menos un artículo');
+    return;
+  }
+  el.remove();
+  updatePODetailItemsTotal();
+}
+
+// Leer todos los items desde los inputs del modal (para guardar)
+function readPODetailItems() {
+  const items = [];
+  document.querySelectorAll('[id^="podi-desc-"]').forEach(descEl => {
+    const idx = descEl.id.replace('podi-desc-', '');
+    const desc = (descEl.value || '').trim();
+    if (!desc) return; // descartar items sin descripción
+    items.push({
+      descripcion: desc,
+      cantidad:    parseFloat(document.getElementById('podi-qty-'   + idx)?.value) || 1,
+      unidad:                 document.getElementById('podi-unit-'  + idx)?.value || 'un',
+      precio_unit: parseFloat(document.getElementById('podi-price-' + idx)?.value) || 0
+    });
+  });
+  return items;
+}
+
+// Recalcular subtotales de cada item + totales generales en vivo
+function updatePODetailItemsTotal() {
+  let subtotal = 0;
+  document.querySelectorAll('[id^="podi-qty-"]').forEach(qtyEl => {
+    const idx = qtyEl.id.replace('podi-qty-', '');
+    const qty   = parseFloat(qtyEl.value) || 0;
+    const price = parseFloat(document.getElementById('podi-price-' + idx)?.value) || 0;
+    const sub   = Math.round(qty * price);
+    subtotal += sub;
+    const subEl = document.getElementById('podi-sub-' + idx);
+    if (subEl) subEl.textContent = '$' + sub.toLocaleString('es-AR');
+  });
+  // Actualizar totales generales
+  const subDisplay = document.getElementById('pod-subtotal-display');
+  if (subDisplay) {
+    const isUSD = (subDisplay.textContent || '').startsWith('US$');
+    const prefix = isUSD ? 'US$' : '$';
+    subDisplay.textContent = prefix + subtotal.toLocaleString('es-AR');
+  }
+  // Recalcular IVA y total con el IVA actual
+  const ivaPct = parseFloat(document.getElementById('pod-iva-pct')?.value || 0);
+  const ivaMonto = Math.round(subtotal * ivaPct / 100);
+  const total = Math.round(subtotal * (1 + ivaPct / 100));
+  const ivaMontoEl = document.getElementById('pod-iva-row-monto');
+  const totEl = document.getElementById('pod-total-display');
+  const ivaLabelEl = document.getElementById('pod-iva-row-label');
+  if (ivaLabelEl) ivaLabelEl.textContent = `IVA (${ivaPct}%)`;
+  const prefix2 = (totEl && totEl.textContent.startsWith('US$')) ? 'US$' : '$';
+  if (ivaMontoEl) ivaMontoEl.textContent = prefix2 + ivaMonto.toLocaleString('es-AR');
+  if (totEl) totEl.textContent = prefix2 + total.toLocaleString('es-AR');
+}
+
 function setPODetailIva(val) {
   const pct = val === '21%' ? 21 : val === '10.5%' ? 10.5 : 0;
   const hidden = document.getElementById('pod-iva-pct');
@@ -9620,7 +9810,16 @@ function setPODetailIva(val) {
     btn.style.color      = v === val ? 'white' : 'var(--text3)';
   });
 
-  // Recalcular en vivo: Subtotal, IVA, Total según el nuevo porcentaje
+  // Si hay inputs de items (modo editable), recalcular desde los inputs reales
+  // Si no, usa el texto del subtotal como fuente
+  const hayInputsItems = document.querySelector('[id^="podi-qty-"]') != null;
+  if (hayInputsItems) {
+    // Delegamos a updatePODetailItemsTotal que ya hace todo bien
+    updatePODetailItemsTotal();
+    return;
+  }
+
+  // Modo lectura: leer del texto del display
   const subEl = document.getElementById('pod-subtotal-display');
   const ivaRowEl = document.getElementById('pod-iva-row');
   const ivaRowLabelEl = document.getElementById('pod-iva-row-label');
@@ -9628,12 +9827,9 @@ function setPODetailIva(val) {
   const totEl = document.getElementById('pod-total-display');
   if (!subEl || !totEl) return;
 
-  // Leer el subtotal actual (está como "$15.000" o "US$15.000")
-  // OJO: el punto es separador de miles en es-AR, no decimal
   const subTxt = subEl.textContent || '';
   const isUSD = subTxt.startsWith('US$');
   const prefix = isUSD ? 'US$' : '$';
-  // Quitar símbolo de moneda y puntos de miles. Convertir coma decimal a punto.
   const limpio = subTxt.replace(/US\$|\$/g, '').replace(/\./g,'').replace(',','.').trim();
   const subNum = parseFloat(limpio) || 0;
   const ivaMonto = Math.round(subNum * pct / 100);
