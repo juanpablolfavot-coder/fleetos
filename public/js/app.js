@@ -9428,8 +9428,16 @@ async function saveEditPOItems(id) {
       body: JSON.stringify({ items })
     });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
+
+    // Cerrar el modal de edición de items
     closeModal();
-    showToast('ok', 'Artículos actualizados');
+    // Si había un modal de detalle abierto atrás, también cerrarlo (evita mostrar datos viejos)
+    // Esperar un tick para que React/DOM actualicen
+    await new Promise(r => setTimeout(r, 50));
+
+    showToast('ok', '✅ Artículos actualizados');
+
+    // Forzar re-fetch del listado (no usar cache)
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message||'Error al guardar'); }
 }
