@@ -7932,7 +7932,7 @@ function _poRenderRows() {
   });
 
   const getSortVal = (p, k) => {
-    if (k === 'total') return parseFloat(p.total_real || p.total_estimado || 0);
+    if (k === 'total') { const tr = parseFloat(p.total_real||0); return tr > 0 ? tr : parseFloat(p.total_estimado||0); }
     if (k === 'created_at') return p.created_at || '';
     if (k === 'status') {
       const order = {'pendiente_cotizacion':1,'en_cotizacion':2,'aprobada_compras':3,'pagada':4,'recibida':5,'rechazada':6};
@@ -7978,7 +7978,7 @@ function _poRenderRows() {
   }
 
   if (footer) {
-    const totalMonto = rows.reduce((a,p) => a + parseFloat(p.total_real||p.total_estimado||0), 0);
+    const totalMonto = rows.reduce((a,p) => { const tr = parseFloat(p.total_real||0); return a + (tr > 0 ? tr : parseFloat(p.total_estimado||0)); }, 0);
     footer.innerHTML = `
       <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OCs</span>
       <span>Monto total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalMonto).toLocaleString('es-AR')}</b></span>
@@ -8014,7 +8014,10 @@ function _poRenderRow(po) {
     role === 'compras' && po.requested_by === App.currentUser?.id && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)
   );
 
-  const total = parseFloat(po.total_real || po.total_estimado || 0);
+  // Calcular total: preferir total_real si tiene valor > 0, sino usar total_estimado
+  const tReal = parseFloat(po.total_real || 0);
+  const tEst  = parseFloat(po.total_estimado || 0);
+  const total = tReal > 0 ? tReal : tEst;
 
   // Ícono de origen según quién creó la OC
   let origenIcon = '';
@@ -8165,7 +8168,7 @@ function _poExportPDF() {
     p.solicitante_nombre || '—',
     p.proveedor || '—',
     p.factura_nro || '—',
-    `$${Math.round(parseFloat(p.total_real||p.total_estimado||0)).toLocaleString('es-AR')}`,
+    (() => { const tr = parseFloat(p.total_real||0); const t = tr > 0 ? tr : parseFloat(p.total_estimado||0); return `$${Math.round(t).toLocaleString('es-AR')}`; })(),
     p.created_at ? new Date(p.created_at).toLocaleDateString('es-AR') : '—',
   ]);
 
@@ -8182,7 +8185,7 @@ function _poExportPDF() {
     },
   });
 
-  const totalMonto = rows.reduce((a,p) => a + parseFloat(p.total_real||p.total_estimado||0), 0);
+  const totalMonto = rows.reduce((a,p) => { const tr = parseFloat(p.total_real||0); return a + (tr > 0 ? tr : parseFloat(p.total_estimado||0)); }, 0);
   const finalY = doc.lastAutoTable.finalY || 90;
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
@@ -9429,16 +9432,19 @@ async function saveEditPOItems(id) {
     });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
 
-    // Cerrar el modal de edición de items
-    closeModal();
-    // Si había un modal de detalle abierto atrás, también cerrarlo (evita mostrar datos viejos)
-    // Esperar un tick para que React/DOM actualicen
-    await new Promise(r => setTimeout(r, 50));
-
     showToast('ok', '✅ Artículos actualizados');
 
-    // Forzar re-fetch del listado (no usar cache)
-    await loadPOList(_poCurrentFilter);
+    // Cerrar modal de edición
+    closeModal();
+
+    // Esperar un tick y volver a abrir el modal de detalle con datos frescos
+    // así el usuario sigue en el contexto de la OC
+    setTimeout(async () => {
+      await openPODetail(id);
+    }, 100);
+
+    // Refrescar listado en paralelo (no esperamos)
+    loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message||'Error al guardar'); }
 }
 
