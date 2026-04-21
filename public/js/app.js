@@ -4653,14 +4653,14 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   if (st === 'aprobada_compras' && (userRole === 'tesoreria' || esAdmin)) {
     acciones.push({ key: 'pagar',    label: '💰 Registrar pago', color: 'primary' });
   }
-  // JEFE MANT (creador) y admin: recibir
-  if (st === 'pagada' && ((userRole === 'jefe_mantenimiento' && esCreador) || esAdmin)) {
+  // SOLICITANTES (jefe mant, paniol, contador) y admin: recibir
+  if (st === 'pagada' && ((['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador) || esAdmin)) {
     acciones.push({ key: 'recibir',  label: '📦 Confirmar recepción', color: 'success' });
   }
   // RECHAZAR: según rol y estado
   const puedeRechazar = (
     esAdmin ||
-    (userRole === 'jefe_mantenimiento' && esCreador && st === 'pendiente_cotizacion') ||
+    (['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador && st === 'pendiente_cotizacion') ||
     (userRole === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(st)) ||
     (userRole === 'tesoreria' && st === 'aprobada_compras')
   );
@@ -4671,9 +4671,11 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   return acciones;
 }
 
-// ¿El rol tiene permitido ver precios?
+// ¿El rol tiene permitido ver precios de OCs?
+// Los roles SOLICITANTES (jefe mant, pañol, contador) NO ven precios.
+// Las cotizaciones y pagos las gestiona compras/tesorería.
 function _ocPuedeVerPrecios(role) {
-  return role !== 'jefe_mantenimiento';
+  return !['jefe_mantenimiento','paniol','contador'].includes(role);
 }
 
 // ¿El rol tiene permitido ver precios de combustible ($ por litro, totales)?
@@ -7797,7 +7799,7 @@ async function renderPurchaseOrders() {
   if (!root) return;
 
   const role = App.currentUser?.role;
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento','compras'].includes(role);
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'].includes(role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
@@ -8001,11 +8003,11 @@ function _poRenderRow(po) {
   const e = OC_ESTADOS[po.status] || { border: '#555', fg: '#aaa' };
   const sideColor = e.fg;
 
-  // Jefe mant solo puede borrar las suyas si están pendientes
+  // Solicitantes pueden borrar sus propias OCs si están en pendiente
   const canDelete = (
     ['dueno','gerencia'].includes(role) && po.status !== 'recibida'
   ) || (
-    role === 'jefe_mantenimiento' && po.requested_by === App.currentUser?.id && po.status === 'pendiente_cotizacion'
+    ['jefe_mantenimiento','paniol','contador'].includes(role) && po.requested_by === App.currentUser?.id && po.status === 'pendiente_cotizacion'
   ) || (
     role === 'compras' && po.requested_by === App.currentUser?.id && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)
   );
@@ -8019,6 +8021,10 @@ function _poRenderRow(po) {
     origenIcon = `<span title="Creada por Compras" style="margin-right:4px;font-size:13px">🛒</span>`;
   } else if (solRol === 'jefe_mantenimiento') {
     origenIcon = `<span title="Solicitada por Jefe de Mantenimiento" style="margin-right:4px;font-size:13px">🔧</span>`;
+  } else if (solRol === 'paniol') {
+    origenIcon = `<span title="Solicitada por Pañol / Depósito" style="margin-right:4px;font-size:13px">📦</span>`;
+  } else if (solRol === 'contador') {
+    origenIcon = `<span title="Solicitada por Administración" style="margin-right:4px;font-size:13px">📋</span>`;
   } else if (['dueno','gerencia'].includes(solRol)) {
     origenIcon = `<span title="Creada por Gerencia" style="margin-right:4px;font-size:13px">👑</span>`;
   }
@@ -8186,9 +8192,10 @@ function _poExportPDF() {
 
 // ── Modal nueva OC ────────────────────────────────────────
 async function openNewPOModal() {
-  // Jefe de mantenimiento usa un modal específico SIN precios / proveedor
-  // (ese workflow lo completa compras después)
-  if (App.currentUser?.role === 'jefe_mantenimiento') {
+  // Roles solicitantes (jefe mant, pañol/depósito, contador/administración)
+  // usan un modal específico SIN precios / proveedor.
+  // Ese workflow lo completa compras después.
+  if (['jefe_mantenimiento','paniol','contador'].includes(App.currentUser?.role)) {
     return openNewPOModalJefe();
   }
 
@@ -8831,10 +8838,37 @@ async function openPODetail(id) {
     const role    = App.currentUser?.role;
     const puedeVerPrecios = _ocPuedeVerPrecios(role);
     const esCreador = po.requested_by === App.currentUser?.id;
-    // canEdit = puede editar campos del detalle (proveedor, factura, forma pago, etc)
-    // Jefe mant NO puede — eso lo carga compras/tesorería
-    const canEdit = ['dueno','gerencia','compras','tesoreria'].includes(role);
-    const canPay  = ['dueno','gerencia','contador'].includes(role);
+    const esAdmin   = ['dueno','gerencia'].includes(role);
+
+    // ── canEdit inteligente: según rol + estado de la OC ──
+    // Cada actor solo puede editar campos en su etapa correspondiente.
+    // Los admins (dueño/gerencia) siempre pueden editar.
+    let canEdit = false;
+    let bloqueoMensaje = '';
+    if (esAdmin) {
+      canEdit = true;
+    } else if (role === 'compras') {
+      if (['pendiente_cotizacion','en_cotizacion'].includes(po.status)) {
+        canEdit = true;
+      } else if (po.status === 'aprobada_compras') {
+        bloqueoMensaje = '🔒 Esta OC ya fue aprobada. No se pueden modificar items ni proveedor. Si hay un error, usá "⏪ Devolver" para que el solicitante la corrija.';
+      } else {
+        bloqueoMensaje = '🔒 Esta OC ya avanzó a tesorería/recepción. No podés modificarla en su etapa actual.';
+      }
+    } else if (role === 'tesoreria') {
+      if (po.status === 'aprobada_compras') {
+        canEdit = true;
+      } else if (po.status === 'pagada') {
+        bloqueoMensaje = '🔒 Esta OC ya fue pagada. Los datos de factura quedan congelados.';
+      } else {
+        bloqueoMensaje = '🔒 Esta OC todavía no llegó a tesorería. Esperá que compras la apruebe.';
+      }
+    } else {
+      // jefe_mant, paniol, contador, y otros solicitantes
+      bloqueoMensaje = '🔒 Esta OC ya fue enviada a compras. Podés verla pero no modificarla.';
+    }
+
+    const canPay  = ['dueno','gerencia','tesoreria'].includes(role);
     const canCancel = ['dueno','gerencia'].includes(role);
 
     const estadoInfo = {
@@ -8863,6 +8897,13 @@ async function openPODetail(id) {
       </div>
     `;
 
+    // Enriquecer datos de vehículo si el backend no los trae (buscar en App.data.vehicles)
+    let vehInfoDet = { code: po.vehicle_code || null, plate: po.vehicle_plate || null };
+    if (po.vehicle_id && (!vehInfoDet.code || !vehInfoDet.plate)) {
+      const v = (App.data.vehicles||[]).find(x => x.id === po.vehicle_id);
+      if (v) { vehInfoDet.code = v.code; vehInfoDet.plate = v.plate; }
+    }
+
     openModal(`${st.icon} ${po.code} — ${po.sucursal||'—'} · ${po.area||'—'}`, `
       <div style="background:${st.color}22;border:1px solid ${st.color};border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:8px">
@@ -8872,6 +8913,17 @@ async function openPODetail(id) {
         <div style="font-size:11px;color:var(--text3)">Creada ${fmt(po.created_at)}</div>
       </div>
 
+      ${(!canEdit && bloqueoMensaje && !esTerminal) ? `
+      <div style="background:rgba(107,114,128,.12);border:1px solid rgba(107,114,128,.4);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2)">
+        <span style="font-size:18px">🔒</span>
+        <span>${bloqueoMensaje}</span>
+      </div>` : ''}
+      ${esTerminal ? `
+      <div style="background:rgba(107,114,128,.12);border:1px solid rgba(107,114,128,.4);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2)">
+        <span style="font-size:18px">🔒</span>
+        <span>Esta OC está en estado final (${po.status === 'recibida' ? 'Recibida' : 'Rechazada'}) y ya no se puede modificar.</span>
+      </div>` : ''}
+
       ${po.status==='rechazada' && po.rechazo_motivo ? `
       <div style="background:#ef444422;border-left:3px solid #ef4444;border-radius:var(--radius);padding:10px 14px;margin-bottom:16px">
         <div style="font-size:11px;color:#ef4444;font-weight:700;text-transform:uppercase;margin-bottom:4px">Motivo del rechazo</div>
@@ -8880,17 +8932,24 @@ async function openPODetail(id) {
 
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🕐 Trazabilidad</div>
-        ${tl('Solicitó',     po.solicitante_nombre, po.created_at,   true)}
-        ${tl('Aprobó',       po.aprobador_nombre,   po.aprobado_en,  !!po.aprobado_en)}
-        ${po.status==='rechazada' ? tl('Rechazó', po.rechazador_nombre, po.rechazado_en, true) : ''}
-        ${tl('Recibió',      po.receptor_nombre,    po.recibido_en,  !!po.recibido_en)}
-        ${tl('Pagó',         po.pagador_nombre,     po.pagado_en,    !!po.pagado_en)}
+        ${tl('Solicitó',         po.solicitante_nombre, po.created_at,              true)}
+        ${tl('Tomó cotización',  po.cotizador_nombre,   po.cotizado_at,             !!po.cotizado_at)}
+        ${tl('Aprobó',           po.aprobador_nombre,   po.aprobado_compras_at,     !!po.aprobado_compras_at)}
+        ${tl('Pagó',             po.pagador_nombre,     po.pagado_at,               !!po.pagado_at)}
+        ${tl('Recibió',          po.receptor_nombre,    po.recibido_at,             !!po.recibido_at)}
+        ${po.status==='rechazada' ? tl('Rechazó', po.rechazador_nombre, po.rechazado_at, true) : ''}
       </div>
+
+      ${po.motivo_devolucion ? `
+      <div class="card" style="padding:10px 14px;margin-bottom:14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35)">
+        <div style="font-size:11px;color:var(--warn);font-weight:700;text-transform:uppercase;margin-bottom:4px">⏪ Devuelta por corrección</div>
+        <div style="font-size:13px;color:var(--text)">${po.motivo_devolucion}</div>
+      </div>` : ''}
 
       ${po.vehicle_id ? `
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🚛 Vehículo</div>
-        <div style="font-size:15px;font-weight:700;color:var(--accent)">${po.vehicle_code||'—'} · ${po.vehicle_plate||'—'}</div>
+        <div style="font-size:15px;font-weight:700;color:var(--accent)">${vehInfoDet.code || '—'} · ${vehInfoDet.plate || '—'}</div>
         ${po.ot_id ? `<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="closeModal();navigate('workorders')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>` :
           (po.status==='aprobada_compras' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
       </div>` : ''}
@@ -9002,11 +9061,18 @@ async function openPODetail(id) {
           ...((po.status==='aprobada_compras' && (role==='tesoreria' || ['dueno','gerencia'].includes(role))) ? [
             { label:'💰 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
           ] : []),
-          ...((po.status==='pagada' && ((role==='jefe_mantenimiento' && esCreador) || ['dueno','gerencia'].includes(role))) ? [
+          ...((po.status==='pagada' && ((['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) || ['dueno','gerencia'].includes(role))) ? [
             { label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) },
           ] : []),
+          // Devolver a etapa anterior (si corresponde al rol y estado)
+          ...(((role==='compras' && po.status==='en_cotizacion') ||
+               (role==='tesoreria' && po.status==='aprobada_compras') ||
+               (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status==='pagada') ||
+               (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','pagada'].includes(po.status))) ? [
+            { label:'⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) },
+          ] : []),
           // Rechazar: según rol + estado (controlado por backend también)
-          ...(((role==='jefe_mantenimiento' && esCreador && po.status==='pendiente_cotizacion') ||
+          ...(((['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status==='pendiente_cotizacion') ||
                (role==='compras' && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)) ||
                (role==='tesoreria' && po.status==='aprobada_compras') ||
                ['dueno','gerencia'].includes(role)) ? [
@@ -9076,6 +9142,13 @@ async function printPO(id) {
       'rechazada':            'background:#fee2e2;color:#991b1b',
     }[po.status] || 'background:#f3f4f6;color:#374151';
 
+    // Enriquecer vehículo si el backend no lo trae — buscar en App.data.vehicles
+    let vehInfo = { code: po.vehicle_code || null, plate: po.vehicle_plate || null };
+    if (po.vehicle_id && (!vehInfo.code || !vehInfo.plate)) {
+      const v = (App.data.vehicles||[]).find(x => x.id === po.vehicle_id);
+      if (v) { vehInfo.code = v.code; vehInfo.plate = v.plate; }
+    }
+
     const win = window.open('', '_blank');
     win.document.write(`<!DOCTYPE html><html lang="es"><head>
       <meta charset="UTF-8">
@@ -9135,7 +9208,7 @@ async function printPO(id) {
           <div class="field"><div class="field-label">Área</div><div class="field-value">${po.area||'—'}</div></div>
           <div class="field"><div class="field-label">Solicitado por</div><div class="field-value">${po.solicitante_nombre||'—'}</div></div>
           <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${po.proveedor||'—'}</div></div>
-          <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${po.vehicle_code||'—'}${po.vehicle_plate?' ('+po.vehicle_plate+')':''}</div></div>
+          <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${vehInfo.code || '—'}${vehInfo.plate ? ' ('+vehInfo.plate+')' : ''}</div></div>
           <div class="field"><div class="field-label">Moneda</div><div class="field-value">${po.moneda==="USD" ? "Dólares (USD)" : "Pesos (ARS)"}</div></div>
         </div>
       </div>
@@ -9787,6 +9860,31 @@ async function rechazarOC(id) {
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al rechazar'); return; }
     showToast('ok', '❌ OC rechazada');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+// Devolver la OC a la etapa anterior (en vez de rechazarla definitivamente)
+async function devolverOC(id, estadoActual) {
+  // Mensaje dinámico según de dónde devuelve
+  const mapMsg = {
+    'en_cotizacion':    'Devolver al solicitante para que corrija. ',
+    'aprobada_compras': 'Devolver a compras para que corrija la cotización. ',
+    'pagada':           'Devolver a tesorería para revisar el pago. '
+  };
+  const msg = (mapMsg[estadoActual] || 'Devolver a la etapa anterior. ') + 'Motivo (mín. 5 caracteres):';
+  var motivo = prompt(msg);
+  if (motivo == null) return;
+  motivo = motivo.trim();
+  if (motivo.length < 5) { showToast('warn', 'El motivo debe tener al menos 5 caracteres'); return; }
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/devolver', {
+      method: 'POST',
+      body: JSON.stringify({ motivo: motivo })
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al devolver'); return; }
+    showToast('ok', '⏪ OC devuelta a la etapa anterior');
     closeModal();
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message || 'Error'); }
