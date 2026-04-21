@@ -4556,6 +4556,8 @@ const ROLES_LIST = [
   { value:'paniol',                label:'Pañol / Stock' },
   { value:'contador',              label:'Contador / Administración' },
   { value:'auditor',               label:'Auditor' },
+  { value:'compras',               label:'Compras' },
+  { value:'tesoreria',             label:'Tesorería' },
 ];
 
 async function renderUsers() {
