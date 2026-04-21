@@ -137,7 +137,7 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     let sql = `
-      SELECT po.*, u.name as solicitante_nombre,
+      SELECT po.*, u.name as solicitante_nombre, u.role as solicitante_rol,
         COALESCE((SELECT SUM(cantidad * precio_unit) FROM purchase_order_items WHERE po_id = po.id), 0) as total_real
       FROM purchase_orders po
       LEFT JOIN users u ON u.id = po.requested_by
@@ -202,7 +202,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const userId = req.user.id;
 
     const po = await query(`
-      SELECT po.*, u.name as solicitante_nombre
+      SELECT po.*, u.name as solicitante_nombre, u.role as solicitante_rol
       FROM purchase_orders po
       LEFT JOIN users u ON u.id = po.requested_by
       WHERE po.id = $1`, [req.params.id]);
@@ -232,13 +232,15 @@ router.get('/:id', authenticate, async (req, res) => {
 //  POST / — Crear nueva OC (Jefe mantenimiento)
 //           SIN PRECIOS — solo descripción + opcional presupuesto
 // ─────────────────────────────────────────────────────────────
-router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
   try {
     const {
       notes, sucursal, area, tipo='flota',
       vehicle_id, ot_id, asset_id, supplier_id,
       items=[],
-      presupuesto_imagen, presupuesto_monto_estimado
+      presupuesto_imagen, presupuesto_monto_estimado,
+      // Campos opcionales si la crea compras con precios/proveedor ya definidos
+      proveedor, forma_pago, cc_dias, moneda, iva_pct
     } = req.body;
 
     if (!items.length) return res.status(400).json({ error: 'La OC debe tener al menos un artículo' });
@@ -253,32 +255,80 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
       if (sizeKB > 5120) return res.status(400).json({ error: 'El archivo de presupuesto no puede superar 5MB' });
     }
 
+    // ── Determinar estado inicial según quién crea + si trajo precios ──
+    // Por defecto: pendiente_cotizacion (el jefe mant pide algo, compras cotizará)
+    let estadoInicial = 'pendiente_cotizacion';
+    let autoCotizado = false;
+    let autoAprobado = false;
+
+    const creadorEsCompras = ['compras','dueno','gerencia'].includes(req.user.role);
+    const traePreciosCargados = items.some(i => parseFloat(i.precio_unit||0) > 0);
+
+    if (creadorEsCompras) {
+      if (traePreciosCargados && proveedor) {
+        // Compras crea con precios + proveedor → ya está APROBADA (lista para pagar)
+        estadoInicial = 'aprobada_compras';
+        autoCotizado = true;
+        autoAprobado = true;
+      } else {
+        // Compras crea sin cotizar todavía → queda EN COTIZACIÓN (ellos ya la tomaron)
+        estadoInicial = 'en_cotizacion';
+        autoCotizado = true;
+      }
+    }
+
     const code = await nextOCCode();
+
+    // Armar INSERT con columnas según estado inicial
+    const _fp  = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
+    const _cc  = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
+    const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
+    const _iva = iva_pct != null ? parseFloat(iva_pct) : 0;
 
     const po = await query(`
       INSERT INTO purchase_orders (
         code, status, requested_by, sucursal, area, tipo,
         vehicle_id, ot_id, asset_id, supplier_id, notes,
-        presupuesto_imagen, presupuesto_monto_estimado
+        presupuesto_imagen, presupuesto_monto_estimado,
+        proveedor, forma_pago, cc_dias, moneda, iva_pct,
+        cotizado_por, cotizado_at,
+        aprobado_compras_por, aprobado_compras_at
       )
-      VALUES ($1, 'pendiente_cotizacion', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+              $14, $15, $16, $17, $18,
+              $19, $20,
+              $21, $22)
       RETURNING *`,
-      [code, req.user.id, sucursal||null, area||null, tipo||'flota',
-       vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
-       notes||null,
-       presupuesto_imagen||null,
-       presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null]
+      [
+        code, estadoInicial, req.user.id, sucursal||null, area||null, tipo||'flota',
+        vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
+        notes||null,
+        presupuesto_imagen||null,
+        presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null,
+        proveedor||null, _fp, _cc, _mon, _iva,
+        autoCotizado ? req.user.id : null,
+        autoCotizado ? new Date() : null,
+        autoAprobado ? req.user.id : null,
+        autoAprobado ? new Date() : null
+      ]
     );
 
     const poId = po.rows[0].id;
-    // Los items SIN precio — el jefe NO los carga
+    // Items: si es jefe mant → sin precio. Si es compras → con el precio que haya cargado
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
+      const precioItem = creadorEsCompras ? (parseFloat(item.precio_unit||0) || 0) : 0;
       await query(
         `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
-         VALUES ($1, $2, $3, $4, 0, $5)`,
-        [poId, item.descripcion.trim(), parseFloat(item.cantidad||1), item.unidad||'un', item.stock_item_id||null]
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [poId, item.descripcion.trim(), parseFloat(item.cantidad||1), item.unidad||'un', precioItem, item.stock_item_id||null]
       );
+    }
+
+    // Si es compras y cargó precios, actualizar total_estimado
+    if (creadorEsCompras && traePreciosCargados) {
+      const t = await query('SELECT COALESCE(SUM(cantidad * precio_unit),0) as total FROM purchase_order_items WHERE po_id = $1', [poId]);
+      await query('UPDATE purchase_orders SET total_estimado = $1 WHERE id = $2', [t.rows[0].total, poId]);
     }
 
     const full = await query('SELECT * FROM purchase_orders WHERE id=$1', [poId]);
@@ -383,18 +433,23 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
 // ─────────────────────────────────────────────────────────────
 //  DELETE /:id — Borrar (solo dueño/gerencia/creador en estado inicial)
 // ─────────────────────────────────────────────────────────────
-router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
   try {
     const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const oc = cur.rows[0];
 
-    if (req.user.role === 'jefe_mantenimiento') {
+    if (['jefe_mantenimiento','compras'].includes(req.user.role)) {
       if (oc.requested_by !== req.user.id) {
         return res.status(403).json({ error: 'Solo podés borrar OCs que creaste vos' });
       }
-      if (oc.status !== 'pendiente_cotizacion') {
+      // Jefe mant solo puede borrar si está pendiente_cotizacion
+      // Compras puede borrar si está pendiente_cotizacion o en_cotizacion (recién creada)
+      if (req.user.role === 'jefe_mantenimiento' && oc.status !== 'pendiente_cotizacion') {
         return res.status(400).json({ error: 'Solo se pueden borrar OCs pendientes de cotizar' });
+      }
+      if (req.user.role === 'compras' && !['pendiente_cotizacion','en_cotizacion'].includes(oc.status)) {
+        return res.status(400).json({ error: 'Solo se pueden borrar OCs en estado inicial' });
       }
     }
     await query('DELETE FROM purchase_orders WHERE id=$1', [req.params.id]);
@@ -520,13 +575,13 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 //  POST /:id/recibir — Jefe mant confirma recepción
 //  pagada → recibida
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
   try {
     const cur = await query('SELECT status, requested_by FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
 
-    // Jefe mant: solo puede recibir las que creó él
-    if (req.user.role === 'jefe_mantenimiento' && cur.rows[0].requested_by !== req.user.id) {
+    // Jefe mant y compras: solo pueden recibir OCs que crearon ellos mismos
+    if (['jefe_mantenimiento','compras'].includes(req.user.role) && cur.rows[0].requested_by !== req.user.id) {
       return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
     }
     if (cur.rows[0].status !== 'pagada') {
