@@ -411,10 +411,12 @@ router.patch('/:id', authenticate, async (req, res) => {
                 'factura_nro','factura_fecha','factura_monto'];
       }
       if (role === 'compras' && ['pendiente_cotizacion','en_cotizacion'].includes(estado)) {
-        return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','notes'];
+        return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','notes',
+                'factura_nro','factura_fecha','factura_monto'];
       }
       if (role === 'tesoreria' && estado === 'aprobada_compras') {
-        return ['factura_nro','factura_fecha','factura_monto','iva_pct','notes'];
+        // Tesorería solo puede corregir notas, no datos de factura (ya llegan cargados)
+        return ['notes'];
       }
       if (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
         return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado'];
@@ -584,7 +586,8 @@ router.post('/:id/tomar-cotizacion', authenticate, requireRole('dueno','gerencia
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
   try {
-    const { proveedor, supplier_id, forma_pago, cc_dias, moneda, iva_pct } = req.body;
+    const { proveedor, supplier_id, forma_pago, cc_dias, moneda, iva_pct,
+            factura_nro, factura_fecha, factura_monto } = req.body;
 
     const cur = await query('SELECT status FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
@@ -597,6 +600,19 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
     const hayPrecios = items.rows.some(it => parseFloat(it.precio_unit) > 0);
     if (!hayPrecios) {
       return res.status(400).json({ error: 'Debés cargar precios en los artículos antes de aprobar' });
+    }
+
+    // Validar datos MÍNIMOS para aprobar
+    // En el flujo de Biletta, compras recibe factura física antes de aprobar,
+    // por eso se exige N° factura y monto al aprobar.
+    if (!proveedor || !String(proveedor).trim()) {
+      return res.status(400).json({ error: 'Cargá el proveedor antes de aprobar' });
+    }
+    if (!factura_nro || !String(factura_nro).trim()) {
+      return res.status(400).json({ error: 'Cargá el N° de factura antes de aprobar (la factura física la tiene compras)' });
+    }
+    if (factura_monto == null || factura_monto === '' || parseFloat(factura_monto) <= 0) {
+      return res.status(400).json({ error: 'Cargá el monto de la factura antes de aprobar' });
     }
 
     // Validar forma_pago
@@ -613,11 +629,17 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
         cc_dias = COALESCE($4, cc_dias),
         moneda = COALESCE($5, moneda),
         iva_pct = COALESCE($6, iva_pct),
-        aprobado_compras_por = $7,
+        factura_nro = COALESCE($7, factura_nro),
+        factura_fecha = COALESCE($8, factura_fecha),
+        factura_monto = COALESCE($9, factura_monto),
+        aprobado_compras_por = $10,
         aprobado_compras_at = NOW()
-      WHERE id = $8 RETURNING *`,
+      WHERE id = $11 RETURNING *`,
       [proveedor||null, supplier_id||null, _fp, _cc, _mon,
        iva_pct != null ? parseFloat(iva_pct) : null,
+       factura_nro ? String(factura_nro).trim() : null,
+       factura_fecha || null,
+       factura_monto != null && factura_monto !== '' ? parseFloat(factura_monto) : null,
        req.user.id, req.params.id]
     );
     res.json(r.rows[0]);
