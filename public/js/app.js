@@ -8816,7 +8816,11 @@ async function openPODetail(id) {
     const po = await res.json();
 
     const role    = App.currentUser?.role;
-    const canEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(role);
+    const puedeVerPrecios = _ocPuedeVerPrecios(role);
+    const esCreador = po.requested_by === App.currentUser?.id;
+    // canEdit = puede editar campos del detalle (proveedor, factura, forma pago, etc)
+    // Jefe mant NO puede — eso lo carga compras/tesorería
+    const canEdit = ['dueno','gerencia','compras','tesoreria'].includes(role);
     const canPay  = ['dueno','gerencia','contador'].includes(role);
     const canCancel = ['dueno','gerencia'].includes(role);
 
@@ -8878,6 +8882,7 @@ async function openPODetail(id) {
           (po.status==='aprobada_compras' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
       </div>` : ''}
 
+      ${puedeVerPrecios ? `
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💰 Datos de factura</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -8919,21 +8924,33 @@ async function openPODetail(id) {
             : ('<span style="font-weight:600">' + (parseFloat(po.iva_pct||0) > 0 ? po.iva_pct+'%' : 'Sin IVA') + '</span>')}
         </div>
       </div>
+      ` : ''}
 
       <div class="card" style="padding:0;margin-bottom:16px">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border2);font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</div>
         <table style="font-size:13px">
-          <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:center">Unid.</th><th style="text-align:right">P. Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+          <thead><tr>
+            <th>Descripción</th>
+            <th style="text-align:center">Cant.</th>
+            <th style="text-align:center">Unid.</th>
+            ${puedeVerPrecios ? `
+              <th style="text-align:right">P. Unit.</th>
+              <th style="text-align:right">Subtotal</th>
+            ` : ''}
+          </tr></thead>
           <tbody>
             ${po.items.map(i => `<tr>
               <td>${i.descripcion}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
               <td style="text-align:center">${i.unidad}</td>
-              <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
-              <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+              ${puedeVerPrecios ? `
+                <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
+                <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+              ` : ''}
             </tr>`).join('')}
           </tbody>
         </table>
+        ${puedeVerPrecios ? `
         <div style="padding:8px 16px;border-top:1px solid var(--border2);display:flex;justify-content:space-between">
           <span style="font-size:12px;color:var(--text3)">Subtotal</span>
           <span style="font-family:monospace;font-size:12px" id="pod-subtotal-display">${po.moneda==='USD'?'US$':'$'}${Math.round(totalReal).toLocaleString('es-AR')}</span>
@@ -8946,6 +8963,7 @@ async function openPODetail(id) {
           <span style="font-size:13px;font-weight:700">TOTAL</span>
           <span style="font-size:20px;font-weight:700;font-family:monospace;color:var(--accent)" id="pod-total-display">${po.moneda==='USD'?'US$':'$'}${Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100)).toLocaleString('es-AR')}</span>
         </div>
+        ` : ''}
       </div>
 
       <div class="card" style="padding:12px 16px;margin-bottom:4px">
@@ -8954,29 +8972,34 @@ async function openPODetail(id) {
       </div>`,
       [
         { label:'Cerrar', cls:'btn-secondary', fn: closeModal },
+        { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
+        // Botones de EDICIÓN: solo compras/tesorería/dueño/gerencia (NO jefe mant)
         ...(canEdit && !esTerminal ? [
-          { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
           { label:'✏️ Editar artículos', cls:'btn-secondary', fn: () => { closeModal(); openEditPOItemsModal(id); } },
           { label:'💾 Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
-          // Acciones del workflow según rol y estado actual
-          ...((po.status==='pendiente_cotizacion' && (App.currentUser?.role==='compras' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+        ] : []),
+        // Acciones del workflow según rol y estado actual (disponibles para TODOS los roles según el flow)
+        ...(!esTerminal ? [
+          ...((po.status==='pendiente_cotizacion' && (role==='compras' || ['dueno','gerencia'].includes(role))) ? [
             { label:'🔎 Tomar cotización', cls:'btn-primary', fn: () => tomarCotizacionOC(id) },
           ] : []),
-          ...((['pendiente_cotizacion','en_cotizacion'].includes(po.status) && (App.currentUser?.role==='compras' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+          ...((['pendiente_cotizacion','en_cotizacion'].includes(po.status) && (role==='compras' || ['dueno','gerencia'].includes(role))) ? [
             { label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) },
           ] : []),
-          ...((po.status==='aprobada_compras' && (App.currentUser?.role==='tesoreria' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+          ...((po.status==='aprobada_compras' && (role==='tesoreria' || ['dueno','gerencia'].includes(role))) ? [
             { label:'💰 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
           ] : []),
-          ...((po.status==='pagada' && (App.currentUser?.role==='jefe_mantenimiento' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+          ...((po.status==='pagada' && ((role==='jefe_mantenimiento' && esCreador) || ['dueno','gerencia'].includes(role))) ? [
             { label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) },
           ] : []),
-          ...((!['recibida','rechazada'].includes(po.status)) ? [
+          // Rechazar: según rol + estado (controlado por backend también)
+          ...(((role==='jefe_mantenimiento' && esCreador && po.status==='pendiente_cotizacion') ||
+               (role==='compras' && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)) ||
+               (role==='tesoreria' && po.status==='aprobada_compras') ||
+               ['dueno','gerencia'].includes(role)) ? [
             { label:'❌ Rechazar', cls:'btn-danger', fn: () => rechazarOC(id) },
           ] : []),
-        ] : [
-          { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
-        ])
+        ] : [])
       ]
     );
 
