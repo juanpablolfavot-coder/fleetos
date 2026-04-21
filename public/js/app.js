@@ -7797,7 +7797,7 @@ async function renderPurchaseOrders() {
   if (!root) return;
 
   const role = App.currentUser?.role;
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento'].includes(role);
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento','compras'].includes(role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
@@ -8006,14 +8006,27 @@ function _poRenderRow(po) {
     ['dueno','gerencia'].includes(role) && po.status !== 'recibida'
   ) || (
     role === 'jefe_mantenimiento' && po.requested_by === App.currentUser?.id && po.status === 'pendiente_cotizacion'
+  ) || (
+    role === 'compras' && po.requested_by === App.currentUser?.id && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)
   );
 
   const total = parseFloat(po.total_real || po.total_estimado || 0);
 
+  // Ícono de origen según quién creó la OC
+  let origenIcon = '';
+  const solRol = po.solicitante_rol || '';
+  if (solRol === 'compras') {
+    origenIcon = `<span title="Creada por Compras" style="margin-right:4px;font-size:13px">🛒</span>`;
+  } else if (solRol === 'jefe_mantenimiento') {
+    origenIcon = `<span title="Solicitada por Jefe de Mantenimiento" style="margin-right:4px;font-size:13px">🔧</span>`;
+  } else if (['dueno','gerencia'].includes(solRol)) {
+    origenIcon = `<span title="Creada por Gerencia" style="margin-right:4px;font-size:13px">👑</span>`;
+  }
+
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent)">${po.code||'—'}</td>
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${po.code||'—'}</td>
 
     <td style="padding:10px 12px">
       ${_ocEstadoBadge(po.status)}
