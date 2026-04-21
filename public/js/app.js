@@ -1888,8 +1888,10 @@ function renderFuel() {
           <th>Tipo</th>
           <th onclick="_fuelSortBy('liters')" style="cursor:pointer;user-select:none">Litros <span id="fuel-sort-liters" style="opacity:.3">⇅</span></th>
           <th>Odómetro</th>
-          <th>Precio/L</th>
-          <th onclick="_fuelSortBy('total')" style="cursor:pointer;user-select:none">Total <span id="fuel-sort-total" style="opacity:.3">⇅</span></th>
+          ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
+            <th>Precio/L</th>
+            <th onclick="_fuelSortBy('total')" style="cursor:pointer;user-select:none">Total <span id="fuel-sort-total" style="opacity:.3">⇅</span></th>
+          ` : ''}
           <th>Lugar</th>
           <th>Estado</th>
           <th>Ticket</th>
@@ -1951,13 +1953,13 @@ function openFuelLoadModal() {
       <div class="form-group"><label class="form-label">Litros cargados</label><input class="form-input" type="number" placeholder="400" id="fl-liters"></div>
       <div class="form-group"><label class="form-label" style="color:var(--text3)">🛰 Km tomados del GPS automáticamente</label><input class="form-input" disabled placeholder="Se toma del GPS al guardar" style="opacity:.5"></div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
+    <div class="form-row" id="fl-ppu-wrap">
+      <div class="form-group"><label class="form-label" id="fl-ppu-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
     </div>
     <div id="fl-place-note" style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-top:4px">
       ⚠ Los litros se descontarán del stock de cisterna al confirmar.
     </div>
-    <div class="form-group" style="margin-top:10px">
+    <div class="form-group" id="fl-ticket-wrap" style="margin-top:10px">
       <label class="form-label">📷 Foto del ticket <span style="color:var(--text3);font-weight:400">(opcional pero recomendado)</span></label>
       <div id="ticket-upload-area" style="border:2px dashed var(--border2);border-radius:var(--radius);padding:16px;text-align:center;cursor:pointer;transition:.2s;background:var(--bg3)" onclick="document.getElementById('fl-ticket-input').click()">
         <div id="ticket-preview-area">
@@ -2002,13 +2004,28 @@ async function updateFuelPlaceNote() {
   const type   = document.getElementById('fl-type')?.value  || 'diesel';
   const noteEl = document.getElementById('fl-place-note');
   const ppuEl  = document.getElementById('fl-ppu');
+  const ppuWrap     = document.getElementById('fl-ppu-wrap');
+  const ticketWrap  = document.getElementById('fl-ticket-wrap');
   if (!noteEl) return;
   const descuenta = place.includes('Cisterna');
 
+  // ── Regla de visibilidad por rol+lugar ──
+  const role = App.currentUser?.role;
+  const puedeVerPrecios = _fuelPuedeVerPrecios(role);
+
   if (descuenta) {
-    noteEl.style.background  = 'rgba(245,158,11,.1)';
-    noteEl.style.borderColor = 'rgba(245,158,11,.3)';
-    noteEl.style.color       = 'var(--warn)';
+    // Carga desde CISTERNA PROPIA → precio se toma automático del tanque
+    // El jefe_mantenimiento NO ve el precio ni el ticket (todo lo gestiona compras)
+    if (!puedeVerPrecios) {
+      if (ppuWrap)    ppuWrap.style.display    = 'none';
+      if (ticketWrap) ticketWrap.style.display = 'none';
+    } else {
+      if (ppuWrap)    ppuWrap.style.display    = '';
+      if (ticketWrap) ticketWrap.style.display = '';
+    }
+    noteEl.style.background  = 'rgba(34,197,94,.1)';
+    noteEl.style.borderColor = 'rgba(34,197,94,.3)';
+    noteEl.style.color       = 'var(--ok)';
 
     // Recargar tanks frescos para tener el precio actualizado
     try {
@@ -2022,7 +2039,7 @@ async function updateFuelPlaceNote() {
     if (!tank) tank = tanks.find(t => t.type === tipoDbPrice || (tipoDbPrice === 'fuel' && t.type === 'gasoil'));
     const precio = tank?.price_per_l ? parseFloat(tank.price_per_l) : null;
 
-    if (ppuEl && precio && precio > 0) {
+    if (puedeVerPrecios && ppuEl && precio && precio > 0) {
       // Precio fijo — no editable
       ppuEl.value    = precio;
       ppuEl.readOnly = true;
@@ -2030,25 +2047,36 @@ async function updateFuelPlaceNote() {
       ppuEl.style.cursor     = 'not-allowed';
       ppuEl.style.background = 'var(--bg3)';
       ppuEl.title            = 'Precio fijado por el abastecimiento de cisterna';
-      const ppuLabel = ppuEl.closest('.form-group')?.querySelector('.form-label');
+      const ppuLabel = document.getElementById('fl-ppu-label');
       if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro <span style="color:var(--ok);font-size:11px;font-weight:400">🔒 fijado por cisterna</span>';
-      noteEl.innerHTML = `⚠ Litros se descontarán de cisterna &nbsp;·&nbsp; <strong style="color:var(--ok)">$${Math.round(precio).toLocaleString('es-AR')}/L</strong>`;
-    } else {
+      noteEl.innerHTML = `💡 Litros se descontarán de cisterna · <strong>$${Math.round(precio).toLocaleString('es-AR')}/L</strong>`;
+    } else if (puedeVerPrecios) {
       if (ppuEl) { ppuEl.readOnly = false; ppuEl.style.opacity = '1'; ppuEl.style.cursor = ''; ppuEl.style.background = ''; }
-      noteEl.textContent = '⚠ Sin precio configurado en cisterna — ingresalo manualmente o configuralo en ⚙ Editar cisternas.';
+      noteEl.textContent = '⚠ Sin precio configurado en cisterna — compras debe actualizarlo. Se guarda sin precio hasta entonces.';
+    } else {
+      // Jefe mant / chofer: solo ven el mensaje informativo (sin precio)
+      noteEl.innerHTML = `💡 Carga desde cisterna — los litros se descontarán del stock. El precio lo gestiona compras.`;
+      // Forzar que el precio quede como 0 ó el de la cisterna (backend ignora este valor igual si hay tank_id)
+      if (ppuEl) ppuEl.value = precio || 0;
     }
   } else {
-    // Externa — desbloquear precio
+    // ── CARGA EXTERNA (estación de servicio, bidón, etc) ──
+    // Acá SIEMPRE se pide precio y ticket, incluso para jefe mant (viene del ticket que él tiene)
+    if (ppuWrap)    ppuWrap.style.display    = '';
+    if (ticketWrap) ticketWrap.style.display = '';
+
     if (ppuEl) {
       ppuEl.readOnly = false; ppuEl.style.opacity = '1';
       ppuEl.style.cursor = ''; ppuEl.style.background = ''; ppuEl.title = '';
-      const ppuLabel = ppuEl.closest('.form-group')?.querySelector('.form-label');
-      if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro ($)';
+      // Si venía en 0 (porque era cisterna), limpiar el valor
+      if (parseFloat(ppuEl.value) === 0) ppuEl.value = '';
+      const ppuLabel = document.getElementById('fl-ppu-label');
+      if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro ($) <span style="color:var(--danger);font-size:11px">*</span>';
     }
     noteEl.style.background  = 'rgba(99,102,241,.1)';
     noteEl.style.borderColor = 'rgba(99,102,241,.3)';
     noteEl.style.color       = 'var(--info, #60a5fa)';
-    noteEl.textContent       = '📦 Carga externa — no descuenta del stock de cisterna. Solo registra el consumo y costo.';
+    noteEl.innerHTML         = '📦 Carga externa — cargá el <strong>precio del ticket</strong> y subí la <strong>foto del ticket</strong>.';
   }
 }
 
@@ -2144,11 +2172,18 @@ function openFuelEntryModal() {
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3);margin-bottom:10px">
       Nivel actual: <strong id="fe-nivel-actual">${gasoilNivel}</strong>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="fe-supplier"></div>
-      <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1200" id="fe-ppu"></div>
-    </div>
-    <div class="form-group"><label class="form-label">Número de remito</label><input class="form-input" placeholder="REM-00001" id="fe-remito"></div>
+    ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="fe-supplier"></div>
+        <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1200" id="fe-ppu"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Número de remito</label><input class="form-input" placeholder="REM-00001" id="fe-remito"></div>
+    ` : `
+      <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">💡</span>
+        <span>Registrá los <b>litros recibidos</b>. El <b>precio y datos del proveedor</b> los gestionará compras cuando llegue la factura.</span>
+      </div>
+    `}
   `, [
     { label:'Confirmar ingreso', cls:'btn-primary', fn: saveFuelEntry },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
@@ -2181,13 +2216,17 @@ async function saveFuelEntry() {
 
   const res = await apiFetch(`/api/fuel/tanks/${tank.id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ current_l: nuevoNivel, price_per_l: parseFloat(document.getElementById('fe-ppu')?.value) || null })
+    body: JSON.stringify(
+      _fuelPuedeVerPrecios(App.currentUser?.role)
+        ? { current_l: nuevoNivel, price_per_l: parseFloat(document.getElementById('fe-ppu')?.value) || null }
+        : { current_l: nuevoNivel }
+    )
   });
 
   if (!res.ok) { showToast('error', 'Error al registrar ingreso'); return; }
 
   // Actualizar en memoria
-  const ppu = parseFloat(document.getElementById('fe-ppu')?.value) || null;
+  const ppu = _fuelPuedeVerPrecios(App.currentUser?.role) ? (parseFloat(document.getElementById('fe-ppu')?.value) || null) : null;
   tank.current_l = nuevoNivel;
   if (ppu) tank.price_per_l = ppu;
   closeModal();
@@ -2207,11 +2246,13 @@ async function openEditTankCapacityModal() {
         <label class='form-label'>Capacidad (L)</label>
         <input class='form-input' type='number' id='tc-gasoil-cap' value='${gasoilTank ? gasoilTank.capacity_l : 47000}'>
       </div>
-      <div class='form-group'>
-        <label class='form-label'>Precio por litro ($)</label>
-        <input class='form-input' type='number' id='tc-gasoil-price' placeholder='Ej: 1250' value='${gasoilTank?.price_per_l ? parseFloat(gasoilTank.price_per_l) : ""}'>
-        <div style="font-size:11px;color:var(--text3);margin-top:3px">Se autocompleta al cargar desde cisterna</div>
-      </div>
+      ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
+        <div class='form-group'>
+          <label class='form-label'>Precio por litro ($)</label>
+          <input class='form-input' type='number' id='tc-gasoil-price' placeholder='Ej: 1250' value='${gasoilTank?.price_per_l ? parseFloat(gasoilTank.price_per_l) : ""}'>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Se autocompleta al cargar desde cisterna</div>
+        </div>
+      ` : ''}
     </div>
     <div style="font-size:12px;font-weight:700;color:var(--accent);margin:12px 0 10px;text-transform:uppercase">🔵 Cisterna Urea</div>
     <div class="form-row">
@@ -2219,19 +2260,30 @@ async function openEditTankCapacityModal() {
         <label class='form-label'>Capacidad (L)</label>
         <input class='form-input' type='number' id='tc-urea-cap' value='${ureaTank ? ureaTank.capacity_l : 2000}'>
       </div>
-      <div class='form-group'>
-        <label class='form-label'>Precio por litro ($)</label>
-        <input class='form-input' type='number' id='tc-urea-price' placeholder='Ej: 800' value='${ureaTank?.price_per_l ? parseFloat(ureaTank.price_per_l) : ""}'>
-      </div>
+      ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
+        <div class='form-group'>
+          <label class='form-label'>Precio por litro ($)</label>
+          <input class='form-input' type='number' id='tc-urea-price' placeholder='Ej: 800' value='${ureaTank?.price_per_l ? parseFloat(ureaTank.price_per_l) : ""}'>
+        </div>
+      ` : ''}
     </div>
   `, [
     { label:'Guardar', cls:'btn-primary', fn: async () => {
       const gasoilCap   = parseInt(document.getElementById('tc-gasoil-cap').value);
-      const gasoilPrice = parseFloat(document.getElementById('tc-gasoil-price').value) || null;
+      const gasoilPriceEl = document.getElementById('tc-gasoil-price');
+      const gasoilPrice = gasoilPriceEl ? (parseFloat(gasoilPriceEl.value) || null) : undefined;
       const ureaCap     = parseInt(document.getElementById('tc-urea-cap').value);
-      const ureaPrice   = parseFloat(document.getElementById('tc-urea-price').value) || null;
-      if (gasoilTank) await apiFetch(`/api/fuel/tanks/${gasoilTank.id}`, { method:'PATCH', body: JSON.stringify({ capacity_l: gasoilCap, price_per_l: gasoilPrice }) });
-      if (ureaTank)   await apiFetch(`/api/fuel/tanks/${ureaTank.id}`,   { method:'PATCH', body: JSON.stringify({ capacity_l: ureaCap,   price_per_l: ureaPrice }) });
+      const ureaPriceEl = document.getElementById('tc-urea-price');
+      const ureaPrice   = ureaPriceEl ? (parseFloat(ureaPriceEl.value) || null) : undefined;
+      const puedeVer = _fuelPuedeVerPrecios(App.currentUser?.role);
+      if (gasoilTank) {
+        const body = puedeVer ? { capacity_l: gasoilCap, price_per_l: gasoilPrice } : { capacity_l: gasoilCap };
+        await apiFetch(`/api/fuel/tanks/${gasoilTank.id}`, { method:'PATCH', body: JSON.stringify(body) });
+      }
+      if (ureaTank) {
+        const body = puedeVer ? { capacity_l: ureaCap, price_per_l: ureaPrice } : { capacity_l: ureaCap };
+        await apiFetch(`/api/fuel/tanks/${ureaTank.id}`, { method:'PATCH', body: JSON.stringify(body) });
+      }
       // Recargar tanks
       const r = await apiFetch('/api/fuel/tanks');
       if (r.ok) { App.data.tanks = await r.json(); }
@@ -4622,6 +4674,13 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
 // ¿El rol tiene permitido ver precios?
 function _ocPuedeVerPrecios(role) {
   return role !== 'jefe_mantenimiento';
+}
+
+// ¿El rol tiene permitido ver precios de combustible ($ por litro, totales)?
+// El jefe mant y el chofer NO ven precios — compras los gestiona
+function _fuelPuedeVerPrecios(role) {
+  const rolesQueSiVen = ['dueno','gerencia','compras','contador','auditor','encargado_combustible'];
+  return rolesQueSiVen.includes(role);
 }
 // ═══════════════════════════════════════════════════════════
 
@@ -8114,6 +8173,12 @@ function _poExportPDF() {
 
 // ── Modal nueva OC ────────────────────────────────────────
 async function openNewPOModal() {
+  // Jefe de mantenimiento usa un modal específico SIN precios / proveedor
+  // (ese workflow lo completa compras después)
+  if (App.currentUser?.role === 'jefe_mantenimiento') {
+    return openNewPOModalJefe();
+  }
+
   try { await loadSucursalesFromAPI(); } catch(e){}
   window._poTipo = 'flota';
   window._poIvaPct = 0;
@@ -8337,6 +8402,304 @@ function updatePOTotal() {
   if (ivaLbl) ivaLbl.textContent = 'IVA (' + ivaPct + '%)';
   if (ivaMEl) ivaMEl.textContent = '$' + Math.round(ivaMonto).toLocaleString('es-AR');
   if (totalEl) totalEl.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MODAL ESPECÍFICO para JEFE DE MANTENIMIENTO
+//  Sin precios, sin proveedor, sin forma de pago, sin IVA, sin moneda.
+//  Solo describe QUÉ NECESITA. Compras cotiza después.
+// ═══════════════════════════════════════════════════════════════════
+async function openNewPOModalJefe() {
+  try { await loadSucursalesFromAPI(); } catch(e){}
+  window._poTipoJefe = 'flota';
+  window._presupuestoArchivo = null;
+
+  var solicitante = App.currentUser?.name || App.currentUser?.email || '—';
+
+  openModal('📋 Nueva solicitud de compra', `
+    <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px">
+      <span style="font-size:18px">💡</span>
+      <span>Describí <b>qué necesitás</b>. Compras se encarga del precio y elegir al proveedor.</span>
+    </div>
+
+    <!-- ORIGEN -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🏢 Origen</div>
+        <div style="font-size:11px;color:var(--text3)">👤 Solicita: <span style="font-weight:700;color:var(--accent)">${solicitante}</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" id="poj-sucursal" onchange="updatePOJefeAreaSelect()">
+            <option value="">— Seleccionar sucursal —</option>
+            ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Área <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" id="poj-area">
+            <option value="">— Primero seleccioná la sucursal —</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- DESTINO -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🚛 Destino</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Tipo</label>
+          <select class="form-select" id="poj-tipo-select" onchange="setPOJefeTipo(this.value)">
+            <option value="flota">🚛 Flota</option>
+            <option value="mantenimiento">🏪 Mantenimiento edilicio</option>
+            <option value="otro">📋 Otro</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0" id="poj-vehicle-field">
+          <label class="form-label">Vehículo (opcional)</label>
+          <select class="form-select" id="poj-vehicle">
+            <option value="">— Sin vehículo asignado —</option>
+            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="poj-extra-fields" style="margin-top:10px;display:none"></div>
+    </div>
+
+    <!-- ARTÍCULOS (SIN PRECIO) -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">📝 Qué necesito</div>
+        <button class="btn btn-secondary btn-sm" onclick="addPOJefeItem()" type="button">+ Agregar artículo</button>
+      </div>
+      <div id="poj-items-list"></div>
+    </div>
+
+    <!-- PRESUPUESTO OPCIONAL -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📎 Presupuesto (opcional)</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Si ya tenés un presupuesto de algún proveedor, subilo acá (JPG, PNG o PDF, máx 5MB). Compras lo va a ver.</div>
+      <div id="poj-file-zone" style="border:2px dashed var(--border2);border-radius:var(--radius);padding:14px;text-align:center;cursor:pointer;background:var(--bg3)" onclick="document.getElementById('poj-file-input').click()">
+        <div id="poj-file-preview">
+          <div style="font-size:24px;margin-bottom:4px">📎</div>
+          <div style="font-size:12px;color:var(--text3)">Tocá para subir presupuesto</div>
+        </div>
+        <input type="file" id="poj-file-input" accept="image/*,application/pdf" style="display:none" onchange="previewPOJefeFile(this)">
+      </div>
+    </div>
+
+    <!-- NOTAS -->
+    <div class="card" style="padding:12px 16px;margin-bottom:6px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🗒️ Notas / problema</div>
+      <textarea class="form-textarea" id="poj-notes" rows="3" placeholder="Describí el problema o contexto de la compra (opcional pero recomendado)"></textarea>
+    </div>
+  `, [
+    { label:'Cancelar',        cls:'btn-secondary', fn: closeModal },
+    { label:'Enviar solicitud', cls:'btn-primary',   fn: saveNewPOJefe },
+  ]);
+
+  // Agregar 1 ítem inicial
+  setTimeout(() => addPOJefeItem(), 50);
+}
+
+function setPOJefeTipo(tipo) {
+  window._poTipoJefe = tipo;
+  var vehField = document.getElementById('poj-vehicle-field');
+  var extraField = document.getElementById('poj-extra-fields');
+  if (vehField) vehField.style.display = (tipo === 'flota') ? '' : 'none';
+  if (extraField) {
+    if (tipo === 'flota') {
+      extraField.style.display = 'none';
+      extraField.innerHTML = '';
+    } else {
+      extraField.style.display = '';
+      extraField.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Local / Sector</label>
+            <input class="form-input" id="pojx-local" placeholder="Ej: Taller / Oficina / Depósito">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Sector / Detalle</label>
+            <input class="form-input" id="pojx-sector" placeholder="Ej: Planta baja / Sala 2">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Equipo / Activo</label>
+            <input class="form-input" id="pojx-equipo" placeholder="Ej: Compresor, Heladera, PC">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Nro de serie (opcional)</label>
+            <input class="form-input" id="pojx-serie" placeholder="Si aplica">
+          </div>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Urgencia</label>
+          <select class="form-select" id="pojx-urgencia">
+            <option value="normal">Normal</option>
+            <option value="urgente">Urgente</option>
+            <option value="critica">Crítica</option>
+          </select>
+        </div>
+      `;
+    }
+  }
+}
+
+async function updatePOJefeAreaSelect() {
+  const suc = document.getElementById('poj-sucursal')?.value;
+  const areaSel = document.getElementById('poj-area');
+  if (!areaSel) return;
+  if (!suc) {
+    areaSel.innerHTML = '<option value="">— Primero seleccioná la sucursal —</option>';
+    return;
+  }
+  let areas = [];
+  try {
+    const r = await apiFetch('/api/sucursales/' + encodeURIComponent(suc) + '/areas');
+    if (r.ok) areas = await r.json();
+  } catch(e) {}
+  if (!Array.isArray(areas) || areas.length === 0) {
+    areas = ['General','Mantenimiento','Oficina','Taller','Depósito'];
+  }
+  areaSel.innerHTML = '<option value="">— Seleccionar área —</option>' +
+    areas.map(a => `<option value="${typeof a==='string'?a:(a.nombre||'')}">${typeof a==='string'?a:(a.nombre||'')}</option>`).join('');
+}
+
+function addPOJefeItem() {
+  const list = document.getElementById('poj-items-list');
+  if (!list) return;
+  const idx = list.children.length;
+  const div = document.createElement('div');
+  div.style.cssText = 'display:grid;grid-template-columns:2fr 80px 80px 40px;gap:6px;margin-bottom:6px;align-items:end';
+  div.innerHTML = `
+    <div>
+      ${idx === 0 ? '<label style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Descripción</label>' : ''}
+      <input class="form-input poj-item-desc" type="text" placeholder="Ej: Filtro de aceite 10W-40" style="width:100%">
+    </div>
+    <div>
+      ${idx === 0 ? '<label style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Cantidad</label>' : ''}
+      <input class="form-input poj-item-qty" type="number" min="0.01" step="0.01" value="1" style="width:100%">
+    </div>
+    <div>
+      ${idx === 0 ? '<label style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Unidad</label>' : ''}
+      <select class="form-select poj-item-unit" style="width:100%">
+        <option value="un">un</option>
+        <option value="kg">kg</option>
+        <option value="lt">lt</option>
+        <option value="m">m</option>
+        <option value="caja">caja</option>
+        <option value="paquete">paquete</option>
+        <option value="par">par</option>
+        <option value="rollo">rollo</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()" style="height:34px">✕</button>
+  `;
+  list.appendChild(div);
+}
+
+function previewPOJefeFile(input) {
+  const file = input.files?.[0];
+  const preview = document.getElementById('poj-file-preview');
+  if (!file) { window._presupuestoArchivo = null; return; }
+
+  // Validar tamaño
+  if (file.size > 5 * 1024 * 1024) {
+    showToast('error', 'El archivo no puede superar 5MB');
+    input.value = '';
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    window._presupuestoArchivo = e.target.result; // base64
+    const esPDF = file.type === 'application/pdf';
+    if (preview) {
+      preview.innerHTML = esPDF
+        ? `<div style="font-size:32px;margin-bottom:4px">📄</div>
+           <div style="font-size:12px;color:var(--text)">${file.name}</div>
+           <div style="font-size:10px;color:var(--text3);margin-top:4px">PDF subido (${Math.round(file.size/1024)}KB) · click para cambiar</div>`
+        : `<img src="${e.target.result}" style="max-width:120px;max-height:100px;border-radius:6px;margin-bottom:4px">
+           <div style="font-size:11px;color:var(--text3)">${file.name} · click para cambiar</div>`;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveNewPOJefe() {
+  const sucursal = document.getElementById('poj-sucursal')?.value?.trim() || '';
+  const area     = document.getElementById('poj-area')?.value?.trim() || '';
+  const tipo     = window._poTipoJefe || 'flota';
+  const vehicle_id = document.getElementById('poj-vehicle')?.value || null;
+  const notes    = document.getElementById('poj-notes')?.value?.trim() || '';
+
+  // Validaciones básicas
+  if (!sucursal) { showToast('error','Elegí una sucursal'); return; }
+  if (!area)     { showToast('error','Elegí un área'); return; }
+
+  // Leer items
+  const descs = document.querySelectorAll('.poj-item-desc');
+  const qtys  = document.querySelectorAll('.poj-item-qty');
+  const units = document.querySelectorAll('.poj-item-unit');
+  const items = [];
+  for (let i = 0; i < descs.length; i++) {
+    const d = descs[i].value.trim();
+    if (!d) continue;
+    items.push({
+      descripcion: d,
+      cantidad:    parseFloat(qtys[i].value) || 1,
+      unidad:      units[i].value || 'un'
+      // NO se envía precio_unit — lo pondrá compras
+    });
+  }
+  if (items.length === 0) {
+    showToast('error','Agregá al menos un artículo describiendo lo que necesitás');
+    return;
+  }
+
+  // Campos específicos de tipo edilicio / otro
+  const extras = {};
+  if (tipo !== 'flota') {
+    extras.tipo           = tipo === 'mantenimiento' ? 'edilicio' : 'otro';
+    extras.local_sector   = document.getElementById('pojx-local')?.value?.trim() || null;
+    extras.sector_detalle = document.getElementById('pojx-sector')?.value || null;
+    extras.equipo         = document.getElementById('pojx-equipo')?.value?.trim() || null;
+    extras.activo_serie   = document.getElementById('pojx-serie')?.value?.trim() || null;
+    extras.urgencia       = document.getElementById('pojx-urgencia')?.value || 'normal';
+  } else {
+    extras.tipo = 'flota';
+  }
+
+  const body = {
+    sucursal, area, notes,
+    vehicle_id: vehicle_id || null,
+    items,
+    presupuesto_imagen: window._presupuestoArchivo || null,
+    ...extras
+  };
+
+  try {
+    const res = await apiFetch('/api/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const e = await res.json();
+      showToast('error', e.error || 'Error al enviar la solicitud');
+      return;
+    }
+    showToast('ok', '📝 Solicitud enviada — compras la va a cotizar');
+    closeModal();
+    // Limpiar archivo y refrescar listado
+    window._presupuestoArchivo = null;
+    await loadPOList?.();
+  } catch(err) {
+    showToast('error', err.message || 'Error de red');
+  }
 }
 
 async function saveNewPO() {
@@ -11242,8 +11605,10 @@ function openVehicleHistoryModal(vehicleCode) {
 
 // Render de una fila de la tabla de combustible (refactorizada para poder filtrar)
 function _renderFuelLogRows(logs) {
+  const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
+  const colspan = verPrecios ? 11 : 9;
   if (!logs || logs.length === 0) {
-    return `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
+    return `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
   }
   return logs.map(f => `<tr>
     <td class="td-mono" style="font-size:11px">${f.date || '—'}</td>
@@ -11252,8 +11617,10 @@ function _renderFuelLogRows(logs) {
     <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
     <td class="td-mono">${f.liters || 0} L</td>
     <td class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
-    <td class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
-    <td class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
+    ${verPrecios ? `
+      <td class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
+      <td class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
+    ` : ''}
     <td>${f.place || '—'}</td>
     <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status||'—'}</span></td>
     <td>
