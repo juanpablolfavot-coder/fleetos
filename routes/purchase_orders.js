@@ -62,6 +62,11 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_at TIMESTAMPTZ`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS motivo_rechazo TEXT`).catch(()=>{});
 
+  // ── Columnas para el flujo de DEVOLUCIÓN (devolver a etapa anterior) ──
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS motivo_devolucion TEXT`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS devuelto_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS devuelto_at TIMESTAMPTZ`).catch(()=>{});
+
   await query(`CREATE TABLE IF NOT EXISTS purchase_order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     po_id UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
@@ -94,18 +99,20 @@ function estadosQueVe(role) {
   if (role === 'tesoreria') {
     return ['aprobada_compras','pagada','recibida','rechazada'];
   }
-  if (role === 'contador' || role === 'auditor') {
+  if (role === 'auditor') {
     return ['pagada','recibida'];
   }
-  if (role === 'jefe_mantenimiento') {
-    return null; // ve todos los estados, pero filtramos por requested_by abajo
+  if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
+    return null; // ve todos los estados, pero filtramos por requested_by abajo (solo las propias)
   }
   return []; // otros roles: no ve nada
 }
 
-// Quita los precios de la respuesta si el rol no debe verlos (jefe_mant)
+// Quita los precios de la respuesta si el rol no debe verlos
+// (jefe_mant, paniol, contador — son solicitantes, no gestionan precios)
 function ocultarPreciosSiCorresponde(po, role) {
-  if (role !== 'jefe_mantenimiento') return po;
+  const rolesSinPrecio = ['jefe_mantenimiento','paniol','contador'];
+  if (!rolesSinPrecio.includes(role)) return po;
   const copia = { ...po };
   delete copia.total_estimado;
   delete copia.factura_monto;
@@ -137,10 +144,21 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     let sql = `
-      SELECT po.*, u.name as solicitante_nombre, u.role as solicitante_rol,
+      SELECT po.*,
+        u.name  as solicitante_nombre, u.role as solicitante_rol,
+        uc.name as cotizador_nombre,
+        ua.name as aprobador_nombre,
+        up.name as pagador_nombre,
+        ur.name as receptor_nombre,
+        urech.name as rechazador_nombre,
         COALESCE((SELECT SUM(cantidad * precio_unit) FROM purchase_order_items WHERE po_id = po.id), 0) as total_real
       FROM purchase_orders po
-      LEFT JOIN users u ON u.id = po.requested_by
+      LEFT JOIN users u     ON u.id     = po.requested_by
+      LEFT JOIN users uc    ON uc.id    = po.cotizado_por
+      LEFT JOIN users ua    ON ua.id    = po.aprobado_compras_por
+      LEFT JOIN users up    ON up.id    = po.pagado_por
+      LEFT JOIN users ur    ON ur.id    = po.recibido_por
+      LEFT JOIN users urech ON urech.id = po.rechazado_por
       WHERE 1=1`;
     const params = [];
 
@@ -154,8 +172,8 @@ router.get('/', authenticate, async (req, res) => {
       sql += ` AND po.status = ANY($${params.length})`;
     }
 
-    // Jefe mant: SOLO las que él creó
-    if (role === 'jefe_mantenimiento') {
+    // Solicitantes (jefe mant, paniol, contador): SOLO ven las que crearon ellos
+    if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
       params.push(userId);
       sql += ` AND po.requested_by = $${params.length}`;
     }
@@ -202,9 +220,20 @@ router.get('/:id', authenticate, async (req, res) => {
     const userId = req.user.id;
 
     const po = await query(`
-      SELECT po.*, u.name as solicitante_nombre, u.role as solicitante_rol
+      SELECT po.*,
+        u.name  as solicitante_nombre, u.role as solicitante_rol,
+        uc.name as cotizador_nombre,
+        ua.name as aprobador_nombre,
+        up.name as pagador_nombre,
+        ur.name as receptor_nombre,
+        urech.name as rechazador_nombre
       FROM purchase_orders po
-      LEFT JOIN users u ON u.id = po.requested_by
+      LEFT JOIN users u     ON u.id     = po.requested_by
+      LEFT JOIN users uc    ON uc.id    = po.cotizado_por
+      LEFT JOIN users ua    ON ua.id    = po.aprobado_compras_por
+      LEFT JOIN users up    ON up.id    = po.pagado_por
+      LEFT JOIN users ur    ON ur.id    = po.recibido_por
+      LEFT JOIN users urech ON urech.id = po.rechazado_por
       WHERE po.id = $1`, [req.params.id]);
     if (!po.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
 
@@ -215,7 +244,7 @@ router.get('/:id', authenticate, async (req, res) => {
     if (estVis !== null && !estVis.includes(oc.status)) {
       return res.status(403).json({ error: 'No tenés permiso para ver esta OC' });
     }
-    if (role === 'jefe_mantenimiento' && oc.requested_by !== userId) {
+    if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
     }
 
@@ -232,7 +261,7 @@ router.get('/:id', authenticate, async (req, res) => {
 //  POST / — Crear nueva OC (Jefe mantenimiento)
 //           SIN PRECIOS — solo descripción + opcional presupuesto
 // ─────────────────────────────────────────────────────────────
-router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
+router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
   try {
     const {
       notes, sucursal, area, tipo='flota',
@@ -433,19 +462,19 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
 // ─────────────────────────────────────────────────────────────
 //  DELETE /:id — Borrar (solo dueño/gerencia/creador en estado inicial)
 // ─────────────────────────────────────────────────────────────
-router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
+router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
   try {
     const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const oc = cur.rows[0];
 
-    if (['jefe_mantenimiento','compras'].includes(req.user.role)) {
+    if (['jefe_mantenimiento','compras','paniol','contador'].includes(req.user.role)) {
       if (oc.requested_by !== req.user.id) {
         return res.status(403).json({ error: 'Solo podés borrar OCs que creaste vos' });
       }
-      // Jefe mant solo puede borrar si está pendiente_cotizacion
-      // Compras puede borrar si está pendiente_cotizacion o en_cotizacion (recién creada)
-      if (req.user.role === 'jefe_mantenimiento' && oc.status !== 'pendiente_cotizacion') {
+      // Solicitantes (jefe mant, paniol, contador): solo borran si está pendiente_cotizacion
+      // Compras: puede borrar si está pendiente o en cotización (recién creada por ella)
+      if (['jefe_mantenimiento','paniol','contador'].includes(req.user.role) && oc.status !== 'pendiente_cotizacion') {
         return res.status(400).json({ error: 'Solo se pueden borrar OCs pendientes de cotizar' });
       }
       if (req.user.role === 'compras' && !['pendiente_cotizacion','en_cotizacion'].includes(oc.status)) {
@@ -575,13 +604,13 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 //  POST /:id/recibir — Jefe mant confirma recepción
 //  pagada → recibida
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras'), async (req, res) => {
+router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
   try {
     const cur = await query('SELECT status, requested_by FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
 
-    // Jefe mant y compras: solo pueden recibir OCs que crearon ellos mismos
-    if (['jefe_mantenimiento','compras'].includes(req.user.role) && cur.rows[0].requested_by !== req.user.id) {
+    // Jefe mant, compras, paniol, contador: solo pueden recibir las que crearon
+    if (['jefe_mantenimiento','compras','paniol','contador'].includes(req.user.role) && cur.rows[0].requested_by !== req.user.id) {
       return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
     }
     if (cur.rows[0].status !== 'pagada') {
@@ -605,7 +634,7 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
 // ─────────────────────────────────────────────────────────────
 //  POST /:id/rechazar — Cualquier actor puede rechazar en su etapa
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria'), async (req, res) => {
+router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria','paniol','contador'), async (req, res) => {
   try {
     const { motivo } = req.body;
     if (!motivo || motivo.trim().length < 5) {
@@ -621,9 +650,11 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
     // Validar que el rol pueda rechazar en el estado actual
     const estadoActual = cur.rows[0].status;
     const rol = req.user.role;
+    const esCreador = cur.rows[0].requested_by === req.user.id;
     const puedeRechazar = (
       ['dueno','gerencia'].includes(rol) ||
-      (rol === 'jefe_mantenimiento' && cur.rows[0].requested_by === req.user.id && estadoActual === 'pendiente_cotizacion') ||
+      // Solicitantes (jefe mant, paniol, contador): solo rechazan las propias en pendiente
+      (['jefe_mantenimiento','paniol','contador'].includes(rol) && esCreador && estadoActual === 'pendiente_cotizacion') ||
       (rol === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(estadoActual)) ||
       (rol === 'tesoreria' && estadoActual === 'aprobada_compras')
     );
@@ -644,6 +675,80 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
   } catch(err) {
     console.error('[OC rechazar]', err.message);
     res.status(500).json({ error: 'Error al rechazar OC' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/devolver — Devuelve la OC a la etapa anterior
+//  con un motivo. El siguiente actor corrige y avanza de nuevo.
+//
+//  Reglas de a dónde vuelve cada estado:
+//    en_cotizacion      → pendiente_cotizacion  (compras dice que faltan datos)
+//    aprobada_compras   → en_cotizacion         (tesorería dice que algo está mal)
+//    pagada             → aprobada_compras      (raro, pero puede pasar)
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compras','tesoreria','jefe_mantenimiento','paniol','contador'), async (req, res) => {
+  try {
+    const { motivo } = req.body;
+    if (!motivo || motivo.trim().length < 5) {
+      return res.status(400).json({ error: 'Indicá el motivo de la devolución (mínimo 5 caracteres)' });
+    }
+
+    const cur = await query('SELECT status, requested_by FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+
+    const estadoActual = cur.rows[0].status;
+    const rol = req.user.role;
+    const esAdmin = ['dueno','gerencia'].includes(rol);
+
+    // Mapa de devolución — a qué estado vuelve según desde dónde se devuelve
+    const mapaDevolver = {
+      'en_cotizacion':      'pendiente_cotizacion',
+      'aprobada_compras':   'en_cotizacion',
+      'pagada':             'aprobada_compras'
+    };
+    const estadoNuevo = mapaDevolver[estadoActual];
+    if (!estadoNuevo) {
+      return res.status(400).json({ error: `No se puede devolver una OC en estado "${estadoActual}"` });
+    }
+
+    // Validar que el rol pueda devolver desde el estado actual
+    const puedeDevolver = (
+      esAdmin ||
+      // Compras devuelve cuando está cotizando (al solicitante)
+      (rol === 'compras' && estadoActual === 'en_cotizacion') ||
+      // Tesorería devuelve cuando tiene que pagar (a compras)
+      (rol === 'tesoreria' && estadoActual === 'aprobada_compras') ||
+      // Solicitantes pueden devolver pagadas (a tesorería) si llegó algo mal — raro
+      (['jefe_mantenimiento','paniol','contador'].includes(rol) && estadoActual === 'pagada' && cur.rows[0].requested_by === req.user.id)
+    );
+    if (!puedeDevolver) {
+      return res.status(403).json({ error: 'No podés devolver esta OC en su estado actual' });
+    }
+
+    // Si vuelve de aprobada_compras → en_cotizacion, limpiar el "aprobado"
+    // Si vuelve de en_cotizacion → pendiente_cotizacion, limpiar el "cotizado"
+    // Si vuelve de pagada → aprobada_compras, limpiar el "pagado"
+    const limpieza = {
+      'pendiente_cotizacion': 'cotizado_por = NULL, cotizado_at = NULL',
+      'en_cotizacion':        'aprobado_compras_por = NULL, aprobado_compras_at = NULL',
+      'aprobada_compras':     'pagado_por = NULL, pagado_at = NULL'
+    }[estadoNuevo];
+
+    const r = await query(`
+      UPDATE purchase_orders SET
+        status = $1,
+        motivo_devolucion = $2,
+        devuelto_por = $3,
+        devuelto_at = NOW(),
+        ${limpieza}
+      WHERE id = $4 RETURNING *`,
+      [estadoNuevo, motivo.trim().substring(0, 500), req.user.id, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(err) {
+    console.error('[OC devolver]', err.message);
+    res.status(500).json({ error: 'Error al devolver OC' });
   }
 });
 
