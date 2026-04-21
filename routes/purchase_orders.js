@@ -371,46 +371,99 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 });
 
 // ─────────────────────────────────────────────────────────────
-//  PATCH /:id — Editar cabecera (solo creador o dueño)
+//  PATCH /:id — Editar cabecera
+//  Los campos editables dependen del rol y del estado de la OC:
+//   - dueno/gerencia: pueden editar TODO, siempre
+//   - compras: puede editar items/proveedor/iva/forma pago en pendiente_cotizacion o en_cotizacion
+//   - tesoreria: puede editar factura/iva en aprobada_compras
+//   - solicitantes (jefe_mant, paniol, contador): solo datos básicos en pendiente_cotizacion
 // ─────────────────────────────────────────────────────────────
 router.patch('/:id', authenticate, async (req, res) => {
   try {
     const role = req.user.role;
     const userId = req.user.id;
 
-    // Cargar OC actual
     const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
     const oc = cur.rows[0];
+    const estado = oc.status;
 
-    // Solo el creador o dueño/gerencia puede editar la cabecera
     const esCreador = oc.requested_by === userId;
     const esAdmin   = ['dueno','gerencia'].includes(role);
-    if (!esCreador && !esAdmin) {
-      return res.status(403).json({ error: 'Solo el creador o admin puede editar la cabecera' });
+
+    // ── Matriz de permisos por rol + estado ──
+    // Devuelve la lista de CAMPOS que este rol/estado puede modificar
+    function camposPermitidos() {
+      if (esAdmin) {
+        // Admin puede modificar todo siempre (salvo estados finales)
+        if (['recibida','rechazada'].includes(estado)) {
+          // En estados finales solo notas/motivos
+          return ['notes'];
+        }
+        return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado',
+                'proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda',
+                'factura_nro','factura_fecha','factura_monto'];
+      }
+      if (role === 'compras' && ['pendiente_cotizacion','en_cotizacion'].includes(estado)) {
+        return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','notes'];
+      }
+      if (role === 'tesoreria' && estado === 'aprobada_compras') {
+        return ['factura_nro','factura_fecha','factura_monto','iva_pct','notes'];
+      }
+      if (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
+        return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado'];
+      }
+      return [];
     }
 
-    // Solo se puede editar si está en pendiente_cotizacion
-    if (!esAdmin && oc.status !== 'pendiente_cotizacion') {
-      return res.status(400).json({ error: 'Solo se puede editar cuando está pendiente de cotizar' });
+    const permitidos = camposPermitidos();
+    if (permitidos.length === 0) {
+      return res.status(403).json({ error: `No podés editar esta OC en su estado actual (${estado})` });
     }
 
-    const { notes, sucursal, area, tipo, vehicle_id, presupuesto_imagen, presupuesto_monto_estimado } = req.body;
+    // Armar UPDATE dinámico con solo los campos permitidos que llegaron
+    const sets = [];
+    const params = [];
+    const campoVal = {
+      proveedor:     () => (req.body.proveedor !== undefined ? (req.body.proveedor || null) : undefined),
+      supplier_id:   () => (req.body.supplier_id !== undefined ? (req.body.supplier_id || null) : undefined),
+      iva_pct:       () => (req.body.iva_pct !== undefined ? parseFloat(req.body.iva_pct) || 0 : undefined),
+      forma_pago:    () => {
+        if (req.body.forma_pago === undefined) return undefined;
+        const v = req.body.forma_pago;
+        return (v === 'contado' || v === 'cuenta_corriente') ? v : null;
+      },
+      cc_dias:       () => (req.body.cc_dias !== undefined ? (req.body.cc_dias ? parseInt(req.body.cc_dias,10) : null) : undefined),
+      moneda:        () => (req.body.moneda !== undefined ? (req.body.moneda === 'USD' ? 'USD' : 'ARS') : undefined),
+      factura_nro:   () => (req.body.factura_nro !== undefined ? (req.body.factura_nro?.trim() || null) : undefined),
+      factura_fecha: () => (req.body.factura_fecha !== undefined ? (req.body.factura_fecha || null) : undefined),
+      factura_monto: () => (req.body.factura_monto !== undefined ? (req.body.factura_monto ? parseFloat(req.body.factura_monto) : null) : undefined),
+      notes:         () => (req.body.notes !== undefined ? (req.body.notes?.trim() || null) : undefined),
+      sucursal:      () => (req.body.sucursal !== undefined ? (req.body.sucursal || null) : undefined),
+      area:          () => (req.body.area !== undefined ? (req.body.area || null) : undefined),
+      tipo:          () => (req.body.tipo !== undefined ? (req.body.tipo || null) : undefined),
+      vehicle_id:    () => (req.body.vehicle_id !== undefined ? (req.body.vehicle_id || null) : undefined),
+      presupuesto_imagen: () => (req.body.presupuesto_imagen !== undefined ? req.body.presupuesto_imagen : undefined),
+      presupuesto_monto_estimado: () => (req.body.presupuesto_monto_estimado !== undefined ?
+        (req.body.presupuesto_monto_estimado ? parseFloat(req.body.presupuesto_monto_estimado) : null) : undefined)
+    };
 
-    const r = await query(`
-      UPDATE purchase_orders SET
-        notes = COALESCE($1, notes),
-        sucursal = COALESCE($2, sucursal),
-        area = COALESCE($3, area),
-        tipo = COALESCE($4, tipo),
-        vehicle_id = COALESCE($5, vehicle_id),
-        presupuesto_imagen = COALESCE($6, presupuesto_imagen),
-        presupuesto_monto_estimado = COALESCE($7, presupuesto_monto_estimado)
-      WHERE id = $8 RETURNING *`,
-      [notes||null, sucursal||null, area||null, tipo||null,
-       vehicle_id||null, presupuesto_imagen||null,
-       presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null,
-       req.params.id]
+    for (const campo of permitidos) {
+      if (!campoVal[campo]) continue;
+      const v = campoVal[campo]();
+      if (v === undefined) continue; // No vino en el body, saltar
+      params.push(v);
+      sets.push(`${campo}=$${params.length}`);
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ error: 'Nada para actualizar' });
+    }
+
+    params.push(req.params.id);
+    const r = await query(
+      `UPDATE purchase_orders SET ${sets.join(',')} WHERE id=$${params.length} RETURNING *`,
+      params
     );
     res.json(ocultarPreciosSiCorresponde(r.rows[0], role));
   } catch(err) {
