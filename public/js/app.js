@@ -9990,12 +9990,32 @@ async function devolverOC(id, estadoActual) {
 
 // TESORERÍA registra el pago
 async function pagarOC(id) {
-  // Leer TODOS los datos del modal (factura + iva + proveedor si cambió)
-  const pod_fact_nro   = document.getElementById('pod-factura-nro')?.value?.trim() || null;
-  const pod_fact_fch   = document.getElementById('pod-factura-fecha')?.value || null;
-  const pod_fact_mnt   = document.getElementById('pod-factura-monto')?.value || null;
-  const pod_iva_pct    = document.getElementById('pod-iva-pct')?.value;
-  const pod_prov       = document.getElementById('pod-proveedor')?.value?.trim() || null;
+  // Leer los elementos (no el value todavía)
+  const fnEl = document.getElementById('pod-factura-nro');
+  const ffEl = document.getElementById('pod-factura-fecha');
+  const fmEl = document.getElementById('pod-factura-monto');
+  const ivEl = document.getElementById('pod-iva-pct');
+  const prEl = document.getElementById('pod-proveedor');
+
+  // Verificar que los inputs existen y están editables
+  if (!fnEl || fnEl.readOnly) { showToast('error', 'Input Nº factura no editable. Refrescá la página.'); return; }
+  if (!fmEl || fmEl.readOnly) { showToast('error', 'Input Monto factura no editable. Refrescá la página.'); return; }
+
+  // Leer los valores ahora sí
+  const pod_fact_nro   = (fnEl.value || '').trim() || null;
+  const pod_fact_fch   = ffEl ? (ffEl.value || null) : null;
+  const pod_fact_mnt   = fmEl ? (fmEl.value || null) : null;
+  const pod_iva_pct    = ivEl ? ivEl.value : null;
+  const pod_prov       = prEl ? ((prEl.value || '').trim() || null) : null;
+
+  // Log para debug — mirá en F12 → Console cuando clickees "Registrar pago"
+  console.log('[pagarOC] Datos leídos:', {
+    factura_nro: pod_fact_nro,
+    factura_fecha: pod_fact_fch,
+    factura_monto: pod_fact_mnt,
+    iva_pct: pod_iva_pct,
+    proveedor: pod_prov
+  });
 
   // Validar datos mínimos — sin factura no se paga
   if (!pod_fact_nro && !pod_fact_mnt) {
@@ -10010,29 +10030,45 @@ async function pagarOC(id) {
 
   try {
     // 1) Primero PATCH para guardar campos actualizados (IVA, proveedor si cambió)
-    //    Esto corre solo si hay algo que actualizar antes de pagar
-    if (pod_iva_pct !== undefined && pod_iva_pct !== null) {
+    if (pod_iva_pct !== undefined && pod_iva_pct !== null && pod_iva_pct !== '') {
       try {
-        await apiFetch('/api/purchase-orders/' + id, {
+        const patchBody = {
+          iva_pct: parseFloat(pod_iva_pct) || 0
+        };
+        if (pod_prov !== null) patchBody.proveedor = pod_prov;
+        console.log('[pagarOC] PATCH body:', patchBody);
+        const pr = await apiFetch('/api/purchase-orders/' + id, {
           method: 'PATCH',
-          body: JSON.stringify({
-            iva_pct:   parseFloat(pod_iva_pct) || 0,
-            proveedor: pod_prov
-          })
+          body: JSON.stringify(patchBody)
         });
-      } catch(e) { /* no bloquear el pago si falla el patch */ }
+        const pj = await pr.json();
+        console.log('[pagarOC] PATCH response:', pj);
+      } catch(e) {
+        console.warn('[pagarOC] PATCH error:', e.message);
+      }
     }
 
     // 2) Disparar el endpoint de pagar con los datos de factura
+    const payBody = {
+      factura_nro:   pod_fact_nro,
+      factura_fecha: pod_fact_fch,
+      factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
+    };
+    console.log('[pagarOC] POST /pagar body:', payBody);
+
     const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', {
       method: 'POST',
-      body: JSON.stringify({
-        factura_nro:   pod_fact_nro,
-        factura_fecha: pod_fact_fch,
-        factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
-      })
+      body: JSON.stringify(payBody)
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al registrar el pago'); return; }
+    const resultado = await r.json();
+    console.log('[pagarOC] Resultado DB después del pago:', {
+      factura_nro: resultado.factura_nro,
+      factura_fecha: resultado.factura_fecha,
+      factura_monto: resultado.factura_monto,
+      iva_pct: resultado.iva_pct
+    });
+
     showToast('ok', '💰 Pago registrado — esperando recepción');
     closeModal();
     await loadPOList(_poCurrentFilter);
