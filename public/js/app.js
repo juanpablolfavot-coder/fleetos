@@ -4651,7 +4651,7 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   }
   // TESORERÍA y admin: pagar
   if (st === 'aprobada_compras' && (userRole === 'tesoreria' || esAdmin)) {
-    acciones.push({ key: 'pagar',    label: '💰 Registrar pago', color: 'primary' });
+    acciones.push({ key: 'pagar',    label: '✓ Confirmar pago', color: 'primary' });
   }
   // SOLICITANTES (jefe mant, paniol, contador) y admin: recibir
   if (st === 'pagada' && ((['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador) || esAdmin)) {
@@ -8864,7 +8864,9 @@ async function openPODetail(id) {
       }
     } else if (role === 'tesoreria') {
       if (po.status === 'aprobada_compras') {
-        canEdit = true;
+        // Tesorería NO edita datos — solo verifica y paga (la factura llega cargada por compras)
+        canEdit = false;
+        bloqueoMensaje = '📋 Tesorería: Revisá los datos de la factura que cargó compras. Si hay un error, usá "⏪ Devolver" para que compras corrija. Si todo está bien, click "✓ Confirmar pago".';
       } else if (po.status === 'pagada') {
         bloqueoMensaje = '🔒 Esta OC ya fue pagada. Los datos de factura quedan congelados.';
       } else {
@@ -9066,7 +9068,7 @@ async function openPODetail(id) {
             { label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) },
           ] : []),
           ...((po.status==='aprobada_compras' && (role==='tesoreria' || ['dueno','gerencia'].includes(role))) ? [
-            { label:'💰 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
+            { label:'✓ Confirmar pago', cls:'btn-primary', fn: () => pagarOC(id) },
           ] : []),
           ...((po.status==='pagada' && ((['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) || ['dueno','gerencia'].includes(role))) ? [
             { label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) },
@@ -9918,6 +9920,14 @@ async function aprobarOC(id) {
   const pod_iva_el = document.getElementById('pod-iva-pct');
   const pod_iva = pod_iva_el ? parseFloat(pod_iva_el.value) : null;
 
+  // Datos de factura (compras los carga al aprobar — ya le llegó del proveedor)
+  const fnEl = document.getElementById('pod-factura-nro');
+  const ffEl = document.getElementById('pod-factura-fecha');
+  const fmEl = document.getElementById('pod-factura-monto');
+  const pod_fact_nro = fnEl ? (fnEl.value.trim() || null) : null;
+  const pod_fact_fch = ffEl ? (ffEl.value || null) : null;
+  const pod_fact_mnt = fmEl ? (fmEl.value || null) : null;
+
   // Forma de pago y moneda vienen del helper
   let pod_fp = null, pod_cc = null, pod_mon = 'ARS';
   try {
@@ -9927,24 +9937,60 @@ async function aprobarOC(id) {
     if (extra.moneda) pod_mon = extra.moneda;
   } catch(e) {}
 
-  if (!pod_prov) {
-    if (!confirm('⚠️ No cargaste proveedor. ¿Aprobar sin proveedor?')) return;
-  } else {
-    if (!confirm('¿Aprobar esta OC con los precios y proveedor cargados? Pasará a tesorería para pagar.')) return;
+  // Validaciones obligatorias — NO se aprueba sin estos datos
+  const faltantes = [];
+  if (!pod_prov) faltantes.push('Proveedor');
+  if (!pod_fact_nro) faltantes.push('N° de factura');
+  if (!pod_fact_mnt || parseFloat(pod_fact_mnt) <= 0) faltantes.push('Monto de factura');
+
+  if (faltantes.length > 0) {
+    showToast('warn', '⚠️ Faltan datos obligatorios: ' + faltantes.join(', ') + '. La factura debe estar cargada para aprobar.');
+    // Hacer focus en el primer campo faltante
+    if (!pod_prov && pod_prov_el) pod_prov_el.focus();
+    else if (!pod_fact_nro && fnEl) fnEl.focus();
+    else if (fmEl && (!pod_fact_mnt || parseFloat(pod_fact_mnt) <= 0)) fmEl.focus();
+    return;
   }
+
+  // Confirmación con resumen de los datos que se mandan a tesorería
+  const resumen = [
+    '¿Aprobar esta OC con los siguientes datos?',
+    '',
+    'Proveedor: ' + pod_prov,
+    'N° factura: ' + pod_fact_nro,
+    'Monto: $' + parseFloat(pod_fact_mnt).toLocaleString('es-AR'),
+    (pod_iva ? 'IVA: ' + pod_iva + '%' : 'Sin IVA'),
+    '',
+    '➡️ Pasará a tesorería para pagar.'
+  ].join('\n');
+
+  if (!confirm(resumen)) return;
+
+  const payload = {
+    proveedor: pod_prov,
+    forma_pago: pod_fp,
+    cc_dias: pod_cc,
+    moneda: pod_mon,
+    iva_pct: (pod_iva != null && !isNaN(pod_iva)) ? pod_iva : null,
+    factura_nro: pod_fact_nro,
+    factura_fecha: pod_fact_fch,
+    factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
+  };
+  console.log('[aprobarOC] Enviando:', payload);
 
   try {
     const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar-compras', {
       method: 'POST',
-      body: JSON.stringify({
-        proveedor: pod_prov,
-        forma_pago: pod_fp,
-        cc_dias: pod_cc,
-        moneda: pod_mon,
-        iva_pct: (pod_iva != null && !isNaN(pod_iva)) ? pod_iva : null
-      })
+      body: JSON.stringify(payload)
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
+    const resultado = await r.json();
+    console.log('[aprobarOC] Resultado DB:', {
+      factura_nro: resultado.factura_nro,
+      factura_monto: resultado.factura_monto,
+      proveedor: resultado.proveedor,
+      iva_pct: resultado.iva_pct
+    });
     showToast('ok', '✅ OC aprobada — pasa a tesorería');
     closeModal();
     await loadPOList(_poCurrentFilter);
@@ -9994,86 +10040,49 @@ async function devolverOC(id, estadoActual) {
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
-// TESORERÍA registra el pago
+// TESORERÍA confirma el pago.
+// Los datos de factura ya están cargados por compras.
+// Tesorería compara con la factura física que le llegó y si coincide, paga.
 async function pagarOC(id) {
-  // Leer los elementos (no el value todavía)
-  const fnEl = document.getElementById('pod-factura-nro');
-  const ffEl = document.getElementById('pod-factura-fecha');
-  const fmEl = document.getElementById('pod-factura-monto');
-  const ivEl = document.getElementById('pod-iva-pct');
-  const prEl = document.getElementById('pod-proveedor');
-
-  // Verificar que los inputs existen y están editables
-  if (!fnEl || fnEl.readOnly) { showToast('error', 'Input Nº factura no editable. Refrescá la página.'); return; }
-  if (!fmEl || fmEl.readOnly) { showToast('error', 'Input Monto factura no editable. Refrescá la página.'); return; }
-
-  // Leer los valores ahora sí
-  const pod_fact_nro   = (fnEl.value || '').trim() || null;
-  const pod_fact_fch   = ffEl ? (ffEl.value || null) : null;
-  const pod_fact_mnt   = fmEl ? (fmEl.value || null) : null;
-  const pod_iva_pct    = ivEl ? ivEl.value : null;
-  const pod_prov       = prEl ? ((prEl.value || '').trim() || null) : null;
-
-  // Log para debug — mirá en F12 → Console cuando clickees "Registrar pago"
-  console.log('[pagarOC] Datos leídos:', {
-    factura_nro: pod_fact_nro,
-    factura_fecha: pod_fact_fch,
-    factura_monto: pod_fact_mnt,
-    iva_pct: pod_iva_pct,
-    proveedor: pod_prov
-  });
-
-  // Validar datos mínimos — sin factura no se paga
-  if (!pod_fact_nro && !pod_fact_mnt) {
-    if (!confirm('⚠️ No cargaste número ni monto de factura. ¿Querés pagar igual sin esos datos?')) return;
-  } else if (!pod_fact_nro) {
-    if (!confirm('⚠️ No cargaste número de factura. ¿Seguir?')) return;
-  } else if (!pod_fact_mnt) {
-    if (!confirm('⚠️ No cargaste monto de factura. ¿Seguir?')) return;
-  } else {
-    if (!confirm('¿Registrar el pago de esta OC? Esta acción es definitiva y la OC pasará a estado "Pagada".')) return;
-  }
-
   try {
-    // 1) Primero PATCH para guardar campos actualizados (IVA, proveedor si cambió)
-    if (pod_iva_pct !== undefined && pod_iva_pct !== null && pod_iva_pct !== '') {
-      try {
-        const patchBody = {
-          iva_pct: parseFloat(pod_iva_pct) || 0
-        };
-        if (pod_prov !== null) patchBody.proveedor = pod_prov;
-        console.log('[pagarOC] PATCH body:', patchBody);
-        const pr = await apiFetch('/api/purchase-orders/' + id, {
-          method: 'PATCH',
-          body: JSON.stringify(patchBody)
-        });
-        const pj = await pr.json();
-        console.log('[pagarOC] PATCH response:', pj);
-      } catch(e) {
-        console.warn('[pagarOC] PATCH error:', e.message);
-      }
+    // Traer los datos frescos para mostrar en la confirmación
+    const ts = Date.now();
+    const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
+    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
+    const po = await res.json();
+
+    // Si faltan datos críticos, rechazar
+    if (!po.factura_nro || !po.factura_monto) {
+      showToast('error', '❌ Esta OC no tiene factura cargada por compras. Usá "⏪ Devolver" para que completen los datos.');
+      return;
     }
 
-    // 2) Disparar el endpoint de pagar con los datos de factura
-    const payBody = {
-      factura_nro:   pod_fact_nro,
-      factura_fecha: pod_fact_fch,
-      factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
-    };
-    console.log('[pagarOC] POST /pagar body:', payBody);
+    const monto = parseFloat(po.factura_monto);
+    const fmtFecha = po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—';
+
+    // Diálogo de verificación contra factura física
+    const resumen = [
+      '📋 VERIFICÁ CONTRA LA FACTURA FÍSICA',
+      '',
+      'Proveedor:   ' + (po.proveedor || '—'),
+      'N° factura:  ' + po.factura_nro,
+      'Fecha:       ' + fmtFecha,
+      'Monto:       $' + monto.toLocaleString('es-AR'),
+      'IVA:         ' + (po.iva_pct ? po.iva_pct + '%' : 'Sin IVA'),
+      '',
+      '¿Estos datos COINCIDEN con la factura física que recibiste?',
+      '',
+      '→ Si SÍ → Aceptar (se registra el pago)',
+      '→ Si NO → Cancelar y usar "⏪ Devolver" para que compras corrija'
+    ].join('\n');
+
+    if (!confirm(resumen)) return;
 
     const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', {
       method: 'POST',
-      body: JSON.stringify(payBody)
+      body: JSON.stringify({}) // No mandamos datos — ya están en la OC cargados por compras
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al registrar el pago'); return; }
-    const resultado = await r.json();
-    console.log('[pagarOC] Resultado DB después del pago:', {
-      factura_nro: resultado.factura_nro,
-      factura_fecha: resultado.factura_fecha,
-      factura_monto: resultado.factura_monto,
-      iva_pct: resultado.iva_pct
-    });
 
     showToast('ok', '💰 Pago registrado — esperando recepción');
     closeModal();
