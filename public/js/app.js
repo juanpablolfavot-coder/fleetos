@@ -146,8 +146,8 @@ function renderDashboard() {
     const min = parseFloat(s.qty_min) || 0;
     return min > 0 && cur <= min;
   });
-  const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'en_revision');
-  const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada');
+  const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'pendiente_cotizacion' || p.status === 'en_cotizacion');
+  const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'pagada');
 
   // Mantenimientos vencidos (>=95% del intervalo)
   const maintAlerts = v.map(veh => {
@@ -438,12 +438,12 @@ function renderDashboard() {
   const ocEl = document.getElementById('dash-oc');
   const recentOCs = (App.data.purchaseOrders||[]).slice(0,5);
   const ocStatusBadge = {
-    'en_revision': 'badge-warn',
-    'aprobada': 'badge-info',
-    'recibida': 'badge-ok',
-    'pagada': 'badge-ok',
-    'rechazada': 'badge-danger',
-    'cancelada': 'badge-gray',
+    'pendiente_cotizacion': 'badge-warn',
+    'en_cotizacion':        'badge-info',
+    'aprobada_compras':     'badge-info',
+    'pagada':               'badge-ok',
+    'recibida':             'badge-ok',
+    'rechazada':            'badge-danger',
   };
   ocEl.innerHTML = recentOCs.length === 0
     ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin órdenes de compra todavía</div>'
@@ -4560,6 +4560,71 @@ const ROLES_LIST = [
   { value:'tesoreria',             label:'Tesorería' },
 ];
 
+// ═══════════════════════════════════════════════════════════
+//  WORKFLOW de OC — fuente única de verdad
+//  Los 6 estados, sus labels, colores, íconos y transiciones
+// ═══════════════════════════════════════════════════════════
+const OC_ESTADOS = {
+  pendiente_cotizacion: { label: 'Pendiente cotización', icon: '📝', bg: 'rgba(251,191,36,.15)', fg: '#f59e0b', border: 'rgba(251,191,36,.4)' },
+  en_cotizacion:        { label: 'En cotización',        icon: '🔎', bg: 'rgba(139,92,246,.15)', fg: '#a78bfa', border: 'rgba(139,92,246,.4)' },
+  aprobada_compras:     { label: 'Aprobada por compras', icon: '✅', bg: 'rgba(14,165,233,.15)', fg: '#38bdf8', border: 'rgba(14,165,233,.4)' },
+  pagada:               { label: 'Pagada',               icon: '💰', bg: 'rgba(34,197,94,.15)',  fg: '#4ade80', border: 'rgba(34,197,94,.4)' },
+  recibida:             { label: 'Recibida',             icon: '📦', bg: 'rgba(16,185,129,.2)',  fg: '#10b981', border: 'rgba(16,185,129,.5)' },
+  rechazada:            { label: 'Rechazada',            icon: '❌', bg: 'rgba(239,68,68,.15)',  fg: '#f87171', border: 'rgba(239,68,68,.4)' }
+};
+
+// Genera el badge HTML del estado (usa el ícono + label + color)
+function _ocEstadoBadge(status) {
+  const e = OC_ESTADOS[status] || { label: status, icon: '❓', bg: '#333', fg: '#fff', border: '#555' };
+  return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:${e.bg};color:${e.fg};border:1px solid ${e.border};font-size:11px;font-weight:600;white-space:nowrap">
+    <span>${e.icon}</span><span>${e.label}</span>
+  </span>`;
+}
+
+// Qué acciones puede hacer un rol sobre una OC en un estado dado
+// Devuelve lista de {key, label, color} para mostrar como botones
+function _ocAccionesPermitidas(oc, userRole, userId) {
+  const st = oc.status;
+  const esCreador = oc.requested_by === userId;
+  const esAdmin = ['dueno','gerencia'].includes(userRole);
+  const acciones = [];
+
+  // COMPRAS y admin: tomar cotización
+  if (st === 'pendiente_cotizacion' && (userRole === 'compras' || esAdmin)) {
+    acciones.push({ key: 'tomar',    label: '🔎 Tomar cotización', color: 'primary' });
+  }
+  // COMPRAS y admin: aprobar con precios (desde en_cotizacion o pendiente)
+  if (['pendiente_cotizacion','en_cotizacion'].includes(st) && (userRole === 'compras' || esAdmin)) {
+    acciones.push({ key: 'aprobar',  label: '✅ Aprobar con precios', color: 'success' });
+  }
+  // TESORERÍA y admin: pagar
+  if (st === 'aprobada_compras' && (userRole === 'tesoreria' || esAdmin)) {
+    acciones.push({ key: 'pagar',    label: '💰 Registrar pago', color: 'primary' });
+  }
+  // JEFE MANT (creador) y admin: recibir
+  if (st === 'pagada' && ((userRole === 'jefe_mantenimiento' && esCreador) || esAdmin)) {
+    acciones.push({ key: 'recibir',  label: '📦 Confirmar recepción', color: 'success' });
+  }
+  // RECHAZAR: según rol y estado
+  const puedeRechazar = (
+    esAdmin ||
+    (userRole === 'jefe_mantenimiento' && esCreador && st === 'pendiente_cotizacion') ||
+    (userRole === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(st)) ||
+    (userRole === 'tesoreria' && st === 'aprobada_compras')
+  );
+  if (puedeRechazar && !['recibida','rechazada'].includes(st)) {
+    acciones.push({ key: 'rechazar', label: '❌ Rechazar', color: 'danger' });
+  }
+
+  return acciones;
+}
+
+// ¿El rol tiene permitido ver precios?
+function _ocPuedeVerPrecios(role) {
+  return role !== 'jefe_mantenimiento';
+}
+// ═══════════════════════════════════════════════════════════
+
 async function renderUsers() {
   const root = document.getElementById('page-users');
   if (!root) return;
@@ -7672,13 +7737,14 @@ async function renderPurchaseOrders() {
   const root = document.getElementById('page-purchase_orders');
   if (!root) return;
 
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
+  const role = App.currentUser?.role;
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento'].includes(role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
       <div>
         <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">📋 Órdenes de Compra</h2>
-        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Gestión de compras · firma manual · enlace con factura</p>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Workflow: pendiente → cotización → aprobada → pagada → recibida</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
@@ -7688,10 +7754,10 @@ async function renderPurchaseOrders() {
     </div>
 
     <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
-      <div class="kpi-card"><div class="kpi-label">Total OCs</div><div class="kpi-value" style="color:var(--text)" id="po-kpi-total">—</div><div class="kpi-trend">todos los estados</div></div>
-      <div class="kpi-card" style="border-color:rgba(217,119,6,.35)"><div class="kpi-label">En revisión</div><div class="kpi-value" style="color:var(--warn)" id="po-kpi-borr">—</div><div class="kpi-trend">esperando aprobación</div></div>
-      <div class="kpi-card info"><div class="kpi-label">Aprobadas</div><div class="kpi-value info" id="po-kpi-curso">—</div><div class="kpi-trend">por recibir mercadería</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Recibidas / Pagadas</div><div class="kpi-value ok" id="po-kpi-rec">—</div><div class="kpi-trend">proceso completado</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pendiente cotizar</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe cotizar</div></div>
+      <div class="kpi-card"><div class="kpi-label">En cotización / Aprobadas</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 en proceso</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Pagadas (por recibir)</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">💰 esperando mercadería</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 proceso completado</div></div>
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -7702,12 +7768,12 @@ async function renderPurchaseOrders() {
       <select id="po-f-status" onchange="App.poTable.status=this.value;_poRenderRows()"
         style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
         <option value="all">Estado: Todos</option>
-        <option value="en_revision">En revisión</option>
-        <option value="aprobada">Aprobada</option>
-        <option value="rechazada">Rechazada</option>
-        <option value="recibida">Recibida</option>
-        <option value="pagada">Pagada</option>
-        <option value="cancelada">Cancelada</option>
+        <option value="pendiente_cotizacion">📝 Pendiente cotización</option>
+        <option value="en_cotizacion">🔎 En cotización</option>
+        <option value="aprobada_compras">✅ Aprobada por compras</option>
+        <option value="pagada">💰 Pagada</option>
+        <option value="recibida">📦 Recibida</option>
+        <option value="rechazada">❌ Rechazada</option>
       </select>
 
       <select id="po-f-sucursal" onchange="App.poTable.sucursal=this.value;_poRenderRows()"
@@ -7775,10 +7841,10 @@ function _poRenderKPIs() {
     const el = document.getElementById(id);
     if (el) { el.textContent = val; if (color) el.style.color = color; }
   };
-  set('po-kpi-total', data.length);
-  set('po-kpi-borr',  data.filter(p => p.status === 'en_revision').length);
-  set('po-kpi-curso', data.filter(p => p.status === 'aprobada').length);
-  set('po-kpi-rec',   data.filter(p => p.status === 'recibida' || p.status === 'pagada').length);
+  set('po-kpi-pend',  data.filter(p => p.status === 'pendiente_cotizacion').length);
+  set('po-kpi-curso', data.filter(p => p.status === 'en_cotizacion' || p.status === 'aprobada_compras').length);
+  set('po-kpi-pag',   data.filter(p => p.status === 'pagada').length);
+  set('po-kpi-rec',   data.filter(p => p.status === 'recibida').length);
 }
 
 function _poRenderRows() {
@@ -7806,7 +7872,7 @@ function _poRenderRows() {
     if (k === 'total') return parseFloat(p.total_real || p.total_estimado || 0);
     if (k === 'created_at') return p.created_at || '';
     if (k === 'status') {
-      const order = {'en_revision':1,'aprobada':2,'rechazada':3,'recibida':4,'pagada':5,'cancelada':6};
+      const order = {'pendiente_cotizacion':1,'en_cotizacion':2,'aprobada_compras':3,'pagada':4,'recibida':5,'rechazada':6};
       return order[p.status] ?? 0;
     }
     return (p[k] || '').toString().toLowerCase();
@@ -7869,32 +7935,20 @@ function _poSort(key) {
 }
 
 function _poRenderRow(po) {
-  const statusColors = {
-    en_revision: 'var(--warn)',
-    aprobada:    'var(--accent)',
-    rechazada:   'var(--danger)',
-    recibida:    'var(--ok)',
-    pagada:      'var(--ok)',
-    cancelada:   'var(--text3)',
-  };
-  const statusLabels = {
-    en_revision: '⏳ En revisión',
-    aprobada:    '✅ Aprobada',
-    rechazada:   '❌ Rechazada',
-    recibida:    '📦 Recibida',
-    pagada:      '💰 Pagada',
-    cancelada:   '🚫 Cancelada',
-  };
-  const statusBar = statusColors;
-
+  const role = App.currentUser?.role;
+  const puedeVerPrecios = _ocPuedeVerPrecios(role);
   const progress = _poProgress(po.status);
-  const progColor = statusBar[po.status] || 'var(--text3)';
 
-  const statusOpts = ['en_revision','aprobada','rechazada','recibida','pagada','cancelada'];
-  const canInlineEdit = ['dueno','gerencia','jefe_mantenimiento'].includes(App.currentUser?.role);
-  const canDelete     = canInlineEdit && po.status === 'en_revision';
+  const e = OC_ESTADOS[po.status] || { border: '#555', fg: '#aaa' };
+  const sideColor = e.fg;
 
-  const sideColor = statusBar[po.status] || 'var(--border2)';
+  // Jefe mant solo puede borrar las suyas si están pendientes
+  const canDelete = (
+    ['dueno','gerencia'].includes(role) && po.status !== 'recibida'
+  ) || (
+    role === 'jefe_mantenimiento' && po.requested_by === App.currentUser?.id && po.status === 'pendiente_cotizacion'
+  );
+
   const total = parseFloat(po.total_real || po.total_estimado || 0);
 
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
@@ -7903,12 +7957,7 @@ function _poRenderRow(po) {
     <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent)">${po.code||'—'}</td>
 
     <td style="padding:10px 12px">
-      ${canInlineEdit ? `
-        <select onchange="_poInlineEdit('${po.id}','status',this.value)"
-          style="padding:3px 8px;border:1px solid var(--border2);border-radius:12px;background:var(--bg);color:${statusColors[po.status]||'var(--text)'};font-weight:600;font-family:var(--mono);font-size:10px;cursor:pointer">
-          ${statusOpts.map(s => `<option value="${s}" ${s===po.status?'selected':''}>${statusLabels[s]||s}</option>`).join('')}
-        </select>
-      ` : `<span style="background:${statusColors[po.status]||'var(--text3)'}22;color:${statusColors[po.status]||'var(--text3)'};padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;font-family:var(--mono)">${statusLabels[po.status]||po.status}</span>`}
+      ${_ocEstadoBadge(po.status)}
     </td>
 
     <td style="padding:10px 12px;font-size:12px">
@@ -7926,15 +7975,17 @@ function _poRenderRow(po) {
     <td style="padding:10px 12px;min-width:120px">
       <div style="display:flex;align-items:center;gap:6px">
         <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:50px;max-width:80px">
-          <div style="height:100%;background:${progColor};width:${progress}%;transition:width .3s"></div>
+          <div style="height:100%;background:${sideColor};width:${progress}%;transition:width .3s"></div>
         </div>
         <span style="font-size:10px;font-family:var(--mono);color:var(--text3);min-width:30px">${progress}%</span>
       </div>
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
-      $${Math.round(total).toLocaleString('es-AR')}
-      ${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}
+      ${puedeVerPrecios
+        ? `$${Math.round(total).toLocaleString('es-AR')}${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}`
+        : `<span style="color:var(--text3)" title="Solo compras/tesorería ven los precios">—</span>`
+      }
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
@@ -7951,12 +8002,12 @@ function _poRenderRow(po) {
 
 function _poProgress(status) {
   const map = {
-    'en_revision': 20,
-    'aprobada':    50,
-    'rechazada':   0,
-    'recibida':    80,
-    'pagada':      100,
-    'cancelada':   0,
+    'pendiente_cotizacion': 15,
+    'en_cotizacion':        35,
+    'aprobada_compras':     60,
+    'pagada':               85,
+    'recibida':             100,
+    'rechazada':            0,
   };
   return map[status] ?? 10;
 }
@@ -8019,12 +8070,12 @@ function _poExportPDF() {
   doc.text(`Generado: ${new Date().toLocaleString('es-AR')}  ·  ${rows.length} OC${rows.length===1?'':'s'}`, 40, 58);
 
   const statusLabels = {
-    en_revision: 'En revisión',
-    aprobada:    'Aprobada',
-    rechazada:   'Rechazada',
-    recibida:    'Recibida',
-    pagada:      'Pagada',
-    cancelada:   'Cancelada',
+    pendiente_cotizacion: 'Pendiente cotización',
+    en_cotizacion:        'En cotización',
+    aprobada_compras:     'Aprobada compras',
+    pagada:               'Pagada',
+    recibida:             'Recibida',
+    rechazada:            'Rechazada',
   };
   const tableData = rows.map(p => [
     p.code || '—',
@@ -8407,15 +8458,15 @@ async function openPODetail(id) {
     const canCancel = ['dueno','gerencia'].includes(role);
 
     const estadoInfo = {
-      en_revision: { label:'EN REVISIÓN', color:'#f59e0b', icon:'🕐' },
-      aprobada:    { label:'APROBADA',    color:'#10b981', icon:'✅' },
-      rechazada:   { label:'RECHAZADA',   color:'#ef4444', icon:'❌' },
-      recibida:    { label:'RECIBIDA',    color:'#3b82f6', icon:'📥' },
-      pagada:      { label:'PAGADA',      color:'#8b5cf6', icon:'💵' },
-      cancelada:   { label:'CANCELADA',   color:'#6b7280', icon:'🚫' }
+      pendiente_cotizacion: { label:'PENDIENTE COTIZACIÓN', color:'#f59e0b', icon:'📝' },
+      en_cotizacion:        { label:'EN COTIZACIÓN',        color:'#a78bfa', icon:'🔎' },
+      aprobada_compras:     { label:'APROBADA POR COMPRAS', color:'#38bdf8', icon:'✅' },
+      pagada:               { label:'PAGADA',               color:'#10b981', icon:'💰' },
+      recibida:             { label:'RECIBIDA',             color:'#10b981', icon:'📦' },
+      rechazada:            { label:'RECHAZADA',            color:'#ef4444', icon:'❌' }
     };
-    const st = estadoInfo[po.status] || { label:po.status.toUpperCase(), color:'#6b7280', icon:'📋' };
-    const esTerminal = ['pagada','rechazada','cancelada'].includes(po.status);
+    const st = estadoInfo[po.status] || { label:(po.status||'').toUpperCase(), color:'#6b7280', icon:'📋' };
+    const esTerminal = ['recibida','rechazada'].includes(po.status);
     window._ocEditValues = { forma_pago: po.forma_pago, cc_dias: po.cc_dias, moneda: po.moneda };
 
     const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
@@ -8461,7 +8512,7 @@ async function openPODetail(id) {
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🚛 Vehículo</div>
         <div style="font-size:15px;font-weight:700;color:var(--accent)">${po.vehicle_code||'—'} · ${po.vehicle_plate||'—'}</div>
         ${po.ot_id ? `<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="closeModal();navigate('workorders')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>` :
-          (po.status==='aprobada' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
+          (po.status==='aprobada_compras' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
       </div>` : ''}
 
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
@@ -8544,18 +8595,21 @@ async function openPODetail(id) {
           { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
           { label:'✏️ Editar artículos', cls:'btn-secondary', fn: () => { closeModal(); openEditPOItemsModal(id); } },
           { label:'💾 Guardar cambios', cls:'btn-secondary', fn: () => savePODetail(id) },
-          ...(po.status==='en_revision' ? [
-            { label:'❌ Rechazar', cls:'btn-danger',  fn: () => rechazarOC(id) },
-            { label:'✅ Aprobar',  cls:'btn-primary', fn: () => aprobarOC(id) },
+          // Acciones del workflow según rol y estado actual
+          ...((po.status==='pendiente_cotizacion' && (App.currentUser?.role==='compras' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+            { label:'🔎 Tomar cotización', cls:'btn-primary', fn: () => tomarCotizacionOC(id) },
           ] : []),
-          ...(po.status==='aprobada' ? [
-            { label:'📥 Recibir' + (po.vehicle_id ? ' y generar OT' : ''), cls:'btn-primary', fn: () => recibirOC(id) },
+          ...((['pendiente_cotizacion','en_cotizacion'].includes(po.status) && (App.currentUser?.role==='compras' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+            { label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) },
           ] : []),
-          ...(po.status==='recibida' && canPay ? [
-            { label:'💵 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
+          ...((po.status==='aprobada_compras' && (App.currentUser?.role==='tesoreria' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+            { label:'💰 Registrar pago', cls:'btn-primary', fn: () => pagarOC(id) },
           ] : []),
-          ...(canCancel ? [
-            { label:'🚫 Cancelar OC', cls:'btn-danger', fn: () => cancelarOC(id, po.status) },
+          ...((po.status==='pagada' && (App.currentUser?.role==='jefe_mantenimiento' || ['dueno','gerencia'].includes(App.currentUser?.role))) ? [
+            { label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) },
+          ] : []),
+          ...((!['recibida','rechazada'].includes(po.status)) ? [
+            { label:'❌ Rechazar', cls:'btn-danger', fn: () => rechazarOC(id) },
           ] : []),
         ] : [
           { label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } },
@@ -8615,12 +8669,12 @@ async function printPO(id) {
 
     // Helper: badge de estado con color
     const statusBadge = {
-      'en_revision': 'background:#fef3c7;color:#92400e',
-      'aprobada':    'background:#dbeafe;color:#1e40af',
-      'recibida':    'background:#dcfce7;color:#166534',
-      'pagada':      'background:#dcfce7;color:#166534',
-      'rechazada':   'background:#fee2e2;color:#991b1b',
-      'cancelada':   'background:#f3f4f6;color:#374151',
+      'pendiente_cotizacion': 'background:#fef3c7;color:#92400e',
+      'en_cotizacion':        'background:#ede9fe;color:#5b21b6',
+      'aprobada_compras':     'background:#dbeafe;color:#1e40af',
+      'pagada':               'background:#dcfce7;color:#166534',
+      'recibida':             'background:#dcfce7;color:#166534',
+      'rechazada':            'background:#fee2e2;color:#991b1b',
     }[po.status] || 'background:#f3f4f6;color:#374151';
 
     const win = window.open('', '_blank');
@@ -9278,24 +9332,55 @@ function getPOExtraFields() {
 }
 
 /* FIN OC EXTRAS v1 */
-/* --- OC WORKFLOW ACTIONS v1 --- */
+/* --- OC WORKFLOW ACTIONS v2 — 6 estados nuevos --- */
 
-async function aprobarOC(id) {
-  if (!confirm('¿Aprobar esta orden de compra? Una vez aprobada podrá ser recibida.')) return;
+// COMPRAS toma la OC para empezar a cotizar
+async function tomarCotizacionOC(id) {
+  if (!confirm('¿Tomar esta OC para cotizar? Quedará marcada como "en cotización".')) return;
   try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar', { method: 'POST' });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
-    showToast('ok', '✅ OC aprobada');
+    const r = await apiFetch('/api/purchase-orders/' + id + '/tomar-cotizacion', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al tomar la OC'); return; }
+    showToast('ok', '🔎 OC tomada para cotizar');
     closeModal();
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
+// COMPRAS aprueba con precios cargados y proveedor elegido
+// Usa los campos que ya hay en el modal de detalle (proveedor, forma_pago, cc_dias, moneda, iva_pct)
+async function aprobarOC(id) {
+  // Leer proveedor y forma de pago del modal si está abierto
+  const pod_prov = document.getElementById('pod-proveedor')?.value?.trim() || null;
+  const pod_fp   = document.getElementById('pod-forma-pago')?.value || null;
+  const pod_cc   = document.getElementById('pod-cc-dias')?.value || null;
+  const pod_mon  = document.getElementById('pod-moneda')?.value || 'ARS';
+  const pod_iva  = document.getElementById('pod-iva')?.value || null;
+
+  if (!confirm('¿Aprobar esta OC con los precios y proveedor cargados? Pasará a tesorería para pagar.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar-compras', {
+      method: 'POST',
+      body: JSON.stringify({
+        proveedor: pod_prov,
+        forma_pago: pod_fp,
+        cc_dias: pod_cc ? parseInt(pod_cc, 10) : null,
+        moneda: pod_mon,
+        iva_pct: pod_iva ? parseFloat(pod_iva) : null
+      })
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
+    showToast('ok', '✅ OC aprobada — pasa a tesorería');
+    closeModal();
+    await loadPOList(_poCurrentFilter);
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+// Rechazo (cualquier rol, según estado)
 async function rechazarOC(id) {
-  var motivo = prompt('Motivo del rechazo (obligatorio):');
+  var motivo = prompt('Motivo del rechazo (mínimo 5 caracteres):');
   if (motivo == null) return;
   motivo = motivo.trim();
-  if (!motivo) { showToast('warn', 'Tenés que indicar un motivo'); return; }
+  if (motivo.length < 5) { showToast('warn', 'El motivo debe tener al menos 5 caracteres'); return; }
   try {
     const r = await apiFetch('/api/purchase-orders/' + id + '/rechazar', {
       method: 'POST',
@@ -9308,35 +9393,48 @@ async function rechazarOC(id) {
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
+// TESORERÍA registra el pago
 async function pagarOC(id) {
-  if (!confirm('¿Registrar el pago de esta orden de compra? Esta acción es definitiva.')) return;
+  // Leer datos de factura si están en el modal
+  const pod_fact_nro   = document.getElementById('pod-factura-nro')?.value?.trim() || null;
+  const pod_fact_fch   = document.getElementById('pod-factura-fecha')?.value || null;
+  const pod_fact_mnt   = document.getElementById('pod-factura-monto')?.value || null;
+
+  if (!confirm('¿Registrar el pago de esta OC? Esta acción es definitiva y la OC pasará a estado "Pagada".')) return;
   try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', { method: 'POST' });
+    const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', {
+      method: 'POST',
+      body: JSON.stringify({
+        factura_nro: pod_fact_nro,
+        factura_fecha: pod_fact_fch,
+        factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
+      })
+    });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al registrar el pago'); return; }
-    showToast('ok', '💵 Pago registrado');
+    showToast('ok', '💰 Pago registrado — esperando recepción');
     closeModal();
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
-async function cancelarOC(id, statusActual) {
-  var msg;
-  if (statusActual === 'recibida') {
-    msg = '⚠️ Esta OC ya fue recibida. Cancelarla implica devolver la mercadería al proveedor. ¿Estás seguro que querés cancelar?';
-  } else {
-    msg = '¿Cancelar esta orden de compra? Esta acción no se puede deshacer.';
-  }
-  if (!confirm(msg)) return;
+// JEFE MANT confirma la recepción
+async function recibirOC(id) {
+  if (!confirm('¿Confirmás que recibiste la mercadería? Esta acción cierra la OC.')) return;
   try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/cancelar', { method: 'POST' });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al cancelar'); return; }
-    showToast('ok', '🚫 OC cancelada');
+    const r = await apiFetch('/api/purchase-orders/' + id + '/recibir', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al recibir'); return; }
+    showToast('ok', '📦 OC recibida — proceso completado');
     closeModal();
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
-/* FIN OC WORKFLOW ACTIONS v1 */
+// Alias de compatibilidad — "cancelar" en el nuevo workflow es "rechazar"
+async function cancelarOC(id, statusActual) {
+  return rechazarOC(id);
+}
+
+/* FIN OC WORKFLOW ACTIONS v2 */
 // ════════════════════════════════════════════════════════════
 //  BACKUP DE DB — Solo accesible por rol 'dueno'
 // ════════════════════════════════════════════════════════════
@@ -11009,12 +11107,12 @@ function openVehicleHistoryModal(vehicleCode) {
   };
 
   const ocStatusColors = {
-    'en_revision': 'var(--warn)',
-    'aprobada': 'var(--accent)',
-    'rechazada': 'var(--danger)',
-    'recibida': 'var(--ok)',
-    'pagada': 'var(--ok)',
-    'cancelada': 'var(--text3)',
+    'pendiente_cotizacion': 'var(--warn)',
+    'en_cotizacion':        'var(--accent)',
+    'aprobada_compras':     'var(--accent)',
+    'pagada':               'var(--ok)',
+    'recibida':             'var(--ok)',
+    'rechazada':            'var(--danger)',
   };
 
   openModal(`📋 Historial completo — ${v.code} (${v.plate || '—'})`, `
