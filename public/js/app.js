@@ -9269,6 +9269,32 @@ async function printPO(id) {
       </div>
       ` : ''}
 
+      <div class="section">
+        <div class="section-title">🕐 Trazabilidad del proceso</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+          <thead>
+            <tr style="background:#f3f4f6;border-bottom:2px solid #e5e7eb">
+              <th style="padding:8px;text-align:left;font-weight:600;color:#374151">ETAPA</th>
+              <th style="padding:8px;text-align:left;font-weight:600;color:#374151">RESPONSABLE</th>
+              <th style="padding:8px;text-align:left;font-weight:600;color:#374151">FECHA</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Solicitó</td><td style="padding:8px"><b>${po.solicitante_nombre||'—'}</b></td><td style="padding:8px">${po.created_at ? new Date(po.created_at).toLocaleString('es-AR') : '—'}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Tomó cotización</td><td style="padding:8px">${po.cotizador_nombre ? '<b>'+po.cotizador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.cotizado_at ? new Date(po.cotizado_at).toLocaleString('es-AR') : '—'}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Aprobó compras</td><td style="padding:8px">${po.aprobador_nombre ? '<b>'+po.aprobador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.aprobado_compras_at ? new Date(po.aprobado_compras_at).toLocaleString('es-AR') : '—'}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Pagó tesorería</td><td style="padding:8px">${po.pagador_nombre ? '<b>'+po.pagador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.pagado_at ? new Date(po.pagado_at).toLocaleString('es-AR') : '—'}</td></tr>
+            <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Recibió mercadería</td><td style="padding:8px">${po.receptor_nombre ? '<b>'+po.receptor_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.recibido_at ? new Date(po.recibido_at).toLocaleString('es-AR') : '—'}</td></tr>
+            ${po.status === 'rechazada' ? `<tr style="background:#fee2e2"><td style="padding:8px">Rechazada</td><td style="padding:8px"><b>${po.rechazador_nombre||'—'}</b></td><td style="padding:8px">${po.rechazado_at ? new Date(po.rechazado_at).toLocaleString('es-AR') : '—'}</td></tr>` : ''}
+          </tbody>
+        </table>
+        ${po.motivo_devolucion ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>⏪ Devuelta por:</b> ${po.motivo_devolucion}</div>` : ''}
+        ${po.motivo_rechazo ? `<div style="background:#fee2e2;border:1px solid #ef4444;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>❌ Motivo de rechazo:</b> ${po.motivo_rechazo}</div>` : ''}
+        <div style="margin-top:12px;padding:10px;background:#eff6ff;border:1px solid #3b82f6;border-radius:4px;font-size:12px">
+          <b>📍 Estado actual:</b> <span style="${statusBadge};padding:2px 8px;border-radius:4px;font-weight:700">${po.status.toUpperCase()}</span>
+        </div>
+      </div>
+
       <div class="firma-section">
         <div class="firma-box">Solicitado por<br><br><br></div>
         <div class="firma-box">Autorizado por<br><br><br></div>
@@ -9892,17 +9918,44 @@ async function devolverOC(id, estadoActual) {
 
 // TESORERÍA registra el pago
 async function pagarOC(id) {
-  // Leer datos de factura si están en el modal
+  // Leer TODOS los datos del modal (factura + iva + proveedor si cambió)
   const pod_fact_nro   = document.getElementById('pod-factura-nro')?.value?.trim() || null;
   const pod_fact_fch   = document.getElementById('pod-factura-fecha')?.value || null;
   const pod_fact_mnt   = document.getElementById('pod-factura-monto')?.value || null;
+  const pod_iva_pct    = document.getElementById('pod-iva-pct')?.value;
+  const pod_prov       = document.getElementById('pod-proveedor')?.value?.trim() || null;
 
-  if (!confirm('¿Registrar el pago de esta OC? Esta acción es definitiva y la OC pasará a estado "Pagada".')) return;
+  // Validar datos mínimos — sin factura no se paga
+  if (!pod_fact_nro && !pod_fact_mnt) {
+    if (!confirm('⚠️ No cargaste número ni monto de factura. ¿Querés pagar igual sin esos datos?')) return;
+  } else if (!pod_fact_nro) {
+    if (!confirm('⚠️ No cargaste número de factura. ¿Seguir?')) return;
+  } else if (!pod_fact_mnt) {
+    if (!confirm('⚠️ No cargaste monto de factura. ¿Seguir?')) return;
+  } else {
+    if (!confirm('¿Registrar el pago de esta OC? Esta acción es definitiva y la OC pasará a estado "Pagada".')) return;
+  }
+
   try {
+    // 1) Primero PATCH para guardar campos actualizados (IVA, proveedor si cambió)
+    //    Esto corre solo si hay algo que actualizar antes de pagar
+    if (pod_iva_pct !== undefined && pod_iva_pct !== null) {
+      try {
+        await apiFetch('/api/purchase-orders/' + id, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            iva_pct:   parseFloat(pod_iva_pct) || 0,
+            proveedor: pod_prov
+          })
+        });
+      } catch(e) { /* no bloquear el pago si falla el patch */ }
+    }
+
+    // 2) Disparar el endpoint de pagar con los datos de factura
     const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', {
       method: 'POST',
       body: JSON.stringify({
-        factura_nro: pod_fact_nro,
+        factura_nro:   pod_fact_nro,
         factura_fecha: pod_fact_fch,
         factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
       })
