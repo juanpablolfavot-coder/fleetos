@@ -10081,18 +10081,8 @@ async function pagarOC(id) {
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
-// JEFE MANT confirma la recepción
-async function recibirOC(id) {
-  if (!confirm('¿Confirmás que recibiste la mercadería? Esta acción cierra la OC.')) return;
-  try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/recibir', { method: 'POST' });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al recibir'); return; }
-    showToast('ok', '📦 OC recibida — proceso completado');
-    closeModal();
-    await loadPOList(_poCurrentFilter);
-  } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
+// JEFE MANT confirma la recepción — (función movida arriba con lógica completa)
+// Esta era una versión vieja que fue reemplazada. Se deja stub para compatibilidad.
 // Alias de compatibilidad — "cancelar" en el nuevo workflow es "rechazar"
 async function cancelarOC(id, statusActual) {
   return rechazarOC(id);
