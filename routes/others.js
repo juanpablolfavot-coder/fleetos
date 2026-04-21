@@ -39,11 +39,16 @@ fuelRouter.get('/tanks', authenticate, async (req, res) => {
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l, odometer_km, location, notes, ticket_image } = req.body;
+    const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l: ppuRaw, odometer_km, location, notes, ticket_image } = req.body;
     // ── Parseo numérico estricto — evita que "100" (string) rompa las restas SQL
     const liters = parseFloat(litersRaw);
-    if (!vehicle_id || !Number.isFinite(liters) || liters <= 0 || !price_per_l) {
-      return res.status(400).json({ error: 'vehicle_id, liters (numero) y price_per_l requeridos' });
+    const ppuFrontend = parseFloat(ppuRaw);
+    if (!vehicle_id || !Number.isFinite(liters) || liters <= 0) {
+      return res.status(400).json({ error: 'vehicle_id y liters (numero > 0) son requeridos' });
+    }
+    // Si es estación externa (sin tank_id), el precio es obligatorio
+    if (!tank_id && (!Number.isFinite(ppuFrontend) || ppuFrontend <= 0)) {
+      return res.status(400).json({ error: 'Al cargar fuera de la cisterna, el precio por litro es obligatorio (del ticket)' });
     }
     // Chofer solo puede cargar a su propia unidad asignada
     if (req.user.role === 'chofer') {
@@ -70,11 +75,23 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       const sizeKB = Math.round(ticket_image.length * 0.75 / 1024);
       if (sizeKB > 5120) return res.status(400).json({ error: 'La imagen del ticket no puede superar 5MB' });
     }
+    // Si es carga externa, exigir ticket salvo que el rol sea dueño/gerencia/compras (podrían cargar a mano)
+    if (!tank_id && !ticket_image) {
+      const rolesSinTicket = ['dueno','gerencia','compras'];
+      if (!rolesSinTicket.includes(req.user.role)) {
+        return res.status(400).json({ error: 'Al cargar en estación externa, la foto del ticket es obligatoria' });
+      }
+    }
     await client.query('BEGIN');
     // Asegurar que existe la columna ticket_image
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});
+
+    // ── PRECIO FINAL:
+    //    * Cisterna propia (tank_id presente): SIEMPRE el precio del tanque (ignoramos frontend)
+    //    * Externa (sin tank_id): el precio que mandó el frontend (ya validado arriba)
+    let ppuFinal = ppuFrontend;
     if (tank_id) {
-      const t = await client.query('SELECT id, current_l, location, type FROM tanks WHERE id=$1 FOR UPDATE',[tank_id]);
+      const t = await client.query('SELECT id, current_l, location, type, price_per_l FROM tanks WHERE id=$1 FOR UPDATE',[tank_id]);
       if (!t.rows[0]) {
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'Cisterna no encontrada' });
@@ -84,17 +101,19 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         await client.query('ROLLBACK');
         return res.status(409).json({ error: `Combustible insuficiente en ${t.rows[0].location} (${stockActual.toFixed(0)}L disponibles, se piden ${liters}L)` });
       }
+      // Precio del tanque (puede ser null si compras aún no lo cargó → queda null, se puede completar después)
+      ppuFinal = parseFloat(t.rows[0].price_per_l) || null;
       // Descontar los litros de esa cisterna específica
       const upd = await client.query(
         'UPDATE tanks SET current_l = current_l - $1, updated_at = NOW() WHERE id = $2 RETURNING current_l, location',
         [liters, tank_id]
       );
-      console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L`);
+      console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L (precio cisterna: $${ppuFinal || 'sin definir'})`);
     }
     // Tomar km del GPS (km_current del vehículo) si no viene odómetro manual
     const vehKm = await client.query('SELECT km_current FROM vehicles WHERE id=$1',[vehicle_id]);
     const kmToSave = odometer_km || vehKm.rows[0]?.km_current || null;
-    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,price_per_l,kmToSave,location||null,notes||null,ticket_image||null]);
+    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null]);
     if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) {
@@ -103,9 +122,16 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     res.status(500).json({ error: 'Error carga' });
   } finally { client.release(); }
 });
-fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encargado_combustible'),validateUUID('id'),async(req,res)=>{
+fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encargado_combustible','compras','jefe_mantenimiento'),validateUUID('id'),async(req,res)=>{
   try{
     const { current_l, capacity_l, price_per_l } = req.body;
+
+    // Solo compras/dueno/gerencia pueden cambiar price_per_l. Jefe mant solo puede registrar ingresos de litros.
+    const rolesPrecio = ['dueno','gerencia','compras','encargado_combustible'];
+    if (price_per_l !== undefined && !rolesPrecio.includes(req.user.role)) {
+      return res.status(403).json({ error: 'No tenés permiso para modificar el precio del combustible. Eso lo gestiona compras.' });
+    }
+
     const fields = []; const params = [];
     if (current_l !== undefined) { params.push(current_l); fields.push('current_l=$'+params.length); }
     if (capacity_l !== undefined) { params.push(capacity_l); fields.push('capacity_l=$'+params.length); }
