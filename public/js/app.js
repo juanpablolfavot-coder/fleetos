@@ -8984,8 +8984,9 @@ async function openPODetail(id) {
             <input class="form-input" type="date" id="pod-factura-fecha" value="${po.factura_fecha?.slice(0,10)||''}" ${canEdit && !esTerminal?'':'readonly'}>
           </div>
           <div class="form-group" style="margin:0">
-            <label class="form-label">Monto factura</label>
-            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit && !esTerminal?'':'readonly'}>
+            <label class="form-label">Monto factura <span style="color:var(--text3);font-weight:400;font-size:10px">(se calcula solo con los artículos)</span></label>
+            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit && !esTerminal?'':'readonly'}
+              oninput="this.dataset.manualEdit='1'">
           </div>
         </div>
       </div>
@@ -9156,6 +9157,13 @@ async function openPODetail(id) {
 
     if (typeof renderPOExtraFields === 'function') {
       renderPOExtraFields(po.tipo, 'pod-extra-fields');
+    }
+
+    // Marcar el input de monto como "editado manualmente" si ya tiene valor cargado
+    // (así no se auto-sobreescribe al abrir la OC por primera vez)
+    const montoEl = document.getElementById('pod-factura-monto');
+    if (montoEl && po.factura_monto && parseFloat(po.factura_monto) > 0) {
+      montoEl.dataset.manualEdit = '1';
     }
   } catch(err) { showToast('error', err.message); }
 }
@@ -9538,17 +9546,36 @@ async function saveEditPOItems(id) {
 // funciones auxiliares OC
 function getPODetailExtraFields() {
   var tipo = document.getElementById('pod-tipo')?.value || 'flota';
-  if (tipo === 'flota') return { tipo };
-  var prefix = 'pod-x';
-  return {
-    tipo,
-    urgencia:      document.getElementById(prefix+'-urgencia')?.value || 'normal',
-    local_sector:  document.getElementById(prefix+'-local')?.value?.trim() || null,
-    sector_detalle:document.getElementById(prefix+'-sector')?.value || null,
-    equipo:        document.getElementById(prefix+'-equipo')?.value?.trim() || null,
-    activo_serie:  document.getElementById(prefix+'-serie')?.value?.trim() || null,
-    problema_desc: document.getElementById(prefix+'-problema')?.value?.trim() || null,
-  };
+  var out = { tipo };
+
+  // Forma de pago, días CC, moneda (los selects del modal detalle usan prefix 'pod-')
+  var fpEl = document.getElementById('pod-forma-pago');
+  var ccEl = document.getElementById('pod-cc-dias');
+  var monEl = document.getElementById('pod-moneda');
+  if (fpEl) {
+    out.forma_pago = fpEl.value || null;
+    if (out.forma_pago === 'cuenta_corriente') {
+      out.cc_dias = (ccEl && ccEl.value !== '') ? parseInt(ccEl.value, 10) : null;
+    } else {
+      out.cc_dias = null;
+    }
+  }
+  if (monEl) {
+    out.moneda = monEl.value || 'ARS';
+  }
+
+  // Campos extra solo para tipos edilicio/otro
+  if (tipo !== 'flota') {
+    var prefix = 'pod-x';
+    out.urgencia       = document.getElementById(prefix+'-urgencia')?.value || 'normal';
+    out.local_sector   = document.getElementById(prefix+'-local')?.value?.trim() || null;
+    out.sector_detalle = document.getElementById(prefix+'-sector')?.value || null;
+    out.equipo         = document.getElementById(prefix+'-equipo')?.value?.trim() || null;
+    out.activo_serie   = document.getElementById(prefix+'-serie')?.value?.trim() || null;
+    out.problema_desc  = document.getElementById(prefix+'-problema')?.value?.trim() || null;
+  }
+
+  return out;
 }
 
 function updatePOAreaSelect() {
@@ -9797,6 +9824,19 @@ function updatePODetailItemsTotal() {
   const prefix2 = (totEl && totEl.textContent.startsWith('US$')) ? 'US$' : '$';
   if (ivaMontoEl) ivaMontoEl.textContent = prefix2 + ivaMonto.toLocaleString('es-AR');
   if (totEl) totEl.textContent = prefix2 + total.toLocaleString('es-AR');
+
+  // 🔄 Auto-actualizar el monto de la factura con el total (subtotal + IVA)
+  // Solo si el usuario no lo está editando manualmente (se respeta si ya puso un valor custom)
+  const montoFacturaEl = document.getElementById('pod-factura-monto');
+  if (montoFacturaEl && !montoFacturaEl.readOnly) {
+    // Solo auto-actualizar si el campo está vacío, en 0, o si el valor actual coincide con el total anterior
+    const valorActual = parseFloat(montoFacturaEl.value) || 0;
+    const autoTotal = total;
+    // Si no fue editado manualmente (coincide con el total anterior o está vacío) → actualizar
+    if (!montoFacturaEl.dataset.manualEdit) {
+      montoFacturaEl.value = autoTotal;
+    }
+  }
 }
 
 function setPODetailIva(val) {
