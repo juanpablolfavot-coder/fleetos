@@ -902,7 +902,7 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
       'aprobada_compras':     'pagado_por = NULL, pagado_at = NULL'
     }[estadoNuevo];
 
-    const r = await client.query(`
+    const r = await client.query(` 
       UPDATE purchase_orders SET
         status = $1,
         motivo_devolucion = $2,
