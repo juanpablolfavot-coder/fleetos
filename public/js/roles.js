@@ -379,6 +379,8 @@ function bootApp() {
     if      (u.role === 'chofer')             navigate('chofer_panel');
     else if (u.role === 'contador')           navigate('contador_panel');
     else if (u.role === 'auditor')            navigate('auditor_panel');
+    else if (u.role === 'compras')            navigate('purchase_orders');
+    else if (u.role === 'tesoreria')          navigate('purchase_orders');
     else if (u.role === 'mecanico')           navigate('encargado_panel');
     else if (u.role === 'jefe_mantenimiento') navigate('encargado_panel');
     else if (u.role === 'gerencia')           navigate('encargado_panel');
