@@ -8941,7 +8941,29 @@ async function openPODetail(id) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Proveedor</label>
-            <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor" ${canEdit && !esTerminal?'':'readonly'}>
+            ${(() => {
+              const cat = (App.data.suppliers || []).filter(s => s.status === 'activo');
+              const readonly = !(canEdit && !esTerminal);
+              if (readonly) {
+                return `<input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" readonly>`;
+              }
+              if (!cat.length) {
+                return `<input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor">
+                        <div style="font-size:11px;color:var(--warn);margin-top:3px">⚠️ Cargá proveedores en el módulo "🏢 Proveedores" para elegirlos del catálogo.</div>`;
+              }
+              // Matchear proveedor actual por supplier_id o por nombre
+              const matchedId = po.supplier_id || (cat.find(s => s.name === po.proveedor)?.id || '');
+              return `
+                <select class="form-select" id="pod-supplier-select" onchange="onPODSupplierChange()">
+                  <option value="">— Seleccionar del catálogo —</option>
+                  ${cat.map(s => `<option value="${s.id}" data-name="${s.name}" ${s.id===matchedId?'selected':''}>${s.name}${s.cuit?' · '+s.cuit:''}</option>`).join('')}
+                  <option value="__manual__" ${!matchedId && po.proveedor ? 'selected' : ''}>✏️ Escribir manualmente...</option>
+                </select>
+                <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}"
+                  placeholder="Nombre del proveedor"
+                  style="margin-top:6px;${matchedId ? 'display:none' : ''}">
+              `;
+            })()}
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Nro. Factura</label>
@@ -9149,9 +9171,17 @@ async function savePODetail(id) {
       Object.assign(body, extra);
     } catch(e) {}
 
-    // Proveedor (solo si existe el input y tiene valor)
-    const provEl = document.getElementById('pod-proveedor');
-    if (provEl && provEl.value !== undefined) body.proveedor = provEl.value.trim() || null;
+    // Proveedor: puede venir del catálogo (supplier_id) o manual (texto)
+    const podSupSel = document.getElementById('pod-supplier-select');
+    const provEl    = document.getElementById('pod-proveedor');
+    if (podSupSel && podSupSel.value && podSupSel.value !== '__manual__') {
+      body.supplier_id = podSupSel.value;
+      const opt = podSupSel.options[podSupSel.selectedIndex];
+      body.proveedor = opt?.dataset?.name || opt?.text || '';
+    } else if (provEl && provEl.value !== undefined) {
+      body.supplier_id = null;
+      body.proveedor = provEl.value.trim() || null;
+    }
 
     // Datos de factura (solo si existen los inputs)
     const fnEl = document.getElementById('pod-factura-nro');
@@ -9211,6 +9241,28 @@ async function deletePO(id) {
     showToast('ok','OC eliminada');
     await loadPOList();
   } catch(err) { showToast('error', err.message); }
+}
+
+// Handler del dropdown de proveedor en el modal de detalle de OC
+function onPODSupplierChange() {
+  const sel   = document.getElementById('pod-supplier-select');
+  const input = document.getElementById('pod-proveedor');
+  if (!sel || !input) return;
+  if (sel.value === '__manual__') {
+    // Modo manual: mostrar input vacío para escribir
+    input.style.display = '';
+    input.value = '';
+    input.focus();
+  } else if (sel.value) {
+    // Del catálogo: ocultar input y poner nombre del proveedor ahí (para el save)
+    const opt = sel.options[sel.selectedIndex];
+    input.value = opt?.dataset?.name || opt?.text || '';
+    input.style.display = 'none';
+  } else {
+    // Sin seleccionar: limpiar
+    input.style.display = 'none';
+    input.value = '';
+  }
 }
 
 // ── Impresión de OC ──────────────────────────────────────
