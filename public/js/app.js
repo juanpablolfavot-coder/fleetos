@@ -9199,7 +9199,7 @@ async function savePODetail(id) {
     // Reabrir el modal con datos frescos (no sacar al usuario del contexto)
     await openPODetail(id);
     // Refrescar listado en paralelo
-    loadPOList(_poCurrentFilter);
+    loadPOList();
   } catch(err) { showToast('error', err.message); }
 }
 
@@ -9209,7 +9209,7 @@ async function deletePO(id) {
     const res = await apiFetch(`/api/purchase-orders/${id}`, { method:'DELETE' });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
     showToast('ok','OC eliminada');
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message); }
 }
 
@@ -10004,7 +10004,7 @@ async function tomarCotizacionOC(id) {
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al tomar la OC'); return; }
     showToast('ok', '🔎 OC tomada para cotizar');
     closeModal();
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
@@ -10090,7 +10090,7 @@ async function aprobarOC(id) {
     });
     showToast('ok', '✅ OC aprobada — pasa a tesorería');
     closeModal();
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
@@ -10108,7 +10108,7 @@ async function rechazarOC(id) {
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al rechazar'); return; }
     showToast('ok', '❌ OC rechazada');
     closeModal();
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
@@ -10133,7 +10133,7 @@ async function devolverOC(id, estadoActual) {
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al devolver'); return; }
     showToast('ok', '⏪ OC devuelta a la etapa anterior');
     closeModal();
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
@@ -10183,7 +10183,7 @@ async function pagarOC(id) {
 
     showToast('ok', '💰 Pago registrado — esperando recepción');
     closeModal();
-    await loadPOList(_poCurrentFilter);
+    await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
 }
 
