@@ -113,7 +113,7 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y pañol', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Depósito', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
@@ -4607,8 +4607,8 @@ const ROLES_LIST = [
   { value:'mecanico',              label:'Mecánico' },
   { value:'chofer',                label:'Chofer' },
   { value:'encargado_combustible', label:'Encargado combustible' },
-  { value:'paniol',                label:'Pañol / Stock' },
-  { value:'contador',              label:'Contador / Administración' },
+  { value:'paniol',                label:'Depósito' },
+  { value:'contador',              label:'Administración' },
   { value:'auditor',               label:'Auditor' },
   { value:'compras',               label:'Compras' },
   { value:'tesoreria',             label:'Tesorería' },
@@ -7864,14 +7864,6 @@ async function renderPurchaseOrders() {
   await loadPOList();
 }
 
-// Mantener filterPO para compatibilidad con otras partes del código
-async function filterPO(status) {
-  App.poTable.status = status || 'all';
-  const sel = document.getElementById('po-f-status');
-  if (sel) sel.value = App.poTable.status;
-  _poRenderRows();
-}
-
 async function loadPOList() {
   try {
     // Cache-busting para que el navegador siempre traiga datos frescos del server
@@ -8095,30 +8087,6 @@ function _poProgress(status) {
     'rechazada':            0,
   };
   return map[status] ?? 10;
-}
-
-// Inline edit de estado de OC
-async function _poInlineEdit(id, field, newValue) {
-  const po = (App.poTable.rawData || []).find(p => p.id === id);
-  if (!po) { showToast?.('error','OC no encontrada'); return; }
-
-  const oldValue = po[field];
-  po[field] = newValue;
-
-  try {
-    const res = await apiFetch(`/api/purchase-orders/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ [field]: newValue })
-    });
-    if (!res.ok) throw new Error('Error HTTP');
-    showToast?.('ok', `OC actualizada: ${newValue}`);
-    _poRenderKPIs();
-    _poRenderRows();
-  } catch(err) {
-    po[field] = oldValue; // revertir
-    showToast?.('error', 'No se pudo actualizar. Revisá permisos.');
-    _poRenderRows();
-  }
 }
 
 // Export PDF de OCs (respeta filtros activos)
@@ -9436,113 +9404,6 @@ async function printPO(id) {
 }
 
 
-// ── Editar ítems de una OC existente ─────────────────────
-async function openEditPOItemsModal(id) {
-  try {
-    const res = await apiFetch(`/api/purchase-orders/${id}`);
-    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
-    const po = await res.json();
-
-    const itemRows = po.items.map((item, idx) => buildEditPOItemRow(idx, item)).join('');
-
-    openModal(`✏️ Editar artículos — ${po.code}`, `
-      <div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px">
-        ⚠️ Al guardar se reemplazarán todos los artículos actuales por los que estén en esta lista.
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <label class="form-label" style="margin:0;font-weight:700">Artículos</label>
-        <button class="btn btn-secondary btn-sm" onclick="addEditPOItem()">+ Agregar artículo</button>
-      </div>
-      <div id="epo-items">${itemRows}</div>
-      <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;margin-top:12px">
-        <span style="color:var(--text3)">Total estimado</span>
-        <span id="epo-total" style="font-weight:700;font-size:16px;font-family:monospace">
-          $${Math.round(po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0)).toLocaleString('es-AR')}
-        </span>
-      </div>`,
-      [
-        { label:'Cancelar',          cls:'btn-secondary', fn: closeModal },
-        { label:'Guardar artículos', cls:'btn-primary',   fn: () => saveEditPOItems(id) },
-      ]
-    );
-    window._editPOItemCount = po.items.length;
-  } catch(err) { showToast('error', err.message); }
-}
-
-function buildEditPOItemRow(idx, item = {}) {
-  return `<div id="epo-item-${idx}" style="display:grid;grid-template-columns:1fr 80px 80px 120px 32px;gap:6px;margin-bottom:6px;align-items:center">
-    <input class="form-input" placeholder="Descripción" id="epoi-desc-${idx}" value="${(item.descripcion||'').replace(/"/g,'&quot;')}" oninput="updateEditPOTotal()" style="font-size:13px">
-    <input class="form-input" type="number" placeholder="Cant." id="epoi-qty-${idx}" value="${parseFloat(item.cantidad||1)}" min="0.01" step="0.01" oninput="updateEditPOTotal()" style="font-size:13px;text-align:center">
-    <input class="form-input" placeholder="Unid." id="epoi-unit-${idx}" value="${item.unidad||'un'}" style="font-size:13px;text-align:center">
-    <input class="form-input" type="number" placeholder="Precio unit." id="epoi-price-${idx}" value="${parseFloat(item.precio_unit||0)}" min="0" oninput="updateEditPOTotal()" style="font-size:13px;text-align:right">
-    <button style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:16px;padding:0 6px;height:36px" onclick="removeEditPOItem(${idx})">✕</button>
-  </div>`;
-}
-
-function addEditPOItem() {
-  const container = document.getElementById('epo-items');
-  if (!container) return;
-  const div = document.createElement('div');
-  div.innerHTML = buildEditPOItemRow(window._editPOItemCount || 99);
-  container.appendChild(div.firstElementChild);
-  window._editPOItemCount = (window._editPOItemCount || 99) + 1;
-}
-
-function removeEditPOItem(idx) {
-  document.getElementById(`epo-item-${idx}`)?.remove();
-  updateEditPOTotal();
-}
-
-function updateEditPOTotal() {
-  let total = 0;
-  document.querySelectorAll('[id^="epoi-qty-"]').forEach(qtyEl => {
-    const idx   = qtyEl.id.replace('epoi-qty-', '');
-    const qty   = parseFloat(qtyEl.value) || 0;
-    const price = parseFloat(document.getElementById(`epoi-price-${idx}`)?.value) || 0;
-    total += qty * price;
-  });
-  const el = document.getElementById('epo-total');
-  if (el) el.textContent = '$' + Math.round(total).toLocaleString('es-AR');
-}
-
-async function saveEditPOItems(id) {
-  try {
-    const items = [];
-    document.querySelectorAll('[id^="epoi-desc-"]').forEach(descEl => {
-      const idx   = descEl.id.replace('epoi-desc-', '');
-      const desc  = descEl.value.trim();
-      if (!desc) return;
-      items.push({
-        descripcion: desc,
-        cantidad:    parseFloat(document.getElementById(`epoi-qty-${idx}`)?.value)   || 1,
-        unidad:      document.getElementById(`epoi-unit-${idx}`)?.value              || 'un',
-        precio_unit: parseFloat(document.getElementById(`epoi-price-${idx}`)?.value) || 0,
-      });
-    });
-    if (!items.length) { showToast('warn','Agregá al menos un artículo'); return; }
-
-    const res = await apiFetch(`/api/purchase-orders/${id}/items`, {
-      method: 'PUT',
-      body: JSON.stringify({ items })
-    });
-    if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
-
-    showToast('ok', '✅ Artículos actualizados');
-
-    // Cerrar modal de edición
-    closeModal();
-
-    // Esperar un tick y volver a abrir el modal de detalle con datos frescos
-    // así el usuario sigue en el contexto de la OC
-    setTimeout(async () => {
-      await openPODetail(id);
-    }, 100);
-
-    // Refrescar listado en paralelo (no esperamos)
-    loadPOList(_poCurrentFilter);
-  } catch(err) { showToast('error', err.message||'Error al guardar'); }
-}
-
 // funciones auxiliares OC
 function getPODetailExtraFields() {
   var tipo = document.getElementById('pod-tipo')?.value || 'flota';
@@ -10324,13 +10185,6 @@ async function pagarOC(id) {
     closeModal();
     await loadPOList(_poCurrentFilter);
   } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
-// JEFE MANT confirma la recepción — (función movida arriba con lógica completa)
-// Esta era una versión vieja que fue reemplazada. Se deja stub para compatibilidad.
-// Alias de compatibilidad — "cancelar" en el nuevo workflow es "rechazar"
-async function cancelarOC(id, statusActual) {
-  return rechazarOC(id);
 }
 
 /* FIN OC WORKFLOW ACTIONS v2 */
