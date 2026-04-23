@@ -377,7 +377,8 @@ function bootApp() {
   // Cargar datos iniciales desde la API
   loadInitialData().then(() => {
     if      (u.role === 'chofer')             navigate('chofer_panel');
-    else if (u.role === 'contador')           navigate('contador_panel');
+    // Contador ahora arranca en 'costs' (unificado con el antiguo panel contable)
+    else if (u.role === 'contador')           navigate('costs');
     else if (u.role === 'auditor')            navigate('auditor_panel');
     else if (u.role === 'compras')            navigate('purchase_orders');
     else if (u.role === 'tesoreria')          navigate('purchase_orders');
