@@ -450,6 +450,11 @@ function renderDashboard() {
         <div id="dash-activity"></div>
       </div>
     </div>
+
+    <!-- ═══ ACTIVIDAD DEL DÍA (fusionado desde el antiguo "Operativo del día") ═══ -->
+    <div style="margin-top:32px;padding-top:24px;border-top:2px solid var(--border)">
+      <div id="dash-daily-activity"></div>
+    </div>
   `;
 
   // ═══ FLEET GRID ═══
@@ -550,6 +555,10 @@ function renderDashboard() {
         </div>
       `).join('')}
     </div>`;
+
+  // ═══ Actividad del día (antiguo panel "Operativo del día") ═══
+  // Se llena asincrónicamente para no bloquear la primera renderización.
+  _renderDailyActivityInto('dash-daily-activity');
 }
 
 // ── FLOTA ──
@@ -5684,19 +5693,27 @@ async function saveChoferChecklist(myVehicle, items) {
 }
 
 // ── PANEL ENCARGADO ──
-async function renderEncargadoPanel() {
-  const el = document.getElementById('page-encargado_panel');
+// ═══════════════════════════════════════════════════════════════════
+//  ACTIVIDAD DEL DÍA (resumen operativo) — helper reutilizable
+//  Usado por:
+//   - renderEncargadoPanel (página encargado_panel, legacy)
+//   - renderDashboard (página principal, al final del dashboard)
+//  Hace el fetch a /api/encargado/resumen y pinta todo dentro del
+//  contenedor que se le pase (por ID).
+// ═══════════════════════════════════════════════════════════════════
+async function _renderDailyActivityInto(containerId) {
+  const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">Cargando resumen del día...</div>`;
+  el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">Cargando actividad del día...</div>`;
 
   try {
-    // Verificar tickets pendientes
-  const tickRes = await apiFetch('/api/fuel/pendientes-verificacion');
-  const tickPendientes = tickRes.ok ? await tickRes.json() : [];
-  if (tickPendientes.length > 0) {
-    showToast('warn', `🧾 ${tickPendientes.length} ticket${tickPendientes.length>1?'s':''} de combustible pendiente${tickPendientes.length>1?'s':''} de verificación`);
-  }
-  const res = await apiFetch('/api/encargado/resumen');
+    // Verificar tickets pendientes (solo dispara un toast, no bloquea)
+    const tickRes = await apiFetch('/api/fuel/pendientes-verificacion');
+    const tickPendientes = tickRes.ok ? await tickRes.json() : [];
+    if (tickPendientes.length > 0) {
+      showToast('warn', `🧾 ${tickPendientes.length} ticket${tickPendientes.length>1?'s':''} de combustible pendiente${tickPendientes.length>1?'s':''} de verificación`);
+    }
+    const res = await apiFetch('/api/encargado/resumen');
     if (!res.ok) throw new Error('Error API');
     const d = await res.json();
 
@@ -5708,7 +5725,7 @@ async function renderEncargadoPanel() {
 
     el.innerHTML = `
       <div style="margin-bottom:20px">
-        <div style="font-size:13px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">${today}</div>
+        <div style="font-size:13px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Actividad · ${today}</div>
       </div>
 
       <!-- KPIs del día -->
@@ -5816,8 +5833,13 @@ async function renderEncargadoPanel() {
       </div>
     `;
   } catch(err) {
-    el.innerHTML = `<div style="color:var(--warn);padding:20px">Error al cargar el resumen: ${err.message}</div>`;
+    el.innerHTML = `<div style="color:var(--warn);padding:20px">Error al cargar la actividad del día: ${err.message}</div>`;
   }
+}
+
+// Compat: página encargado_panel sigue existiendo por si algún link viejo la llama
+async function renderEncargadoPanel() {
+  await _renderDailyActivityInto('page-encargado_panel');
 }
 
 // ── PANEL CONTADOR ──
