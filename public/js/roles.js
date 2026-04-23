@@ -317,7 +317,7 @@ function getRoleData(role) {
     dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel'], canEdit:['all'] },
     gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel'], canEdit:['all'] },
     jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
-    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
+    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Depósito',                 badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
@@ -381,10 +381,12 @@ function bootApp() {
     else if (u.role === 'auditor')            navigate('auditor_panel');
     else if (u.role === 'compras')            navigate('purchase_orders');
     else if (u.role === 'tesoreria')          navigate('purchase_orders');
-    else if (u.role === 'mecanico')           navigate('encargado_panel');
-    else if (u.role === 'jefe_mantenimiento') navigate('encargado_panel');
-    else if (u.role === 'gerencia')           navigate('encargado_panel');
-    else if (u.role === 'dueno')              navigate('encargado_panel');
+    // Los roles que antes iban a 'encargado_panel' ahora van a 'dashboard'
+    // (el panel unificado incluye la actividad del día al final).
+    else if (u.role === 'mecanico')           navigate('dashboard');
+    else if (u.role === 'jefe_mantenimiento') navigate('dashboard');
+    else if (u.role === 'gerencia')           navigate('dashboard');
+    else if (u.role === 'dueno')              navigate('dashboard');
     else                                      navigate('dashboard');
   });
 }
