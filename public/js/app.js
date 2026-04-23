@@ -3900,14 +3900,19 @@ async function saveNewDoc() {
 }
 
 
-function getCostDetail(vehicleCode) {
+function getCostDetail(vehicleCode, mesStr) {
   const v = App.data.vehicles.find(x => x.code === vehicleCode);
   if (!v) return null;
 
-  // ── Período: mes actual ──
-  const now  = new Date();
-  const yr   = now.getFullYear();
-  const mo   = now.getMonth() + 1;
+  // ── Período: mes seleccionado (mesStr 'YYYY-MM') o mes actual si no se pasa ──
+  let yr, mo;
+  if (mesStr && /^\d{4}-\d{2}$/.test(mesStr)) {
+    [yr, mo] = mesStr.split('-').map(Number);
+  } else {
+    const now  = new Date();
+    yr   = now.getFullYear();
+    mo   = now.getMonth() + 1;
+  }
 
   const inMes = d => { const x = new Date(d); return x.getFullYear()===yr && x.getMonth()+1===mo; };
 
@@ -3997,17 +4002,20 @@ function exportCostPDF() {
     return;
   }
 
-  const now = new Date();
-  const yr = now.getFullYear(), mo = now.getMonth()+1;
-  const mesStr = yr+'-'+String(mo).padStart(2,'0');
+  // Usar el mes seleccionado en la vista (o mes actual por default)
+  const mesStr = window._costsMes || (() => {
+    const now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  })();
+  const [yr, mo] = mesStr.split('-').map(Number);
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const mesNombre = meses[mo-1];
 
-  // Recopilar datos
+  // Recopilar datos del mes seleccionado
   const rows = [];
   let totalCombustible = 0, totalPreventivo = 0, totalCorrectivo = 0, totalGeneral = 0, totalKm = 0;
   App.data.vehicles.forEach(v => {
-    const d = getCostDetail(v.code);
+    const d = getCostDetail(v.code, mesStr);
     if (!d || d.totalMes === 0) return;
     const comb = Math.round(d.rubros[0].total);
     const prev = Math.round(d.rubros[1].total);
@@ -4084,10 +4092,28 @@ function exportCostPDF() {
 function exportCostCSV() { exportCostPDF(); }
 
 function renderCosts() {
-  // Calcular costo real de cada vehículo este mes
+  // Inicializar mes seleccionado (persiste entre re-renders)
+  if (!window._costsMes) {
+    const now = new Date();
+    window._costsMes = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  }
+  const mesStr = window._costsMes;
+  const [yr, mo] = mesStr.split('-').map(Number);
+  const mesLabel = new Date(yr, mo-1, 1).toLocaleString('es-AR', { month:'long', year:'numeric' });
+
+  // Opciones del selector: últimos 12 meses
+  const mesOpts = [];
+  for (let i=0; i<12; i++) {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+    const val = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    const lbl = d.toLocaleString('es-AR',{month:'long',year:'numeric'});
+    mesOpts.push(`<option value="${val}" ${val===mesStr?'selected':''}>${lbl.charAt(0).toUpperCase()+lbl.slice(1)}</option>`);
+  }
+
+  // Calcular costo real de cada vehículo del mes seleccionado
   const withCost = App.data.vehicles.map(v => {
-    const d = getCostDetail(v.code);
-    return { ...v, _costReal: d ? d.costKmReal : 0, _totalMes: d ? d.totalMes : 0, _kmMes: d ? d.kmMes : 0 };
+    const d = getCostDetail(v.code, mesStr);
+    return { ...v, _costReal: d ? d.costKmReal : 0, _totalMes: d ? d.totalMes : 0, _kmMes: d ? d.kmMes : 0, _detail: d };
   });
   const sorted = [...withCost].sort((a,b) => b._totalMes - a._totalMes);
   const conDatos = sorted.filter(v => v._costReal > 0);
@@ -4095,34 +4121,64 @@ function renderCosts() {
     ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length).toFixed(3)
     : '—';
 
+  // ═══ TOTALES DEL MES (de Panel contable) ═══
+  const fuelMes = (App.data.fuelLogs||[]).filter(f => {
+    const d = new Date(f.date); return d.getFullYear()===yr && d.getMonth()+1===mo;
+  });
+  const otsMes = (App.data.workOrders||[]).filter(o => {
+    if (o.status !== 'Cerrada') return false;
+    const d = new Date(o.closed_at || o.date); return d.getFullYear()===yr && d.getMonth()+1===mo;
+  });
+  const totalCombustible = fuelMes.reduce((a,f) => a + (f.liters * f.ppu), 0);
+  const totalLitros      = fuelMes.reduce((a,f) => a + f.liters, 0);
+  const totalMano        = otsMes.reduce((a,o) => a + (o.labor_cost||0), 0);
+  const totalRepuestos   = otsMes.reduce((a,o) => a + (o.parts_cost||0), 0);
+  const totalOTs         = totalMano + totalRepuestos;
+  const totalGeneral     = totalCombustible + totalOTs;
+
+  // Litros por vehículo (para la columna nueva)
+  const litrosByVeh = {};
+  fuelMes.forEach(f => { litrosByVeh[f.vehicle] = (litrosByVeh[f.vehicle]||0) + (f.liters||0); });
+
   document.getElementById('page-costs').innerHTML = `
-    <div class="kpi-row" style="margin-bottom:20px">
-      <div class="kpi-card info">
-        <div class="kpi-label">Costo/km promedio flota</div>
-        <div class="kpi-value white">$${avg}</div>
-        <div class="kpi-trend">todas las unidades · mes actual</div>
-      </div>
-      <div class="kpi-card danger">
-        <div class="kpi-label">Unidad más costosa</div>
-        <div class="kpi-value danger">${sorted[0]._totalMes>0 ? '$'+Math.round(sorted[0]._totalMes/1000)+'K' : 'Sin datos'}</div>
-        <div class="kpi-trend" style="cursor:pointer;text-decoration:underline" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code} — clic para ver detalle</div>
-      </div>
-      <div class="kpi-card ok">
-        <div class="kpi-label">Unidad más eficiente</div>
-        <div class="kpi-value ok">${conDatos.length>0 ? '$'+conDatos[conDatos.length-1]._costReal.toFixed(3)+'/km' : '—'}</div>
-        <div class="kpi-trend">${conDatos.length>0 ? conDatos[conDatos.length-1].code+' — '+conDatos[conDatos.length-1].brand : 'Sin datos suficientes'}</div>
-      </div>
-      <div class="kpi-card warn">
-        <div class="kpi-label">Con gasto este mes</div>
-        <div class="kpi-value warn">${conDatos.length}</div>
-        <div class="kpi-trend">unidades con movimiento registrado</div>
+    <!-- Header con selector de mes -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+      <div class="section-title" style="margin:0">💰 Costos operativos — ${mesLabel.charAt(0).toUpperCase()+mesLabel.slice(1)}</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="form-select" style="width:220px" onchange="window._costsMes=this.value;renderCosts()">${mesOpts.join('')}</select>
+        <button class="btn btn-secondary btn-sm" onclick="exportCostPDF()">📄 PDF</button>
       </div>
     </div>
 
+    <!-- KPIs del mes -->
+    <div class="kpi-row" style="margin-bottom:20px">
+      <div class="kpi-card info">
+        <div class="kpi-label">💰 Costo total del mes</div>
+        <div class="kpi-value white">$${Math.round(totalGeneral).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">combustible + mantenimiento</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
+        <div class="kpi-label">⛽ Combustible</div>
+        <div class="kpi-value" style="color:#3b82f6">$${Math.round(totalCombustible).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">${Math.round(totalLitros).toLocaleString()} L · ${fuelMes.length} cargas</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">🔧 Mantenimiento</div>
+        <div class="kpi-value" style="color:#f59e0b">$${Math.round(totalOTs).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">mano $${Math.round(totalMano).toLocaleString()} · rep $${Math.round(totalRepuestos).toLocaleString()}</div>
+      </div>
+      <div class="kpi-card ${parseFloat(avg)>0.22?'warn':'ok'}">
+        <div class="kpi-label">📐 Costo/km promedio</div>
+        <div class="kpi-value white">$${avg}</div>
+        <div class="kpi-trend">${conDatos.length} unidades con movimiento · ${otsMes.length} OTs cerradas</div>
+      </div>
+    </div>
+
+    <!-- Gráfico ranking + detalle lateral -->
     <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-bottom:20px">
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <div class="card-title" style="margin:0">Ranking costo/km — hacé clic para ver el desglose</div>
+          <div class="card-title" style="margin:0">Ranking costo/km — hacé clic en una barra o fila</div>
         </div>
         <div style="position:relative;height:300px">
           <canvas id="costRankChart" role="img" aria-label="Ranking costo por km"></canvas>
@@ -4133,41 +4189,56 @@ function renderCosts() {
         <div style="color:var(--text3);font-size:13px;padding:16px 0">
           Hacé clic en una barra del gráfico o en cualquier fila de la tabla para ver el desglose completo de costos de esa unidad.
         </div>
+        ${sorted[0] && sorted[0]._totalMes>0 ? `
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text3)">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span>Unidad más costosa del mes:</span>
+              <span style="cursor:pointer;text-decoration:underline;color:var(--danger)" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code}</span>
+            </div>
+            ${conDatos.length>0 ? `<div style="display:flex;justify-content:space-between">
+              <span>Más eficiente ($/km):</span>
+              <span style="cursor:pointer;color:var(--ok)">${conDatos[conDatos.length-1].code} · $${conDatos[conDatos.length-1]._costReal.toFixed(3)}</span>
+            </div>` : ''}
+          </div>
+        ` : ''}
       </div>
     </div>
 
+    <!-- Tabla detalle por unidad -->
     <div class="section-header">
-      <div><div class="section-title">Detalle por unidad — clic en una fila para el desglose completo</div></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary btn-sm" onclick="exportCostPDF()">📄 Exportar PDF</button>
-      </div>
+      <div><div class="section-title">Desglose por unidad — clic en una fila para el detalle</div></div>
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
         <table id="costs-table">
           <thead><tr>
-            <th>Código</th><th>Marca / Modelo</th><th>Km mes</th>
+            <th>Código</th><th>Marca / Modelo</th><th>Km</th><th>Litros</th>
             <th style="color:#3b82f6">Combustible</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
-            <th>Total mes</th><th>$/km</th><th>Eval.</th><th></th>
+            <th>Total</th><th>$/km</th><th>% mes</th><th>Eval.</th><th></th>
           </tr></thead>
-          <tbody>${sorted.slice(0,20).map(v=>{
-            const d = getCostDetail(v.code);
+          <tbody>${sorted.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
+            const d = v._detail;
             if (!d || d.totalMes === 0) return '';
             const ck = d.costKmReal;
             const ev = ck>0.25?['danger','Alto']:ck>0.20?['warn','Revisar']:['ok','Eficiente'];
+            const litros = litrosByVeh[v.code] || 0;
+            const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
             return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${v.code}</td>
-              <td>${v.brand} ${v.model}</td>
+              <td>${v.brand || ''} ${v.model || ''}</td>
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toFixed(3):'—'}</td>
+              <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
-              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Desglose</button></td>
+              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Ver</button></td>
             </tr>`;
           }).join('')}
+          ${sorted.filter(v => v._totalMes > 0).length === 0 ? '<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text3)">Sin movimientos registrados en este mes</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -5842,143 +5913,23 @@ async function renderEncargadoPanel() {
   await _renderDailyActivityInto('page-encargado_panel');
 }
 
-// ── PANEL CONTADOR ──
+// ── PANEL CONTADOR (legacy, fusionado con Costos operativos) ──
+// La página se mantiene por compat — si algún link viejo navega a contador_panel,
+// lo redirigimos a la página Costos (que ahora incluye selector de mes + KPIs contables).
 function renderContadorPanel() {
-  if (!window._contadorMes) {
-    const now = new Date();
-    window._contadorMes = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  // Sincronizar mes seleccionado entre las dos variables (por si alguien venía del contador)
+  if (window._contadorMes && !window._costsMes) {
+    window._costsMes = window._contadorMes;
   }
-  _buildContadorPanel(window._contadorMes);
+  // Redirigir a la página unificada
+  navigate('costs');
 }
 
+// _buildContadorPanel queda definido más abajo solo por si algún código legacy lo llama directamente.
 function _buildContadorPanel(mesStr) {
+  window._costsMes = mesStr;
   window._contadorMes = mesStr;
-  const [yr, mo] = mesStr.split('-').map(Number);
-  const mesLabel = new Date(yr, mo-1, 1).toLocaleString('es-AR', { month:'long', year:'numeric' });
-
-  const fuelMes = App.data.fuelLogs.filter(f => {
-    const d = new Date(f.date); return d.getFullYear()===yr && d.getMonth()+1===mo;
-  });
-  const otsMes = App.data.workOrders.filter(o => {
-    if (o.status !== 'Cerrada') return false;
-    const d = new Date(o.closed_at || o.date); return d.getFullYear()===yr && d.getMonth()+1===mo;
-  });
-
-  const totalCombustible = fuelMes.reduce((a,f) => a + (f.liters * f.ppu), 0);
-  const totalLitros      = fuelMes.reduce((a,f) => a + f.liters, 0);
-  const totalOTs         = otsMes.reduce((a,o) => a + ((o.labor_cost||0) + (o.parts_cost||0)), 0);
-  const totalMano        = otsMes.reduce((a,o) => a + (o.labor_cost||0), 0);
-  const totalRepuestos   = otsMes.reduce((a,o) => a + (o.parts_cost||0), 0);
-  const totalGeneral     = totalCombustible + totalOTs;
-
-  const byVeh = {};
-  App.data.vehicles.forEach(v => {
-    byVeh[v.code] = { code:v.code, brand:v.brand, model:v.model, combustible:0, litros:0, mano:0, repuestos:0, ots:0 };
-  });
-  fuelMes.forEach(f => {
-    if (!byVeh[f.vehicle]) byVeh[f.vehicle] = { code:f.vehicle, brand:'—', model:'', combustible:0, litros:0, mano:0, repuestos:0, ots:0 };
-    byVeh[f.vehicle].combustible += f.liters * f.ppu;
-    byVeh[f.vehicle].litros      += f.liters;
-  });
-  otsMes.forEach(o => {
-    const vc = o.vehicle_code || o.vehicle || '';
-    if (!byVeh[vc]) byVeh[vc] = { code:vc, brand:'—', model:'', combustible:0, litros:0, mano:0, repuestos:0, ots:0 };
-    byVeh[vc].mano      += o.labor_cost || 0;
-    byVeh[vc].repuestos += o.parts_cost || 0;
-    byVeh[vc].ots++;
-  });
-  const rows = Object.values(byVeh)
-    .map(v => ({ ...v, total: v.combustible + v.mano + v.repuestos }))
-    .filter(v => v.total > 0)
-    .sort((a,b) => b.total - a.total);
-
-  const meses = [];
-  for (let i=0; i<12; i++) {
-    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
-    const val = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-    const lbl = d.toLocaleString('es-AR',{month:'long',year:'numeric'});
-    meses.push(`<option value="${val}" ${val===mesStr?'selected':''}>${lbl.charAt(0).toUpperCase()+lbl.slice(1)}</option>`);
-  }
-
-  const rowsHTML = rows.map(v => {
-    const pct = totalGeneral > 0 ? (v.total/totalGeneral*100).toFixed(1) : 0;
-    return `<tr>
-      <td class="td-mono td-main">${v.code}</td>
-      <td>${v.brand} ${v.model}</td>
-      <td class="td-mono" style="color:#3b82f6">${v.combustible>0?'$'+Math.round(v.combustible).toLocaleString('es-AR'):'—'}</td>
-      <td class="td-mono" style="color:#3b82f6">${v.litros>0?Math.round(v.litros).toLocaleString()+' L':'—'}</td>
-      <td class="td-mono" style="color:#f59e0b">${v.mano>0?'$'+Math.round(v.mano).toLocaleString('es-AR'):'—'}</td>
-      <td class="td-mono" style="color:#f59e0b">${v.repuestos>0?'$'+Math.round(v.repuestos).toLocaleString('es-AR'):'—'}</td>
-      <td class="td-mono">${v.ots||'—'}</td>
-      <td class="td-mono" style="font-weight:700">$${Math.round(v.total).toLocaleString('es-AR')}</td>
-      <td><div style="display:flex;align-items:center;gap:8px">
-        <div style="width:60px;height:6px;background:var(--border2);border-radius:3px">
-          <div style="width:${Math.min(pct,100)}%;height:100%;background:var(--accent);border-radius:3px"></div>
-        </div>
-        <span style="font-size:12px;color:var(--text3)">${pct}%</span>
-      </div></td>
-    </tr>`;
-  }).join('');
-
-  const emptyMsg = '<div style="padding:32px;text-align:center;color:var(--text3)">Sin movimientos registrados en este mes</div>';
-
-  document.getElementById('page-contador_panel').innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
-      <div class="section-title" style="margin:0">📊 Panel contable — ${mesLabel.charAt(0).toUpperCase()+mesLabel.slice(1)}</div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <select class="form-select" style="width:220px" onchange="_buildContadorPanel(this.value)">${meses.join('')}</select>
-        <button class="btn btn-secondary btn-sm" onclick="_exportContadorPDF('${mesStr}')">📄 Exportar PDF</button>
-      </div>
-    </div>
-    <div class="kpi-row" style="margin-bottom:20px">
-      <div class="kpi-card info">
-        <div class="kpi-label">💰 Costo total del mes</div>
-        <div class="kpi-value white">$${Math.round(totalGeneral).toLocaleString('es-AR')}</div>
-        <div class="kpi-trend">combustible + mantenimiento</div>
-      </div>
-      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
-        <div class="kpi-label">⛽ Combustible</div>
-        <div class="kpi-value" style="color:#3b82f6">$${Math.round(totalCombustible).toLocaleString('es-AR')}</div>
-        <div class="kpi-trend">${Math.round(totalLitros).toLocaleString()} L · ${fuelMes.length} cargas</div>
-      </div>
-      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
-        <div class="kpi-label">🔧 Mantenimiento</div>
-        <div class="kpi-value" style="color:#f59e0b">$${Math.round(totalOTs).toLocaleString('es-AR')}</div>
-        <div class="kpi-trend">mano $${Math.round(totalMano).toLocaleString()} · repuestos $${Math.round(totalRepuestos).toLocaleString()}</div>
-      </div>
-      <div class="kpi-card" style="border-color:rgba(168,85,247,.4)">
-        <div class="kpi-label">📋 OTs cerradas</div>
-        <div class="kpi-value" style="color:#a855f7">${otsMes.length}</div>
-        <div class="kpi-trend">${rows.length} unidades con movimiento</div>
-      </div>
-    </div>
-    <div class="card" style="padding:0">
-      <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2)">
-        <div class="card-title" style="margin:0">Desglose por unidad</div>
-      </div>
-      ${rows.length === 0 ? emptyMsg : `
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th>Unidad</th><th>Marca / Modelo</th>
-            <th style="color:#3b82f6">Combustible</th><th style="color:#3b82f6">Litros</th>
-            <th style="color:#f59e0b">Mano obra</th><th style="color:#f59e0b">Repuestos</th>
-            <th>OTs</th><th>Total</th><th>% del mes</th>
-          </tr></thead>
-          <tbody>${rowsHTML}</tbody>
-          <tfoot><tr style="font-weight:700;border-top:2px solid var(--border2)">
-            <td colspan="2" style="padding:12px 16px">TOTAL</td>
-            <td class="td-mono" style="color:#3b82f6">$${Math.round(totalCombustible).toLocaleString('es-AR')}</td>
-            <td class="td-mono" style="color:#3b82f6">${Math.round(totalLitros).toLocaleString()} L</td>
-            <td class="td-mono" style="color:#f59e0b">$${Math.round(totalMano).toLocaleString('es-AR')}</td>
-            <td class="td-mono" style="color:#f59e0b">$${Math.round(totalRepuestos).toLocaleString('es-AR')}</td>
-            <td class="td-mono">${otsMes.length}</td>
-            <td class="td-mono" style="font-weight:700">$${Math.round(totalGeneral).toLocaleString('es-AR')}</td>
-            <td></td>
-          </tr></tfoot>
-        </table>
-      </div>`}
-    </div>`;
+  navigate('costs');
 }
 
 function _exportContadorPDF(mesStr) {
