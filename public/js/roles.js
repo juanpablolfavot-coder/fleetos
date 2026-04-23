@@ -531,6 +531,26 @@ function _mapStockItem(s) {
   };
 }
 
+// Movimientos del pañol — formato esperado por renderStock (app.js:3137)
+// Backend devuelve: sm.*, si.item_name, si.unit, u.user_name
+// Render espera:    { date, name, type, qty, unit, motivo, user }
+function _mapStockMovement(m) {
+  const d = m.created_at ? new Date(m.created_at) : null;
+  const dateStr = d
+    ? d.toISOString().slice(0,16).replace('T',' ')
+    : '—';
+  return {
+    id:     m.id,
+    date:   dateStr,
+    name:   m.item_name || '[ítem eliminado]',
+    type:   m.type || 'Movimiento',
+    qty:    parseFloat(m.qty) || 0,
+    unit:   m.unit || 'un',
+    motivo: m.reason || '—',
+    user:   m.user_name || '—',
+  };
+}
+
 function _mapDocument(d) {
   const days = Math.ceil((new Date(d.expiry_date) - new Date()) / 86400000);
   const isUser = d.entity_type === 'user';
@@ -574,7 +594,7 @@ async function loadInitialData() {
     const canLoadUsers = ['dueno','gerencia'].includes(App.currentUser?.role);
     const usersFetch   = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -587,6 +607,7 @@ async function loadInitialData() {
       apiFetch('/api/tires/history'),
       apiFetch('/api/suppliers'),
       apiFetch('/api/assets'),
+      apiFetch('/api/stock/movements?limit=50'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -627,6 +648,14 @@ async function loadInitialData() {
 
     if (assetsRes?.ok)      App.data.assets      = await assetsRes.json();
     else App.data.assets = App.data.assets || [];
+
+    // Historial de movimientos del pañol (Ingreso/Egreso/Ajuste/Baja)
+    if (stockHistRes?.ok) {
+      const rawHist = await stockHistRes.json();
+      App.data.stockHistory = rawHist.map(_mapStockMovement);
+    } else {
+      App.data.stockHistory = App.data.stockHistory || [];
+    }
 
     // Alias usado por algunos renders
     App.data.fuel = App.data.fuelLogs;
