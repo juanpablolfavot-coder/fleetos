@@ -2512,9 +2512,9 @@ function renderTires() {
             <td>${t.brand}</td>
             <td class="td-mono">${t.size}</td>
             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
-            <td class="td-mono" style="color:var(--ok)">${(t.depth||0)}/${(t.maxDepth||0)}mm</td>
+            <td class="td-mono" style="color:var(--ok)">${(t.tread||0)}/20mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
-            <td class="td-mono">$${(t.purchase||0).toLocaleString()}</td>
+            <td class="td-mono">$${(t.price||0).toLocaleString()}</td>
             <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
           </tbody>
@@ -2648,7 +2648,7 @@ function renderTireMapDnD(vehicleCode, config) {
           onclick="openTireDetail('${t.serial}')"
           style="background:${bg};border-color:${bc};cursor:grab"
           title="${t.serial} · ${t.brand} · Clic: detalle · Arrastrar: cambiar posición">
-          <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:${c}">${t.depth}mm</span>
+          <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:${c}">${t.tread||0}mm</span>
           <span style="font-size:8px;font-family:var(--mono);color:${c};text-align:center;line-height:1.3;word-break:break-all">${t.serial}</span>
           <span style="font-size:9px;font-family:var(--mono);background:rgba(0,0,0,.2);padding:1px 4px;border-radius:3px;color:${c}">${pos}</span>
         </div>`;
@@ -2759,7 +2759,7 @@ function renderTireTableBody(vehicleCode) {
     <td class="td-mono">${t.pos}</td>
     <td style="font-size:12px">${t.brand.split(' ')[0]} ${t.brand.split(' ')[1]||''}</td>
     <td class="td-mono">${(t.km||0).toLocaleString()}</td>
-    <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.depth}/${t.maxDepth}mm</td>
+    <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.tread||0}/20mm</td>
     <td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td>
     <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Ver</button></td>
   </tr>`).join('');
@@ -2813,7 +2813,7 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
         <label class="form-label">Cubierta a montar</label>
         <select class="form-select" id="ms-serial">
           ${stock.length
-            ? stock.map(t=>`<option value="${t.serial}" ${t.serial===serial?'selected':''}>${t.serial} · ${t.brand} · ${t.km===0?'Nueva':'Usada '+(t.km||0).toLocaleString()+'km'} · ${t.depth}mm dibujo</option>`).join('')
+            ? stock.map(t=>`<option value="${t.serial}" ${t.serial===serial?'selected':''}>${t.serial} · ${t.brand} · ${t.km===0?'Nueva':'Usada '+(t.km||0).toLocaleString()+'km'} · ${t.tread||0}mm dibujo</option>`).join('')
             : '<option value="">— Sin cubiertas en stock —</option>'
           }
         </select>
@@ -2959,14 +2959,19 @@ function openTireDetail(serial) {
   const t = App.data.tires.find(x=>x.serial===serial);
   if (!t) return;
   const hist     = App.data.tireHistory.filter(h=>h.serial===serial);
-  const depthPct = Math.round((t.depth / t.maxDepth) * 100);
-  const cpkm     = t.km > 0 ? ((t.purchase||0) / t.km).toFixed(2) : '—';
+  // Profundidad típica de un neumático nuevo de camión: 20mm
+  const MAX_DEPTH = 20;
+  const tread    = parseFloat(t.tread) || 0;
+  const km       = parseFloat(t.km) || 0;
+  const price    = parseFloat(t.price) || 0;
+  const depthPct = Math.min(100, Math.round((tread / MAX_DEPTH) * 100));
+  const cpkm     = km > 0 && price > 0 ? (price / km).toFixed(2) : '—';
 
   openModal('Cubierta — ' + serial, `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
       <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);text-align:center">
         <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Dibujo</div>
-        <div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.depth}mm</div>
+        <div style="font-size:26px;font-weight:700;font-family:var(--mono);color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${tread}mm</div>
         <div style="font-size:10px;color:var(--text3)">prof. actual</div>
         <div style="height:4px;background:var(--bg4);border-radius:2px;margin-top:5px;overflow:hidden">
           <div style="height:4px;width:${depthPct}%;background:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'});border-radius:2px"></div>
@@ -2974,22 +2979,22 @@ function openTireDetail(serial) {
       </div>
       <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);text-align:center">
         <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Km acumulados</div>
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${(t.purchase||0).toLocaleString()}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${km.toLocaleString()}</div>
         <div style="font-size:10px;color:var(--text3)">km totales</div>
       </div>
       <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);text-align:center">
         <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;margin-bottom:4px">Costo/km</div>
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">$${cpkm}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${cpkm==='—'?'—':'$'+cpkm}</div>
         <div style="font-size:10px;color:var(--text3)">costo acumulado</div>
       </div>
     </div>
 
     <table style="width:100%;font-size:13px;margin-bottom:16px">
-      <tr><td style="color:var(--text3);padding:5px 0;width:38%">Marca / Modelo</td><td style="font-weight:500">${t.brand}</td></tr>
-      <tr><td style="color:var(--text3);padding:5px 0">Medida</td><td class="td-mono">${t.size}</td></tr>
-      <tr><td style="color:var(--text3);padding:5px 0">Posición actual</td><td class="td-mono" style="color:var(--accent)">${t.pos} · ${t.vehicle}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0;width:38%">Marca / Modelo</td><td style="font-weight:500">${t.brand || '—'}${t.model ? ' ' + t.model : ''}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0">Medida</td><td class="td-mono">${t.size || '—'}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0">Posición actual</td><td class="td-mono" style="color:var(--accent)">${t.pos || '—'} · ${t.vehicle || '—'}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Estado</td><td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td></tr>
-      <tr><td style="color:var(--text3);padding:5px 0">Precio compra</td><td class="td-mono">$${(t.purchase||0).toLocaleString()}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0">Precio compra</td><td class="td-mono">$${price.toLocaleString()}</td></tr>
     </table>
 
     <div style="font-size:11px;font-weight:500;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">
@@ -3006,8 +3011,8 @@ function openTireDetail(serial) {
               <td style="padding:6px 8px;font-family:var(--mono);color:var(--text3)">${h.fromPos}</td>
               <td style="padding:6px 8px;font-family:var(--mono);color:var(--accent)">→ ${h.toPos}</td>
               <td style="padding:6px 8px"><span class="badge ${h.type.includes('Rotación')?'badge-info':h.type==='Montaje'?'badge-ok':'badge-gray'}">${h.type}</span></td>
-              <td style="padding:6px 8px;font-family:var(--mono)">${h.km.toLocaleString()}</td>
-              <td style="padding:6px 8px;color:var(--text3);font-size:11px">${h.obs}</td>
+              <td style="padding:6px 8px;font-family:var(--mono)">${(h.km||0).toLocaleString()}</td>
+              <td style="padding:6px 8px;color:var(--text3);font-size:11px">${h.obs||''}</td>
             </tr>`).join('')}</tbody>
           </table>`
         : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Sin movimientos previos registrados.</div>'
@@ -3017,7 +3022,7 @@ function openTireDetail(serial) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="form-group" style="margin:0">
         <label class="form-label">Actualizar profundidad (mm)</label>
-        <input class="form-input" type="number" id="td-depth" value="${t.depth||0}" min="0" max="${t.maxDepth||20}">
+        <input class="form-input" type="number" id="td-depth" value="${tread}" min="0" max="${MAX_DEPTH}">
       </div>
       <div class="form-group" style="margin:0">
         <label class="form-label">Acción</label>
@@ -3058,14 +3063,14 @@ async function saveTireAction(serial) {
       body: JSON.stringify({ depth_mm: depth, notes: obs })
     });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al actualizar profundidad'); return; }
-    // Actualizar los campos que usa el render
+    // Actualizar el campo real del mapper (t.tread) más alias por compat
+    t.tread = depth;
     t.depth = depth;
     t.depth_mm = depth;
-    // Recalcular status según el porcentaje de desgaste
-    if (t.maxDepth && t.maxDepth > 0) {
-      const pct = (depth / t.maxDepth) * 100;
-      t.status = pct < 25 ? 'danger' : (pct < 50 ? 'warn' : 'ok');
-    }
+    // Recalcular status según el porcentaje de desgaste (neumático nuevo ≈ 20mm)
+    const MAX_DEPTH = 20;
+    const pct = (depth / MAX_DEPTH) * 100;
+    t.status = pct < 25 ? 'danger' : (pct < 50 ? 'warn' : 'ok');
     closeModal();
     showToast('ok', `${serial}: profundidad actualizada a ${depth}mm`);
     // Recargar todos los datos del sistema para reflejar cambios en todas las vistas
