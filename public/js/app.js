@@ -36,6 +36,87 @@ window.nowDatetimeLocal = nowDatetimeLocal;
 window.nowTimeAR = nowTimeAR;
 window.nowDateAR = nowDateAR;
 
+// ═══════════════════════════════════════════════════════════
+//  BRANDING PDF — Identidad visual Expreso Biletta
+//  Colores y tipografía oficial usados por TODOS los exportadores.
+//  Cambiar acá se refleja en los 10 PDFs del sistema.
+// ═══════════════════════════════════════════════════════════
+const BILETTA_BRAND = {
+  // Naranja corporativo (logo EB)
+  orange:      [229, 90, 17],   // #E55A11
+  orangeSoft:  [252, 232, 218], // versión clara para fondos alternos
+  // Gris oscuro del texto principal
+  dark:        [39, 42, 57],    // #272A39
+  darkSoft:    [100, 105, 120], // gris medio para subtítulos
+  // Neutros
+  white:       [255, 255, 255],
+  rowAlt:      [250, 248, 246], // crema muy sutil para filas alternas
+};
+
+// Dibuja el logo "EB" naranja + "Expreso Biletta" en un doc jsPDF
+// x, y = esquina superior izquierda del logo. Devuelve la Y final para seguir abajo.
+function _pdfDrawLogo(doc, x, y) {
+  const O = BILETTA_BRAND.orange;
+  const D = BILETTA_BRAND.dark;
+  // Cuadrado naranja con "EB"
+  doc.setFillColor(O[0], O[1], O[2]);
+  doc.roundedRect(x, y, 32, 32, 5, 5, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('EB', x + 16, y + 21, { align: 'center' });
+  // Texto "Expreso Biletta" al lado
+  doc.setTextColor(D[0], D[1], D[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('Expreso Biletta', x + 42, y + 14);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 105, 120);
+  doc.text('Sistema de gestión de flota', x + 42, y + 25);
+  return y + 32;
+}
+
+// Header estándar de cada PDF exportable: logo + título + subtítulo + fecha generación.
+// Devuelve la Y donde puede empezar el contenido siguiente (típicamente autoTable).
+function _pdfHeader(doc, titulo, subtitulo) {
+  const D = BILETTA_BRAND.dark;
+  const O = BILETTA_BRAND.orange;
+  // Logo arriba a la izquierda
+  _pdfDrawLogo(doc, 40, 30);
+  // Título centrado-derecha
+  doc.setTextColor(D[0], D[1], D[2]);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(titulo, doc.internal.pageSize.getWidth() - 40, 48, { align: 'right' });
+  // Subtítulo
+  if (subtitulo) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(100, 105, 120);
+    doc.text(subtitulo, doc.internal.pageSize.getWidth() - 40, 62, { align: 'right' });
+  }
+  // Fecha de generación
+  doc.setFontSize(8);
+  doc.setTextColor(140, 145, 160);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, doc.internal.pageSize.getWidth() - 40, 76, { align: 'right' });
+  // Línea divisoria naranja
+  doc.setDrawColor(O[0], O[1], O[2]);
+  doc.setLineWidth(1.5);
+  doc.line(40, 90, doc.internal.pageSize.getWidth() - 40, 90);
+  return 110; // Y donde empezar el contenido
+}
+
+// Estilo común de autoTable usado por todos los exportadores
+function _pdfTableStyle() {
+  return {
+    styles: { fontSize: 8, cellPadding: 4, textColor: BILETTA_BRAND.dark, lineColor: [230, 230, 230] },
+    headStyles: { fillColor: BILETTA_BRAND.dark, textColor: 255, fontStyle: 'bold', fontSize: 9 },
+    alternateRowStyles: { fillColor: BILETTA_BRAND.rowAlt },
+    footStyles: { fillColor: BILETTA_BRAND.orange, textColor: 255, fontStyle: 'bold', fontSize: 9 },
+  };
+}
+
 // ── ESTADO GLOBAL ──
 const App = {
   currentPage: 'dashboard',
@@ -1636,12 +1717,12 @@ async function printOT(id) {
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; background: #fff; padding: 32px; }
-      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 3px solid #1e3a8a; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 3px solid #E55A11; }
       .logo-wrap { display: flex; align-items: center; gap: 14px; }
-      .logo-square { width: 52px; height: 52px; background: #1e3a8a; color: #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; letter-spacing: 1px; }
+      .logo-square { width: 52px; height: 52px; background: #E55A11; color: #fff; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 20px; letter-spacing: .5px; }
       .empresa { font-size: 20px; font-weight: 700; color: #111; }
       .empresa-sub { font-size: 11px; color: #6b7280; margin-top: 2px; }
-      .ot-id { font-size: 22px; font-weight: 700; font-family: monospace; color: #1e3a8a; text-align: right; }
+      .ot-id { font-size: 22px; font-weight: 700; font-family: monospace; color: #E55A11; text-align: right; }
       .ot-date { font-size: 11px; color: #6b7280; text-align: right; margin-top: 4px; }
       .status-bar { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 6px; }
       .status-cerrada { background: #dcfce7; color: #166534; }
@@ -1649,19 +1730,19 @@ async function printOT(id) {
       .status-pendiente { background: #fef3c7; color: #92400e; }
       .status-other { background: #f3f4f6; color: #374151; }
       .section { margin-bottom: 22px; }
-      .section-title { font-size: 11px; font-weight: 700; color: #1e3a8a; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+      .section-title { font-size: 11px; font-weight: 700; color: #E55A11; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
       .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
       .field { margin-bottom: 8px; }
       .field-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 2px; }
       .field-value { font-size: 13px; font-weight: 500; color: #111; }
-      .desc-box { background: #f9fafb; border-left: 3px solid #1e3a8a; padding: 12px; font-size: 13px; line-height: 1.6; color: #374151; border-radius: 4px; }
+      .desc-box { background: #f9fafb; border-left: 3px solid #E55A11; padding: 12px; font-size: 13px; line-height: 1.6; color: #374151; border-radius: 4px; }
       table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
       thead tr { background: #eff6ff; }
-      th { text-align: left; padding: 8px; border-bottom: 2px solid #1e3a8a; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #1e3a8a; font-weight: 700; }
+      th { text-align: left; padding: 8px; border-bottom: 2px solid #E55A11; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #E55A11; font-weight: 700; }
       td { padding: 7px 8px; border-bottom: 1px solid #f3f4f6; }
       .total-row { background: #f9fafb; }
       .total-row td { padding: 8px; font-weight: 700; border-top: 2px solid #111; }
-      .grand-total-row td { background: #1e3a8a; color: #fff; font-size: 15px; padding: 10px 8px; }
+      .grand-total-row td { background: #E55A11; color: #fff; font-size: 15px; padding: 10px 8px; }
       .firma-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 32px; margin-top: 40px; }
       .firma-box { border-top: 1px solid #111; padding-top: 8px; font-size: 11px; color: #6b7280; text-align: center; }
       .badge-stock { background: #dcfce7; color: #166534; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
@@ -1679,7 +1760,7 @@ async function printOT(id) {
 
     <div class="header">
       <div class="logo-wrap">
-        <div class="logo-square">B</div>
+        <div class="logo-square">EB</div>
         <div>
           <div class="empresa">Expreso Biletta S.A.</div>
           <div class="empresa-sub">Sistema de gestión de flota y taller</div>
@@ -3937,25 +4018,14 @@ function exportCostPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  // Encabezado
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Costos Operativos — Expreso Biletta', 40, 40);
-  doc.setFontSize(10);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`, 40, 58);
-  doc.setFontSize(8);
-  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+  const startY = _pdfHeader(doc, 'Costos Operativos', `Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`);
 
   // Tabla principal
   doc.autoTable({
-    startY: 90,
+    startY: startY,
     head: [['Unidad','Marca/Modelo','Km mes','Combustible','Preventivo','Correctivo','Total mes','$/km real']],
     body: rows,
-    styles: { fontSize: 9, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 60, fontStyle: 'bold' },
       1: { cellWidth: 130 },
@@ -3972,7 +4042,7 @@ function exportCostPDF() {
   const finalY = doc.lastAutoTable.finalY || 100;
   doc.setFontSize(11);
   doc.setFont('helvetica','bold');
-  doc.setTextColor(0);
+  doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
   doc.text(`TOTALES DEL MES:`, 40, finalY + 25);
   doc.setFontSize(10);
   doc.setFont('helvetica','normal');
@@ -3981,14 +4051,14 @@ function exportCostPDF() {
   doc.text(`Preventivo: $${totalPreventivo.toLocaleString('es-AR')}`, 340, finalY + 42);
   doc.text(`Correctivo: $${totalCorrectivo.toLocaleString('es-AR')}`, 490, finalY + 42);
   doc.setFont('helvetica','bold');
-  doc.setTextColor(37, 99, 235);
+  doc.setTextColor(BILETTA_BRAND.orange[0], BILETTA_BRAND.orange[1], BILETTA_BRAND.orange[2]);
   doc.setFontSize(12);
   doc.text(`TOTAL GENERAL: $${totalGeneral.toLocaleString('es-AR')}`, 40, finalY + 65);
 
   if (totalKm > 0) {
     doc.setFontSize(9);
     doc.setFont('helvetica','normal');
-    doc.setTextColor(100);
+    doc.setTextColor(100, 105, 120);
     doc.text(`Costo promedio de la flota: $${(totalGeneral/totalKm).toFixed(3)} / km`, 40, finalY + 82);
   }
 
@@ -5318,15 +5388,7 @@ function _otExportPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  // Encabezado
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Órdenes de Trabajo — Expreso Biletta', 40, 40);
-  doc.setFontSize(9);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  const hoy = new Date().toLocaleString('es-AR');
-  doc.text(`Generado: ${hoy}  ·  ${rows.length} OT${rows.length===1?'':'s'}`, 40, 58);
+  const startY = _pdfHeader(doc, 'Órdenes de Trabajo', `${rows.length} OT${rows.length===1?'':'s'}`);
 
   // Tabla
   const tableData = rows.map(o => [
@@ -5343,12 +5405,10 @@ function _otExportPDF() {
   ]);
 
   doc.autoTable({
-    startY: 72,
+    startY: startY,
     head: [['ID','Veh','Patente','Tipo','Descripción','Mecánico','Estado','Prioridad','Costo','Apertura']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 50, fontStyle: 'bold' },
       1: { cellWidth: 60 },
@@ -5364,6 +5424,7 @@ function _otExportPDF() {
   const finalY = doc.lastAutoTable.finalY || 90;
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
+  doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
   doc.text(`TOTAL VISIBLE: $${Math.round(totalCost).toLocaleString('es-AR')}`, 40, finalY + 20);
 
   const fileDate = todayISO();
@@ -5947,25 +6008,14 @@ function _exportContadorPDF(mesStr) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  // Encabezado
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Panel Contable — Expreso Biletta', 40, 40);
-  doc.setFontSize(10);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`, 40, 58);
-  doc.setFontSize(8);
-  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+  const startY = _pdfHeader(doc, 'Panel Contable', `Período: ${mesNombre} ${yr}  ·  ${rows.length} unidades con movimientos`);
 
   // Tabla
   doc.autoTable({
-    startY: 90,
+    startY: startY,
     head: [['Unidad','Combustible','Litros','Mano de obra','Repuestos','OTs','Total']],
     body: rows,
-    styles: { fontSize: 9, cellPadding: 5 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { fontStyle: 'bold', cellWidth: 70 },
       1: { halign: 'right', cellWidth: 100 },
@@ -5984,7 +6034,6 @@ function _exportContadorPDF(mesStr) {
       String(tOts),
       '$'+Math.round(tTotal).toLocaleString('es-AR'),
     ]],
-    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'right' },
   });
 
   doc.save(`Contable-Biletta-${mesStr}.pdf`);
@@ -8118,13 +8167,7 @@ function _poExportPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Órdenes de Compra — Expreso Biletta', 40, 40);
-  doc.setFontSize(9);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`Generado: ${new Date().toLocaleString('es-AR')}  ·  ${rows.length} OC${rows.length===1?'':'s'}`, 40, 58);
+  const startY = _pdfHeader(doc, 'Órdenes de Compra', `${rows.length} OC${rows.length===1?'':'s'}`);
 
   const statusLabels = {
     pendiente_cotizacion: 'Pendiente cotización',
@@ -8147,12 +8190,10 @@ function _poExportPDF() {
   ]);
 
   doc.autoTable({
-    startY: 72,
+    startY: startY,
     head: [['Código','Estado','Sucursal','Área','Solicitante','Proveedor','Factura','Total','Fecha']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 70, fontStyle: 'bold' },
       7: { halign: 'right', fontStyle: 'bold' },
@@ -8163,6 +8204,7 @@ function _poExportPDF() {
   const finalY = doc.lastAutoTable.finalY || 90;
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
+  doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
   doc.text(`TOTAL VISIBLE: $${Math.round(totalMonto).toLocaleString('es-AR')}`, 40, finalY + 20);
 
   doc.save(`OCs-Biletta-${todayISO()}.pdf`);
@@ -9305,16 +9347,16 @@ async function printPO(id) {
       <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size:13px; color:#111; padding:32px; background:#fff; }
-        .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; padding-bottom:20px; border-bottom:3px solid #1e3a8a; }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px; padding-bottom:20px; border-bottom:3px solid #E55A11; }
         .logo-wrap { display:flex; align-items:center; gap:14px; }
-        .logo-square { width:52px; height:52px; background:#1e3a8a; color:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:18px; letter-spacing:1px; }
+        .logo-square { width:52px; height:52px; background:#E55A11; color:#fff; border-radius:10px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:20px; letter-spacing:.5px; }
         .empresa { font-size:20px; font-weight:700; color:#111; }
         .empresa-sub { font-size:11px; color:#6b7280; margin-top:2px; }
-        .doc-code { font-size:22px; font-weight:700; font-family:monospace; color:#1e3a8a; text-align:right; }
+        .doc-code { font-size:22px; font-weight:700; font-family:monospace; color:#E55A11; text-align:right; }
         .doc-sub { font-size:11px; color:#6b7280; text-align:right; margin-top:4px; }
         .status-pill { display:inline-block; padding:4px 12px; border-radius:20px; font-size:11px; font-weight:700; margin-top:6px; text-transform:uppercase; letter-spacing:.5px; }
         .section { margin-bottom:22px; }
-        .section-title { font-size:11px; font-weight:700; color:#1e3a8a; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
+        .section-title { font-size:11px; font-weight:700; color:#E55A11; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
         .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
         .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
         .field { margin-bottom:8px; }
@@ -9322,19 +9364,19 @@ async function printPO(id) {
         .field-value { font-size:13px; font-weight:500; color:#111; }
         table { width:100%; border-collapse:collapse; font-size:12px; }
         thead tr { background:#eff6ff; }
-        th { text-align:left; padding:8px; border-bottom:2px solid #1e3a8a; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#1e3a8a; font-weight:700; }
+        th { text-align:left; padding:8px; border-bottom:2px solid #E55A11; font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:#E55A11; font-weight:700; }
         td { padding:7px 8px; border-bottom:1px solid #f3f4f6; }
         .total-row td { background:#f9fafb; font-weight:700; }
-        .grand-total td { background:#1e3a8a; color:#fff; font-size:14px; font-weight:700; padding:10px 8px; }
+        .grand-total td { background:#E55A11; color:#fff; font-size:14px; font-weight:700; padding:10px 8px; }
         .firma-section { display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px; margin-top:40px; }
         .firma-box { border-top:1px solid #333; padding-top:8px; text-align:center; font-size:11px; color:#6b7280; }
-        .observ-box { background:#f9fafb; border-left:3px solid #1e3a8a; padding:10px 14px; font-size:12px; border-radius:4px; margin-top:6px; }
+        .observ-box { background:#f9fafb; border-left:3px solid #E55A11; padding:10px 14px; font-size:12px; border-radius:4px; margin-top:6px; }
         @media print { body { padding:16px; } @page { margin:12mm; } }
       </style>
     </head><body>
       <div class="header">
         <div class="logo-wrap">
-          <div class="logo-square">B</div>
+          <div class="logo-square">EB</div>
           <div>
             <div class="empresa">Expreso Biletta S.A.</div>
             <div class="empresa-sub">Sistema de gestión de flota y taller</div>
@@ -10922,10 +10964,7 @@ function _supExportPDF() {
   });
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-  doc.setFontSize(16); doc.setFont('helvetica','bold');
-  doc.text('Proveedores — Expreso Biletta', 40, 40);
-  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(100);
-  doc.text(`Generado: ${new Date().toLocaleString('es-AR')} · ${rows.length} proveedor${rows.length===1?'':'es'}`, 40, 58);
+  const startY = _pdfHeader(doc, 'Proveedores', `${rows.length} proveedor${rows.length===1?'':'es'}`);
   const tableData = rows.map(s => [
     s.name || '—', s.cuit || '—',
     (s.rubros||[]).join(', ') || '—',
@@ -10934,12 +10973,10 @@ function _supExportPDF() {
     s.status || '—',
   ]);
   doc.autoTable({
-    startY: 72,
+    startY: startY,
     head: [['Nombre','CUIT','Rubros','Contacto','Tel','Email','Pago','Estado']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
   });
   doc.save(`Proveedores-Biletta-${todayISO()}.pdf`);
   showToast('ok', 'PDF descargado');
@@ -12160,15 +12197,11 @@ function exportFuelPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Cargas de combustible — Expreso Biletta', 40, 40);
-  doc.setFontSize(10);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`${filtered.length} carga${filtered.length===1?'':'s'}${q?` · Filtro: "${q}"`:''}${typeFilter!=='all'?` · Tipo: ${typeFilter}`:''}`, 40, 58);
-  doc.setFontSize(8);
-  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+  const startY = _pdfHeader(
+    doc,
+    'Cargas de combustible',
+    `${filtered.length} carga${filtered.length===1?'':'s'}${q?` · Filtro: "${q}"`:''}${typeFilter!=='all'?` · Tipo: ${typeFilter}`:''}`
+  );
 
   const totalLitros = filtered.reduce((a,b) => a + (b.liters||0), 0);
   const totalPesos  = filtered.reduce((a,b) => a + (b.total||0), 0);
@@ -12187,12 +12220,10 @@ function exportFuelPDF() {
   ]);
 
   doc.autoTable({
-    startY: 88,
+    startY: startY,
     head: [['Fecha','Unidad','Chofer','Tipo','Litros','Odómetro','Precio/L','Total','Lugar','Estado']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 75 },
       1: { cellWidth: 60, fontStyle: 'bold' },
@@ -12208,7 +12239,6 @@ function exportFuelPDF() {
       '$' + Math.round(totalPesos).toLocaleString('es-AR'),
       '', '',
     ]],
-    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
   });
 
   doc.save(`Combustible-Biletta-${todayISO()}.pdf`);
@@ -12232,15 +12262,7 @@ function exportStockPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Inventario del pañol — Expreso Biletta', 40, 40);
-  doc.setFontSize(10);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`${items.length} ítem${items.length===1?'':'s'}`, 40, 58);
-  doc.setFontSize(8);
-  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+  const startY = _pdfHeader(doc, 'Inventario del pañol', `${items.length} ítem${items.length===1?'':'s'}`);
 
   const totalVal = items.reduce((a,s) => a + (s.qty * s.cost), 0);
   const criticos = items.filter(s => s.qty <= s.min).length;
@@ -12263,12 +12285,10 @@ function exportStockPDF() {
   });
 
   doc.autoTable({
-    startY: 88,
+    startY: startY,
     head: [['Código','Descripción','Categoría','Stock','Mínimo','P. pedido','Costo unit.','Valorización','Proveedor','Estado']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 65, fontStyle: 'bold' },
       3: { halign: 'right' },
@@ -12285,7 +12305,6 @@ function exportStockPDF() {
       '$' + Math.round(totalVal).toLocaleString('es-AR'),
       '', '',
     ]],
-    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
   });
 
   doc.save(`Inventario-Biletta-${todayISO()}.pdf`);
@@ -12303,15 +12322,7 @@ function exportStockHistoryPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  doc.setFontSize(16);
-  doc.setFont('helvetica','bold');
-  doc.text('Movimientos del pañol — Expreso Biletta', 40, 40);
-  doc.setFontSize(10);
-  doc.setFont('helvetica','normal');
-  doc.setTextColor(100);
-  doc.text(`${hist.length} movimiento${hist.length===1?'':'s'}`, 40, 58);
-  doc.setFontSize(8);
-  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+  const startY = _pdfHeader(doc, 'Movimientos del pañol', `${hist.length} movimiento${hist.length===1?'':'s'}`);
 
   // Conteo por tipo para el footer
   const porTipo = hist.reduce((acc, h) => {
@@ -12333,12 +12344,10 @@ function exportStockHistoryPDF() {
   });
 
   doc.autoTable({
-    startY: 88,
+    startY: startY,
     head: [['Fecha','Ítem','Tipo','Cantidad','Motivo','Usuario']],
     body: tableData,
-    styles: { fontSize: 8, cellPadding: 4 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [247, 249, 252] },
+    ..._pdfTableStyle(),
     columnStyles: {
       0: { cellWidth: 90 },
       1: { cellWidth: 160, fontStyle: 'bold' },
@@ -12347,7 +12356,6 @@ function exportStockHistoryPDF() {
       4: { cellWidth: 250 },
     },
     foot: [[ 'TOTAL', hist.length + ' mov.', '', '', resumenTipo || '—', '' ]],
-    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
   });
 
   doc.save(`Movimientos-Panol-Biletta-${todayISO()}.pdf`);
