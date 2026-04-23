@@ -3112,7 +3112,7 @@ function renderStock() {
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
     const bajaBtn = isDueno
-      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal('+s.id+')" title="Solo dueño/gerencia">✕ Baja</button>'
+      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Solo dueño/gerencia">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Solo dueño puede dar de baja">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+s.code+'</td>'
@@ -3126,7 +3126,7 @@ function renderStock() {
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
-      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal('+s.id+')">Egreso</button>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
       +   bajaBtn
       + '</td>'
       + '</tr>';
