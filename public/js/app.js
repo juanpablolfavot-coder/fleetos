@@ -3150,7 +3150,10 @@ function renderStock() {
 
   const histSection = histRows
     ? '<div class="card" style="margin-top:16px">'
-      + '<div class="card-title">Últimos movimientos del pañol</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+      +   '<div class="card-title" style="margin:0">Últimos movimientos del pañol</div>'
+      +   '<button class="btn btn-secondary btn-sm" onclick="exportStockHistoryPDF()">📄 PDF</button>'
+      + '</div>'
       + '<div class="table-wrap"><table>'
       + '<thead><tr><th>Fecha</th><th>Ítem</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Usuario</th></tr></thead>'
       + '<tbody>'+histRows+'</tbody>'
@@ -3183,6 +3186,7 @@ function renderStock() {
     +   '<div><div class="section-title">Inventario de repuestos e insumos</div></div>'
     +   '<div style="display:flex;gap:8px">'
     +   bajaBtnHeader
+    +   '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>'
     +   '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
     +   '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
     +   '</div>'
@@ -12209,6 +12213,145 @@ function exportFuelPDF() {
 
   doc.save(`Combustible-Biletta-${todayISO()}.pdf`);
   showToast('ok', `PDF descargado · ${filtered.length} cargas`);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORTADORES PDF DEL PAÑOL
+//  - exportStockPDF:        inventario completo (stock_items)
+//  - exportStockHistoryPDF: últimos movimientos (stock_movements)
+// ═══════════════════════════════════════════════════════════
+
+function exportStockPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+  const items = App.data.stock || [];
+  if (items.length === 0) { showToast('warn', 'No hay ítems en el pañol'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Inventario del pañol — Expreso Biletta', 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`${items.length} ítem${items.length===1?'':'s'}`, 40, 58);
+  doc.setFontSize(8);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+
+  const totalVal = items.reduce((a,s) => a + (s.qty * s.cost), 0);
+  const criticos = items.filter(s => s.qty <= s.min).length;
+
+  const tableData = items.map(s => {
+    const pct = s.min > 0 ? s.qty / s.min : 999;
+    const estado = pct <= 1 ? 'Crítico' : pct <= 1.5 ? 'Bajo' : 'Normal';
+    return [
+      s.code || '—',
+      s.name || '—',
+      s.cat || 'General',
+      (s.qty || 0).toString() + ' ' + (s.unit || 'un'),
+      (s.min || 0).toString() + ' ' + (s.unit || 'un'),
+      (s.reorder || 0).toString() + ' ' + (s.unit || 'un'),
+      '$' + (s.cost || 0).toLocaleString('es-AR'),
+      '$' + Math.round((s.qty || 0) * (s.cost || 0)).toLocaleString('es-AR'),
+      s.supplier || '—',
+      estado,
+    ];
+  });
+
+  doc.autoTable({
+    startY: 88,
+    head: [['Código','Descripción','Categoría','Stock','Mínimo','P. pedido','Costo unit.','Valorización','Proveedor','Estado']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 65, fontStyle: 'bold' },
+      3: { halign: 'right' },
+      4: { halign: 'right' },
+      5: { halign: 'right' },
+      6: { halign: 'right' },
+      7: { halign: 'right', fontStyle: 'bold' },
+    },
+    foot: [[
+      'TOTALES', '', '',
+      items.length + ' ítems',
+      criticos + ' crít.',
+      '', '',
+      '$' + Math.round(totalVal).toLocaleString('es-AR'),
+      '', '',
+    ]],
+    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+  });
+
+  doc.save(`Inventario-Biletta-${todayISO()}.pdf`);
+  showToast('ok', `PDF descargado · ${items.length} ítems`);
+}
+
+function exportStockHistoryPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast('error','jsPDF no cargado. Refrescá la página.');
+    return;
+  }
+  const hist = App.data.stockHistory || [];
+  if (hist.length === 0) { showToast('warn', 'No hay movimientos registrados'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica','bold');
+  doc.text('Movimientos del pañol — Expreso Biletta', 40, 40);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100);
+  doc.text(`${hist.length} movimiento${hist.length===1?'':'s'}`, 40, 58);
+  doc.setFontSize(8);
+  doc.text(`Generado el ${nowDateAR()} a las ${nowTimeAR()}`, 40, 72);
+
+  // Conteo por tipo para el footer
+  const porTipo = hist.reduce((acc, h) => {
+    acc[h.type] = (acc[h.type] || 0) + 1;
+    return acc;
+  }, {});
+  const resumenTipo = Object.entries(porTipo).map(([t,n]) => `${n} ${t}`).join(' · ');
+
+  const tableData = hist.map(h => {
+    const sign = (h.type === 'Baja' || h.type === 'Egreso') ? '-' : '+';
+    return [
+      h.date || '—',
+      h.name || '—',
+      h.type || '—',
+      sign + (h.qty || 0) + ' ' + (h.unit || 'un'),
+      h.motivo || '—',
+      h.user || '—',
+    ];
+  });
+
+  doc.autoTable({
+    startY: 88,
+    head: [['Fecha','Ítem','Tipo','Cantidad','Motivo','Usuario']],
+    body: tableData,
+    styles: { fontSize: 8, cellPadding: 4 },
+    headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [247, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 90 },
+      1: { cellWidth: 160, fontStyle: 'bold' },
+      2: { cellWidth: 70, halign: 'center' },
+      3: { cellWidth: 70, halign: 'right', fontStyle: 'bold' },
+      4: { cellWidth: 250 },
+    },
+    foot: [[ 'TOTAL', hist.length + ' mov.', '', '', resumenTipo || '—', '' ]],
+    footStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold' },
+  });
+
+  doc.save(`Movimientos-Panol-Biletta-${todayISO()}.pdf`);
+  showToast('ok', `PDF descargado · ${hist.length} movimientos`);
 }
 
 // Ver ticket (imagen) de una carga — mejorado
