@@ -383,6 +383,7 @@ function bootApp() {
     else if (u.role === 'auditor')            navigate('auditor_panel');
     else if (u.role === 'compras')            navigate('purchase_orders');
     else if (u.role === 'tesoreria')          navigate('purchase_orders');
+    else if (u.role === 'proveedores')        navigate('proveedor_panel');
     // Los roles que antes iban a 'encargado_panel' ahora van a 'dashboard'
     // (el panel unificado incluye la actividad del día al final).
     else if (u.role === 'mecanico')           navigate('dashboard');
@@ -719,6 +720,20 @@ async function loadInitialData() {
 }
 
 function buildNavForRole(role) {
+  // Si el rol tiene 'proveedor_panel' en sus modules y todavía no existe el item, lo inyectamos
+  if (role.modules.includes('proveedor_panel') && !document.querySelector('[data-page="proveedor_panel"]')) {
+    const sidebar = document.querySelector('.sidebar');
+    const firstSection = sidebar?.querySelector('.nav-section');
+    if (firstSection) {
+      const item = document.createElement('a');
+      item.className = 'nav-item';
+      item.dataset.page = 'proveedor_panel';
+      item.style.cursor = 'pointer';
+      item.innerHTML = '<span class="nav-icon">📄</span><span>Mis Órdenes de Compra</span>';
+      item.onclick = () => navigate('proveedor_panel');
+      firstSection.insertBefore(item, firstSection.firstChild);
+    }
+  }
   document.querySelectorAll('.nav-item').forEach(item => {
     const page = item.dataset.page;
     if (!page) return;
