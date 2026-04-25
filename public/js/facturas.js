@@ -10,7 +10,14 @@
   const ROLES_CARGAR = ['dueno','gerencia','compras','contador','proveedores'];
 
   function puedeCargarFacturas() {
-    const role = window.App?.currentUser?.role;
+    // Acceder a currentUser de varias formas posibles
+    const role = window.App?.currentUser?.role
+              || window.currentUser?.role
+              || (typeof App !== 'undefined' && App?.currentUser?.role);
+    if (!role) {
+      console.warn('[facturas] No hay currentUser. Revisar sesión.');
+      return false;
+    }
     return ROLES_CARGAR.includes(role);
   }
 
@@ -25,6 +32,7 @@
       ]);
       const facturas = facRes.ok ? await facRes.json() : [];
       const oc = ocRes.ok ? await ocRes.json() : {};
+      console.log('[facturas] OC:', oc.code, 'total:', oc.total_estimado, 'facturas:', facturas.length, 'puedeCargar:', puedeCargarFacturas());
       renderModalFacturas(poId, oc, facturas);
     } catch (err) {
       console.error('[facturas]', err);
