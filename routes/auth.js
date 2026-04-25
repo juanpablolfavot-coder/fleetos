@@ -19,8 +19,8 @@ const LOCK_MINS    = parseInt(process.env.LOCK_TIME_MINUTES)  || 15;
     await query(`ALTER TABLE users ADD CONSTRAINT users_role_check
       CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
                       'encargado_combustible','paniol','contador','auditor',
-                      'compras','tesoreria'))`);
-    console.log('[auth migración] roles compras/tesoreria habilitados');
+                      'compras','tesoreria','proveedores'))`);
+    console.log('[auth migración] roles habilitados (incluyendo proveedores)');
   } catch(e) { console.error('[auth migración]', e.message); }
 })();
 
