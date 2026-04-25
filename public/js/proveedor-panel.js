@@ -139,13 +139,22 @@
     }
   }
 
-  // Aplicar al cargar la app (cuando ya hay currentUser)
+  // Esperar a que App.currentUser exista Y que el sidebar tenga items renderizados
+  function tryAplicar() {
+    if (!window.App?.currentUser) return false;
+    if (window.App.currentUser.role !== 'proveedores') return true; // no hace falta hacer nada
+    const items = document.querySelectorAll('.nav-item[data-page]');
+    if (items.length < 5) return false; // sidebar todavía no terminó de renderizar
+    aplicarUIProveedor();
+    return true;
+  }
+
   const interval = setInterval(() => {
-    if (window.App?.currentUser) {
-      clearInterval(interval);
-      aplicarUIProveedor();
-    }
-  }, 200);
+    if (tryAplicar()) clearInterval(interval);
+  }, 100);
+
+  // Timeout de seguridad: dejar de intentar después de 15 segundos
+  setTimeout(() => clearInterval(interval), 15000);
 
   // Por si se hace re-login
   window._aplicarUIProveedor = aplicarUIProveedor;
