@@ -1,288 +1,141 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Expreso Biletta — FleetOS</title>
-  <link rel="stylesheet" href="css/main.css?v=v2light-inter-20260419b">
-  <link rel="stylesheet" href="css/login.css?v=v2light-inter-20260419b">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-<style>
-/* MODAL - CSS crítico inline para evitar problemas de cache */
-.modal-overlay {
-  position: fixed !important;
-  top: 0 !important; left: 0 !important;
-  width: 100vw !important; height: 100vh !important;
-  background: rgba(15,23,42,0.5) !important;
-  z-index: 99999 !important;
-  display: none !important;
-  align-items: center !important;
-  justify-content: center !important;
-  padding: 20px !important;
-}
-.modal-overlay.open {
-  display: flex !important;
-}
-.modal-overlay.open .modal {
-  display: block !important;
-  flex-direction: column !important;
-  background: var(--bg2) !important;
-  border: 1px solid var(--border2) !important;
-  border-radius: 14px !important;
-  width: 90% !important;
-  max-width: 720px !important;
-  max-height: 88vh !important;
-  overflow: visible !important;
-  position: relative !important;
-  z-index: 100000 !important;
-  box-shadow: var(--shadow-lg) !important;
-}
-.modal-overlay.open .modal .modal-body {
-  overflow-y: auto !important;
-  max-height: calc(88vh - 120px) !important;
-}
-.modal-header {
-  padding: 16px 20px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  border-bottom: 1px solid var(--border) !important;
-  background: var(--bg2) !important;
-}
-.modal-title {
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  color: var(--text) !important;
-}
-.modal-close {
-  background: none !important;
-  border: none !important;
-  color: var(--text3) !important;
-  font-size: 20px !important;
-  cursor: pointer !important;
-  padding: 0 4px !important;
-}
-.modal-body {
-  padding: 20px !important;
-  overflow-y: auto !important;
-  flex: 1 !important;
-  color: var(--text) !important;
-}
-.modal-footer {
-  padding: 12px 20px !important;
-  display: flex !important;
-  gap: 8px !important;
-  justify-content: flex-end !important;
-  border-top: 1px solid var(--border) !important;
-  background: var(--bg2) !important;
-}
-/* html y body siempre con tamaño correcto */
-html, body {
-  width: 100% !important;
-  min-height: 100vh !important;
-  background: var(--bg) !important;
-}
-#app-shell {
-  width: 100% !important;
-  min-height: 100vh !important;
-  background: var(--bg) !important;
-}
-.main {
-  margin-left: 220px !important;
-  width: calc(100% - 220px) !important;
-  height: 100vh !important;
-  overflow-y: auto !important;
-  display: block !important;
-  background: var(--bg) !important;
-}
-@media (max-width: 900px) {
-  .main { margin-left: 60px !important; width: calc(100% - 60px) !important; }
-}
-@media (max-width: 600px) {
-  .sidebar {
-    width: 100% !important; height: 56px !important;
-    position: fixed !important; top: auto !important; bottom: 0 !important;
-    left: 0 !important; flex-direction: row !important;
-    overflow-x: auto !important; z-index: 9999 !important;
-    border-top: 1px solid var(--border) !important; border-right: none !important;
+// Manejo global de errores: loguea pero NO mata el proceso
+// (matar el proceso hacía que Render reiniciara el server ante CUALQUIER error, interrumpiendo a todos)
+process.on('uncaughtException', (e) => {
+  console.error('UNCAUGHT EXCEPTION:', e.message, e.stack);
+  // NO process.exit — dejamos que el server siga sirviendo otros requests
+});
+process.on('unhandledRejection', (r) => {
+  console.error('UNHANDLED REJECTION:', r);
+  // NO process.exit
+});
+require('dotenv').config();
+const express=require('express');
+const helmet=require('helmet');
+const cors=require('cors');
+const hpp=require('hpp');
+const compression=require('compression');
+const morgan=require('morgan');
+const path=require('path');
+const cookieParser=require('cookie-parser');
+const {apiLimiter}=require('./middleware/security');  
+const { startGPSSync, syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
+const {sanitize}=require('./middleware/security');
+const authRoutes=require('./routes/auth');
+const vehicleRoutes=require('./routes/vehicles');
+const woRoutes=require('./routes/workorders');
+const stockRoutes=require('./routes/stock');
+const {fuelRouter,tireRouter,docRouter,userRouter,configRouter,checklistRouter,encargadoRouter}=require('./routes/others');
+const auditorRouter = require('./routes/auditor');
+const purchaseOrdersRouter = require('./routes/purchase_orders');
+const purchaseOrderReceiptsRouter = require('./routes/purchase_order_receipts');
+const purchaseOrderInvoicesRouter = require('./routes/purchase_order_invoices');
+const paymentsRouter = require('./routes/payments');
+const sucursalesRouter = require('./routes/sucursales');
+const adminRouter = require('./routes/admin');
+const assetsRouter = require('./routes/assets');
+const suppliersRouter = require('./routes/suppliers');
+const app=express();
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "cdnjs.cloudflare.com"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
+      fontSrc: ["'self'", "fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "cdnjs.cloudflare.com", "rusegur.monitoreodeflotas.com.ar"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+app.use(cors({origin:(o,cb)=>cb(null,true),credentials:true}));
+app.use(cookieParser());
+app.use(express.json({ limit: '2mb' }));
+app.use(hpp());
+app.use(sanitize);
+app.use(compression());
+if(process.env.NODE_ENV!=='production')app.use(morgan('dev'));
+app.set('trust proxy',1);
+app.use('/api/',apiLimiter);
+app.use('/api/auth',authRoutes);
+app.use('/api/vehicles',vehicleRoutes);
+app.use('/api/workorders',woRoutes);
+app.use('/api/stock',stockRoutes);
+app.use('/api/fuel',fuelRouter);
+app.use('/api/checklists',checklistRouter);
+app.use('/api/encargado',encargadoRouter);
+app.use('/api/tires',tireRouter);
+app.use('/api/documents',docRouter);
+app.use('/api/users',userRouter);
+app.use('/api/config',configRouter);
+app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/payments',paymentsRouter); app.use('/api/purchase-orders',paymentsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
+app.use('/api/assets', assetsRouter);
+app.use('/api/suppliers', suppliersRouter);
+app.get('/api/health', async (req, res) => {
+  try {
+    const { pool } = require('./db/pool');
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (e) {
+    // Log interno completo, cliente solo recibe info básica
+    console.error('[health]', e.message);
+    res.status(503).json({ status: 'error', db: 'disconnected' });
   }
-  .sidebar-logo { display: none !important; }
-  .sidebar-footer { display: none !important; }
-  .main {
-    margin-left: 0 !important; width: 100% !important;
-    height: auto !important; min-height: 100vh !important;
-    padding-bottom: 70px !important;
+});
+// Forzar no-cache en archivos JS y CSS
+app.use((req, res, next) => {
+  if (req.path.match(/\.(js|css)$/)) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
   }
-  .nav-section { display: contents !important; padding: 0 !important; }
-  .nav-section-label { display: none !important; }
-  .nav-item {
-    flex-direction: column !important; min-width: 60px !important;
-    height: 56px !important; border-radius: 0 !important;
-    padding: 6px 4px 4px !important; gap: 2px !important;
-    justify-content: center !important; flex-shrink: 0 !important;
-    font-size: 9px !important;
-  }
-  .nav-item span:not(.nav-icon) {
-    display: block !important; font-size: 8px !important;
-    white-space: nowrap !important; overflow: hidden !important;
-    text-overflow: ellipsis !important; max-width: 58px !important;
-    text-align: center !important;
-  }
-  .nav-item .nav-icon { width: auto !important; font-size: 16px !important; }
-  .user-name-text, .user-role-text { display: none !important; }
-}
-.page { padding: 24px; display: none; overflow: visible; }
-.page.active { display: block !important; overflow: visible; }
-</style>
-</head>
-<body>
+  next();
+});
+app.use(express.static(path.join(__dirname,'public'),{maxAge:'0', etag:false, lastModified:false}));
+app.get(/^(?!\/api).*/, (req, res) => {
+  const fs = require('fs');
+  const filePath = require('path').join(__dirname, 'public', 'index.html');
+  let html = fs.readFileSync(filePath, 'utf8');
+  
+  // Forzar que el browser nunca use cache del HTML
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  
+  res.send(html);
+});
 
-<div class="login-screen" id="login-screen">
-  <div class="login-box">
-    <div class="login-logo">
-      <div class="login-logo-mark">EB</div>
-      <div>
-        <div class="login-logo-text">Expreso Biletta</div>
-        <div class="login-logo-sub">Sistema de gestión de flota pesada</div>
-      </div>
-    </div>
-    <div class="login-title" id="auth-title">Iniciar sesión</div>
-    <div class="login-sub" id="auth-sub">Ingresá con tu email y contraseña.</div>
-    <form id="login-form" class="login-form" onsubmit="doLogin();return false;" autocomplete="on">
-      <div style="margin-bottom:14px">
-        <label class="form-label">Email</label>
-        <input class="form-input" type="email" id="login-email" autocomplete="email" placeholder="admin@fleetos.com">
-      </div>
-      <div style="margin-bottom:6px">
-        <label class="form-label">Contraseña</label>
-        <input class="form-input" type="password" id="login-password" autocomplete="current-password" placeholder="••••••••">
-      </div>
-      <div id="login-error" style="color:#ef4444;font-size:12px;min-height:18px;margin-bottom:8px"></div>
-    </form>
-    <form id="register-form" class="login-form" onsubmit="doRegister();return false;" style="display:none" autocomplete="off">
-      <div style="margin-bottom:10px">
-        <label class="form-label">Nombre completo</label>
-        <input class="form-input" type="text" id="reg-name" autocomplete="name" placeholder="Juan Pérez">
-      </div>
-      <div style="margin-bottom:10px">
-        <label class="form-label">Email</label>
-        <input class="form-input" type="email" id="reg-email" autocomplete="email" placeholder="chofer@email.com">
-      </div>
-      <div style="margin-bottom:10px">
-        <label class="form-label">Contraseña</label>
-        <input class="form-input" type="password" id="reg-password" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
-      </div>
-      <div style="margin-bottom:6px">
-        <label class="form-label">Patente del vehículo asignado (opcional)</label>
-        <input class="form-input" type="text" id="reg-vehicle" placeholder="Ej: AD235FE">
-      </div>
-      <div id="reg-error" style="color:#ef4444;font-size:12px;min-height:18px;margin-bottom:8px"></div>
-      <div id="reg-success" style="color:#22c55e;font-size:12px;min-height:18px;margin-bottom:8px;display:none"></div>
-    </form>
-    <button class="btn-login" id="btn-login" onclick="doLogin()">Ingresar al sistema</button>
-    <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text3)">
-      <span id="auth-toggle-text">¿Sos chofer y no tenés cuenta?</span>
-      <a href="#" id="auth-toggle-link" onclick="toggleAuthMode(event)" style="color:var(--accent);text-decoration:none;margin-left:4px;font-weight:500">Registrate acá</a>
-    </div>
-    <div class="login-footer">Expreso Biletta · FleetOS v2.0</div>
-  </div>
-</div>
+app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
 
-<div id="app-shell" style="display:none">
-  <nav class="sidebar">
-    <div class="sidebar-logo">
-      <div class="logo-mark">EB</div>
-      <div>
-        <div class="logo-text">Expreso Biletta</div>
-      </div>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Principal</div>
-      <a class="nav-item" data-page="dashboard"       onclick="navigate('dashboard')"><span class="nav-icon">🏠</span><span>Panel principal</span></a>
-      <a class="nav-item" data-page="fleet"           onclick="navigate('fleet')"><span class="nav-icon">🚛</span><span>Flota y vehículos</span></a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Operaciones</div>
-      <a class="nav-item" data-page="workorders"  onclick="navigate('workorders')"><span class="nav-icon">🔧</span><span>Órdenes de trabajo</span></a>
-      <a class="nav-item" data-page="maintenance" onclick="navigate('maintenance')"><span class="nav-icon">⚙️</span><span>Mantenimiento</span></a>
-      <a class="nav-item" data-page="fuel"        onclick="navigate('fuel')"><span class="nav-icon">⛽</span><span>Combustible y urea</span></a>
-      <a class="nav-item" data-page="tires"       onclick="navigate('tires')"><span class="nav-icon">🔘</span><span>Cubiertas</span></a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-label">Administración</div>
-      <a class="nav-item" data-page="stock"       onclick="navigate('stock')"><span class="nav-icon">📦</span><span>Depósito</span></a>
-      <a class="nav-item" data-page="purchase_orders" onclick="navigate('purchase_orders')"><span class="nav-icon">🛒</span><span>Órdenes de compra</span></a>
-      <a class="nav-item" data-page="suppliers"   onclick="navigate('suppliers')"><span class="nav-icon">🏢</span><span>Proveedores</span></a>
-      <a class="nav-item" data-page="assets"      onclick="navigate('assets')"><span class="nav-icon">🏗️</span><span>Activos patrimoniales</span></a>
-      <a class="nav-item" data-page="documents"   onclick="navigate('documents')"><span class="nav-icon">📄</span><span>Documentación</span></a>
-      <a class="nav-item" data-page="costs"       onclick="navigate('costs')"><span class="nav-icon">💰</span><span>Costos operativos</span></a>
-      <a class="nav-item" id="nav-users"  data-page="users"          onclick="navigate('users')"><span class="nav-icon">👥</span><span>Usuarios</span></a>
-      <a class="nav-item" id="nav-config" data-page="config"         onclick="navigate('config')"><span class="nav-icon">🔩</span><span>Configuración</span></a>
-      <a class="nav-item"                 data-page="chofer_panel"   onclick="navigate('chofer_panel')"><span class="nav-icon">🚛</span><span>Mi panel</span></a>
-      <a class="nav-item"                 data-page="auditor_panel"  onclick="navigate('auditor_panel')"><span class="nav-icon">🔍</span><span>Panel auditor</span></a>
-    </div>
-    <div class="sidebar-footer">
-      <div class="user-card">
-        <div class="user-avatar" id="user-avatar">??</div>
-        <div class="user-info">
-          <div class="user-name" id="user-name">—</div>
-          <div class="user-role" id="user-role">—</div>
-        </div>
-      </div>
-      <a class="nav-item" id="btn-account-config" style="cursor:pointer" onclick="openAccountConfigModal()"><span class="nav-icon">⚙</span><span>Config. cuenta</span></a>
-      <a class="nav-item" id="btn-logout" style="cursor:pointer"><span class="nav-icon">←</span><span>Cerrar sesión</span></a>
-    </div>
-  </nav>
-  <main class="main">
-    <div class="topbar">
-      <div>
-        <div class="topbar-title" id="topbar-title">Panel</div>
-        <div class="topbar-sub"   id="topbar-sub"></div>
-      </div>
-      <div class="topbar-actions"></div>
-    </div>
-    <div id="page-dashboard"      class="page active"></div>
-    <div id="page-fleet"          class="page"></div>
-    <div id="page-workorders"     class="page"></div>
-    <div id="page-maintenance"    class="page"></div>
-    <div id="page-fuel"           class="page"></div>
-    <div id="page-tires"          class="page"></div>
-    <div id="page-stock"          class="page"></div>
-    <div id="page-documents"      class="page"></div>
-    <div id="page-costs"          class="page"></div>
-    <div id="page-chofer_panel"   class="page"></div>
-    <div id="page-auditor_panel"  class="page"></div>
-    <div id="page-purchase_orders" class="page"></div>
-    <div id="page-suppliers"       class="page"></div>
-    <div id="page-assets"          class="page"></div>
-    <div id="page-encargado_panel" class="page"></div>
-    <div id="page-contador_panel" class="page"></div>
-    <div id="page-users"  class="page"></div>
-    <div id="page-config" class="page"></div>
-    <div id="page-proveedor_panel" class="page"></div>
-  </main>
-</div>
+// ── Endpoints GPS ──
+// Importar middleware de autenticación
+const { authenticate, requireRole } = require('./middleware/auth');
 
-<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="modal-title"></div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-    <div class="modal-body"   id="modal-body"></div>
-    <div class="modal-footer" id="modal-footer"></div> 
-  </div>
-</div>
+app.get('/api/gps/status', authenticate, async (req, res) => {
+  res.json(getGPSStatus());
+});
 
-<div class="toast-container" id="toast-container"></div>
+// Debug: forzar sync y esperar resultado (SOLO dueño/gerencia)
+app.post('/api/gps/force-sync', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
+  const { syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
+  syncGPSData();
+  // Esperar 20s y devolver el resultado
+  await new Promise(r => setTimeout(r, 20000));
+  res.json(getGPSStatus());
+});
 
-<script src="js/roles.js?v=1776198437"></script>
-<script src="js/app.js?v=1776198437"></script>
-<script src="js/recepciones.js?v=3"></script>
-<script src="js/facturas.js?v=4"></script>
-<script src="js/proveedor-panel.js?v=4"></script>
+app.post('/api/gps/sync', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  syncGPSData();
+  res.json({ ok: true, message: 'Sync iniciado' });
+});
 
-</body>
-</html>
+
+const PORT=process.env.PORT||3000;
+app.listen(PORT, () => {
+  console.log('FleetOS OK port', PORT);
+  // Iniciar sync GPS con Powerfleet cada 5 minutos
+  startGPSSync(5);
+});
