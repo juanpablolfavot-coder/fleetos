@@ -14,7 +14,7 @@ const authenticate = async (req, res, next) => {
 
     // Verificar que el usuario sigue activo en DB
     const result = await query(
-      'SELECT id, name, role, vehicle_code, active FROM users WHERE id = $1',
+      'SELECT id, name, role, vehicle_code, active, supplier_id FROM users WHERE id = $1',
       [decoded.id]
     );
 
