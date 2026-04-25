@@ -21,6 +21,9 @@ const LOCK_MINS    = parseInt(process.env.LOCK_TIME_MINUTES)  || 15;
                       'encargado_combustible','paniol','contador','auditor',
                       'compras','tesoreria','proveedores'))`);
     console.log('[auth migración] roles habilitados (incluyendo proveedores)');
+    // Agregar supplier_id a users (vincula usuario rol=proveedores con un supplier del catálogo)
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id)`);
+    console.log('[auth migración] users.supplier_id agregado');
   } catch(e) { console.error('[auth migración]', e.message); }
 })();
 
