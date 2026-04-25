@@ -68,7 +68,7 @@ app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);
 app.use('/api/config',configRouter);
-app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
+app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.get('/api/health', async (req, res) => {
