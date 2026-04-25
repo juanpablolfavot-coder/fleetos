@@ -314,8 +314,8 @@ function logout() {
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
-    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel'], canEdit:['all'] },
+    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
     jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
@@ -324,7 +324,7 @@ function getRoleData(role) {
     contador:              { label:'Administración',           badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel','suppliers'], canEdit:[] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers'], canEdit:['purchase_orders'] },
-    tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['purchase_orders'], canEdit:['purchase_orders'] },
+    tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
     proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel'], canEdit:[] },
   };
   return roles[role] || roles['auditor'];
@@ -382,7 +382,7 @@ function bootApp() {
     else if (u.role === 'contador')           navigate('costs');
     else if (u.role === 'auditor')            navigate('auditor_panel');
     else if (u.role === 'compras')            navigate('purchase_orders');
-    else if (u.role === 'tesoreria')          navigate('purchase_orders');
+    else if (u.role === 'tesoreria')          navigate('tesoreria_panel');
     else if (u.role === 'proveedores')        navigate('proveedor_panel');
     // Los roles que antes iban a 'encargado_panel' ahora van a 'dashboard'
     // (el panel unificado incluye la actividad del día al final).
@@ -732,6 +732,21 @@ function buildNavForRole(role) {
       item.innerHTML = '<span class="nav-icon">📄</span><span>Mis Órdenes de Compra</span>';
       item.onclick = () => navigate('proveedor_panel');
       firstSection.insertBefore(item, firstSection.firstChild);
+    }
+  }
+  if (role.modules.includes('tesoreria_panel') && !document.querySelector('[data-page="tesoreria_panel"]')) {
+    const sidebar = document.querySelector('.sidebar');
+    // Buscar la última sección (Administración) para insertar el item ahí
+    const sections = sidebar?.querySelectorAll('.nav-section');
+    const lastSection = sections?.[sections.length - 1];
+    if (lastSection) {
+      const item = document.createElement('a');
+      item.className = 'nav-item';
+      item.dataset.page = 'tesoreria_panel';
+      item.style.cursor = 'pointer';
+      item.innerHTML = '<span class="nav-icon">💳</span><span>Pagos / Tesorería</span>';
+      item.onclick = () => navigate('tesoreria_panel');
+      lastSection.appendChild(item);
     }
   }
   document.querySelectorAll('.nav-item').forEach(item => {
