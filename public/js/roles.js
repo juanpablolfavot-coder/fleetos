@@ -325,6 +325,7 @@ function getRoleData(role) {
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers'], canEdit:['purchase_orders'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['purchase_orders'], canEdit:['purchase_orders'] },
+    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel'], canEdit:[] },
   };
   return roles[role] || roles['auditor'];
 }
