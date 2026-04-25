@@ -102,6 +102,9 @@ function estadosQueVe(role) {
   if (role === 'auditor') {
     return ['pagada','recibida'];
   }
+  if (role === 'proveedores') {
+    return ['aprobada_compras','pagada','recibida'];
+  }
   if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
     return null; // ve todos los estados, pero filtramos por requested_by abajo (solo las propias)
   }
@@ -252,6 +255,12 @@ router.get('/:id', authenticate, async (req, res) => {
     }
     if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
+    }
+    if (role === 'proveedores') {
+      const u = await query('SELECT supplier_id FROM users WHERE id=$1', [userId]);
+      if (!u.rows[0]?.supplier_id || oc.supplier_id !== u.rows[0].supplier_id) {
+        return res.status(403).json({ error: 'Esta OC no pertenece a tu proveedor' });
+      }
     }
 
     const items = await query('SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at', [req.params.id]);
