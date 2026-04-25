@@ -332,13 +332,13 @@ docRouter.put('/:id',authenticate,requireRole('dueno','gerencia','jefe_mantenimi
 
 // ======= USUARIOS =======
 userRouter.get('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=>{
-  try{res.json((await query('SELECT id,name,email,role,vehicle_code,active,last_login FROM users ORDER BY name')).rows);}catch(err){res.status(500).json({error:'Error usuarios'});}
+  try{res.json((await query(`SELECT u.id,u.name,u.email,u.role,u.vehicle_code,u.active,u.last_login,u.supplier_id,s.name AS supplier_name FROM users u LEFT JOIN suppliers s ON s.id=u.supplier_id ORDER BY u.name`)).rows);}catch(err){res.status(500).json({error:'Error usuarios'});}
 });
 userRouter.post('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=>{
-  try{const{name,email,password,role,vehicle_code}=req.body;
+  try{const{name,email,password,role,vehicle_code,supplier_id}=req.body;
   if(!name||!email||!password||!role) return res.status(400).json({error:'name,email,password,role requeridos'});
   const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
-  const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code) VALUES($1,$2,$3,$4,$5) RETURNING id,name,email,role,active`,[name,email.toLowerCase(),hash,role,vehicle_code||null]);
+  const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code,supplier_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,active,supplier_id`,[name,email.toLowerCase(),hash,role,vehicle_code||null,supplier_id||null]);
   res.status(201).json(r.rows[0]);}catch(err){if(err.code==='23505') return res.status(409).json({error:'Email existe'});res.status(500).json({error:'Error usuario'});}
 });
 userRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id'), async (req, res) => {
@@ -355,14 +355,14 @@ userRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
 
 userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID('id'),async(req,res)=>{
   try{
-    const{name,role,vehicle_code,active,password}=req.body;
+    const{name,role,vehicle_code,active,password,supplier_id}=req.body;
     if(req.params.id===req.user.id&&active===false) return res.status(400).json({error:'No puedes desactivarte'});
     // Si viene contraseña nueva la hasheamos
     if(password && password.length>=8){
       const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
       await query('UPDATE users SET password_hash=$1,updated_at=NOW() WHERE id=$2',[hash,req.params.id]);
     }
-    const r=await query('UPDATE users SET name=$1,role=$2,vehicle_code=$3,active=$4,updated_at=NOW() WHERE id=$5 RETURNING id,name,email,role,active',[name,role,vehicle_code||null,active!==false,req.params.id]);
+    const r=await query('UPDATE users SET name=$1,role=$2,vehicle_code=$3,active=$4,supplier_id=$6,updated_at=NOW() WHERE id=$5 RETURNING id,name,email,role,active,supplier_id',[name,role,vehicle_code||null,active!==false,req.params.id,supplier_id||null]);
     if(!r.rows[0]) return res.status(404).json({error:'Usuario no encontrado'});
     res.json(r.rows[0]);
   }catch(err){console.error('PUT user error:',err.message);res.status(500).json({error:'Error actualizar'});}
