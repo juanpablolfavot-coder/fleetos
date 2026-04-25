@@ -81,7 +81,7 @@
                     <td style="text-align:right;color:${parseFloat(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
                     <td style="text-align:right;color:var(--warn);font-weight:600">$${fmt(f.saldo)}</td>
                     <td style="text-align:center">
-                      ${puedePagar() ? `<button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">💳 Pagar</button>` : ''}
+                      <button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">💳 Pagar</button>
                     </td>
                   </tr>`;
                 }).join('')}
