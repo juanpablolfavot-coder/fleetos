@@ -5069,6 +5069,13 @@ function openEditUserModal(id, name, email, role, vehicle, active) {
           ${vehiclesOpts}
         </select>
       </div>
+      <div class="form-group" id="eu-supplier-group" style="display:${role==='proveedores'?'block':'none'}">
+        <label class="form-label">Proveedor vinculado <span style="color:#ef4444">*</span></label>
+        <select class="form-select" id="eu-supplier">
+          <option value="">— Cargar al guardar —</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Solo verá las OCs de este proveedor</div>
+      </div>
       <div class="form-group" style="grid-column:1/-1">
         <label class="form-label">Nueva contraseña <span style="color:var(--text3)">(dejá vacío para no cambiar)</span></label>
         <input class="form-input" id="eu-pass" type="password" placeholder="••••••••">
@@ -5097,7 +5104,8 @@ async function saveEditUser(id) {
   if (password && password.length < 8) { if(errDiv) errDiv.textContent = 'La contraseña debe tener al menos 8 caracteres'; return; }
 
   try {
-    const body = { name, role, vehicle_code: vehicle || null, active };
+    const supplier_id = document.getElementById('eu-supplier')?.value || null;
+    const body = { name, role, vehicle_code: vehicle || null, active, supplier_id };
     if (password) body.password = password;
 
     const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -9145,6 +9153,13 @@ async function openPODetail(id) {
           ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras'].includes(role)
         )) {
           btns.push({ label:'📦 Recepciones parciales', cls:'btn-secondary', fn: () => abrirModalRecepciones(id) });
+        }
+
+        // 📄 Facturas (disponible desde aprobada_compras en adelante)
+        if (['aprobada_compras','pagada','recibida'].includes(po.status) && (
+          ['dueno','gerencia','compras','tesoreria','contador','proveedores'].includes(role)
+        )) {
+          btns.push({ label:'📄 Facturas', cls:'btn-secondary', fn: () => abrirModalFacturas(id) });
         }
 
         // ══════════════════════════════════════════════
