@@ -4771,6 +4771,7 @@ const ROLES_LIST = [
   { value:'auditor',               label:'Auditor' },
   { value:'compras',               label:'Compras' },
   { value:'tesoreria',             label:'Tesorería' },
+  { value:'proveedores',           label:'Proveedores' },
 ];
 
 // ═══════════════════════════════════════════════════════════
