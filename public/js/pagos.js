@@ -157,7 +157,7 @@
             </div>
           </div>
 
-          ${!pagada && puedePagar() ? `
+          ${!pagada ? `
           <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:16px;margin-bottom:16px">
             <div style="font-weight:600;margin-bottom:12px">+ Registrar nuevo pago</div>
 
