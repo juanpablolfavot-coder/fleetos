@@ -29,6 +29,7 @@ const auditorRouter = require('./routes/auditor');
 const purchaseOrdersRouter = require('./routes/purchase_orders');
 const purchaseOrderReceiptsRouter = require('./routes/purchase_order_receipts');
 const purchaseOrderInvoicesRouter = require('./routes/purchase_order_invoices');
+const paymentsRouter = require('./routes/payments');
 const sucursalesRouter = require('./routes/sucursales');
 const adminRouter = require('./routes/admin');
 const assetsRouter = require('./routes/assets');
@@ -68,7 +69,7 @@ app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);
 app.use('/api/config',configRouter);
-app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
+app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/payments',paymentsRouter); app.use('/api/purchase-orders',paymentsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.get('/api/health', async (req, res) => {
