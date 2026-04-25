@@ -9140,6 +9140,13 @@ async function openPODetail(id) {
           btns.push({ label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) });
         }
 
+        // 📦 Recepciones parciales (disponible desde aprobada_compras en adelante, salvo rechazada)
+        if (['aprobada_compras','pagada','recibida'].includes(po.status) && (
+          ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras'].includes(role)
+        )) {
+          btns.push({ label:'📦 Recepciones parciales', cls:'btn-secondary', fn: () => abrirModalRecepciones(id) });
+        }
+
         // ══════════════════════════════════════════════
         //  ACCIONES SECUNDARIAS: Devolver / Rechazar
         // ══════════════════════════════════════════════
