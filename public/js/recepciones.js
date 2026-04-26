@@ -1,16 +1,9 @@
 // ═══════════════════════════════════════════════════════════
-//  FleetOS — Recepciones parciales (UI)
+//  FleetOS — Recepciones parciales (UI claro + OC abierta)
 //  Expone window.abrirModalRecepciones(poId)
-//  Roles: dueno, gerencia, jefe_mantenimiento, paniol, contador, compras
 // ═══════════════════════════════════════════════════════════
 
 (function() {
-  const ROLES_RECIBIR = ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras'];
-
-  function puedeRecibir() {
-    const role = window.App?.currentUser?.role;
-    return ROLES_RECIBIR.includes(role);
-  }
 
   window.abrirModalRecepciones = async function(poId) {
     try {
@@ -24,6 +17,7 @@
       const recepciones = recsRes.ok ? await recsRes.json() : [];
       const destinos = destRes.ok ? await destRes.json() : { fijos: [], sucursales: [] };
       const oc = ocRes.ok ? await ocRes.json() : {};
+      console.log('[recepciones] OC:', oc.code, 'is_open:', oc.is_open, 'items pend:', items.length);
       renderModalRecepciones(poId, oc, items, recepciones, destinos);
     } catch (err) {
       console.error('[recepciones]', err);
@@ -40,108 +34,155 @@
 
     const totalPendiente = items.reduce((s, i) => s + parseFloat(i.pendiente || 0), 0);
     const totalRecibido  = items.reduce((s, i) => s + parseFloat(i.recibida || 0), 0);
-    const status = totalRecibido === 0 ? 'Pendiente' : (totalPendiente <= 0.001 ? 'Total' : 'Parcial');
-    const statusColor = totalRecibido === 0 ? '#f59e0b' : (totalPendiente <= 0.001 ? '#10b981' : '#3b82f6');
+    const isOpen = !!oc.is_open;
+
+    let statusLabel = 'Pendiente', statusColor = 'var(--warn)';
+    if (isOpen) { statusLabel = 'Abierta (servicios)'; statusColor = 'var(--info)'; }
+    else if (totalRecibido === 0) { statusLabel = 'Pendiente'; statusColor = 'var(--warn)'; }
+    else if (totalPendiente <= 0.001) { statusLabel = 'Total'; statusColor = 'var(--ok)'; }
+    else { statusLabel = 'Parcial'; statusColor = 'var(--info)'; }
 
     overlay.innerHTML = `
-      <div style="background:#1e293b;border-radius:12px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;color:#e2e8f0;border:1px solid #334155">
-        <div style="padding:20px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#1e293b;z-index:10">
+      <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;color:var(--text);border:1px solid var(--border2);box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:20px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:10">
           <div>
             <div style="font-size:18px;font-weight:700">📦 Recepciones · ${oc.code || ''}</div>
-            <div style="font-size:13px;color:#94a3b8;margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Estado entrega: <strong style="color:${statusColor}">${status}</strong></div>
+            <div style="font-size:13px;color:var(--text3);margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Estado entrega: <strong style="color:${statusColor}">${statusLabel}</strong></div>
           </div>
-          <button onclick="this.closest('.modal-recepciones-overlay').remove()" style="background:transparent;border:none;color:#94a3b8;font-size:28px;cursor:pointer;line-height:1">×</button>
+          <button onclick="this.closest('.modal-recepciones-overlay').remove()" style="background:transparent;border:none;color:var(--text3);font-size:28px;cursor:pointer;line-height:1">×</button>
         </div>
+
         <div style="padding:20px">
 
-          <div style="margin-bottom:20px">
-            <div style="font-weight:600;margin-bottom:8px;color:#cbd5e1">Ítems de la OC</div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead><tr style="background:#0f172a;color:#94a3b8">
-                <th style="padding:8px;text-align:left">Descripción</th>
-                <th style="padding:8px;text-align:right">Pedido</th>
-                <th style="padding:8px;text-align:right">Recibido</th>
-                <th style="padding:8px;text-align:right">Pendiente</th>
-              </tr></thead>
-              <tbody>
-                ${items.map(i => {
-                  const ped = parseFloat(i.pedida).toFixed(2);
-                  const rec = parseFloat(i.recibida).toFixed(2);
-                  const pen = parseFloat(i.pendiente).toFixed(2);
-                  const completo = parseFloat(i.pendiente) <= 0.001;
-                  return `<tr style="border-bottom:1px solid #334155">
-                    <td style="padding:8px">${i.descripcion}</td>
-                    <td style="padding:8px;text-align:right">${ped} ${i.unidad || ''}</td>
-                    <td style="padding:8px;text-align:right;color:${rec > 0 ? '#10b981' : '#94a3b8'}">${rec}</td>
-                    <td style="padding:8px;text-align:right;color:${completo ? '#10b981' : '#f59e0b'};font-weight:600">${completo ? '✓' : pen}</td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-            </table>
+          <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:16px;display:flex;align-items:center;gap:10px">
+            <input id="recep-is-open" type="checkbox" ${isOpen ? 'checked' : ''} onchange="toggleOCAbierta('${poId}', this.checked)" style="width:18px;height:18px;cursor:pointer">
+            <label for="recep-is-open" style="cursor:pointer;flex:1">
+              <strong>OC abierta</strong>
+              <div style="font-size:12px;color:var(--text3)">Para servicios fraccionados (ej: 10.000 km de flete que se descuentan progresivamente). No se cierra automáticamente.</div>
+            </label>
           </div>
 
-          ${totalPendiente > 0.001 && puedeRecibir() ? `
-          <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:20px">
-            <div style="font-weight:600;margin-bottom:12px;color:#cbd5e1">+ Registrar nueva recepción</div>
+          <div style="margin-bottom:18px">
+            <div style="font-weight:600;margin-bottom:8px">Ítems de la OC</div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Descripción</th>
+                    <th style="text-align:right">Pedido</th>
+                    <th style="text-align:right">Recibido</th>
+                    <th style="text-align:right">Pendiente</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${items.map(i => {
+                    const ped = parseFloat(i.pedida).toFixed(2);
+                    const rec = parseFloat(i.recibida).toFixed(2);
+                    const pen = parseFloat(i.pendiente).toFixed(2);
+                    const completo = parseFloat(i.pendiente) <= 0.001;
+                    return `<tr>
+                      <td>${i.descripcion}</td>
+                      <td style="text-align:right">${ped} ${i.unidad || ''}</td>
+                      <td style="text-align:right;color:${rec > 0 ? 'var(--ok)' : 'var(--text3)'}">${rec}</td>
+                      <td style="text-align:right;color:${completo && !isOpen ? 'var(--ok)' : 'var(--warn)'};font-weight:600">${(completo && !isOpen) ? '✓' : pen}${isOpen ? ' (abierta)' : ''}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          ${(totalPendiente > 0.001 || isOpen) ? `
+          <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:16px;margin-bottom:16px">
+            <div style="font-weight:600;margin-bottom:12px">+ Registrar nueva recepción</div>
+
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
-                <label style="font-size:12px;color:#94a3b8">Destino *</label>
-                <select id="recep-destino" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <label style="font-size:12px;color:var(--text3)">Destino *</label>
+                <select id="recep-destino" class="form-select">
                   <option value="">— Seleccionar —</option>
                   <optgroup label="Destinos">${destinos.fijos.map(d => `<option value="${d}">${d}</option>`).join('')}</optgroup>
                   ${destinos.sucursales.length ? `<optgroup label="Sucursales">${destinos.sucursales.map(s => `<option value="${s}">${s}</option>`).join('')}</optgroup>` : ''}
                 </select>
               </div>
               <div>
-                <label style="font-size:12px;color:#94a3b8">N° Remito (opcional)</label>
-                <input id="recep-remito" type="text" placeholder="R-12345" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <label style="font-size:12px;color:var(--text3)">N° Remito (opcional)</label>
+                <input id="recep-remito" type="text" placeholder="R-12345" class="form-input">
               </div>
             </div>
+
             <div style="margin-bottom:12px">
-              <label style="font-size:12px;color:#94a3b8">Cantidades recibidas</label>
-              <div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:10px;margin-top:4px">
-                ${items.filter(i => parseFloat(i.pendiente) > 0.001).map(i => `
-                  <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #334155">
+              <label style="font-size:12px;color:var(--text3)">Cantidades recibidas / utilizadas</label>
+              <div style="background:#fff;border:1px solid var(--border2);border-radius:6px;padding:10px;margin-top:4px">
+                ${items.filter(i => isOpen || parseFloat(i.pendiente) > 0.001).map(i => {
+                  const max = isOpen ? '' : `max="${i.pendiente}"`;
+                  return `
+                  <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
                     <div style="font-size:13px">${i.descripcion}</div>
-                    <input type="number" step="0.01" min="0" max="${i.pendiente}" data-recep-item="${i.id}" placeholder="0" style="background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:6px;border-radius:4px;text-align:right">
-                    <div style="font-size:11px;color:#94a3b8">/ ${parseFloat(i.pendiente).toFixed(2)} ${i.unidad || ''}</div>
-                  </div>
-                `).join('')}
+                    <input type="number" step="0.01" min="0" ${max} data-recep-item="${i.id}" placeholder="0" class="form-input" style="text-align:right">
+                    <div style="font-size:11px;color:var(--text3)">${isOpen ? 'libre' : '/ ' + parseFloat(i.pendiente).toFixed(2)} ${i.unidad || ''}</div>
+                  </div>`;
+                }).join('')}
               </div>
             </div>
+
             <div style="margin-bottom:12px">
-              <label style="font-size:12px;color:#94a3b8">Observaciones (opcional)</label>
-              <textarea id="recep-notes" rows="2" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px;resize:vertical"></textarea>
+              <label style="font-size:12px;color:var(--text3)">Observaciones (opcional)</label>
+              <textarea id="recep-notes" rows="2" class="form-input" style="resize:vertical"></textarea>
             </div>
-            <button onclick="guardarRecepcion('${poId}')" style="background:#3b82f6;color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:600">✓ Registrar recepción</button>
-          </div>` : (totalPendiente <= 0.001 ? `<div style="background:#064e3b;color:#6ee7b7;padding:12px;border-radius:6px;margin-bottom:20px;text-align:center">✓ Esta OC ya fue recibida en su totalidad</div>` : '')}
+
+            <button class="btn btn-primary" onclick="guardarRecepcion('${poId}')">✓ Registrar recepción</button>
+          </div>
+          ` : `<div style="background:#dcfce7;color:#166534;padding:12px;border-radius:6px;margin-bottom:16px;text-align:center;font-weight:600">✓ Esta OC ya fue recibida en su totalidad</div>`}
 
           ${recepciones.length ? `
           <div>
-            <div style="font-weight:600;margin-bottom:8px;color:#cbd5e1">Historial de recepciones</div>
+            <div style="font-weight:600;margin-bottom:8px">Historial de recepciones (${recepciones.length})</div>
             ${recepciones.map(r => {
               const role = window.App?.currentUser?.role;
               const userId = window.App?.currentUser?.id;
               const puedeAnular = ['dueno','gerencia'].includes(role) || r.received_by === userId;
-              return `<div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:8px">
+              return `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:12px;margin-bottom:8px">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
-                  <div>
+                  <div style="flex:1">
                     <div style="font-weight:600">📥 ${new Date(r.received_at).toLocaleString('es-AR')}</div>
-                    <div style="font-size:12px;color:#94a3b8">por ${r.received_by_name || '—'} · Destino: <strong>${r.destino}</strong>${r.remito_nro ? ' · Remito: '+r.remito_nro : ''}</div>
+                    <div style="font-size:12px;color:var(--text3)">por ${r.received_by_name || '—'} · Destino: <strong>${r.destino}</strong>${r.remito_nro ? ' · Remito: '+r.remito_nro : ''}</div>
                   </div>
-                  ${puedeAnular ? `<button onclick="anularRecepcion('${poId}','${r.id}')" style="background:transparent;border:1px solid #ef4444;color:#ef4444;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px">Anular</button>` : ''}
+                  ${puedeAnular ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="anularRecepcion('${poId}','${r.id}')">Anular</button>` : ''}
                 </div>
-                ${(r.items || []).length ? `<div style="font-size:13px">${r.items.map(it => `<div style="padding:2px 0;color:#cbd5e1">• ${it.descripcion}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${it.unidad || ''}</strong></div>`).join('')}</div>` : ''}
-                ${r.notes ? `<div style="font-size:12px;color:#94a3b8;margin-top:6px;font-style:italic">${r.notes}</div>` : ''}
+                ${(r.items || []).length ? `<div style="font-size:13px;margin-top:6px">${r.items.map(it => `<div style="padding:2px 0">• ${it.descripcion}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${it.unidad || ''}</strong></div>`).join('')}</div>` : ''}
+                ${r.notes ? `<div style="font-size:12px;color:var(--text3);margin-top:6px;font-style:italic">${r.notes}</div>` : ''}
               </div>`;
             }).join('')}
-          </div>` : '<div style="text-align:center;color:#94a3b8;padding:20px">Sin recepciones registradas todavía</div>'}
+          </div>` : '<div style="text-align:center;color:var(--text3);padding:20px">Sin recepciones registradas todavía</div>'}
 
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
   }
+
+  window.toggleOCAbierta = async function(poId, isOpen) {
+    try {
+      const res = await apiFetch(`/api/purchase-orders/${poId}/toggle-open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_open: isOpen })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast('error', err.error || 'No se pudo cambiar el estado');
+        const cb = document.getElementById('recep-is-open');
+        if (cb) cb.checked = !isOpen;
+        return;
+      }
+      showToast('ok', isOpen ? 'OC marcada como abierta' : 'OC marcada como cerrada');
+      abrirModalRecepciones(poId);
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Error al cambiar el estado');
+    }
+  };
 
   window.guardarRecepcion = async function(poId) {
     const destino = document.getElementById('recep-destino')?.value;
