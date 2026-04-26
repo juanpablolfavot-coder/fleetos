@@ -8871,7 +8871,7 @@ async function openPODetail(id) {
       if (po.status === 'aprobada_compras') {
         // Tesorería NO edita datos — solo verifica y paga (la factura llega cargada por compras)
         canEdit = false;
-        bloqueoMensaje = '📋 Tesorería: Revisá los datos de la factura que cargó compras. Si hay un error, usá "⏪ Devolver" para que compras corrija. Si todo está bien, click "✓ Confirmar pago".';
+        bloqueoMensaje = '📋 Tesorería: Click en "📄 Facturas" para ver/cargar facturas y registrar pagos. Cada factura puede tener uno o varios pagos parciales.';
       } else if (po.status === 'pagada') {
         bloqueoMensaje = '🔒 Esta OC ya fue pagada. Los datos de factura quedan congelados.';
       } else {
