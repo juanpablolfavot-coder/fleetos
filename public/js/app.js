@@ -10139,50 +10139,37 @@ async function aprobarOC(id) {
     '',
     'La factura la cargará el proveedor cuando entregue la mercadería.',
   ];
-  if (primaryBtn) primaryBtn.textContent = '⏳ Generando backup...';
+  if (!confirm(resumen.join('\n'))) return;
 
   try {
-    const token = window._getToken ? window._getToken() : null;
-    if (!token) {
-      showToast('error', 'Sesión expirada. Volvé a loguearte.');
-      return;
+    const body = {
+      proveedor: pod_prov,
+      iva_pct: pod_iva,
+      forma_pago: pod_fp,
+      cc_dias: pod_cc,
+      moneda: pod_mon,
+    };
+    // El supplier_id si está vinculado
+    const supplierSel = document.getElementById('pod-supplier-select');
+    if (supplierSel && supplierSel.value && supplierSel.value !== '__manual__') {
+      body.supplier_id = supplierSel.value;
     }
-
-    const res = await fetch('/api/admin/backup', {
-      headers: { 'Authorization': 'Bearer ' + token }
+    const res = await apiFetch(`/api/purchase-orders/${id}/aprobar-compras`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     });
-
     if (!res.ok) {
-      const txt = await res.text().catch(() => 'Error');
-      showToast('error', 'Error ' + res.status + ': ' + txt);
-      if (primaryBtn) { primaryBtn.textContent = '📥 Descargar ahora'; primaryBtn.disabled = false; }
-      btns.forEach(b => { b.disabled = false; });
+      const err = await res.json().catch(() => ({}));
+      showToast('error', err.error || 'Error al aprobar la OC');
       return;
     }
-
-    const blob = await res.blob();
-    const sizeKB = (blob.size / 1024).toFixed(1);
-
-    const fecha = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
-    const filename = `biletta-backup-${fecha}.sql.gz`;
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
+    showToast('ok', '✅ OC aprobada y enviada al proveedor');
     closeModal();
-    showToast('ok', `✅ Backup descargado: ${filename} (${sizeKB} KB)`);
-
+    await renderPurchaseOrders();
   } catch (err) {
-    console.error('[BACKUP]', err);
-    showToast('error', 'Error al descargar: ' + (err.message || 'desconocido'));
-    if (primaryBtn) { primaryBtn.textContent = '📥 Descargar ahora'; primaryBtn.disabled = false; }
-    btns.forEach(b => { b.disabled = false; });
+    console.error('[aprobarOC]', err);
+    showToast('error', 'Error al aprobar la OC');
   }
 }
 
