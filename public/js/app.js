@@ -10122,225 +10122,23 @@ async function aprobarOC(id) {
     if (extra.moneda) pod_mon = extra.moneda;
   } catch(e) {}
 
-  // Validaciones obligatorias — NO se aprueba sin estos datos
-  const faltantes = [];
-  if (!pod_prov) faltantes.push('Proveedor');
-  if (!pod_fact_nro) faltantes.push('N° de factura');
-  if (!pod_fact_mnt || parseFloat(pod_fact_mnt) <= 0) faltantes.push('Monto de factura');
-
-  if (faltantes.length > 0) {
-    showToast('warn', '⚠️ Faltan datos obligatorios: ' + faltantes.join(', ') + '. La factura debe estar cargada para aprobar.');
-    // Hacer focus en el primer campo faltante
-    if (!pod_prov && pod_prov_el) pod_prov_el.focus();
-    else if (!pod_fact_nro && fnEl) fnEl.focus();
-    else if (fmEl && (!pod_fact_mnt || parseFloat(pod_fact_mnt) <= 0)) fmEl.focus();
+  // Validaciones obligatorias — solo proveedor (la factura la carga proveedores luego)
+  if (!pod_prov) {
+    showToast('warn', '⚠️ Tenés que seleccionar el proveedor antes de aprobar.');
+    if (pod_prov_el) pod_prov_el.focus();
     return;
   }
 
-  // Confirmación con resumen de los datos que se mandan a tesorería
+  // Confirmación con resumen
   const resumen = [
-    '¿Aprobar esta OC con los siguientes datos?',
+    '¿Aprobar esta OC para enviar al proveedor?',
     '',
     'Proveedor: ' + pod_prov,
-    'N° factura: ' + pod_fact_nro,
-    'Monto: $' + parseFloat(pod_fact_mnt).toLocaleString('es-AR'),
-    (pod_iva ? 'IVA: ' + pod_iva + '%' : 'Sin IVA'),
+    'Forma de pago: ' + (pod_fp === 'contado' ? 'Contado' : (pod_fp === 'cuenta_corriente' ? ('Cuenta corriente a ' + (pod_cc || 0) + ' días') : '—')),
+    'Moneda: ' + (pod_mon || 'ARS'),
     '',
-    '➡️ Pasará a tesorería para pagar.'
-  ].join('\n');
-
-  if (!confirm(resumen)) return;
-
-  const payload = {
-    proveedor: pod_prov,
-    forma_pago: pod_fp,
-    cc_dias: pod_cc,
-    moneda: pod_mon,
-    iva_pct: (pod_iva != null && !isNaN(pod_iva)) ? pod_iva : null,
-    factura_nro: pod_fact_nro,
-    factura_fecha: pod_fact_fch,
-    factura_monto: pod_fact_mnt ? parseFloat(pod_fact_mnt) : null
-  };
-  console.log('[aprobarOC] Enviando:', payload);
-
-  try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/aprobar-compras', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al aprobar'); return; }
-    const resultado = await r.json();
-    console.log('[aprobarOC] Resultado DB:', {
-      factura_nro: resultado.factura_nro,
-      factura_monto: resultado.factura_monto,
-      proveedor: resultado.proveedor,
-      iva_pct: resultado.iva_pct
-    });
-    showToast('ok', '✅ OC aprobada — pasa a tesorería');
-    closeModal();
-    await loadPOList();
-  } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
-// Rechazo (cualquier rol, según estado)
-async function rechazarOC(id) {
-  var motivo = prompt('Motivo del rechazo (mínimo 5 caracteres):');
-  if (motivo == null) return;
-  motivo = motivo.trim();
-  if (motivo.length < 5) { showToast('warn', 'El motivo debe tener al menos 5 caracteres'); return; }
-  try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/rechazar', {
-      method: 'POST',
-      body: JSON.stringify({ motivo: motivo })
-    });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al rechazar'); return; }
-    showToast('ok', '❌ OC rechazada');
-    closeModal();
-    await loadPOList();
-  } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
-// Devolver la OC a la etapa anterior (en vez de rechazarla definitivamente)
-async function devolverOC(id, estadoActual) {
-  // Mensaje dinámico según de dónde devuelve
-  const mapMsg = {
-    'en_cotizacion':    'Devolver al solicitante para que corrija. ',
-    'aprobada_compras': 'Devolver a compras para que corrija la cotización. ',
-    'pagada':           'Devolver a tesorería para revisar el pago. '
-  };
-  const msg = (mapMsg[estadoActual] || 'Devolver a la etapa anterior. ') + 'Motivo (mín. 5 caracteres):';
-  var motivo = prompt(msg);
-  if (motivo == null) return;
-  motivo = motivo.trim();
-  if (motivo.length < 5) { showToast('warn', 'El motivo debe tener al menos 5 caracteres'); return; }
-  try {
-    const r = await apiFetch('/api/purchase-orders/' + id + '/devolver', {
-      method: 'POST',
-      body: JSON.stringify({ motivo: motivo })
-    });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al devolver'); return; }
-    showToast('ok', '⏪ OC devuelta a la etapa anterior');
-    closeModal();
-    await loadPOList();
-  } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
-// TESORERÍA confirma el pago.
-// Los datos de factura ya están cargados por compras.
-// Tesorería compara con la factura física que le llegó y si coincide, paga.
-async function pagarOC(id) {
-  try {
-    // Traer los datos frescos para mostrar en la confirmación
-    const ts = Date.now();
-    const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
-    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
-    const po = await res.json();
-
-    // Si faltan datos críticos, intentar usar el flujo nuevo (facturas múltiples)
-    if (!po.factura_nro || !po.factura_monto) {
-      // Buscar facturas en el sistema nuevo
-      try {
-        const fr = await apiFetch(`/api/purchase-orders/${id}/facturas`);
-        if (fr.ok) {
-          const facs = await fr.json();
-          const pendientes = facs.filter(f => !f.pagada);
-          if (pendientes.length === 1) {
-            // Una sola factura pendiente: abrir modal de pago directamente
-            if (typeof abrirModalPago === 'function') {
-              abrirModalPago(id, pendientes[0].id);
-              return;
-            }
-          } else if (pendientes.length > 1) {
-            // Varias: abrir modal de facturas
-            if (typeof abrirModalFacturas === 'function') {
-              abrirModalFacturas(id);
-              return;
-            }
-          } else if (facs.length > 0) {
-            showToast('ok', 'Todas las facturas de esta OC ya están pagadas');
-            return;
-          }
-        }
-      } catch {}
-      showToast('error', '❌ Esta OC no tiene factura cargada. El proveedor debe cargar la factura primero.');
-      return;
-    }
-
-    const monto = parseFloat(po.factura_monto);
-    const fmtFecha = po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—';
-
-    // Diálogo de verificación contra factura física
-    const resumen = [
-      '📋 VERIFICÁ CONTRA LA FACTURA FÍSICA',
-      '',
-      'Proveedor:   ' + (po.proveedor || '—'),
-      'N° factura:  ' + po.factura_nro,
-      'Fecha:       ' + fmtFecha,
-      'Monto:       $' + monto.toLocaleString('es-AR'),
-      'IVA:         ' + (po.iva_pct ? po.iva_pct + '%' : 'Sin IVA'),
-      '',
-      '¿Estos datos COINCIDEN con la factura física que recibiste?',
-      '',
-      '→ Si SÍ → Aceptar (se registra el pago)',
-      '→ Si NO → Cancelar y usar "⏪ Devolver" para que compras corrija'
-    ].join('\n');
-
-    if (!confirm(resumen)) return;
-
-    const r = await apiFetch('/api/purchase-orders/' + id + '/pagar', {
-      method: 'POST',
-      body: JSON.stringify({}) // No mandamos datos — ya están en la OC cargados por compras
-    });
-    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al registrar el pago'); return; }
-
-    showToast('ok', '💰 Pago registrado — esperando recepción');
-    closeModal();
-    await loadPOList();
-  } catch(err) { showToast('error', err.message || 'Error'); }
-}
-
-/* FIN OC WORKFLOW ACTIONS v2 */
-// ════════════════════════════════════════════════════════════
-//  BACKUP DE DB — Solo accesible por rol 'dueno'
-// ════════════════════════════════════════════════════════════
-
-async function downloadBackupDB() {
-  if (!userHasRole('dueno')) {
-    showToast('error', 'Solo el dueño puede descargar el backup');
-    return;
-  }
-
-  openModal('🔒 Backup de base de datos', `
-    <div style="background:var(--bg3);border-radius:var(--radius-lg);padding:18px;margin-bottom:14px">
-      <div style="font-size:13px;color:var(--text2);line-height:1.6">
-        Vas a descargar un <strong>backup completo</strong> de toda la base de datos de FleetOS (Expreso Biletta) en formato comprimido (<code>.sql.gz</code>).
-      </div>
-      <div style="margin-top:14px;padding:12px;background:var(--bg2);border-radius:var(--radius);border-left:3px solid var(--accent)">
-        <div style="font-size:12px;color:var(--text3);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">📦 Qué incluye</div>
-        <div style="font-size:12px;color:var(--text2);line-height:1.7">
-          ✓ Todos los vehículos y ficha técnica<br>
-          ✓ Órdenes de trabajo con repuestos y costos<br>
-          ✓ Cargas de combustible y cisternas<br>
-          ✓ Cubiertas con historial<br>
-          ✓ Stock y movimientos<br>
-          ✓ Órdenes de compra<br>
-          ✓ Usuarios, documentos y configuración
-        </div>
-      </div>
-      <div style="margin-top:12px;padding:10px 14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);font-size:12px;color:var(--warn)">
-        💡 <strong>Recomendación:</strong> guardá el archivo en 3 lugares (compu + Google Drive + email).
-      </div>
-    </div>
-  `, [
-    { label: '📥 Descargar ahora', cls: 'btn-primary', fn: _executeBackupDownload },
-    { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
-  ]);
-}
-
-async function _executeBackupDownload() {
-  const btns = document.querySelectorAll('#modal-footer button');
-  btns.forEach(b => { b.disabled = true; });
-  const primaryBtn = btns[0];
+    'La factura la cargará el proveedor cuando entregue la mercadería.',
+  ];
   if (primaryBtn) primaryBtn.textContent = '⏳ Generando backup...';
 
   try {
