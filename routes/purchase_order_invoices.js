@@ -92,14 +92,7 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), async (req, res) => {
   try {
-    // Si es proveedor, validar que la OC sea suya
-    if (req.user.role === 'proveedores') {
-      const u = await query('SELECT supplier_id FROM users WHERE id=$1', [req.user.id]);
-      const oc = await query('SELECT supplier_id FROM purchase_orders WHERE id=$1', [req.params.id]);
-      if (!oc.rows[0] || oc.rows[0].supplier_id !== u.rows[0]?.supplier_id) {
-        return res.status(403).json({ error: 'Esta OC no pertenece a tu proveedor' });
-      }
-    }
+    // El rol proveedores es personal interno: ve todas las OCs.
 
     const r = await query(`
       SELECT
