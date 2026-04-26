@@ -143,14 +143,7 @@ router.post('/:id/facturas', authenticate, requireRole(...ROLES_CARGAR_FAC), asy
       return res.status(400).json({ error: `No se puede facturar una OC en estado ${poRow.rows[0].status}` });
     }
 
-    // Si es proveedor, validar que sea su OC
-    if (req.user.role === 'proveedores') {
-      const u = await client.query('SELECT supplier_id FROM users WHERE id=$1', [req.user.id]);
-      if (poRow.rows[0].supplier_id !== u.rows[0]?.supplier_id) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Esta OC no pertenece a tu proveedor' });
-      }
-    }
+    // El rol proveedores es personal interno: puede cargar facturas en cualquier OC.
 
     // Validar duplicado
     const dup = await client.query(
