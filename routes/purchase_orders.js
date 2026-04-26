@@ -658,14 +658,9 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Cargá el proveedor antes de aprobar' });
     }
-    if (!factura_nro || !String(factura_nro).trim()) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Cargá el N° de factura antes de aprobar (la factura física la tiene compras)' });
-    }
-    if (factura_monto == null || factura_monto === '' || parseFloat(factura_monto) <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Cargá el monto de la factura antes de aprobar' });
-    }
+    // Nota: ya no se exige N° de factura ni monto al aprobar.
+    // En el flujo real, compras solo aprueba con proveedor + condiciones,
+    // y el rol Proveedores carga la factura cuando la recibe del proveedor.
 
     // Validar forma_pago
     const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
