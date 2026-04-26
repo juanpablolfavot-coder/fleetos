@@ -8970,8 +8970,8 @@ async function openPODetail(id) {
 
       ${puedeVerPrecios ? `
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💰 Datos de factura</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🏢 Proveedor</div>
+        <div style="display:grid;grid-template-columns:1fr;gap:10px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Proveedor</label>
             ${(() => {
@@ -8998,19 +8998,8 @@ async function openPODetail(id) {
               `;
             })()}
           </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Nro. Factura</label>
-            <input class="form-input" id="pod-factura-nro" value="${po.factura_nro||''}" placeholder="0001-00012345" ${canEdit && !esTerminal?'':'readonly'}>
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Fecha factura</label>
-            <input class="form-input" type="date" id="pod-factura-fecha" value="${po.factura_fecha?.slice(0,10)||''}" ${canEdit && !esTerminal?'':'readonly'}>
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Monto factura <span style="color:var(--text3);font-weight:400;font-size:10px">(se calcula solo con los artículos)</span></label>
-            <input class="form-input" type="number" id="pod-factura-monto" value="${po.factura_monto||''}" placeholder="0" ${canEdit && !esTerminal?'':'readonly'}
-              oninput="this.dataset.manualEdit='1'">
-          </div>
+          <!-- Los datos de la factura los carga el rol Proveedores cuando reciben la factura física.
+               Compras solo cierra la cotización con: proveedor + forma de pago + items. -->
         </div>
       </div>
 
