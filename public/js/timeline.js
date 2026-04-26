@@ -61,7 +61,42 @@
         } catch {}
       }
 
-      if (!recepciones.length && !facturas.length) return; // nada que sumar
+      // Si no hay datos, igual intentamos actualizar los puntos PAGÓ y RECIBIÓ del timeline existente
+      if (recepciones.length || facturas.length) {
+        // Actualizar puntos del timeline (PAGÓ y RECIBIÓ) si están vacíos pero ya hay datos en flujo nuevo
+        const points = card.querySelectorAll('div[style*="border-radius:50%"]');
+        const labels = card.querySelectorAll('div[style*="text-transform:uppercase"]');
+        labels.forEach(lbl => {
+          const txt = lbl.textContent.trim().toUpperCase();
+          const point = lbl.parentElement?.previousElementSibling;
+          const valueDiv = lbl.nextElementSibling;
+          const fechaDiv = lbl.parentElement?.parentElement?.lastElementChild;
+          if (txt === 'PAGÓ' && facturas.length) {
+            const todasPagadas = facturas.every(f => f.pagada);
+            const algunaPagada = facturas.some(f => parseFloat(f.monto_pagado||0) > 0);
+            if (todasPagadas || algunaPagada) {
+              if (point) point.style.background = 'var(--accent)';
+              if (valueDiv) {
+                valueDiv.style.fontWeight = '600';
+                valueDiv.style.color = 'var(--text)';
+                valueDiv.textContent = todasPagadas ? '✓ Todas las facturas pagadas' : 'Pago parcial';
+              }
+            }
+          }
+          if (txt === 'RECIBIÓ' && recepciones.length) {
+            if (point) point.style.background = 'var(--accent)';
+            if (valueDiv) {
+              valueDiv.style.fontWeight = '600';
+              valueDiv.style.color = 'var(--text)';
+              valueDiv.textContent = `${recepciones.length} recepción${recepciones.length>1?'es':''}`;
+            }
+            if (fechaDiv && recepciones[0].received_at) {
+              fechaDiv.textContent = fmtDate(recepciones[0].received_at);
+            }
+          }
+        });
+      }
+      if (!recepciones.length && !facturas.length) return; // nada más que sumar
 
       const html = `
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
