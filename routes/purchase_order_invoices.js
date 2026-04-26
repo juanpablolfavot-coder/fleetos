@@ -61,29 +61,24 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Solo usuarios con rol Proveedores' });
     }
 
-    // Buscar el supplier vinculado al usuario
-    const u = await query('SELECT supplier_id FROM users WHERE id=$1', [req.user.id]);
-    if (!u.rows[0] || !u.rows[0].supplier_id) {
-      return res.status(400).json({
-        error: 'Tu usuario aún no está vinculado a un proveedor del catálogo. Contactá al administrador.'
-      });
-    }
-
+    // El rol "Proveedores" es personal interno que carga facturas de TODOS los proveedores
+    // No se filtra por supplier_id del usuario
     const r = await query(`
       SELECT
         po.id, po.code, po.proveedor, po.status, po.created_at,
         po.total_estimado, po.factura_monto,
         po.delivery_status, po.invoice_status, po.payment_status,
         po.forma_pago, po.cc_dias,
+        s.name AS supplier_name,
         COALESCE(SUM(f.invoice_monto), 0) AS total_facturado,
         COUNT(f.id) AS cant_facturas
       FROM purchase_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN purchase_order_invoices f ON f.po_id = po.id
-      WHERE po.supplier_id = $1
-        AND po.status IN ('aprobada_compras','pagada','recibida')
-      GROUP BY po.id
+      WHERE po.status IN ('aprobada_compras','pagada','recibida')
+      GROUP BY po.id, s.name
       ORDER BY po.created_at DESC
-    `, [u.rows[0].supplier_id]);
+    `);
 
     res.json(r.rows);
   } catch (err) {
