@@ -946,4 +946,24 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/toggle-open — marcar OC como abierta (para servicios fraccionados)
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/toggle-open', authenticate, requireRole('dueno','gerencia','compras','jefe_mantenimiento','paniol','contador'), async (req, res) => {
+  try {
+    const { is_open } = req.body;
+    const r = await query(
+      'UPDATE purchase_orders SET is_open = $1 WHERE id = $2 AND status IN (\'aprobada_compras\',\'pagada\',\'recibida\') RETURNING id, code, is_open',
+      [!!is_open, req.params.id]
+    );
+    if (!r.rows[0]) {
+      return res.status(404).json({ error: 'OC no encontrada o en estado inválido' });
+    }
+    res.json({ ok: true, ...r.rows[0] });
+  } catch (err) {
+    console.error('[toggle-open]', err.message);
+    res.status(500).json({ error: 'Error al actualizar estado' });
+  }
+});
+
 module.exports = router;
