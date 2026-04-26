@@ -667,6 +667,29 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
     const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
 
+    // Resolver supplier_id: si vino, usarlo. Sino buscar/crear automáticamente desde "proveedor" (texto)
+    let _supplier_id = supplier_id || null;
+    if (!_supplier_id && proveedor && String(proveedor).trim()) {
+      const nombre = String(proveedor).trim();
+      // Buscar por nombre exacto (case insensitive) entre proveedores activos
+      const found = await client.query(
+        `SELECT id FROM suppliers WHERE LOWER(name) = LOWER($1) AND active = TRUE LIMIT 1`,
+        [nombre]
+      );
+      if (found.rows[0]) {
+        _supplier_id = found.rows[0].id;
+      } else {
+        // Crear nuevo proveedor automáticamente con datos mínimos
+        const ins = await client.query(
+          `INSERT INTO suppliers (name, forma_pago, cc_dias, moneda, status, active)
+           VALUES ($1, $2, $3, $4, 'activo', TRUE) RETURNING id`,
+          [nombre, _fp, _cc, _mon]
+        );
+        _supplier_id = ins.rows[0].id;
+        console.log('[OC aprobar-compras] supplier creado automáticamente:', nombre, _supplier_id);
+      }
+    }
+
     const r = await client.query(`
       UPDATE purchase_orders SET
         status = 'aprobada_compras',
@@ -682,7 +705,7 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
         aprobado_compras_por = $10,
         aprobado_compras_at = NOW()
       WHERE id = $11 RETURNING *`,
-      [proveedor||null, supplier_id||null, _fp, _cc, _mon,
+      [proveedor||null, _supplier_id, _fp, _cc, _mon,
        iva_pct != null ? parseFloat(iva_pct) : null,
        factura_nro ? String(factura_nro).trim() : null,
        factura_fecha || null,
