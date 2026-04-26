@@ -52,8 +52,9 @@ window.renderProveedorPanelInline = async function() {
           <td style="text-align:right;color:${facColor};font-weight:600">$${fmt(o.total_facturado)}</td>
           <td style="text-align:center"><span class="badge ${badgeClass(o.delivery_status)}">${o.delivery_status || 'pendiente'}</span></td>
           <td style="text-align:center"><span class="badge ${badgeClass(o.payment_status)}">${o.payment_status || 'pendiente'}</span></td>
-          <td style="text-align:center">
-            <button class="btn btn-primary btn-sm" onclick="abrirModalFacturas('${o.id}')">📄 Cargar factura</button>
+          <td style="text-align:center;white-space:nowrap">
+            <button class="btn btn-secondary btn-sm" onclick="openPODetail('${o.id}')">👁 Ver OC</button>
+            <button class="btn btn-primary btn-sm" onclick="abrirModalFacturas('${o.id}')" style="margin-left:4px">📄 Cargar factura</button>
           </td>
         </tr>
       `;}).join('');
