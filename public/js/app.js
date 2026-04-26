@@ -10247,9 +10247,33 @@ async function pagarOC(id) {
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
 
-    // Si faltan datos críticos, rechazar
+    // Si faltan datos críticos, intentar usar el flujo nuevo (facturas múltiples)
     if (!po.factura_nro || !po.factura_monto) {
-      showToast('error', '❌ Esta OC no tiene factura cargada por compras. Usá "⏪ Devolver" para que completen los datos.');
+      // Buscar facturas en el sistema nuevo
+      try {
+        const fr = await apiFetch(`/api/purchase-orders/${id}/facturas`);
+        if (fr.ok) {
+          const facs = await fr.json();
+          const pendientes = facs.filter(f => !f.pagada);
+          if (pendientes.length === 1) {
+            // Una sola factura pendiente: abrir modal de pago directamente
+            if (typeof abrirModalPago === 'function') {
+              abrirModalPago(id, pendientes[0].id);
+              return;
+            }
+          } else if (pendientes.length > 1) {
+            // Varias: abrir modal de facturas
+            if (typeof abrirModalFacturas === 'function') {
+              abrirModalFacturas(id);
+              return;
+            }
+          } else if (facs.length > 0) {
+            showToast('ok', 'Todas las facturas de esta OC ya están pagadas');
+            return;
+          }
+        }
+      } catch {}
+      showToast('error', '❌ Esta OC no tiene factura cargada. El proveedor debe cargar la factura primero.');
       return;
     }
 
