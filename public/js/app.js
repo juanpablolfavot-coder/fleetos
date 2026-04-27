@@ -5406,6 +5406,7 @@ function _otRenderRow(o) {
         ${['dueno','gerencia','jefe_mantenimiento','mecanico'].includes(App.currentUser?.role) ?
           `<button class="btn btn-primary btn-sm" onclick="closeOT('${o.id||o._id}')" style="margin-left:4px">Cerrar</button>` : ''}
       `}
+      <button class="btn btn-secondary btn-sm" onclick="printOT('${o.id||o._id}')" title="Imprimir" style="margin-left:4px">🖨</button>
     </td>
   </tr>`;
 }
