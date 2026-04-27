@@ -439,11 +439,11 @@ router.get('/:id/parts', authenticate, validateUUID('id'), async (req, res) => {
        FROM work_order_parts wop
        LEFT JOIN stock_items si ON si.id = wop.stock_id
        WHERE wop.wo_id = $1
-       ORDER BY wop.created_at ASC`,
+       ORDER BY wop.added_at ASC`,
       [req.params.id]
     );
     res.json(r.rows);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[GET /parts]', err.message); res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/workorders/:id/parts — AGREGAR repuesto a OT existente
