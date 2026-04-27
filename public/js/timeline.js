@@ -66,6 +66,43 @@
         // Actualizar puntos del timeline (PAGÓ y RECIBIÓ) si están vacíos pero ya hay datos en flujo nuevo
         const points = card.querySelectorAll('div[style*="border-radius:50%"]');
         const labels = card.querySelectorAll('div[style*="text-transform:uppercase"]');
+        // Insertar una nueva fila "CARGÓ FACTURA" después de APROBÓ si hay facturas
+        if (facturas.length) {
+          const f1 = facturas.slice().sort((a,b) => new Date(a.uploaded_at) - new Date(b.uploaded_at))[0];
+          // Buscar el row de APROBÓ
+          let aprobRow = null;
+          labels.forEach(lbl => {
+            const txt = lbl.textContent.trim().toUpperCase();
+            if (txt === 'APROBÓ' || txt === 'APROBO') {
+              aprobRow = lbl.closest('div[style*="display"]')?.parentElement || lbl.parentElement?.parentElement;
+            }
+          });
+          // Mejor: insertar antes del row de PAGÓ
+          let pagoRow = null;
+          labels.forEach(lbl => {
+            const txt = lbl.textContent.trim().toUpperCase();
+            if (txt === 'PAGÓ' || txt === 'PAGO') {
+              pagoRow = lbl.closest('div[style*="display"]')?.parentElement || lbl.parentElement?.parentElement;
+            }
+          });
+          if (pagoRow && !card.querySelector('[data-cargo-factura]')) {
+            const newRow = document.createElement('div');
+            newRow.dataset.cargoFactura = '1';
+            newRow.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0';
+            newRow.innerHTML = `
+              <div style="width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0"></div>
+              <div style="flex:1;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">CARGÓ FACTURA</div>
+                  <div style="font-weight:600">${f1.uploaded_by_name || '—'}</div>
+                </div>
+                <div style="font-size:12px;color:var(--text3)">${f1.uploaded_at ? new Date(f1.uploaded_at).toLocaleString('es-AR') : ''}</div>
+              </div>
+            `;
+            pagoRow.parentNode.insertBefore(newRow, pagoRow);
+          }
+        }
+
         labels.forEach(lbl => {
           const txt = lbl.textContent.trim().toUpperCase();
           const point = lbl.parentElement?.previousElementSibling;
