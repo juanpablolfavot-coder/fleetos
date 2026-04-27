@@ -8897,7 +8897,7 @@ async function openPODetail(id) {
     const esTerminal = ['recibida','rechazada'].includes(po.status);
     window._ocEditValues = { forma_pago: po.forma_pago, cc_dias: po.cc_dias, moneda: po.moneda };
 
-    const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+    const totalReal = po.items.reduce((a,i) => a + (parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)), 0);
     const fmt = d => d ? new Date(d).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
 
     const tl = (label, nombre, fecha, done) => `
@@ -9309,7 +9309,25 @@ async function printPO(id) {
     const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
-    const totalReal = po.items.reduce((a,i) => a + parseFloat(i.subtotal||0), 0);
+
+    // Cargar recepciones, facturas y pagos del flujo nuevo
+    let recepciones = [], facturas = [], pagosByFactura = {};
+    try {
+      const [recR, facR] = await Promise.all([
+        apiFetch(`/api/purchase-orders/${id}/recepciones`),
+        apiFetch(`/api/purchase-orders/${id}/facturas`),
+      ]);
+      if (recR.ok) recepciones = await recR.json();
+      if (facR.ok) facturas = await facR.json();
+      for (const f of facturas) {
+        try {
+          const r = await apiFetch(`/api/purchase-orders/${id}/facturas/${f.id}/pagos`);
+          if (r.ok) pagosByFactura[f.id] = await r.json();
+        } catch {}
+      }
+    } catch (e) { console.warn('print extra data', e); }
+
+    const totalReal = po.items.reduce((a,i) => a + (parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)), 0);
     const ivaMonto = Math.round(totalReal * parseFloat(po.iva_pct||0) / 100);
     const totalConIva = Math.round(totalReal * (1 + parseFloat(po.iva_pct||0)/100));
 
@@ -9423,8 +9441,8 @@ async function printPO(id) {
               <td>${i.descripcion}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
               <td style="text-align:center">${i.unidad||'un'}</td>
-              <td style="text-align:right">$${parseFloat(i.precio_unit).toLocaleString('es-AR')}</td>
-              <td style="text-align:right;font-weight:600">$${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
+              <td style="text-align:right">$${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
+              <td style="text-align:right;font-weight:600">$${Math.round(parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)).toLocaleString('es-AR')}</td>
             </tr>`).join('')}
             ${parseFloat(po.iva_pct||0) > 0 ? `
             <tr class="total-row">
@@ -9476,7 +9494,63 @@ async function printPO(id) {
         </div>
       </div>
 
-      <div class="firma-section">
+      ${recepciones.length ? `
+      <div style="margin-top:24px;page-break-inside:avoid">
+        <div style="font-size:13px;font-weight:700;color:#ea580c;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📦 Recepciones (${recepciones.length})</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:6px">
+          <thead><tr style="background:#fef3c7;border-bottom:2px solid #f59e0b">
+            <th style="padding:6px;text-align:left">Fecha</th>
+            <th style="padding:6px;text-align:left">Destino</th>
+            <th style="padding:6px;text-align:left">Remito</th>
+            <th style="padding:6px;text-align:left">Items</th>
+            <th style="padding:6px;text-align:left">Por</th>
+          </tr></thead>
+          <tbody>
+            ${recepciones.map(r => `<tr style="border-bottom:1px solid #e5e7eb">
+              <td style="padding:6px">${new Date(r.received_at).toLocaleString('es-AR')}</td>
+              <td style="padding:6px">${r.destino || '—'}</td>
+              <td style="padding:6px">${r.remito_nro || '—'}</td>
+              <td style="padding:6px">${(r.items||[]).map(it => `${it.descripcion}: ${parseFloat(it.cantidad).toFixed(2)} ${it.unidad||''}`).join(' · ')}</td>
+              <td style="padding:6px">${r.received_by_name || '—'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+
+      ${facturas.length ? `
+      <div style="margin-top:24px;page-break-inside:avoid">
+        <div style="font-size:13px;font-weight:700;color:#ea580c;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📄 Facturas (${facturas.length})</div>
+        ${facturas.map(f => {
+          const pagos = pagosByFactura[f.id] || [];
+          const monto = parseFloat(f.invoice_monto||0);
+          const pagado = parseFloat(f.monto_pagado||0);
+          const saldo = monto - pagado;
+          const venc = f.vencimiento ? new Date(f.vencimiento).toLocaleDateString('es-AR') : '—';
+          return `
+            <div style="border:1px solid #e5e7eb;border-radius:4px;padding:10px;margin-bottom:8px;font-size:11px;background:${f.pagada?'#dcfce7':'#fff'}">
+              <div style="display:flex;justify-content:space-between;font-weight:600">
+                <span>N° ${f.invoice_nro} · $${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}${f.pagada?' ✓ PAGADA':''}</span>
+                <span style="color:#374151">Vence ${venc}</span>
+              </div>
+              <div style="color:#6b7280;margin-top:4px">Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''} · Cargada por ${f.uploaded_by_name||'—'}</div>
+              ${pagos.length ? `
+                <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb">
+                  ${pagos.map(p => {
+                    let detalle = '';
+                    if (p.metodo === 'transferencia') detalle = ` · ${p.banco_origen||''}→${p.banco_destino||''}`;
+                    else if (p.metodo === 'cheque') detalle = ` · Cheque ${p.cheque_nro||''} ${p.cheque_banco||''}`;
+                    else if (p.metodo === 'echeq') detalle = ` · eCheq ${p.echeq_nro||''}`;
+                    else if (p.metodo === 'tarjeta') detalle = ` · Aprob ${p.tarjeta_aprobacion||''}`;
+                    return `<div style="padding:2px 0;color:#166534">💰 $${parseFloat(p.monto).toLocaleString('es-AR',{minimumFractionDigits:2})} · ${p.metodo}${detalle} · ${new Date(p.paid_at).toLocaleDateString('es-AR')} (${p.paid_by_name||'—'})</div>`;
+                  }).join('')}
+                </div>
+              ` : '<div style="margin-top:4px;color:#92400e;font-style:italic">Sin pagos registrados</div>'}
+            </div>
+          `;
+        }).join('')}
+      </div>` : ''}
+
+      <div class="firma-section" style="margin-top:32px">
         <div class="firma-box">Solicitado por<br><br><br></div>
         <div class="firma-box">Autorizado por<br><br><br></div>
         <div class="firma-box">Recibido / Conforme<br><br><br></div>
