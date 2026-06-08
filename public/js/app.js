@@ -7730,11 +7730,11 @@ async function openVerificacionTickets() {
             <textarea class="form-textarea" id="tick-obs" placeholder="Ej: Precio no coincide, ticket ilegible..." rows="3"></textarea>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${t.id}','aprobar')">✅ Aprobar y borrar foto</button>
+            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${t.id}','aprobar')">✅ Aprobar y conservar foto</button>
             <button class="btn btn-danger" style="flex:1" onclick="verificarTicket('${t.id}','observar')">⚠ Observar</button>
           </div>
           <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">
-            Al aprobar, la foto se borra de la DB para ahorrar espacio
+            Al aprobar, la foto queda guardada para poder verla después desde el historial
           </div>
         </div>
         <div style="text-align:center">
@@ -7767,7 +7767,7 @@ async function verificarTicket(id, accion) {
   window._ticketIdx = idx;
 
   const restantes = pendientes.length - idx;
-  showToast('ok', accion === 'aprobar' ? `✅ Aprobado · foto eliminada · ${restantes} pendientes` : `⚠ Observado · ${restantes} pendientes`);
+  showToast('ok', accion === 'aprobar' ? `✅ Aprobado · foto conservada · ${restantes} pendientes` : `⚠ Observado · ${restantes} pendientes`);
 
   if (idx >= pendientes.length) {
     closeModal();
@@ -7792,11 +7792,11 @@ async function verificarTicket(id, accion) {
             <textarea class="form-textarea" id="tick-obs" placeholder="Ej: Precio no coincide, ticket ilegible..." rows="3"></textarea>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${next.id}','aprobar')">✅ Aprobar y borrar foto</button>
+            <button class="btn btn-primary" style="flex:1" onclick="verificarTicket('${next.id}','aprobar')">✅ Aprobar y conservar foto</button>
             <button class="btn btn-danger" style="flex:1" onclick="verificarTicket('${next.id}','observar')">⚠ Observar</button>
           </div>
           <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">
-            Al aprobar, la foto se borra de la DB para ahorrar espacio
+            Al aprobar, la foto queda guardada para poder verla después desde el historial
           </div>
         </div>
         <div style="text-align:center">
@@ -11980,7 +11980,7 @@ function _renderFuelLogRows(logs) {
       <td class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
     ` : ''}
     <td>${f.place || '—'}</td>
-    <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status||'—'}</span></td>
+    <td><span class="badge ${f.ticket_estado==='verificado'?'badge-ok':(f.ticket_estado==='observado'?'badge-warn':'badge-info')}">${f.ticket_estado ? ('Ticket ' + f.ticket_estado) : (f.status||'—')}</span></td>
     <td>
       <div style="display:flex;gap:4px">
         ${f.ticket_image
