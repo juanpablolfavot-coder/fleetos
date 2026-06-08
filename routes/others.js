@@ -58,13 +58,23 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         return res.status(403).json({ error: 'Solo podés cargar combustible a tu unidad asignada (' + (req.user.vehicle_code||'sin asignar') + ')' });
       }
     }
-    // Control de duplicados: misma unidad en los últimos 10 minutos
-    const dup = await client.query(
-      "SELECT id FROM fuel_logs WHERE vehicle_id=$1 AND driver_id=$2 AND logged_at > NOW() - INTERVAL '10 minutes'",
-      [vehicle_id, req.user.id]
-    );
-    if (dup.rows.length > 0) {
-      return res.status(409).json({ error: 'Ya registraste una carga para esta unidad hace menos de 10 minutos. Si es correcta, esperá unos minutos e intentá de nuevo.' });
+    // Control de duplicados: misma unidad en los últimos 10 minutos.
+    // IMPORTANTE: aplica solo a combustible/gasoil. La urea puede cargarse inmediatamente
+    // después de una carga de combustible de la misma unidad.
+    const tipoCarga = (fuel_type || 'fuel').toLowerCase();
+    const esUrea = tipoCarga === 'urea';
+    if (!esUrea) {
+      const dup = await client.query(
+        `SELECT id FROM fuel_logs
+         WHERE vehicle_id=$1
+           AND driver_id=$2
+           AND COALESCE(fuel_type,'fuel') <> 'urea'
+           AND logged_at > NOW() - INTERVAL '10 minutes'`,
+        [vehicle_id, req.user.id]
+      );
+      if (dup.rows.length > 0) {
+        return res.status(409).json({ error: 'Ya registraste una carga de combustible para esta unidad hace menos de 10 minutos. Si es correcta, esperá unos minutos e intentá de nuevo.' });
+      }
     }
     // Validar ticket_image si viene — debe ser JPG o PNG en base64, máx 5MB
     if (ticket_image) {
@@ -75,10 +85,14 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       const sizeKB = Math.round(ticket_image.length * 0.75 / 1024);
       if (sizeKB > 5120) return res.status(400).json({ error: 'La imagen del ticket no puede superar 5MB' });
     }
-    // Si es carga externa, exigir ticket salvo que el rol sea dueño/gerencia/compras (podrían cargar a mano)
-    if (!tank_id && !ticket_image) {
-      const rolesSinTicket = ['dueno','gerencia','compras'];
-      if (!rolesSinTicket.includes(req.user.role)) {
+    // Ticket obligatorio para cargas de combustible hechas por choferes.
+    // Para urea no se exige ticket, salvo que sea carga externa y el rol no esté exceptuado.
+    const rolesSinTicket = ['dueno','gerencia','compras'];
+    if (!ticket_image) {
+      if (!esUrea && req.user.role === 'chofer') {
+        return res.status(400).json({ error: 'Para registrar combustible tenés que subir la foto del ticket.' });
+      }
+      if (!tank_id && !rolesSinTicket.includes(req.user.role)) {
         return res.status(400).json({ error: 'Al cargar en estación externa, la foto del ticket es obligatoria' });
       }
     }
@@ -564,10 +578,9 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 
     let sql, params;
     if (accion === 'aprobar') {
-      // Aprobar: marcar como verificado y BORRAR la foto para liberar espacio
+      // Aprobar: marcar como verificado, conservando la foto para auditoría y consulta posterior.
       sql = `UPDATE fuel_logs SET 
         ticket_estado = 'verificado',
-        ticket_image = NULL,
         ticket_verificado_por = $1,
         ticket_verificado_at = NOW()
         WHERE id = $2 RETURNING id, ticket_estado`;
