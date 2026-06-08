@@ -518,6 +518,8 @@ function _mapFuelLog(f) {
     place:        f.location || 'Cisterna',
     status:       'OK',
     ticket_image: f.ticket_image || null,
+    ticket_estado: f.ticket_estado || null,
+    ticket_obs: f.ticket_obs || null,
   };
 }
 
