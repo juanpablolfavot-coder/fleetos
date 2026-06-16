@@ -567,90 +567,6 @@ function renderDashboard() {
 
 // ── FLOTA ──
 let vehicleFilter = '';
-const DEFAULT_VEHICLE_TYPES = ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
-
-function _normalizeVehicleType(type) {
-  const raw = String(type || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, '_')
-    .replace(/-/g, '_');
-  const aliases = {
-    semi: 'semirremolque',
-    semirremolques: 'semirremolque',
-    semi_remolque: 'semirremolque',
-    semi_remolques: 'semirremolque',
-    remolque: 'semirremolque',
-    acoplados: 'acoplado',
-    auto_elevador: 'autoelevador',
-    autoelevadores: 'autoelevador',
-    montacargas: 'autoelevador',
-    camioneta: 'utilitario',
-    utilitaria: 'utilitario',
-    furgoneta: 'furgon',
-  };
-  return aliases[raw] || raw || 'otro';
-}
-
-function getConfiguredVehicleTypes() {
-  const configured = Array.isArray(App.config?.vehicle_types) ? App.config.vehicle_types : [];
-  const out = [];
-  [...configured, ...DEFAULT_VEHICLE_TYPES].forEach(t => {
-    const n = _normalizeVehicleType(t);
-    if (n && !out.includes(n)) out.push(n);
-  });
-  return out;
-}
-
-function _vehicleTypeLabel(type) {
-  const labels = {
-    tractor: 'Tractor',
-    camion: 'Camión',
-    semirremolque: 'Semirremolque',
-    acoplado: 'Acoplado',
-    utilitario: 'Utilitario',
-    autoelevador: 'Autoelevador',
-    furgon: 'Furgón',
-    moto: 'Moto',
-    otro: 'Otro',
-  };
-  const n = _normalizeVehicleType(type);
-  return labels[n] || (String(type||'Otro').charAt(0).toUpperCase()+String(type||'otro').slice(1));
-}
-
-function _isTrailerType(type) {
-  return ['semirremolque','acoplado'].includes(_normalizeVehicleType(type));
-}
-
-function _vehicleMetricLabel(type) {
-  const t = _normalizeVehicleType(type);
-  if (t === 'autoelevador') return 'Horas actuales';
-  if (_isTrailerType(t)) return 'Km / uso actual';
-  return 'Km actuales';
-}
-
-function _vehicleMetricUnit(type) {
-  return _normalizeVehicleType(type) === 'autoelevador' ? 'hs' : 'km';
-}
-
-function updateVehicleMetricLabel(selectId, labelId) {
-  const type = document.getElementById(selectId)?.value || 'camion';
-  const el = document.getElementById(labelId);
-  if (el) el.textContent = _vehicleMetricLabel(type);
-}
-
-function _vehicleCanReceiveFuel(v) {
-  const t = _normalizeVehicleType(v?.type);
-  return !['semirremolque','acoplado'].includes(t);
-}
-
-function _vehicleTypeOptions(selected) {
-  const sel = _normalizeVehicleType(selected);
-  return getConfiguredVehicleTypes().map(t => {
-    const n = _normalizeVehicleType(t);
-    return `<option value="${n}" ${n===sel?'selected':''}>${_vehicleTypeLabel(n)}</option>`;
-  }).join('');
-}
-
 function filterVehicle(code) { vehicleFilter = code; renderFleet(); }
 
 function renderFleet() {
@@ -659,7 +575,7 @@ function renderFleet() {
     <div class="section-header">
       <div>
         <div class="section-title">Flota registrada</div>
-        <div class="section-sub">${App.data.vehicles.length} unidades · tractores, camiones, semirremolques, acoplados y autoelevadores</div>
+        <div class="section-sub">${App.data.vehicles.length} unidades · tractores, camiones, semirremolques</div>
       </div>
       <div style="display:flex;gap:8px">
         <input type="text" class="form-input" placeholder="Buscar por código, patente, marca..." id="fleet-search" style="width:280px" value="${vehicleFilter}" oninput="filterFleetTable(this.value)">
@@ -675,7 +591,7 @@ function renderFleet() {
         <table id="fleet-table">
           <thead><tr>
             <th>Código</th><th>Patente</th><th>Marca / Modelo</th><th>Tipo</th>
-            <th>Año</th><th>Km / hs actuales</th><th>Base</th><th>Chofer</th>
+            <th>Año</th><th>Km actuales</th><th>Base</th><th>Chofer</th>
             <th>Costo/km</th><th>Estado</th><th>GPS</th><th></th>
           </tr></thead>
           <tbody id="fleet-tbody"></tbody>
@@ -698,13 +614,13 @@ function renderFleetTable(data) {
     const cpkm_color = ckReal>0.25?'danger':ckReal>0.20?'warn':'ok';
     return `<tr>
       <td class="td-mono td-main">${v.code}</td>
-      <td class="td-mono">${v.plate || '—'}</td>
-      <td class="td-main">${v.brand || '—'} ${v.model || ''}</td>
-      <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${_vehicleTypeLabel(v.type)}</span></td>
+      <td class="td-mono">${v.plate}</td>
+      <td class="td-main">${v.brand} ${v.model}</td>
+      <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${v.type}</span></td>
       <td class="td-mono">${v.year}</td>
-      <td class="td-mono">${(v.km||0).toLocaleString()} ${_vehicleMetricUnit(v.type)}</td>
-      <td>${v.base || 'Central'}</td>
-      <td>${v.driver || '—'}</td>
+      <td class="td-mono">${v.km.toLocaleString()} ${v.type==='autoelevador'?'hs':'km'}</td>
+      <td>${v.base}</td>
+      <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">${ckReal>0?'$'+ckReal.toFixed(3):'—'}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
       <td>
@@ -718,14 +634,12 @@ function renderFleetTable(data) {
 }
 
 function filterFleetTable(q) {
-  const needle = String(q || '').toLowerCase();
-  const filtered = (App.data.vehicles || []).filter(v =>
-    String(v.code || '').toLowerCase().includes(needle) ||
-    String(v.plate || '').toLowerCase().includes(needle) ||
-    String(v.brand || '').toLowerCase().includes(needle) ||
-    String(v.model || '').toLowerCase().includes(needle) ||
-    String(v.driver || '').toLowerCase().includes(needle) ||
-    _vehicleTypeLabel(v.type).toLowerCase().includes(needle)
+  const filtered = App.data.vehicles.filter(v =>
+    v.code.toLowerCase().includes(q.toLowerCase()) ||
+    v.plate.toLowerCase().includes(q.toLowerCase()) ||
+    v.brand.toLowerCase().includes(q.toLowerCase()) ||
+    v.model.toLowerCase().includes(q.toLowerCase()) ||
+    v.driver.toLowerCase().includes(q.toLowerCase())
   );
   renderFleetTable(filtered);
 }
@@ -1000,16 +914,16 @@ function showVehicleFicha(id, tab) {
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
       <div style="background:var(--bg3);border-radius:var(--radius-lg);padding:14px 18px;text-align:center;border:1px solid var(--border)">
         <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--accent)">${v.code}</div>
-        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${v.plate || '—'}</div>
+        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${v.plate}</div>
       </div>
       <div style="flex:1">
-        <div style="font-size:16px;font-weight:600;color:var(--text)">${v.brand || 'Sin marca'} ${v.model || ''} · ${v.year || '—'}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:3px">${_vehicleTypeLabel(v.type)} · Base ${v.base || 'Central'} · ${v.driver || '—'}</div>
+        <div style="font-size:16px;font-weight:600;color:var(--text)">${v.brand} ${v.model} · ${v.year}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:3px">${v.type} · Base ${v.base} · ${v.driver}</div>
         <div style="margin-top:8px"><span class="badge ${stBadge[v.status]||'badge-gray'}">${stLabel[v.status]||v.status}</span></div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${(v.km || 0).toLocaleString()}</div>
-        <div style="font-size:11px;color:var(--text3)">${_vehicleMetricLabel(v.type).toLowerCase()}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${v.km.toLocaleString()}</div>
+        <div style="font-size:11px;color:var(--text3)">km actuales</div>
         <div style="font-size:13px;font-family:var(--mono);color:var(--text3);margin-top:4px">${(()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+'/km':'Sin datos costo/km';})()}</div>
       </div>
     </div>`;
@@ -1024,13 +938,13 @@ function showVehicleFicha(id, tab) {
           ['Marca',        v.brand],
           ['Modelo',       v.model],
           ['Año',          v.year],
-          ['Tipo',         _vehicleTypeLabel(v.type)],
+          ['Tipo',         v.type],
           ['VIN / Chasis', v.vin||'No registrado'],
           ['Nro. motor',   v.engine_no||'No registrado'],
           ['Base operativa', v.base],
           ['Centro de costo', v.cost_center||'Sin asignar'],
           ['Chofer habitual', v.driver],
-          [_vehicleMetricLabel(v.type),  (v.km||0).toLocaleString()+' '+_vehicleMetricUnit(v.type)],
+          ['Km actuales',  v.km.toLocaleString()+(v.type==='autoelevador'?' hs':' km')],
           ['Costo/km',     (()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+' (mes actual)':'Sin datos suficientes';})()],
           ['Combustible',  spec.fuel_cap],
         ].map(([l,val])=>`
@@ -1234,17 +1148,17 @@ function openEditVehicleModal(id) {
   openModal('Editar unidad — ' + v.code, `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="ev-code" value="${v.code}"></div>
-      <div class="form-group"><label class="form-label">Patente <span style="color:var(--text3);font-weight:400">(opcional si no tiene)</span></label><input class="form-input" id="ev-plate" value="${v.plate || ''}" placeholder="Si no tiene, se usa el código interno"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" id="ev-plate" value="${v.plate}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="ev-brand" value="${v.brand || ''}"></div>
-      <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" id="ev-model" value="${v.model || ''}"></div>
+      <div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="ev-brand" value="${v.brand}"></div>
+      <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" id="ev-model" value="${v.model}"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" id="ev-year" value="${v.year}"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-select" id="ev-type" onchange="updateVehicleMetricLabel('ev-type','ev-km-label')">
-          ${_vehicleTypeOptions(v.type)}
+        <select class="form-select" id="ev-type">
+          ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option ${t===v.type?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -1254,10 +1168,10 @@ function openEditVehicleModal(id) {
           ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option ${b===v.base?'selected':''}>${b}</option>`).join('')}
         </select>
       </div>
-      <div class="form-group"><label class="form-label">Chofer habitual <span style="color:var(--text3);font-weight:400">(opcional en semis/acoplados)</span></label><input class="form-input" id="ev-driver" value="${v.driver && v.driver !== '—' ? v.driver : ''}"></div>
+      <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" id="ev-driver" value="${v.driver}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label" id="ev-km-label">${_vehicleMetricLabel(v.type)}</label><input class="form-input" type="number" id="ev-km" value="${v.km || 0}"></div>
+      <div class="form-group"><label class="form-label">${v.type==='autoelevador'?'Horas actuales':'Km actuales'}</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
       <div class="form-group"><label class="form-label">Estado</label>
         <select class="form-select" id="ev-status">
           ${['ok','warn','taller','detenida'].map(s=>`<option ${s===v.status?'selected':''}>${s}</option>`).join('')}
@@ -1290,14 +1204,11 @@ async function saveEditVehicle(id) {
   const engine = (document.getElementById('ev-engine')?.value || '').trim();
   const cc     = (document.getElementById('ev-cc')?.value     || '').trim();
 
-  if (!code) { showToast('error','El código interno es obligatorio'); return; }
-  if (!plate && !_isTrailerType(type) && _normalizeVehicleType(type) !== 'autoelevador') {
-    showToast('warn','Sin patente: se usará el código interno como identificación');
-  }
+  if (!code || !plate) { showToast('error','Código y patente son obligatorios'); return; }
 
   const res = await apiFetch(`/api/vehicles/${id}`, {
     method:'PUT',
-    body: JSON.stringify({ code, plate: plate || code, brand: brand || 'Sin marca', model: model || (type === 'autoelevador' ? 'Autoelevador' : 'Sin modelo'), year, type, base, km_current: km,
+    body: JSON.stringify({ code, plate, brand, model, year, type, base, km_current: km,
                            status, driver, vin, engine_no: engine, cost_center: cc })
   });
   if (!res.ok) { const e=await res.json(); showToast('error',e.error||'Error al guardar'); return; }
@@ -2170,7 +2081,7 @@ function renderFuel() {
 }
 
 function openFuelLoadModal() {
-  const vehicleOpts = (App.data.vehicles||[]).filter(_vehicleCanReceiveFuel).map(v=>`<option value="${v.id}">${v.code} — ${v.plate || 'sin patente'} · ${_vehicleTypeLabel(v.type)}</option>`).join('');
+  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
   openModal('Registrar carga de combustible / urea', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Unidad</label>
@@ -2980,23 +2891,13 @@ const AXLE_CONFIGS = {
     { name:'Eje 2 — Portante',  positions:['S2-IE','S2-II','S2-DE','S2-DD'],     dual:true  },
     { name:'Eje 3 — Portante',  positions:['S3-IE','S3-II','S3-DE','S3-DD'],     dual:true  },
   ],
-  acoplado: [
-    { name:'Eje 1 — Portante',  positions:['A1-IE','A1-II','A1-DE','A1-DD'],     dual:true  },
-    { name:'Eje 2 — Portante',  positions:['A2-IE','A2-II','A2-DE','A2-DD'],     dual:true  },
-    { name:'Eje 3 — Portante',  positions:['A3-IE','A3-II','A3-DE','A3-DD'],     dual:true  },
-  ],
-  autoelevador: [
-    { name:'Eje delantero',     positions:['AE-DI','AE-DD'],                     dual:false },
-    { name:'Eje trasero',       positions:['AE-TI','AE-TD'],                     dual:false },
-  ],
 };
 
 function getAxleConfig(vehicle) {
   const customAxles = vehicle?.tech_spec?.axles;
   if (customAxles && customAxles.length > 0) {
     return customAxles.map((axle, i) => {
-      const typeNorm = _normalizeVehicleType(vehicle.type);
-      const prefix = typeNorm === 'semirremolque' ? 'S' : (typeNorm === 'acoplado' ? 'A' : (typeNorm === 'autoelevador' ? 'AE' : ''));
+      const prefix = vehicle.type === 'semirremolque' ? 'S' : '';
       const n = i + 1;
       if (axle.dual) {
         return { name:'Eje ' + n + ' - ' + (axle.label||'Portante'), positions:[prefix+n+'-IE',prefix+n+'-II',prefix+n+'-DE',prefix+n+'-DD'], dual:true };
@@ -3005,7 +2906,7 @@ function getAxleConfig(vehicle) {
       }
     });
   }
-  return AXLE_CONFIGS[_normalizeVehicleType(vehicle?.type)] || AXLE_CONFIGS.camion;
+  return AXLE_CONFIGS[vehicle?.type] || AXLE_CONFIGS.camion;
 }
 // ─────────────────────────────────────────
 function renderTires() {
@@ -3017,7 +2918,7 @@ function renderTires() {
   const warn     = mounted.filter(t=>t.status==='warn').length;
 
   const vehicleOpts = App.data.vehicles
-    .filter(v=>['tractor','camion','semirremolque','acoplado','autoelevador'].includes(_normalizeVehicleType(v.type)))
+    .filter(v=>['tractor','camion','semirremolque'].includes(v.type))
     .slice(0,12);
 
   document.getElementById('page-tires').innerHTML = `
@@ -3396,7 +3297,7 @@ function renderTireHistory() {
 function openMountFromStockModal(serial='', vehicleCode='', pos='') {
   const code    = vehicleCode || getSelectedVehicle();
   const vehicle = App.data.vehicles.find(v=>v.code===code);
-  const config  = AXLE_CONFIGS[_normalizeVehicleType(vehicle?.type)] || AXLE_CONFIGS['tractor'];
+  const config  = AXLE_CONFIGS[vehicle?.type] || AXLE_CONFIGS['tractor'];
   const allPos  = config.flatMap(a=>a.positions);
   const occupied= App.data.tires.filter(t=>t.vehicle===code).map(t=>t.pos);
   const freePos = allPos.filter(p=>!occupied.includes(p));
@@ -5690,7 +5591,7 @@ async function rejectUser(id, name) {
 
 function openNewUserModal() {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
-  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}">${v.code} · ${v.plate || '—'}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}">${v.code} · ${v.plate}</option>`).join('');
 
   openModal('Nuevo usuario', `
     <div class="form-grid">
@@ -5749,7 +5650,7 @@ async function saveNewUser() {
 
 function openEditUserModal(id, name, email, role, vehicle, active) {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');
-  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate || '—'}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate}</option>`).join('');
 
   openModal(`Editar: ${name}`, `
     <div class="form-grid">
@@ -6352,7 +6253,7 @@ function openChoferNovedadModal() {
     <div class="form-group">
       <label class="form-label">Vehículo</label>
       <select class="form-select" id="cn-vehicle">
-        ${(App.data.vehicles||[]).map(v=>`<option value="${v.id}" ${myVehicle?.id===v.id?'selected':''}>${v.code} — ${v.plate || '—'}</option>`).join('')}
+        ${(App.data.vehicles||[]).map(v=>`<option value="${v.id}" ${myVehicle?.id===v.id?'selected':''}>${v.code} — ${v.plate}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -6737,7 +6638,7 @@ function openNewVehicleModal() {
   openModal('Registrar nueva unidad', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="Ej: INT-46" id="nv-code"></div>
-      <div class="form-group"><label class="form-label">Patente <span style="color:var(--text3);font-weight:400">(opcional si no tiene)</span></label><input class="form-input" placeholder="Ej: ABC 001 / si no tiene, queda el código" id="nv-plate"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" placeholder="Ej: ABC 001" id="nv-plate"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Marca</label><input class="form-input" placeholder="Ej: Mercedes-Benz" id="nv-brand"></div>
@@ -6746,13 +6647,13 @@ function openNewVehicleModal() {
     <div class="form-row">
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" placeholder="Ej: 2019" id="nv-year"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-select" id="nv-type" onchange="updateVehicleMetricLabel('nv-type','nv-km-label')">
-          ${_vehicleTypeOptions('camion')}
+        <select class="form-select" id="nv-type">
+          ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
         </select>
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label" id="nv-km-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000 / autoelevador en horas" id="nv-km"></div>
+      <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000" id="nv-km"></div>
       <div class="form-group"><label class="form-label">Base operativa</label>
         <select class="form-select" id="nv-base">
           ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option value="${b}">${b}</option>`).join('')}
@@ -6760,7 +6661,7 @@ function openNewVehicleModal() {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Chofer habitual <span style="color:var(--text3);font-weight:400">(opcional)</span></label><input class="form-input" placeholder="Ej: Juan Pérez" id="nv-driver"></div>
+      <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" placeholder="Ej: Juan Pérez" id="nv-driver"></div>
       <div class="form-group"><label class="form-label">Estado</label>
         <select class="form-select" id="nv-status">
           <option value="ok">Operativo</option>
@@ -6797,13 +6698,12 @@ async function saveNewVehicle() {
   const cc     = (document.getElementById('nv-cc')?.value     || '').trim();
 
   if (!code)  { showToast('error', 'El código interno es obligatorio'); return; }
-  if (!plate && !_isTrailerType(type) && _normalizeVehicleType(type) !== 'autoelevador') {
-    showToast('warn', 'Sin patente: el sistema usará el código interno como identificación');
-  }
+  if (!plate) { showToast('error', 'La patente es obligatoria'); return; }
+  if (!brand || !model) { showToast('error', 'Marca y modelo son obligatorios'); return; }
 
   const res = await apiFetch('/api/vehicles', {
     method: 'POST',
-    body: JSON.stringify({ code, plate: plate || code, brand: brand || 'Sin marca', model: model || (type === 'autoelevador' ? 'Autoelevador' : 'Sin modelo'), year, type, base, km_current: km,
+    body: JSON.stringify({ code, plate, brand, model, year, type, base, km_current: km,
                            driver, status, vin, engine_no: engine, cost_center: cc })
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar unidad'); return; }
@@ -6812,8 +6712,8 @@ async function saveNewVehicle() {
   // Agregar directamente a App.data usando datos del servidor
   if (!App.data.vehicles) App.data.vehicles = [];
   App.data.vehicles.push({
-    id: newV.id, code: newV.code, plate: newV.plate || code, brand: newV.brand || 'Sin marca',
-    model: newV.model || model || 'Sin modelo', year: newV.year || year, type: _normalizeVehicleType(newV.type || type),
+    id: newV.id, code: newV.code, plate: newV.plate, brand: newV.brand,
+    model: newV.model, year: newV.year, type: newV.type,
     base: newV.base || base, status: newV.status || status,
     km: newV.km_current || km,
     driver: newV.driver_name || driver || '—',
@@ -7215,9 +7115,9 @@ async function syncGPSNow(btn) {
       const vehicles = await res.json();
       // Mapear igual que en loadInitialData
       App.data.vehicles = vehicles.map(v => ({
-        id: v.id, code: v.code, plate: v.plate || v.code || '—', brand: v.brand || 'Sin marca', model: v.model || 'Sin modelo',
-        year: parseInt(v.year, 10) || new Date().getFullYear(), type: _normalizeVehicleType(v.type), status: v.status || 'ok',
-        km: parseInt(v.km_current, 10) || 0, base: v.base || 'Central',
+        id: v.id, code: v.code, plate: v.plate, brand: v.brand, model: v.model,
+        year: v.year, type: v.type, status: v.status || 'ok',
+        km: v.km_current || 0, base: v.base || 'Central',
         driver: v.driver_name || '—', cost_km: parseFloat(v.cost_km) || 0,
         vin: v.vin, engine_no: v.engine_no, cost_center: v.cost_center,
         driver_id: v.driver_id,
@@ -7397,7 +7297,7 @@ async function resetTechSpec(id) {
 
 function renderConfig() {
   const bases  = (App.config?.bases  || ['Central','Norte','Sur']);
-  const vtypes = getConfiguredVehicleTypes();
+  const vtypes = (App.config?.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']);
   const laborRate = parseFloat(App.config?.labor_rate || 0);
   document.getElementById('page-config').innerHTML = `
     <div class="section-header">
@@ -7524,7 +7424,7 @@ async function saveConfig() {
 function openAccountConfigModal() {
   if (!userHasRole('dueno')) { showToast('error', 'Solo el dueño puede acceder a la configuración'); return; }
   const bases  = App.config?.bases  || ['Central'];
-  const vtypes = getConfiguredVehicleTypes();
+  const vtypes = App.config?.vehicle_types || ['tractor','camion','semirremolque'];
 
   openModal('⚙ Configuración de la cuenta', `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -8164,7 +8064,7 @@ async function renderAuditorOTs(el) {
 // ── Tab 4: Trazabilidad por unidad ───────────────────────
 async function renderAuditorTrazabilidad(el) {
   const vehicleOpts = (App.data.vehicles||[]).map(v =>
-    `<option value="${v.id}">${v.code} — ${v.plate || '—'}</option>`).join('');
+    `<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:16px">
@@ -8548,7 +8448,7 @@ async function renderPurchaseOrders() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
       <div>
         <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">📋 Órdenes de Compra</h2>
-        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Workflow: pendiente → cotización → aprobada → pagada → recibida</p>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Proceso de compra: pendiente de cotizar → en cotización → aprobada → pagada → recibida</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
@@ -8560,7 +8460,7 @@ async function renderPurchaseOrders() {
     ${_renderGasoilLowBannerForCompras()}
 
     <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
-      <div class="kpi-card"><div class="kpi-label">Pendiente cotizar</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe cotizar</div></div>
+      <div class="kpi-card"><div class="kpi-label">Pendientes de cotización</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe solicitar cotización</div></div>
       <div class="kpi-card"><div class="kpi-label">En cotización / Aprobadas</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 en proceso</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Pagadas (por recibir)</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">💰 esperando mercadería</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 proceso completado</div></div>
@@ -8967,7 +8867,7 @@ async function openNewPOModal() {
           <label class="form-label">Vehículo (opcional)</label>
           <select class="form-select" id="po-vehicle">
             <option value="">— Sin vehículo asignado —</option>
-            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate || '—'}</option>`).join('')}
+            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -9192,7 +9092,7 @@ async function openNewPOModalJefe() {
           <label class="form-label">Vehículo (opcional)</label>
           <select class="form-select" id="poj-vehicle">
             <option value="">— Sin vehículo asignado —</option>
-            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate || '—'}</option>`).join('')}
+            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
           </select>
         </div>
       </div>
