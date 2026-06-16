@@ -67,7 +67,15 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
       SELECT
         po.id, po.code, po.proveedor, po.status, po.created_at,
         po.total_estimado, po.factura_monto,
-        po.delivery_status, po.invoice_status, po.payment_status,
+        CASE
+          WHEN po.status = 'recibida' THEN 'total'
+          ELSE COALESCE(NULLIF(po.delivery_status, ''), 'pendiente')
+        END AS delivery_status,
+        po.invoice_status,
+        CASE
+          WHEN po.status IN ('pagada','recibida') THEN COALESCE(NULLIF(po.payment_status, ''), 'total')
+          ELSE COALESCE(NULLIF(po.payment_status, ''), 'pendiente')
+        END AS payment_status,
         po.forma_pago, po.cc_dias,
         s.name AS supplier_name,
         COALESCE(SUM(f.invoice_monto), 0) AS total_facturado,
