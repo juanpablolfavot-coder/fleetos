@@ -18,6 +18,57 @@ function clampRating(v) {
   return n;
 }
 
+
+// Normaliza textos de proveedores para que la carga quede pareja:
+// primera letra en mayúscula y el resto en minúscula, conservando siglas comunes.
+function titleCaseAR(value) {
+  if (value === undefined || value === null) return null;
+  const raw = String(value).trim().replace(/\s+/g, ' ');
+  if (!raw) return null;
+
+  const upperTokens = new Set([
+    'SA','S.A','S.A.','SRL','S.R.L','S.R.L.','SAS','S.A.S','S.A.S.',
+    'SNC','S.C.','SCA','CUIT','IVA','CBU','CVU','YPF','ACA','R3M','LD'
+  ]);
+  const romanTokens = new Set(['I','II','III','IV','V','VI','VII','VIII','IX','X']);
+  const lowerJoiners = new Set(['de','del','la','las','los','y','e','el','en','a','al','da','do']);
+
+  return raw.split(' ').map((word, index) => {
+    const cleanUpper = word.replace(/[.,]/g, '').toUpperCase();
+    if (upperTokens.has(cleanUpper) || romanTokens.has(cleanUpper)) return cleanUpper;
+
+    const lower = word.toLocaleLowerCase('es-AR');
+    if (index > 0 && lowerJoiners.has(lower)) return lower;
+
+    return lower.replace(/(^|[-'’/])([\p{L}])/gu, (_, sep, letter) => sep + letter.toLocaleUpperCase('es-AR'));
+  }).join(' ');
+}
+
+function normalizeSupplierPayload(body = {}) {
+  const b = { ...body };
+  const titleFields = ['name','razon_social','contact_person','address','city','province','bank_name'];
+  for (const field of titleFields) {
+    if (Object.prototype.hasOwnProperty.call(b, field)) b[field] = titleCaseAR(b[field]);
+  }
+  if (Object.prototype.hasOwnProperty.call(b, 'email')) {
+    b.email = b.email ? String(b.email).trim().toLowerCase() : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(b, 'website')) {
+    b.website = b.website ? String(b.website).trim().toLowerCase() : null;
+    if (b.website === 'https://' || b.website === 'http://') b.website = null;
+  }
+  if (Object.prototype.hasOwnProperty.call(b, 'bank_alias')) {
+    b.bank_alias = b.bank_alias ? String(b.bank_alias).trim().toLowerCase() : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(b, 'cuit')) {
+    b.cuit = b.cuit ? String(b.cuit).replace(/\D/g, '') : null;
+  }
+  if (Array.isArray(b.rubros)) {
+    b.rubros = b.rubros.map(r => String(r).trim().toLowerCase()).filter(Boolean);
+  }
+  return b;
+}
+
 // Auto-create de la tabla
 (async () => {
   try {
@@ -64,6 +115,36 @@ function clampRating(v) {
     )`);
     await query(`CREATE INDEX IF NOT EXISTS idx_suppliers_status ON suppliers(status) WHERE active=TRUE`);
     await query(`CREATE INDEX IF NOT EXISTS idx_suppliers_cuit ON suppliers(cuit) WHERE active=TRUE AND cuit IS NOT NULL`);
+    // Bases viejas: CREATE TABLE IF NOT EXISTS no agrega columnas nuevas.
+    // Esto evita errores 500 al editar proveedores cuando la tabla fue creada antes.
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS razon_social VARCHAR(200)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cuit VARCHAR(20)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS iva_condition VARCHAR(30)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact_person VARCHAR(200)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS website VARCHAR(200)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS address TEXT`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS city VARCHAR(100)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS province VARCHAR(100)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rubros TEXT[]`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(30)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cc_dias INT`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS moneda VARCHAR(5) DEFAULT 'ARS'`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) DEFAULT 0`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS delivery_time_days INT`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rating NUMERIC(2,1)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS total_compras NUMERIC(14,2) DEFAULT 0`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_cbu VARCHAR(30)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_alias VARCHAR(100)`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS notes TEXT`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS blacklist_reason TEXT`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
   } catch(e) { console.error('[suppliers] init:', e.message); }
 })();
 
@@ -93,7 +174,7 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
 // POST /api/suppliers — crear
 router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','paniol','proveedores'), auditAction('CREATE','suppliers'), async (req, res) => {
   try {
-    const b = req.body;
+    const b = normalizeSupplierPayload(req.body);
     if (!b.name) return res.status(400).json({ error: 'El nombre es obligatorio' });
 
     // CUIT debe ser único si se provee
@@ -143,7 +224,13 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 // PUT /api/suppliers/:id — actualizar
 router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','paniol','proveedores'), validateUUID('id'), auditAction('UPDATE','suppliers'), async (req, res) => {
   try {
-    const b = req.body;
+    const b = normalizeSupplierPayload(req.body);
+
+    if (b.cuit) {
+      const exists = await query('SELECT id FROM suppliers WHERE cuit = $1 AND id <> $2 AND active = TRUE', [b.cuit, req.params.id]);
+      if (exists.rows[0]) return res.status(409).json({ error: `Ya existe otro proveedor con CUIT ${b.cuit}` });
+    }
+
     const r = await query(
       `UPDATE suppliers SET
         name          = COALESCE($1, name),
@@ -162,9 +249,9 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
         forma_pago    = COALESCE($14, forma_pago),
         cc_dias       = COALESCE($15::int, cc_dias),
         moneda        = COALESCE($16, moneda),
-        discount_pct  = COALESCE($17, discount_pct),
+        discount_pct  = COALESCE($17::numeric, discount_pct),
         delivery_time_days = COALESCE($18::int, delivery_time_days),
-        rating        = COALESCE($19, rating),
+        rating        = COALESCE($19::numeric, rating),
         bank_name     = COALESCE($20, bank_name),
         bank_cbu      = COALESCE($21, bank_cbu),
         bank_alias    = COALESCE($22, bank_alias),
@@ -192,7 +279,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
     if (!r.rows[0]) return res.status(404).json({ error: 'Proveedor no encontrado' });
     res.locals.recordId = r.rows[0].id;
     res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[suppliers] PUT:', err); res.status(500).json({ error: err.message }); }
 });
 
 // DELETE /api/suppliers/:id — soft delete
