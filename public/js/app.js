@@ -238,9 +238,10 @@ function renderDashboard() {
   const maintAlerts = v.map(veh => {
     const km = veh.km || 0;
     const ts = veh.tech_spec || {};
-    const interval = parseInt(ts.maint_interval_km) || 15000;
+    const isFork = isAutoelevador(veh);
+    const interval = parseInt(ts.maint_interval_km) || (isFork ? 250 : 15000);
     const pct = interval > 0 ? (km % interval / interval * 100) : 0;
-    return { code: veh.code, pct: Math.round(pct), km, interval, nextKm: Math.ceil(km/interval)*interval };
+    return { code: veh.code, pct: Math.round(pct), km, interval, unit: isFork ? 'hs' : 'km', nextKm: Math.ceil(km/interval)*interval };
   }).filter(m => m.pct >= 80).sort((a,b) => b.pct - a.pct);
   const maintVencidos = maintAlerts.filter(m => m.pct >= 95);
   const maintProximos = maintAlerts.filter(m => m.pct >= 80 && m.pct < 95);
@@ -484,10 +485,10 @@ function renderDashboard() {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
   });
   maintVencidos.forEach(m => {
-    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} km</span></div>`;
+    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} ${m.unit}</span></div>`;
   });
   maintProximos.slice(0,3).forEach(m => {
-    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} km</span></div>`;
+    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} ${m.unit}</span></div>`;
   });
   warnDocs.slice(0,2).forEach(d => {
     const days = Math.ceil((new Date(d.expiry)-new Date())/86400000);
@@ -569,6 +570,60 @@ function renderDashboard() {
 let vehicleFilter = '';
 function filterVehicle(code) { vehicleFilter = code; renderFleet(); }
 
+
+function normalizeVehicleTypeLabel(type) {
+  return String(type || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\s_-]+/g, '');
+}
+
+function isAutoelevador(vOrType) {
+  const raw = typeof vOrType === 'string' ? vOrType : (vOrType?.type || '');
+  return normalizeVehicleTypeLabel(raw) === 'autoelevador';
+}
+
+function vehicleMeasureLabel(v, lower=false) {
+  const label = isAutoelevador(v) ? 'Horas actuales' : 'Km actuales';
+  return lower ? label.toLowerCase() : label;
+}
+
+function vehicleMeasureUnit(v) {
+  return isAutoelevador(v) ? 'hs' : 'km';
+}
+
+function vehicleCostLabel(v) {
+  return isAutoelevador(v) ? 'Costo/hora' : 'Costo/km';
+}
+
+function vehicleOperatorLabel(v) {
+  return isAutoelevador(v) ? 'Operador habitual' : 'Chofer habitual';
+}
+
+function formatVehicleMeasure(v, value) {
+  const n = Number(value ?? v?.km ?? 0) || 0;
+  return n.toLocaleString('es-AR') + ' ' + vehicleMeasureUnit(v);
+}
+
+function updateVehicleTypeLabels(prefix) {
+  const typeEl = document.getElementById(`${prefix}-type`);
+  const tempV = { type: typeEl?.value || '' };
+  const kmLabel = document.getElementById(`${prefix}-km-label`);
+  const driverLabel = document.getElementById(`${prefix}-driver-label`);
+  const plateHelp = document.getElementById(`${prefix}-plate-help`);
+  const kmInput = document.getElementById(`${prefix}-km`);
+  const driverInput = document.getElementById(`${prefix}-driver`);
+  if (kmLabel) kmLabel.textContent = vehicleMeasureLabel(tempV);
+  if (driverLabel) driverLabel.textContent = vehicleOperatorLabel(tempV);
+  if (plateHelp) plateHelp.textContent = isAutoelevador(tempV)
+    ? 'Opcional para autoelevador. Si no tiene patente, se usa el código interno.'
+    : 'Obligatoria para unidades patentadas.';
+  if (kmInput) kmInput.placeholder = isAutoelevador(tempV) ? 'Ej: 9449' : 'Ej: 250000';
+  if (driverInput) driverInput.placeholder = isAutoelevador(tempV) ? 'Ej: Billani Matías' : 'Ej: Juan Pérez';
+}
+
 function renderFleet() {
   const page = document.getElementById('page-fleet');
   page.innerHTML = `
@@ -591,8 +646,8 @@ function renderFleet() {
         <table id="fleet-table">
           <thead><tr>
             <th>Código</th><th>Patente</th><th>Marca / Modelo</th><th>Tipo</th>
-            <th>Año</th><th>Km actuales</th><th>Base</th><th>Chofer</th>
-            <th>Costo/km</th><th>Estado</th><th>GPS</th><th></th>
+            <th>Año</th><th>Km / horas</th><th>Base</th><th>Chofer / operador</th>
+            <th>Costo</th><th>Estado</th><th>GPS</th><th></th>
           </tr></thead>
           <tbody id="fleet-tbody"></tbody>
         </table>
@@ -618,7 +673,7 @@ function renderFleetTable(data) {
       <td class="td-main">${v.brand} ${v.model}</td>
       <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${v.type}</span></td>
       <td class="td-mono">${v.year}</td>
-      <td class="td-mono">${v.km.toLocaleString()} ${v.type==='autoelevador'?'hs':'km'}</td>
+      <td class="td-mono">${formatVehicleMeasure(v)}</td>
       <td>${v.base}</td>
       <td>${v.driver}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">${ckReal>0?'$'+ckReal.toFixed(3):'—'}</td>
@@ -646,6 +701,35 @@ function filterFleetTable(q) {
 
 // Ficha técnica completa por defecto por marca/modelo
 function getTechSpec(brand, model, type) {
+  if (isAutoelevador(type)) {
+    return {
+      engine: 'Motor industrial — completar según placa del equipo',
+      power: 'No registrado — completar HP / torque si corresponde',
+      transmission: 'Transmisión industrial / convertidor — completar modelo',
+      differential: 'Eje motriz / dirección — completar según equipo',
+      oil_engine: 'Aceite de motor — completar viscosidad y litros',
+      oil_gearbox: 'Aceite hidráulico / transmisión — completar especificación',
+      oil_diff: 'Aceite diferencial / mandos finales — completar especificación',
+      coolant: 'Refrigerante — completar tipo y capacidad',
+      filter_oil: 'Filtro de aceite — completar código',
+      filter_fuel_p: 'Filtro de combustible — completar código',
+      filter_fuel_s: 'Filtro secundario / separador — completar si aplica',
+      filter_air: 'Filtro de aire — completar código',
+      filter_sep: 'Separador de agua — completar si aplica',
+      filter_cabin: 'No aplica / completar si posee cabina cerrada',
+      grease: 'Engrase de mástil, cadenas, pernos y dirección — según manual',
+      battery: 'Batería — completar amperaje / CCA',
+      urea: 'No registrado / no aplica salvo equipo con SCR',
+      service_km: 'Cada 250 hs: control general + aceite/filtros según manual',
+      service_engage: 'Cada 500 hs: hidráulico, mástil, cadenas, frenos y dirección',
+      service_major: 'Cada 1.000 hs: servicio mayor de motor, transmisión e hidráulico',
+      tire_size: 'No registrado — completar medida de cubiertas',
+      tire_pressure_steer: 'Según cubierta / manual',
+      tire_pressure_drive: 'Según cubierta / manual',
+      wheel_torque: 'No registrado — completar torque',
+      fuel_cap: 'No registrado — completar capacidad de tanque',
+    };
+  }
   const specs = {
     'Mercedes-Benz': {
       engine: 'Mercedes-Benz OM 471 · 6 cil. en línea · 12.8 L · Euro VI',
@@ -922,9 +1006,9 @@ function showVehicleFicha(id, tab) {
         <div style="margin-top:8px"><span class="badge ${stBadge[v.status]||'badge-gray'}">${stLabel[v.status]||v.status}</span></div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${v.km.toLocaleString()}</div>
-        <div style="font-size:11px;color:var(--text3)">km actuales</div>
-        <div style="font-size:13px;font-family:var(--mono);color:var(--text3);margin-top:4px">${(()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+'/km':'Sin datos costo/km';})()}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text)">${(Number(v.km)||0).toLocaleString('es-AR')}</div>
+        <div style="font-size:11px;color:var(--text3)">${vehicleMeasureLabel(v, true)}</div>
+        <div style="font-size:13px;font-family:var(--mono);color:var(--text3);margin-top:4px">${(()=>{const _d=getCostDetail(v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+(isAutoelevador(v)?'/h':'/km'):'Sin datos ' + vehicleCostLabel(v).toLowerCase();})()}</div>
       </div>
     </div>`;
 
@@ -943,9 +1027,9 @@ function showVehicleFicha(id, tab) {
           ['Nro. motor',   v.engine_no||'No registrado'],
           ['Base operativa', v.base],
           ['Centro de costo', v.cost_center||'Sin asignar'],
-          ['Chofer habitual', v.driver],
-          ['Km actuales',  v.km.toLocaleString()+(v.type==='autoelevador'?' hs':' km')],
-          ['Costo/km',     (()=>{const _d=getCostDetail(v.id||v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+' (mes actual)':'Sin datos suficientes';})()],
+          [vehicleOperatorLabel(v), v.driver],
+          [vehicleMeasureLabel(v),  formatVehicleMeasure(v)],
+          [vehicleCostLabel(v),     (()=>{const _d=getCostDetail(v.code);return _d&&_d.costKmReal>0?'$'+_d.costKmReal.toFixed(3)+' (mes actual)':'Sin datos suficientes';})()],
           ['Combustible',  spec.fuel_cap],
         ].map(([l,val])=>`
           <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border)">
@@ -1092,11 +1176,11 @@ function showVehicleFicha(id, tab) {
   if (tab === 'fuel') {
     content = vFuel.length
       ? `<div style="margin-bottom:12px;font-size:12px;color:var(--text3)">Últimas ${vFuel.length} cargas registradas para esta unidad.</div>
-         <table><thead><tr><th>Fecha</th><th>Litros</th><th>Odómetro</th><th>Precio/L</th><th>Total</th><th>Lugar</th></tr></thead>
+         <table><thead><tr><th>Fecha</th><th>Litros</th><th>${isAutoelevador(v)?'Horas':'Odómetro'}</th><th>Precio/L</th><th>Total</th><th>Lugar</th></tr></thead>
           <tbody>${vFuel.map(f=>`<tr>
             <td class="td-mono" style="font-size:11px">${f.date}</td>
             <td class="td-mono">${f.liters} L</td>
-            <td class="td-mono">${f.km.toLocaleString()} km</td>
+            <td class="td-mono">${(Number(f.km)||0).toLocaleString('es-AR')} ${vehicleMeasureUnit(v)}</td>
             <td class="td-mono">$${f.ppu.toLocaleString()}</td>
             <td class="td-mono">$${f.total.toLocaleString()}</td>
             <td style="color:var(--text3)">${f.place}</td>
@@ -1148,7 +1232,7 @@ function openEditVehicleModal(id) {
   openModal('Editar unidad — ' + v.code, `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="ev-code" value="${v.code}"></div>
-      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" id="ev-plate" value="${v.plate}"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" id="ev-plate" value="${v.plate||''}"><div id="ev-plate-help" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="ev-brand" value="${v.brand}"></div>
@@ -1157,7 +1241,7 @@ function openEditVehicleModal(id) {
     <div class="form-row">
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" id="ev-year" value="${v.year}"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-select" id="ev-type">
+        <select class="form-select" id="ev-type" onchange="updateVehicleTypeLabels('ev')">
           ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option ${t===v.type?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
@@ -1168,10 +1252,10 @@ function openEditVehicleModal(id) {
           ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option ${b===v.base?'selected':''}>${b}</option>`).join('')}
         </select>
       </div>
-      <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" id="ev-driver" value="${v.driver}"></div>
+      <div class="form-group"><label class="form-label" id="ev-driver-label">${vehicleOperatorLabel(v)}</label><input class="form-input" id="ev-driver" value="${v.driver||''}"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">${v.type==='autoelevador'?'Horas actuales':'Km actuales'}</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
+      <div class="form-group"><label class="form-label" id="ev-km-label">${vehicleMeasureLabel(v)}</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
       <div class="form-group"><label class="form-label">Estado</label>
         <select class="form-select" id="ev-status">
           ${['ok','warn','taller','detenida'].map(s=>`<option ${s===v.status?'selected':''}>${s}</option>`).join('')}
@@ -1187,6 +1271,7 @@ function openEditVehicleModal(id) {
     { label:'Guardar cambios', cls:'btn-primary',   fn: () => saveEditVehicle(id) },
     { label:'Cancelar',        cls:'btn-secondary', fn: () => showVehicleFicha(id, 'general') },
   ]);
+  updateVehicleTypeLabels('ev');
 }
 
 async function saveEditVehicle(id) {
@@ -1204,7 +1289,8 @@ async function saveEditVehicle(id) {
   const engine = (document.getElementById('ev-engine')?.value || '').trim();
   const cc     = (document.getElementById('ev-cc')?.value     || '').trim();
 
-  if (!code || !plate) { showToast('error','Código y patente son obligatorios'); return; }
+  if (!code) { showToast('error','El código interno es obligatorio'); return; }
+  if (!plate && !isAutoelevador(type)) { showToast('error','La patente es obligatoria para unidades patentadas'); return; }
 
   const res = await apiFetch(`/api/vehicles/${id}`, {
     method:'PUT',
@@ -1795,9 +1881,9 @@ async function printOT(id) {
         <div class="field"><div class="field-label">Código interno</div><div class="field-value">${ot.vehicle}</div></div>
         <div class="field"><div class="field-label">Patente</div><div class="field-value">${v?v.plate:ot.plate||'—'}</div></div>
         <div class="field"><div class="field-label">Marca / Modelo</div><div class="field-value">${v?(v.brand||'')+' '+(v.model||''):'—'}</div></div>
-        <div class="field"><div class="field-label">Km al momento</div><div class="field-value">${v?(v.km||0).toLocaleString('es-AR')+' km':'—'}</div></div>
+        <div class="field"><div class="field-label">${v && isAutoelevador(v) ? 'Horas al momento' : 'Km al momento'}</div><div class="field-value">${v?formatVehicleMeasure(v):'—'}</div></div>
         <div class="field"><div class="field-label">Base operativa</div><div class="field-value">${v?v.base||'—':'—'}</div></div>
-        <div class="field"><div class="field-label">Chofer habitual</div><div class="field-value">${v?v.driver||'—':'—'}</div></div>
+        <div class="field"><div class="field-label">${v && isAutoelevador(v) ? 'Operador habitual' : 'Chofer habitual'}</div><div class="field-value">${v?v.driver||'—':'—'}</div></div>
       </div>
     </div>
 
@@ -4393,6 +4479,8 @@ async function saveNewDoc() {
 function getCostDetail(vehicleCode, mesStr) {
   const v = App.data.vehicles.find(x => x.code === vehicleCode);
   if (!v) return null;
+  const measureUnit = vehicleMeasureUnit(v);
+  const measureFallback = isAutoelevador(v) ? 'horas registradas' : 'km GPS';
 
   // ── Período: mes seleccionado (mesStr 'YYYY-MM') o mes actual si no se pasa ──
   let yr, mo;
@@ -4414,7 +4502,7 @@ function getCostDetail(vehicleCode, mesStr) {
     fecha:   f.date.split(' ')[0],
     desc:    `Carga ${f.liters}L · ${f.place}`,
     monto:   Math.round(f.liters * f.ppu),
-    detalle: `${f.liters}L × $${f.ppu}/L · ${f.km ? f.km.toLocaleString()+' km' : 'km GPS'}`,
+    detalle: `${f.liters}L × $${f.ppu}/L · ${f.km ? f.km.toLocaleString('es-AR')+' '+measureUnit : measureFallback}`,
   }));
 
   // ── OTs reales del mes ──
@@ -4949,14 +5037,16 @@ function renderMaintenance() {
   const plans = vehicles.map(v => {
     const km = v.km || 0;
     const ts = v.tech_spec || {};
-    const interval = parseInt(ts.maint_interval_km) || 15000;
+    const isFork = isAutoelevador(v);
+    const unit = isFork ? 'hs' : 'km';
+    const interval = parseInt(ts.maint_interval_km) || (isFork ? 250 : 15000);
     const lastMaint = parseInt(ts.maint_last_km) || 0;
     const kmSinceLast = km - lastMaint;
     const pct = Math.min(100, Math.round(kmSinceLast / interval * 100));
     const nextKm = lastMaint + interval;
     const status = pct >= 95 ? 'danger' : pct >= 80 ? 'warn' : 'ok';
     const taskName = ts.maint_task_name || 'Cambio aceite + filtros';
-    return { v, km, interval, lastMaint, kmSinceLast, pct, nextKm, status, taskName };
+    return { v, km, interval, lastMaint, kmSinceLast, pct, nextKm, status, taskName, unit, isFork };
   });
 
   const rows = plans.map(p => `
@@ -4964,16 +5054,16 @@ function renderMaintenance() {
       <td class="td-mono td-main">${p.v.code}</td>
       <td>
         <div style="font-weight:500">${p.taskName}</div>
-        <div style="font-size:11px;color:var(--text3)">c/${p.interval.toLocaleString()} km · último: ${p.lastMaint.toLocaleString()} km</div>
+        <div style="font-size:11px;color:var(--text3)">c/${p.interval.toLocaleString()} ${p.unit} · último: ${p.lastMaint.toLocaleString()} ${p.unit}</div>
       </td>
-      <td><span class="badge badge-info">Por km</span></td>
-      <td class="td-mono">${p.nextKm.toLocaleString()} km</td>
-      <td class="td-mono">${p.km.toLocaleString()} km</td>
+      <td><span class="badge badge-info">${p.isFork?'Por horas':'Por km'}</span></td>
+      <td class="td-mono">${p.nextKm.toLocaleString()} ${p.unit}</td>
+      <td class="td-mono">${p.km.toLocaleString()} ${p.unit}</td>
       <td style="width:140px">
         <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
           <div style="background:var(--${p.status});width:${p.pct}%;height:100%"></div>
         </div>
-        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}% · faltan ${Math.max(0,p.nextKm-p.km).toLocaleString()} km</div>
+        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}% · faltan ${Math.max(0,p.nextKm-p.km).toLocaleString()} ${p.unit}</div>
       </td>
       <td><span class="badge badge-${p.status}">${p.status==='ok'?'Al día':p.status==='warn'?'Próximo':'Vencido'}</span></td>
       <td>
@@ -5008,7 +5098,7 @@ function renderMaintenance() {
       </div>
     </div>
     <div style="margin-top:12px;font-size:12px;color:var(--text3)">
-      💡 Hacé clic en <b>⚙ Configurar</b> en cualquier unidad para personalizar el intervalo, el km del último service y la tarea.
+      💡 Hacé clic en <b>⚙ Configurar</b> en cualquier unidad para personalizar el intervalo, el km/horas del último service y la tarea.
     </div>`;
 }
 
@@ -5016,13 +5106,14 @@ function openMaintConfigModal(vehicleId) {
   const v = App.data.vehicles.find(x=>x.id===vehicleId);
   if (!v) return;
   const ts = v.tech_spec || {};
-  const interval = ts.maint_interval_km || 15000;
+  const isFork = isAutoelevador(v);
+  const interval = ts.maint_interval_km || (isFork ? 250 : 15000);
   const lastKm   = ts.maint_last_km    || 0;
   const taskName = ts.maint_task_name  || 'Cambio aceite + filtros';
 
   openModal(`⚙ Configurar mantenimiento — ${v.code}`, `
     <div style="margin-bottom:14px;font-size:12px;color:var(--text3)">
-      Configurá el plan de mantenimiento preventivo para esta unidad. Los datos se guardan en la ficha técnica.
+      ${isFork ? 'Configurá el plan de mantenimiento preventivo por horas para este autoelevador.' : 'Configurá el plan de mantenimiento preventivo para esta unidad.'} Los datos se guardan en la ficha técnica.
     </div>
     <div class="form-group">
       <label class="form-label">Tarea / nombre del service</label>
@@ -5030,19 +5121,19 @@ function openMaintConfigModal(vehicleId) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Intervalo (cada cuántos km)</label>
+        <label class="form-label">Intervalo (cada cuántos ${isFork ? 'hs' : 'km'})</label>
         <input class="form-input" type="number" id="mc-interval" value="${interval}" placeholder="15000">
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Ej: 15000, 20000, 25000</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${isFork ? 'Ej: 250, 500, 1000' : 'Ej: 15000, 20000, 25000'}</div>
       </div>
       <div class="form-group">
-        <label class="form-label">Km del último service</label>
+        <label class="form-label">${isFork ? 'Horas del último service' : 'Km del último service'}</label>
         <input class="form-input" type="number" id="mc-last" value="${lastKm}" placeholder="0">
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">Km cuando hiciste el último service</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${isFork ? 'Horas cuando hiciste el último service' : 'Km cuando hiciste el último service'}</div>
       </div>
     </div>
     <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;margin-top:8px;font-size:12px;color:var(--text3)">
-      <b>Km actuales:</b> ${(v.km||0).toLocaleString()} km<br>
-      <b>Próximo service:</b> ${(parseInt(lastKm||0)+parseInt(interval||15000)).toLocaleString()} km
+      <b>${isFork ? 'Horas actuales' : 'Km actuales'}:</b> ${formatVehicleMeasure(v)}<br>
+      <b>Próximo service:</b> ${(parseInt(lastKm||0)+parseInt(interval||15000)).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}
       <span id="mc-preview" style="margin-left:8px;font-weight:600"></span>
     </div>
   `, [
@@ -5053,12 +5144,12 @@ function openMaintConfigModal(vehicleId) {
   // Preview dinámico
   ['mc-interval','mc-last'].forEach(id => {
     document.getElementById(id)?.addEventListener('input', () => {
-      const int = parseInt(document.getElementById('mc-interval')?.value)||15000;
+      const int = parseInt(document.getElementById('mc-interval')?.value)||(isFork ? 250 : 15000);
       const last = parseInt(document.getElementById('mc-last')?.value)||0;
       const next = last + int;
       const pct = Math.min(100, Math.round((v.km - last) / int * 100));
       const preview = document.getElementById('mc-preview');
-      if (preview) preview.textContent = `(${pct}% completado → próximo: ${next.toLocaleString()} km)`;
+      if (preview) preview.textContent = `(${pct}% completado → próximo: ${next.toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'})`;
     });
   });
 }
@@ -5068,7 +5159,8 @@ async function saveMaintConfig(vehicleId) {
   if (!v) return;
 
   const taskName = (document.getElementById('mc-task')?.value||'').trim() || 'Cambio aceite + filtros';
-  const interval = parseInt(document.getElementById('mc-interval')?.value) || 15000;
+  const isFork = isAutoelevador(v);
+  const interval = parseInt(document.getElementById('mc-interval')?.value) || (isFork ? 250 : 15000);
   const lastKm   = parseInt(document.getElementById('mc-last')?.value)    || 0;
 
   const newTechSpec = Object.assign({}, v.tech_spec||{}, {
@@ -5087,7 +5179,7 @@ async function saveMaintConfig(vehicleId) {
   v.tech_spec = updated.tech_spec || newTechSpec;
 
   closeModal();
-  showToast('ok', `Mantenimiento de ${v.code} configurado — próximo service: ${(lastKm+interval).toLocaleString()} km`);
+  showToast('ok', `Mantenimiento de ${v.code} configurado — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
   renderMaintenance();
   renderDashboard(); // actualizar alertas del panel
 }
@@ -5095,39 +5187,63 @@ async function saveMaintConfig(vehicleId) {
 
 function openNewMaintModal() {
   const vehicleOpts = (App.data.vehicles||[]).map(v =>
-    `<option value="${v.id}" data-code="${v.code}" data-km="${v.km}">${v.code} — ${v.brand} ${v.model} (${v.km.toLocaleString()} km)</option>`
+    `<option value="${v.id}" data-code="${v.code}" data-unit="${vehicleMeasureUnit(v)}" data-isfork="${isAutoelevador(v)?'1':'0'}">${v.code} — ${v.brand} ${v.model} (${formatVehicleMeasure(v)})</option>`
   ).join('');
   openModal('Nueva tarea de mantenimiento', `
     <div class="form-group" style="margin-bottom:12px">
-      <label class="form-label">Vehículo</label>
-      <select class="form-select" id="nm-veh">${vehicleOpts}</select>
+      <label class="form-label">Unidad</label>
+      <select class="form-select" id="nm-veh" onchange="updateNewMaintLabels()">${vehicleOpts}</select>
     </div>
     <div class="form-group" style="margin-bottom:12px">
       <label class="form-label">Descripción de la tarea</label>
-      <input class="form-input" placeholder="Ej: Cambio aceite motor 15W-40 + filtros" id="nm-task">
+      <input class="form-input" placeholder="Ej: Cambio aceite motor + filtros" id="nm-task">
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Intervalo (km)</label><input class="form-input" type="number" placeholder="15000" id="nm-interval" value="15000"></div>
-      <div class="form-group"><label class="form-label">Km del último service</label><input class="form-input" type="number" placeholder="0" id="nm-last" value="0"></div>
+      <div class="form-group">
+        <label class="form-label" id="nm-interval-label">Intervalo (km)</label>
+        <input class="form-input" type="number" placeholder="15000" id="nm-interval" value="15000">
+        <div id="nm-interval-help" style="font-size:11px;color:var(--text3);margin-top:4px">Ej: 15000, 20000, 25000</div>
+      </div>
+      <div class="form-group"><label class="form-label" id="nm-last-label">Km del último service</label><input class="form-input" type="number" placeholder="0" id="nm-last" value="0"></div>
     </div>
   `, [
     { label:'Guardar', cls:'btn-primary', fn: saveNewMaintTask },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
+  updateNewMaintLabels();
+}
+
+function updateNewMaintLabels() {
+  const sel = document.getElementById('nm-veh');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const isFork = opt?.dataset?.isfork === '1';
+  const intervalLabel = document.getElementById('nm-interval-label');
+  const intervalHelp = document.getElementById('nm-interval-help');
+  const lastLabel = document.getElementById('nm-last-label');
+  const intervalInput = document.getElementById('nm-interval');
+  if (intervalLabel) intervalLabel.textContent = `Intervalo (${isFork ? 'horas' : 'km'})`;
+  if (intervalHelp) intervalHelp.textContent = isFork ? 'Ej: 250, 500, 1000 horas' : 'Ej: 15000, 20000, 25000 km';
+  if (lastLabel) lastLabel.textContent = isFork ? 'Horas del último service' : 'Km del último service';
+  if (intervalInput && (!intervalInput.value || intervalInput.value === '15000' || intervalInput.value === '250')) {
+    intervalInput.value = isFork ? '250' : '15000';
+    intervalInput.placeholder = isFork ? '250' : '15000';
+  }
 }
 
 async function saveNewMaintTask() {
   const sel      = document.getElementById('nm-veh');
   const vehicleId = sel?.value || '';
   const task     = (document.getElementById('nm-task')?.value || '').trim();
-  const interval = parseInt(document.getElementById('nm-interval')?.value) || 15000;
-  const lastKm   = parseInt(document.getElementById('nm-last')?.value) || 0;
   const code     = sel?.options[sel.selectedIndex]?.dataset?.code || '';
 
-  if (!vehicleId) { showToast('error', 'Seleccioná un vehículo'); return; }
+  if (!vehicleId) { showToast('error', 'Seleccioná una unidad'); return; }
   if (!task)      { showToast('error', 'Ingresá la descripción de la tarea'); return; }
 
   const v = App.data.vehicles.find(x => x.id === vehicleId);
+  const isFork = isAutoelevador(v);
+  const interval = parseInt(document.getElementById('nm-interval')?.value) || (isFork ? 250 : 15000);
+  const lastKm   = parseInt(document.getElementById('nm-last')?.value) || 0;
   const newTechSpec = Object.assign({}, v?.tech_spec || {}, {
     maint_task_name:   task,
     maint_interval_km: interval,
@@ -5144,7 +5260,7 @@ async function saveNewMaintTask() {
   if (v) v.tech_spec = updated.tech_spec || newTechSpec;
 
   closeModal();
-  showToast('ok', `Tarea de mantenimiento guardada para ${code} — próximo service: ${(lastKm+interval).toLocaleString()} km`);
+  showToast('ok', `Tarea de mantenimiento guardada para ${code} — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
   renderMaintenance();
 }
 
@@ -6638,7 +6754,7 @@ function openNewVehicleModal() {
   openModal('Registrar nueva unidad', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="Ej: INT-46" id="nv-code"></div>
-      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" placeholder="Ej: ABC 001" id="nv-plate"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" placeholder="Ej: ABC 001" id="nv-plate"><div id="nv-plate-help" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Marca</label><input class="form-input" placeholder="Ej: Mercedes-Benz" id="nv-brand"></div>
@@ -6647,13 +6763,13 @@ function openNewVehicleModal() {
     <div class="form-row">
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" placeholder="Ej: 2019" id="nv-year"></div>
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-select" id="nv-type">
+        <select class="form-select" id="nv-type" onchange="updateVehicleTypeLabels('nv')">
           ${(App.config?.vehicle_types||['tractor','camion','semirremolque','acoplado','utilitario','autoelevador']).map(t=>`<option value="${t}">${t.charAt(0).toUpperCase()+t.slice(1)}</option>`).join('')}
         </select>
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000" id="nv-km"></div>
+      <div class="form-group"><label class="form-label" id="nv-km-label">Km actuales</label><input class="form-input" type="number" placeholder="Ej: 250000" id="nv-km"></div>
       <div class="form-group"><label class="form-label">Base operativa</label>
         <select class="form-select" id="nv-base">
           ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option value="${b}">${b}</option>`).join('')}
@@ -6661,7 +6777,7 @@ function openNewVehicleModal() {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Chofer habitual</label><input class="form-input" placeholder="Ej: Juan Pérez" id="nv-driver"></div>
+      <div class="form-group"><label class="form-label" id="nv-driver-label">Chofer habitual</label><input class="form-input" placeholder="Ej: Juan Pérez" id="nv-driver"></div>
       <div class="form-group"><label class="form-label">Estado</label>
         <select class="form-select" id="nv-status">
           <option value="ok">Operativo</option>
@@ -6680,6 +6796,7 @@ function openNewVehicleModal() {
     { label: 'Registrar unidad', cls: 'btn-primary',   fn: saveNewVehicle },
     { label: 'Cancelar',         cls: 'btn-secondary', fn: closeModal }
   ]);
+  updateVehicleTypeLabels('nv');
 }
 
 async function saveNewVehicle() {
@@ -6698,7 +6815,7 @@ async function saveNewVehicle() {
   const cc     = (document.getElementById('nv-cc')?.value     || '').trim();
 
   if (!code)  { showToast('error', 'El código interno es obligatorio'); return; }
-  if (!plate) { showToast('error', 'La patente es obligatoria'); return; }
+  if (!plate && !isAutoelevador(type)) { showToast('error', 'La patente es obligatoria para unidades patentadas'); return; }
   if (!brand || !model) { showToast('error', 'Marca y modelo son obligatorios'); return; }
 
   const res = await apiFetch('/api/vehicles', {
