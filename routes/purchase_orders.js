@@ -110,7 +110,7 @@ function estadosQueVe(role) {
   if (role === 'proveedores') {
     return ['aprobada_compras','pagada','recibida'];
   }
-  if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
+  if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role)) {
     return null; // ve todos los estados, pero filtramos por requested_by abajo (solo las propias)
   }
   return []; // otros roles: no ve nada
@@ -119,7 +119,7 @@ function estadosQueVe(role) {
 // Quita los precios de la respuesta si el rol no debe verlos
 // (jefe_mant, paniol, contador — son solicitantes, no gestionan precios)
 function ocultarPreciosSiCorresponde(po, role) {
-  const rolesSinPrecio = ['jefe_mantenimiento','paniol','contador'];
+  const rolesSinPrecio = ['jefe_mantenimiento','paniol','contador','gerente_sucursal'];
   if (!rolesSinPrecio.includes(role)) return po;
   const copia = { ...po };
   delete copia.total_estimado;
@@ -149,7 +149,7 @@ router.get('/', authenticate, async (req, res) => {
     const userId = req.user.id;
 
     // Roles sin acceso al módulo
-    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores'];
+    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores','gerente_sucursal'];
     if (!rolesPermitidos.includes(role)) {
       return res.status(403).json({ error: 'No tenés permiso para ver órdenes de compra' });
     }
@@ -183,10 +183,15 @@ router.get('/', authenticate, async (req, res) => {
       sql += ` AND po.status = ANY($${params.length})`;
     }
 
-    // Solicitantes (jefe mant, paniol, contador): SOLO ven las que crearon ellos
-    if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
+    // Solicitantes operativos: ven las OCs que pidieron ellos.
+    // El gerente de sucursal también queda limitado a su sucursal si la tiene asignada.
+    if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role)) {
       params.push(userId);
       sql += ` AND po.requested_by = $${params.length}`;
+    }
+    if (role === 'gerente_sucursal' && req.user.sucursal) {
+      params.push(req.user.sucursal);
+      sql += ` AND po.sucursal = $${params.length}`;
     }
 
     // Filtro de estado específico si viene en query
@@ -258,8 +263,11 @@ router.get('/:id', authenticate, async (req, res) => {
     if (estVis !== null && !estVis.includes(oc.status)) {
       return res.status(403).json({ error: 'No tenés permiso para ver esta OC' });
     }
-    if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
+    if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
+    }
+    if (role === 'gerente_sucursal' && req.user.sucursal && oc.sucursal !== req.user.sucursal) {
+      return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
     }
     // Rol proveedores: personal interno que carga facturas de cualquier proveedor.
     // No se valida supplier_id.
@@ -277,7 +285,7 @@ router.get('/:id', authenticate, async (req, res) => {
 //  POST / — Crear nueva OC (Jefe mantenimiento)
 //           SIN PRECIOS — solo descripción + opcional presupuesto
 // ─────────────────────────────────────────────────────────────
-router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
+router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
   try {
     const {
@@ -325,6 +333,10 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 
     const code = await nextOCCode();
 
+    // Gerente de sucursal: los pedidos quedan siempre marcados con su sucursal/área.
+    const poSucursal = (req.user.role === 'gerente_sucursal' && req.user.sucursal) ? req.user.sucursal : (sucursal || null);
+    const poArea     = (req.user.role === 'gerente_sucursal' && req.user.area) ? req.user.area : (area || null);
+
     // Armar INSERT con columnas según estado inicial
     const _fp  = normalizarFormaPago(forma_pago);
     const _cc  = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
@@ -349,7 +361,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
               $21, $22)
       RETURNING *`,
       [
-        code, estadoInicial, req.user.id, sucursal||null, area||null, tipo||'flota',
+        code, estadoInicial, req.user.id, poSucursal, poArea, tipo||'flota',
         vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
         notes||null,
         presupuesto_imagen||null,
@@ -437,7 +449,7 @@ router.patch('/:id', authenticate, async (req, res) => {
         // Tesorería solo puede corregir notas, no datos de factura (ya llegan cargados)
         return ['notes'];
       }
-      if (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
+      if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
         return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado'];
       }
       return [];
@@ -555,7 +567,7 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
 // ─────────────────────────────────────────────────────────────
 //  DELETE /:id — Borrar (solo dueño/gerencia/creador en estado inicial)
 // ─────────────────────────────────────────────────────────────
-router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
+router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
   try {
     const cur = await query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!cur.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
@@ -770,7 +782,7 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 //  POST /:id/recibir — Jefe mant confirma recepción
 //  pagada → recibida
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'), async (req, res) => {
+router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -812,7 +824,7 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
 // ─────────────────────────────────────────────────────────────
 //  POST /:id/rechazar — Cualquier actor puede rechazar en su etapa
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria','paniol','contador'), async (req, res) => {
+router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { motivo } = req.body;
@@ -876,7 +888,7 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
 //    aprobada_compras   → en_cotizacion         (tesorería dice que algo está mal)
 //    pagada             → aprobada_compras      (raro, pero puede pasar)
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compras','tesoreria','jefe_mantenimiento','paniol','contador'), async (req, res) => {
+router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compras','tesoreria','jefe_mantenimiento','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
   try {
     const { motivo } = req.body;
@@ -955,7 +967,7 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
 // ─────────────────────────────────────────────────────────────
 //  POST /:id/toggle-open — marcar OC como abierta (para servicios fraccionados)
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/toggle-open', authenticate, requireRole('dueno','gerencia','compras','jefe_mantenimiento','paniol','contador'), async (req, res) => {
+router.post('/:id/toggle-open', authenticate, requireRole('dueno','gerencia','compras','jefe_mantenimiento','paniol','contador','gerente_sucursal'), async (req, res) => {
   try {
     const { is_open } = req.body;
     const r = await query(
