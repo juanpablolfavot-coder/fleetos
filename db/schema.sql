@@ -416,6 +416,38 @@ CREATE TABLE IF NOT EXISTS suppliers (
 CREATE INDEX IF NOT EXISTS idx_suppliers_status ON suppliers(status) WHERE active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_suppliers_cuit   ON suppliers(cuit)   WHERE active = TRUE AND cuit IS NOT NULL;
 
+
+-- Compatibilidad con bases existentes: si la tabla suppliers ya existía,
+-- estas columnas se agregan sin borrar datos y evitan errores 500 al editar proveedores.
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS razon_social VARCHAR(200);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cuit VARCHAR(20);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS iva_condition VARCHAR(30);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact_person VARCHAR(200);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS email VARCHAR(200);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS website VARCHAR(200);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS province VARCHAR(100);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rubros TEXT[];
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(30);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cc_dias INT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS moneda VARCHAR(5) DEFAULT 'ARS';
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) DEFAULT 0;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS delivery_time_days INT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rating NUMERIC(2,1);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS total_compras NUMERIC(14,2) DEFAULT 0;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_cbu VARCHAR(30);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_alias VARCHAR(100);
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo';
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS blacklist_reason TEXT;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 -- assets: activos patrimoniales no-vehículos (herramientas, edilicios, informática, etc.)
 CREATE TABLE IF NOT EXISTS assets (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
