@@ -2094,7 +2094,7 @@ function renderFuel() {
                   <td>
                     <div style="display:flex;gap:4px;flex-wrap:wrap">
                       <button class="btn btn-secondary btn-sm" onclick="openFuelDispatchTicket('${d.id}')">🧾 Remito</button>
-                      ${d.status !== 'recibido' && _fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchReceiveModal('${d.id}')">✓ Recibir</button>` : ''}
+                      ${d.status !== 'recibido' && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchReceiveModal('${d.id}')">✓ Recibir</button>` : ''}
                     </div>
                   </td>
                 </tr>
@@ -2116,7 +2116,7 @@ function renderFuel() {
           <option value="urea">🔵 Urea</option>
         </select>
         <button class="btn btn-secondary btn-sm" onclick="exportFuelPDF()">📄 Exportar PDF</button>
-        <button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>
+        ${_fuelPuedeRegistrarCarga(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>` : ''}
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -2808,7 +2808,7 @@ function openFuelDispatchTicket(dispatchId) {
     </div>
   `, [
     { label:'🖨 Imprimir', cls:'btn-primary', fn: () => printFuelDispatchTicket(dispatchId) },
-    ...(d.status !== 'recibido' && _fuelPuedeGestionarDespachos(App.currentUser?.role) ? [{ label:'✓ Marcar recibido', cls:'btn-secondary', fn: () => openFuelDispatchReceiveModal(dispatchId) }] : []),
+    ...(d.status !== 'recibido' && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? [{ label:'✓ Marcar recibido', cls:'btn-secondary', fn: () => openFuelDispatchReceiveModal(dispatchId) }] : []),
     { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
   ]);
 }
@@ -5532,7 +5532,7 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
 // Los roles SOLICITANTES (jefe mant, pañol, contador) NO ven precios.
 // Las cotizaciones y pagos las gestiona compras/tesorería.
 function _ocPuedeVerPrecios(role) {
-  return !['jefe_mantenimiento','paniol','contador'].includes(role);
+  return !['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role);
 }
 
 // ¿El rol tiene permitido ver precios de combustible ($ por litro, totales)?
@@ -5548,6 +5548,14 @@ function _fuelPuedeGestionarCisterna(role) {
 
 function _fuelPuedeGestionarDespachos(role) {
   return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento','mecanico'].includes(role);
+}
+
+function _fuelPuedeRecibirDespachos(role) {
+  return _fuelPuedeGestionarDespachos(role) || role === 'gerente_sucursal';
+}
+
+function _fuelPuedeRegistrarCarga(role) {
+  return ['dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico'].includes(role);
 }
 
 function _fuelPuedeVerificarTickets(role) {
