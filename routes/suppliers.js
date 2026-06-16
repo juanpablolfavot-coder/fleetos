@@ -11,11 +11,27 @@ const { validateUUID } = require('../middleware/security');
 // Helper: clampa rating a rango [0..5] para que NUMERIC(2,1) no se queje
 function clampRating(v) {
   if (v === undefined || v === null || v === '') return null;
-  const n = parseFloat(v);
-  if (isNaN(n)) return null;
+  const n = nullableNumber(v);
+  if (n === null) return null;
   if (n < 0) return 0;
   if (n > 5) return 5;
   return n;
+}
+
+function nullableInt(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === 'nan') return null;
+  const n = parseInt(text, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function nullableNumber(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  if (!text || text.toLowerCase() === 'nan') return null;
+  const n = parseFloat(text.replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
 }
 
 
@@ -207,10 +223,10 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         b.address||null, b.city||null, b.province||null, b.postal_code||null,
         Array.isArray(b.rubros)?b.rubros:null,
         b.forma_pago||null,
-        (b.cc_dias!==undefined && b.cc_dias!=='')?parseInt(b.cc_dias):null,
+        nullableInt(b.cc_dias),
         b.moneda||'ARS',
-        (b.discount_pct!==undefined && b.discount_pct!=='')?parseFloat(b.discount_pct):0,
-        (b.delivery_time_days!==undefined && b.delivery_time_days!=='')?parseInt(b.delivery_time_days):null,
+        nullableNumber(b.discount_pct) ?? 0,
+        nullableInt(b.delivery_time_days),
         clampRating(b.rating),
         b.bank_name||null, b.bank_cbu||null, b.bank_alias||null,
         b.notes||null, b.status||'activo', b.blacklist_reason||null
@@ -266,10 +282,10 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
         b.address||null, b.city||null, b.province||null, b.postal_code||null,
         Array.isArray(b.rubros)?b.rubros:null,
         b.forma_pago||null,
-        (b.cc_dias!==undefined && b.cc_dias!=='')?parseInt(b.cc_dias):null,
+        nullableInt(b.cc_dias),
         b.moneda||null,
-        (b.discount_pct!==undefined && b.discount_pct!=='')?parseFloat(b.discount_pct):null,
-        (b.delivery_time_days!==undefined && b.delivery_time_days!=='')?parseInt(b.delivery_time_days):null,
+        nullableNumber(b.discount_pct),
+        nullableInt(b.delivery_time_days),
         clampRating(b.rating),
         b.bank_name||null, b.bank_cbu||null, b.bank_alias||null,
         b.notes||null, b.status||null, b.blacklist_reason||null,
