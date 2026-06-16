@@ -93,9 +93,14 @@ router.get('/', authenticate, async (req, res) => {
       WHERE v.active = TRUE
     `;
     const params = [];
+    const sucursalAsignada = String(req.user?.sucursal || '').trim();
+    if (req.user?.role === 'gerente_sucursal' && sucursalAsignada) {
+      params.push(sucursalAsignada);
+      sql += ` AND v.base = $${params.length}`;
+    }
     if (status) { params.push(status); sql += ` AND v.status = $${params.length}`; }
     if (type)   { params.push(normalizeVehicleType(type)); sql += ` AND v.type = $${params.length}`; }
-    if (base)   { params.push(base);   sql += ` AND v.base = $${params.length}`; }
+    if (base && !(req.user?.role === 'gerente_sucursal' && sucursalAsignada)) { params.push(base);   sql += ` AND v.base = $${params.length}`; }
     sql += ' ORDER BY v.code';
     const result = await query(sql, params);
     res.json(result.rows);
