@@ -41,11 +41,15 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS area VARCHAR(100);
+
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check
     CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
                     'encargado_combustible','paniol','contador','auditor',
-                    'compras','tesoreria'));
+                    'compras','tesoreria','proveedores','gerente_sucursal'));
 
 -- refresh_tokens: tokens de sesión larga (refresh JWT)
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -212,7 +216,7 @@ CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status  ON fuel_internal_dispatch
 
 CREATE TABLE IF NOT EXISTS stock_items (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    code            VARCHAR(50) UNIQUE NOT NULL,
+    code            VARCHAR(50) NOT NULL,
     name            VARCHAR(200) NOT NULL,
     category        VARCHAR(100) NOT NULL DEFAULT 'General',
     unit            VARCHAR(20) NOT NULL DEFAULT 'un',
@@ -221,6 +225,8 @@ CREATE TABLE IF NOT EXISTS stock_items (
     qty_reorder     NUMERIC(10,2) NOT NULL DEFAULT 2,
     unit_cost       NUMERIC(12,2) NOT NULL DEFAULT 0,
     supplier        VARCHAR(200),
+    base_location   VARCHAR(200) NOT NULL DEFAULT 'Central',
+    area            VARCHAR(100) NOT NULL DEFAULT 'Depósito',
     active          BOOLEAN NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -233,6 +239,8 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     qty                 NUMERIC(10,2) NOT NULL,
     reason              TEXT,
     wo_id               UUID,                            -- OT asociada, si es egreso a OT
+    base_location       VARCHAR(200),
+    area                VARCHAR(100),
     user_id             UUID NOT NULL REFERENCES users(id),
     requires_approval   BOOLEAN DEFAULT FALSE,
     approved_by         UUID REFERENCES users(id),
@@ -240,6 +248,8 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 );
 
 ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS wo_id UUID;
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS base_location VARCHAR(200);
+ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS area VARCHAR(100);
 
 
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS category VARCHAR(100) NOT NULL DEFAULT 'General';
@@ -249,10 +259,21 @@ ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS qty_min NUMERIC(10,2) NOT NULL 
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS qty_reorder NUMERIC(10,2) NOT NULL DEFAULT 2;
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(12,2) NOT NULL DEFAULT 0;
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS supplier VARCHAR(200);
+ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS base_location VARCHAR(200) NOT NULL DEFAULT 'Central';
+ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS area VARCHAR(100) NOT NULL DEFAULT 'Depósito';
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+ALTER TABLE stock_items DROP CONSTRAINT IF EXISTS stock_items_code_key;
+DROP INDEX IF EXISTS idx_stock_code;
+CREATE INDEX IF NOT EXISTS idx_stock_code ON stock_items(code);
+CREATE INDEX IF NOT EXISTS idx_stock_base_area ON stock_items(base_location, area);
+CREATE UNIQUE INDEX IF NOT EXISTS stock_items_code_base_area_uidx
+    ON stock_items (UPPER(code), base_location, area)
+    WHERE active = TRUE;
+
 CREATE INDEX IF NOT EXISTS idx_stock_mov_stock ON stock_movements(stock_id);
+CREATE INDEX IF NOT EXISTS idx_stock_mov_base_area ON stock_movements(base_location, area);
 CREATE INDEX IF NOT EXISTS idx_stock_mov_date  ON stock_movements(created_at DESC);
 
 -- ══════════════════════════════════════════════════════════════════════
