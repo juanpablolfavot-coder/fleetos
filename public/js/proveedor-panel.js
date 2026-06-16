@@ -17,11 +17,28 @@ window.renderProveedorPanelInline = async function() {
     const ocs = await res.json();
     const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    const normalizarEntrega = (o) => {
+      const statusOC = String(o?.status || '').toLowerCase();
+      const delivery = String(o?.delivery_status || '').toLowerCase();
+      if (statusOC === 'recibida' || delivery === 'total' || delivery === 'recibida') return 'recibida';
+      if (delivery === 'parcial') return 'parcial';
+      return 'pendiente';
+    };
+
+    const normalizarPago = (o) => {
+      const statusOC = String(o?.status || '').toLowerCase();
+      const pago = String(o?.payment_status || '').toLowerCase();
+      if (statusOC === 'recibida' || statusOC === 'pagada' || pago === 'total' || pago === 'pagado') return 'total';
+      if (pago === 'parcial') return 'parcial';
+      return 'pendiente';
+    };
+
     const badgeClass = (status) => {
       switch (status) {
-        case 'total':   return 'badge-success';
-        case 'parcial': return 'badge-warn';
-        default:        return 'badge-gray';
+        case 'total':
+        case 'recibida': return 'badge-success';
+        case 'parcial':  return 'badge-warn';
+        default:         return 'badge-gray';
       }
     };
 
@@ -43,6 +60,8 @@ window.renderProveedorPanelInline = async function() {
         const facturado  = parseFloat(o.total_facturado);
         const totalEst   = parseFloat(o.total_estimado);
         const facColor   = facturado >= totalEst && totalEst > 0 ? 'var(--ok)' : 'var(--warn)';
+        const entrega = normalizarEntrega(o);
+        const pago = normalizarPago(o);
         return `
         <tr>
           <td class="td-main td-mono">${o.code}</td>
@@ -50,8 +69,8 @@ window.renderProveedorPanelInline = async function() {
           <td>${new Date(o.created_at).toLocaleDateString('es-AR')}</td>
           <td style="text-align:right">$${fmt(o.total_estimado)}</td>
           <td style="text-align:right;color:${facColor};font-weight:600">$${fmt(o.total_facturado)}</td>
-          <td style="text-align:center"><span class="badge ${badgeClass(o.delivery_status)}">${o.delivery_status || 'pendiente'}</span></td>
-          <td style="text-align:center"><span class="badge ${badgeClass(o.payment_status)}">${o.payment_status || 'pendiente'}</span></td>
+          <td style="text-align:center"><span class="badge ${badgeClass(entrega)}">${entrega}</span></td>
+          <td style="text-align:center"><span class="badge ${badgeClass(pago)}">${pago}</span></td>
           <td style="text-align:center;white-space:nowrap">
             <button class="btn btn-secondary btn-sm" onclick="openPODetail('${o.id}')">👁 Ver OC</button>
             <button class="btn btn-primary btn-sm" onclick="abrirModalFacturas('${o.id}')" style="margin-left:4px">📄 Cargar factura</button>
