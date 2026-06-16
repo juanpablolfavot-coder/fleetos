@@ -364,6 +364,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
     km_at_open      INTEGER,
     labor_cost      NUMERIC(12,2) DEFAULT 0,
     parts_cost      NUMERIC(12,2) DEFAULT 0,
+    external_required BOOLEAN NOT NULL DEFAULT FALSE, -- si requiere servicio/repuesto externo, genera OC para Compras
+    external_po_id  UUID,                            -- OC vinculada generada desde OT
     root_cause      TEXT,
     opened_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     closed_at       TIMESTAMPTZ,
@@ -374,6 +376,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
 
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS ot_tipo  VARCHAR(20) DEFAULT 'vehiculo';
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS asset_id UUID;
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_po_id UUID;
 
 CREATE INDEX IF NOT EXISTS idx_wo_vehicle ON work_orders(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_wo_status  ON work_orders(status);
@@ -385,15 +389,19 @@ CREATE TABLE IF NOT EXISTS work_order_parts (
     wo_id       UUID NOT NULL,                       -- no REFERENCES para tolerar OTs borradas
     stock_id    UUID,
     name        TEXT,
-    origin      VARCHAR(20),                         -- 'stock'|'compra'
+    origin      VARCHAR(20),                         -- 'stock'|'externo'
     qty         NUMERIC(10,2),
     unit        VARCHAR(20),
     unit_cost   NUMERIC(12,2) DEFAULT 0,
     subtotal    NUMERIC(14,2) GENERATED ALWAYS AS (qty * unit_cost) STORED,
+    po_id       UUID,                                -- OC generada para externo, si corresponde
     added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID;
 CREATE INDEX IF NOT EXISTS idx_wop_wo ON work_order_parts(wo_id);
+CREATE INDEX IF NOT EXISTS idx_wop_po ON work_order_parts(po_id);
+CREATE INDEX IF NOT EXISTS idx_wo_external_po ON work_orders(external_po_id);
 
 -- Mano de obra cargada en cada OT
 CREATE TABLE IF NOT EXISTS work_order_labor (
