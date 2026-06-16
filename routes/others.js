@@ -12,10 +12,32 @@ const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 const bcrypt     = require('bcryptjs');
 
 // ======= COMBUSTIBLE =======
-// Migración: agregar price_per_l a tanks si no existe
+// Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna.
+async function ensureFuelTankEntriesTable() {
+  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)").catch(() => {});
+  await query(`
+    CREATE TABLE IF NOT EXISTS fuel_tank_entries (
+      id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tank_id     UUID REFERENCES tanks(id),
+      type        VARCHAR(20) NOT NULL,
+      liters      NUMERIC(12,2) NOT NULL,
+      price_per_l NUMERIC(12,2),
+      supplier    TEXT,
+      remito      TEXT,
+      notes       TEXT,
+      previous_l  NUMERIC(12,2),
+      new_l       NUMERIC(12,2),
+      created_by  UUID REFERENCES users(id),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await query("CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_created ON fuel_tank_entries(created_at DESC)").catch(() => {});
+  await query("CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_tank ON fuel_tank_entries(tank_id)").catch(() => {});
+}
+
 (async () => {
   try {
-    await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)");
+    await ensureFuelTankEntriesTable();
   } catch(e) {}
 })();
 
@@ -36,6 +58,94 @@ fuelRouter.get('/tanks', authenticate, async (req, res) => {
   try { res.json((await query('SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC, location ASC')).rows); }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
+
+// Historial de ingresos a cisterna: sirve como ticket básico del sistema.
+fuelRouter.get('/tank-entries', authenticate, async (req, res) => {
+  try {
+    await ensureFuelTankEntriesTable();
+    const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
+    const r = await query(`
+      SELECT e.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
+      FROM fuel_tank_entries e
+      LEFT JOIN tanks t ON t.id = e.tank_id
+      LEFT JOIN users u ON u.id = e.created_by
+      ORDER BY e.created_at DESC
+      LIMIT $1
+    `, [limit]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[fuel tank-entries GET]', err.message);
+    res.status(500).json({ error: 'Error al obtener tickets de cisterna' });
+  }
+});
+
+// Registrar ingreso a cisterna + crear ticket básico.
+fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','encargado_combustible','compras','jefe_mantenimiento'), async (req, res) => {
+  const client = await require('../db/pool').pool.connect();
+  try {
+    await ensureFuelTankEntriesTable();
+    const { tank_id, type='gasoil', liters: litersRaw, price_per_l: ppuRaw, supplier, remito, notes } = req.body || {};
+    const liters = parseFloat(litersRaw);
+    const ppu    = ppuRaw === '' || ppuRaw === undefined || ppuRaw === null ? null : parseFloat(ppuRaw);
+
+    if (!tank_id) return res.status(400).json({ error: 'Falta seleccionar la cisterna' });
+    if (!Number.isFinite(liters) || liters <= 0) return res.status(400).json({ error: 'Ingresá litros válidos' });
+    if (ppu !== null && (!Number.isFinite(ppu) || ppu < 0)) return res.status(400).json({ error: 'Precio por litro inválido' });
+
+    await client.query('BEGIN');
+    const tq = await client.query('SELECT * FROM tanks WHERE id=$1 FOR UPDATE', [tank_id]);
+    const tank = tq.rows[0];
+    if (!tank) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cisterna no encontrada' });
+    }
+
+    const previous = parseFloat(tank.current_l) || 0;
+    const capacity = parseFloat(tank.capacity_l) || 0;
+    const next     = previous + liters;
+    if (capacity > 0 && next > capacity) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: `Excede la capacidad de la cisterna (${capacity.toFixed(0)} L). Actual: ${previous.toFixed(0)} L` });
+    }
+
+    const fields = ['current_l = $1', 'updated_at = NOW()'];
+    const params = [next];
+    if (ppu !== null && ['dueno','gerencia','compras','encargado_combustible'].includes(req.user.role)) {
+      params.push(ppu);
+      fields.push(`price_per_l = $${params.length}`);
+    }
+    params.push(tank_id);
+    const updated = await client.query(`UPDATE tanks SET ${fields.join(', ')} WHERE id=$${params.length} RETURNING *`, params);
+
+    const entry = await client.query(`
+      INSERT INTO fuel_tank_entries
+        (tank_id, type, liters, price_per_l, supplier, remito, notes, previous_l, new_l, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `, [
+      tank_id,
+      (type || tank.type || 'gasoil'),
+      liters,
+      ppu,
+      supplier || null,
+      remito || null,
+      notes || null,
+      previous,
+      next,
+      req.user.id
+    ]);
+
+    await client.query('COMMIT');
+    res.status(201).json({ ok:true, entry: entry.rows[0], tank: updated.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel tank-entries POST]', err.message);
+    res.status(500).json({ error: 'Error al registrar ingreso a cisterna' });
+  } finally {
+    client.release();
+  }
+});
+
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
@@ -520,7 +630,7 @@ checklistRouter.get('/', authenticate, async (req, res) => {
 // ======= DASHBOARD ENCARGADO =======
 const encargadoRouter = express.Router();
 
-encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico'), async (req, res) => {
   try {
     await ensureChecklistTable();
     // Fecha de hoy en Argentina (el server corre en UTC en Render; sin esto, cerca de medianoche AR los checklists del día no aparecían)
@@ -620,7 +730,7 @@ fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
   } catch(err) { console.error('[fuel DELETE]', err.message); res.status(500).json({ error: 'Error al eliminar carga' }); }
 });
 
-fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible'), async (req, res) => {
+fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico'), async (req, res) => {
   try {
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT").catch(()=>{});
