@@ -792,6 +792,7 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
     const r = await client.query(`
       UPDATE purchase_orders SET
         status = 'recibida',
+        delivery_status = 'total',
         recibido_por = $1,
         recibido_at = NOW()
       WHERE id = $2 RETURNING *`,
