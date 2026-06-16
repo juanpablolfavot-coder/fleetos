@@ -317,7 +317,7 @@ function getRoleData(role) {
     dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
     gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
     jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
-    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','tires','stock'], canEdit:['workorders'] },
+    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Depósito',                 badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
@@ -325,7 +325,7 @@ function getRoleData(role) {
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers'], canEdit:['purchase_orders'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
-    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel'], canEdit:[] },
+    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
   };
   return roles[role] || roles['auditor'];
 }
@@ -342,7 +342,8 @@ function getRoleColor(role) {
     contador:              '#db2777',
     auditor:               '#dc2626',
     compras:               '#0ea5e9',
-    tesoreria:             '#14b8a6'
+    tesoreria:             '#14b8a6',
+    proveedores:           '#a855f7'
   };
   return map[role] || '#2563eb';
 }
