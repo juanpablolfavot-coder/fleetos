@@ -28,6 +28,7 @@ const ROLES_RECIBIR = ['dueno','gerencia','jefe_mantenimiento','paniol','contado
 
 // Destinos fijos predefinidos (el frontend les agrega las sucursales dinámicamente)
 const DESTINOS_FIJOS = [
+  'Depósito',
   'Pañol central',
   'Taller',
   'Obra / Edilicio',
