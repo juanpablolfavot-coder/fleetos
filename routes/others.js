@@ -642,7 +642,28 @@ userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID(
 // ======= CONFIGURACIÓN (bases y tipos) =======
 const configRouter = express.Router();
 const DEFAULT_BASES = ['Central','Norte','Sur'];
-const DEFAULT_VTYPES = ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
+const DEFAULT_VTYPES = ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
+function mergeVehicleTypes(value) {
+  const incoming = Array.isArray(value) ? value : [];
+  const aliases = {
+    semi: 'semirremolque',
+    semirremolques: 'semirremolque',
+    'semi remolque': 'semirremolque',
+    acoplados: 'acoplado',
+    'auto elevador': 'autoelevador',
+    autoelevadores: 'autoelevador',
+    montacargas: 'autoelevador',
+    camioneta: 'utilitario',
+  };
+  const clean = [];
+  for (const item of [...incoming, ...DEFAULT_VTYPES]) {
+    const raw = String(item || '').trim().toLowerCase();
+    if (!raw) continue;
+    const normalized = aliases[raw] || raw.replace(/\s+/g, '_').replace(/-/g, '_');
+    if (!clean.includes(normalized)) clean.push(normalized);
+  }
+  return clean;
+}
 
 configRouter.get('/', authenticate, async (req, res) => {
   try {
@@ -653,7 +674,7 @@ configRouter.get('/', authenticate, async (req, res) => {
     const areas = await query(`SELECT value FROM app_config WHERE key='areas'`);
     res.json({
       bases:  bases.rows[0]  ? bases.rows[0].value  : DEFAULT_BASES,
-      vehicle_types: vtypes.rows[0] ? vtypes.rows[0].value : DEFAULT_VTYPES,
+      vehicle_types: mergeVehicleTypes(vtypes.rows[0] ? vtypes.rows[0].value : DEFAULT_VTYPES),
       labor_rate: lrate.rows[0] ? parseFloat(lrate.rows[0].value) : 0,
       areas: areas.rows[0] ? areas.rows[0].value : {},
     });
@@ -665,7 +686,7 @@ configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req,
     await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
     const { bases, vehicle_types, labor_rate, areas } = req.body;
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
-    if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(vehicle_types)]);
+    if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(mergeVehicleTypes(vehicle_types))]);
     if (areas && typeof areas === 'object') {
       // Validación básica: debe ser objeto con arrays de strings
       const clean = {};
