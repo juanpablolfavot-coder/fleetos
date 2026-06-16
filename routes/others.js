@@ -12,7 +12,7 @@ const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 const bcrypt     = require('bcryptjs');
 
 // ======= COMBUSTIBLE =======
-// Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna.
+// Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna y despachos internos.
 async function ensureFuelTankEntriesTable() {
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)").catch(() => {});
   await query(`
@@ -33,6 +33,40 @@ async function ensureFuelTankEntriesTable() {
   `).catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_created ON fuel_tank_entries(created_at DESC)").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_tank ON fuel_tank_entries(tank_id)").catch(() => {});
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS fuel_internal_dispatches (
+      id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tank_id             UUID REFERENCES tanks(id),
+      type                VARCHAR(20) NOT NULL DEFAULT 'gasoil',
+      liters              NUMERIC(12,2) NOT NULL,
+      destination         TEXT NOT NULL,
+      destination_detail  TEXT,
+      responsible         TEXT,
+      transport_vehicle   TEXT,
+      remito              TEXT,
+      notes               TEXT,
+      previous_l          NUMERIC(12,2),
+      new_l               NUMERIC(12,2),
+      status              VARCHAR(20) NOT NULL DEFAULT 'despachado',
+      received_by         TEXT,
+      received_liters     NUMERIC(12,2),
+      receive_notes       TEXT,
+      received_at         TIMESTAMPTZ,
+      created_by          UUID REFERENCES users(id),
+      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_detail TEXT").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS responsible TEXT").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS transport_vehicle TEXT").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS received_by TEXT").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS received_liters NUMERIC(12,2)").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS receive_notes TEXT").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ").catch(() => {});
+  await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_created ON fuel_internal_dispatches(created_at DESC)").catch(() => {});
+  await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_tank ON fuel_internal_dispatches(tank_id)").catch(() => {});
+  await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status ON fuel_internal_dispatches(status)").catch(() => {});
 }
 
 (async () => {
@@ -143,6 +177,119 @@ fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','e
     res.status(500).json({ error: 'Error al registrar ingreso a cisterna' });
   } finally {
     client.release();
+  }
+});
+
+
+// Despachos internos: salida de cisterna hacia sucursal, bidones o tanque chico.
+// No se registra como consumo de una unidad: solo descuenta la cisterna y genera remito interno.
+fuelRouter.get('/dispatches', authenticate, async (req, res) => {
+  try {
+    await ensureFuelTankEntriesTable();
+    const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
+    const r = await query(`
+      SELECT d.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
+      FROM fuel_internal_dispatches d
+      LEFT JOIN tanks t ON t.id = d.tank_id
+      LEFT JOIN users u ON u.id = d.created_by
+      ORDER BY d.created_at DESC
+      LIMIT $1
+    `, [limit]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error('[fuel dispatches GET]', err.message);
+    res.status(500).json({ error: 'Error al obtener despachos internos' });
+  }
+});
+
+fuelRouter.post('/dispatches', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico'), async (req, res) => {
+  const client = await require('../db/pool').pool.connect();
+  try {
+    await ensureFuelTankEntriesTable();
+    const {
+      tank_id, type='gasoil', liters: litersRaw, destination, destination_detail,
+      responsible, transport_vehicle, remito, notes
+    } = req.body || {};
+    const liters = parseFloat(litersRaw);
+
+    if (!tank_id) return res.status(400).json({ error: 'Falta seleccionar la cisterna de origen' });
+    if (!Number.isFinite(liters) || liters <= 0) return res.status(400).json({ error: 'Ingresá litros válidos' });
+    if (!destination || String(destination).trim().length < 2) return res.status(400).json({ error: 'Indicá destino del despacho' });
+
+    await client.query('BEGIN');
+    const tq = await client.query('SELECT * FROM tanks WHERE id=$1 FOR UPDATE', [tank_id]);
+    const tank = tq.rows[0];
+    if (!tank) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Cisterna de origen no encontrada' });
+    }
+
+    const previous = parseFloat(tank.current_l) || 0;
+    const next = previous - liters;
+    if (next < 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: `Stock insuficiente en ${tank.location || 'cisterna'} (${previous.toFixed(0)} L disponibles, se piden ${liters.toFixed(0)} L)` });
+    }
+
+    const updated = await client.query(
+      'UPDATE tanks SET current_l=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+      [next, tank_id]
+    );
+
+    const dispatch = await client.query(`
+      INSERT INTO fuel_internal_dispatches
+        (tank_id, type, liters, destination, destination_detail, responsible, transport_vehicle, remito, notes, previous_l, new_l, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+      RETURNING *
+    `, [
+      tank_id,
+      (type || tank.type || 'gasoil'),
+      liters,
+      String(destination).trim(),
+      destination_detail || null,
+      responsible || null,
+      transport_vehicle || null,
+      remito || null,
+      notes || null,
+      previous,
+      next,
+      req.user.id
+    ]);
+
+    await client.query('COMMIT');
+    res.status(201).json({ ok:true, dispatch: dispatch.rows[0], tank: updated.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel dispatches POST]', err.message);
+    res.status(500).json({ error: 'Error al registrar despacho interno' });
+  } finally {
+    client.release();
+  }
+});
+
+fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico'), validateUUID('id'), async (req, res) => {
+  try {
+    await ensureFuelTankEntriesTable();
+    const { received_by, received_liters, receive_notes } = req.body || {};
+    const liters = received_liters === '' || received_liters === undefined || received_liters === null ? null : parseFloat(received_liters);
+    if (liters !== null && (!Number.isFinite(liters) || liters < 0)) {
+      return res.status(400).json({ error: 'Litros recibidos inválidos' });
+    }
+    const r = await query(`
+      UPDATE fuel_internal_dispatches
+         SET status='recibido',
+             received_by=$2,
+             received_liters=$3,
+             receive_notes=$4,
+             received_at=NOW()
+       WHERE id=$1
+       RETURNING *
+    `, [req.params.id, received_by || null, liters, receive_notes || null]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Despacho no encontrado' });
+    res.json({ ok:true, dispatch: r.rows[0] });
+  } catch (err) {
+    console.error('[fuel dispatch receive]', err.message);
+    res.status(500).json({ error: 'Error al confirmar recepción' });
   }
 });
 
