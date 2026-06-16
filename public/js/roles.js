@@ -90,6 +90,8 @@ async function _tryAutoLogin(attempt = 1) {
       email:    u.email,
       role:     u.role,
       vehicle:  u.vehicle_code,
+      sucursal: u.sucursal || null,
+      area:     u.area || null,
       initials: u.name.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase(),
       roleData: getRoleData(u.role),
     };
@@ -242,6 +244,8 @@ async function doLogin() {
       email:    u.email,
       role:     u.role,
       vehicle:  u.vehicle_code,
+      sucursal: u.sucursal || null,
+      area:     u.area || null,
       initials: u.name.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase(),
       roleData: getRoleData(u.role),
     };
@@ -350,10 +354,11 @@ function getRoleData(role) {
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Depósito',                 badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
-    contador:              { label:'Administración',           badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel','suppliers'], canEdit:[] },
+    contador:              { label:'Administración',           badge:'role-contador',   modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel'], canEdit:['stock','purchase_orders'] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
+    gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs'], canEdit:['stock','purchase_orders'] },
     proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
   };
   return roles[role] || roles['auditor'];
@@ -372,6 +377,7 @@ function getRoleColor(role) {
     auditor:               '#dc2626',
     compras:               '#0ea5e9',
     tesoreria:             '#14b8a6',
+    gerente_sucursal:      '#0f766e',
     proveedores:           '#a855f7'
   };
   return map[role] || '#2563eb';
@@ -418,6 +424,7 @@ function bootApp() {
     // (el panel unificado incluye la actividad del día al final).
     else if (u.role === 'mecanico')           navigate('dashboard');
     else if (u.role === 'jefe_mantenimiento') navigate('dashboard');
+    else if (u.role === 'gerente_sucursal')   navigate('dashboard');
     else if (u.role === 'gerencia')           navigate('dashboard');
     else if (u.role === 'dueno')              navigate('dashboard');
     else                                      navigate('dashboard');
@@ -622,6 +629,9 @@ function _mapStockItem(s) {
     reorder:  parseFloat(s.qty_reorder) || 2,
     cost:     parseFloat(s.unit_cost) || 0,
     supplier: s.supplier || '—',
+    sucursal: s.base_location || s.sucursal || 'Central',
+    base_location: s.base_location || s.sucursal || 'Central',
+    area: s.area || 'Depósito',
   };
 }
 
@@ -642,6 +652,8 @@ function _mapStockMovement(m) {
     unit:   m.unit || 'un',
     motivo: m.reason || '—',
     user:   m.user_name || '—',
+    sucursal: m.base_location || 'Central',
+    area: m.area || 'Depósito',
   };
 }
 
