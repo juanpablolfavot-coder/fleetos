@@ -199,7 +199,7 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Depósito', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales', proveedor_panel:'Mis Órdenes de Compra', tesoreria_panel:'Pagos / Tesorería' };
+  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y Depósito', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales', proveedor_panel:'Mis Órdenes de Compra', tesoreria_panel:'Pagos / Tesorería' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
@@ -1152,7 +1152,7 @@ function showVehicleFicha(id, tab) {
             <td style="max-width:200px;color:var(--text2)">${o.desc}</td>
             <td>${o.mechanic}</td>
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
-            <td class="td-mono">${(o.parts_cost+o.labor_cost)>0?'$'+((o.parts_cost+o.labor_cost)/1000).toFixed(0)+'K':'—'}</td>
+            <td class="td-mono">${(o.parts_cost)>0?'$'+((o.parts_cost)/1000).toFixed(0)+'K':'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
             <td><button class="btn btn-secondary btn-sm" onclick="printOT('${o.id}')">🖨</button></td>
           </tr>`).join('')}</tbody></table>`
@@ -1323,7 +1323,7 @@ async function saveNewOT() {
   const target_id = document.getElementById('ot-target-select')?.value || '';
   const title      = (document.getElementById('ot-title')?.value || '').trim();
   const priority   = document.getElementById('ot-priority')?.value || 'Normal';
-  const labor_cost = parseFloat(document.getElementById('ot-labor')?.value) || 0;
+  const labor_cost = 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
   // Repuestos — leer directo del DOM (incluye origin + stock_id si aplica)
@@ -1366,7 +1366,8 @@ async function saveNewOT() {
     mechanic_id: null,
     mechanic: document.getElementById('ot-mechanic')?.value?.trim() || null,
     parts,
-    labor_cost
+    labor_cost,
+    external_required: !!document.getElementById('ot-external-required')?.checked
   };
   if (ot_tipo === 'vehiculo') payload.vehicle_id = target_id;
   else                         payload.asset_id   = target_id;
@@ -1380,7 +1381,7 @@ async function saveNewOT() {
 
   window._otParts = [];
   closeModal();
-  showToast('ok', `OT ${ot.code} creada · Repuestos: $${Math.round(ot.parts_cost||0).toLocaleString()} · MO: $${Math.round(ot.labor_cost||0).toLocaleString()}`);
+  showToast('ok', `OT ${ot.code} creada${ot.external_po_code ? ' · OC generada: ' + ot.external_po_code : ''}`);
   await afterSave({ page: 'workorders' });
 }
 
@@ -1436,7 +1437,7 @@ function openEditOTModal(id) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <div>
           <label class="form-label" style="margin:0;font-weight:700">⏱️ Partes de trabajo (mano de obra propia)</label>
-          <div style="font-size:11px;color:var(--text3)">Quién trabajó y cuánto. Se suma automáticamente al costo MO.</div>
+          <div style="font-size:11px;color:var(--text3)">Quién trabajó y cuántas horas. No se valoriza la mano de obra propia.</div>
         </div>
         <button type="button" class="btn btn-secondary btn-sm" onclick="_labAddRow()">+ Agregar parte</button>
       </div>
@@ -1444,8 +1445,7 @@ function openEditOTModal(id) {
         <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando partes...</div>
       </div>
       <div id="eo-labor-total" style="text-align:right;font-size:13px;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);display:none">
-        Total MO de partes: <strong id="eo-labor-total-val" style="color:var(--accent)">$0</strong>
-        <span style="color:var(--text3);font-size:11px">· <span id="eo-labor-total-hours">0</span>h</span>
+        Total horas registradas: <strong id="eo-labor-total-hours" style="color:var(--accent)">0</strong> h
       </div>
     </div>
 
@@ -1457,10 +1457,8 @@ function openEditOTModal(id) {
         <input class="form-input" type="number" id="eo-parts" value="${ot.parts_cost||0}" readonly style="background:var(--bg3)">
       </div>
       <div class="form-group">
-        <label class="form-label">Costo mano de obra ($)
-          <span style="font-size:10px;color:var(--text3);font-weight:400">· autocalculado desde los partes</span>
-        </label>
-        <input class="form-input" type="number" id="eo-labor" value="${ot.labor_cost||0}" readonly style="background:var(--bg3)">
+        <label class="form-label">Mano de obra propia</label>
+        <input class="form-input" id="eo-labor" value="Sin precio · se registra por horas" readonly style="background:var(--bg3);color:var(--text3)">
       </div>
     </div>
     ${(ot.parts||[]).length>0?`
@@ -1504,15 +1502,15 @@ async function saveEditOT(id) {
   const mechanic   = document.getElementById('eo-mechanic')?.value || '';
   const desc       = document.getElementById('eo-desc')?.value     || ot.desc;
   const priority   = document.getElementById('eo-priority')?.value || ot.priority;
-  const labor      = parseFloat(document.getElementById('eo-labor')?.value)  || ot.labor_cost  || 0;
+  const labor      = 0;
   const parts_cost = parseFloat(document.getElementById('eo-parts')?.value)  || ot.parts_cost  || 0;
   const woUUID = ot._uuid || ot.id;
   const res = await apiFetch(`/api/workorders/${woUUID}`, {
     method: 'PUT',
-    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: labor, parts_cost, priority })
+    body: JSON.stringify({ status, mechanic_id: null, description: desc, labor_cost: 0, parts_cost, priority })
   });
   if (!res.ok) { showToast('error', 'Error al actualizar OT'); return; }
-  ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = labor; ot.parts_cost = parts_cost;
+  ot.status = status; ot.desc = desc; ot.priority = priority; ot.labor_cost = 0; ot.parts_cost = parts_cost;
   closeModal();
   showToast('ok', `${id} actualizada correctamente`);
   await afterSave({ page: 'workorders' });
@@ -1564,7 +1562,7 @@ function openCloseOTModal(id) {
           <label class="form-label">Origen</label>
           <select class="form-select" id="cl-origin" onchange="onClosePartOriginChange()">
             <option value="stock">Del stock / pañol</option>
-            <option value="compra">Compra externa</option>
+            <option value="externo">Compra externa (genera OC a Compras)</option>
           </select>
         </div>
         <div class="form-group" style="margin:0" id="cl-stock-grp">
@@ -1585,8 +1583,8 @@ function openCloseOTModal(id) {
           <input class="form-input" type="number" value="1" min="1" id="cl-qty" oninput="previewClosePartTotal()">
         </div>
         <div class="form-group" style="margin:0;flex:1">
-          <label class="form-label">Costo unit. ($)</label>
-          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" oninput="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
+          <label class="form-label">Costo stock ($)</label>
+          <input class="form-input" type="number" id="cl-unit-cost" placeholder="0" readonly style="background:var(--bg3)" oninput="previewClosePartTotal()"><div id="cl-preview-total" style="font-size:11px;color:var(--accent);font-family:var(--mono);margin-top:3px;height:14px"></div>
         </div>
         <button class="btn btn-secondary" style="height:38px;padding:0 14px;flex-shrink:0" onclick="addCloseOTPart('${id}')">+ Agregar</button>
       </div>
@@ -1597,10 +1595,7 @@ function openCloseOTModal(id) {
       <textarea class="form-textarea" placeholder="Describí qué se encontró y cómo se resolvió..." id="cl-causa"></textarea>
     </div>
     <div class="form-row">
-      ${(App.currentUser?.role === 'mecanico') ?
-        '<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn)">El costo de mano de obra debe ser cargado por el Jefe de Mantenimiento.</div>'
-        : `<div class="form-group"><label class="form-label">Costo mano de obra ($) <span style="font-size:10px;color:var(--text3);font-weight:400">· autocalculado desde los partes</span></label><input class="form-input" type="number" id="cl-labor" value="${parseFloat(ot.labor_cost)||0}" readonly style="background:var(--bg3)"></div>`
-      }
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3)">La mano de obra propia no lleva precio. Queda registrada por partes de trabajo y horas.</div>
       <div style="display:none">
       <div class="form-group">
         <label class="form-label">Total repuestos (acumulado)</label>
@@ -1621,9 +1616,18 @@ function onClosePartOriginChange() {
   const origin = document.getElementById('cl-origin')?.value;
   const sG = document.getElementById('cl-stock-grp');
   const nG = document.getElementById('cl-name-grp');
+  const costEl = document.getElementById('cl-unit-cost');
+  const prev = document.getElementById('cl-preview-total');
   if (!sG || !nG) return;
-  if (origin === 'stock') { sG.style.display=''; nG.style.display='none'; }
-  else { sG.style.display='none'; nG.style.display=''; document.getElementById('cl-unit-cost').value=''; }
+  if (origin === 'stock') {
+    sG.style.display=''; nG.style.display='none';
+    if (costEl) { costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; costEl.value = ''; }
+    if (prev) prev.textContent = '';
+  } else {
+    sG.style.display='none'; nG.style.display='';
+    if (costEl) { costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; costEl.value = 0; }
+    if (prev) prev.textContent = 'Se generará OC para Compras. Sin precio en la OT.';
+  }
 }
 
 function onCloseStockSelect() {
@@ -1651,8 +1655,8 @@ function addCloseOTPart(otId) {
     sel.value = '';
   } else {
     const name = document.getElementById('cl-part-name')?.value.trim();
-    if (!name) { showToast('warn','Escribí el nombre del repuesto'); return; }
-    ot.closeParts.push({ name, origin:'compra', stockId:null, qty, cost });
+    if (!name) { showToast('warn','Escribí el nombre del repuesto o servicio externo'); return; }
+    ot.closeParts.push({ name, origin:'externo', stockId:null, qty, cost:0, unit:'un' });
     document.getElementById('cl-part-name').value = '';
   }
   document.getElementById('cl-qty').value = '1';
@@ -1674,8 +1678,8 @@ function renderCloseOTPartsList(otId) {
       <tbody>${parts.map((p,i)=>`<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:5px 6px;color:var(--text)">${p.name}</td>
         <td style="padding:5px 6px;text-align:center;font-family:var(--mono)">${p.qty||1}</td>
-        <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'Compra'}</span></td>
-        <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
+        <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'OC Compras'}</span></td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${p.origin==='stock' ? '$'+((p.cost||0)*(p.qty||1)).toLocaleString() : 'A cotizar'}</td>
         <td style="padding:5px 4px;text-align:center">
           <button onclick="removeCloseOTPart('${otId}',${i})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;line-height:1">✕</button>
         </td>
@@ -1697,21 +1701,19 @@ async function closeOTConfirmed(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
   const causa  = document.getElementById('cl-causa')?.value  || '—';
-  const labor  = parseFloat(document.getElementById('cl-labor')?.value) || 0;
+  const labor  = 0;
 
-  // Descontar repuestos del modal
-  const parts = [];
-  let descuentos = 0;
-  document.querySelectorAll('.cl-part-row').forEach(row => {
-    const stockId = row.dataset.stockId;
-    const qty     = parseFloat(row.dataset.qty) || 0;
-    const name    = row.dataset.name || '';
-    const cost    = parseFloat(row.dataset.cost) || 0;
-    if (stockId && qty > 0) {
-      parts.push({ stock_id: stockId, name, qty, unit_cost: cost, origin: 'stock' });
-      descuentos++;
-    }
-  });
+  // Repuestos agregados al cerrar: pañol descuenta stock; externos generan OC para Compras.
+  const parts = (ot.closeParts || []).map(p => ({
+    stock_id: p.origin === 'stock' ? p.stockId : null,
+    name: p.name,
+    qty: parseFloat(p.qty) || 1,
+    unit: p.unit || 'un',
+    unit_cost: p.origin === 'stock' ? (parseFloat(p.cost) || 0) : 0,
+    origin: p.origin === 'stock' ? 'stock' : 'externo'
+  }));
+  let descuentos = parts.filter(p => p.origin === 'stock').length;
+  let externos = parts.filter(p => p.origin !== 'stock').length;
 
   const woUUID = ot._uuid || ot.id;
   const res = await apiFetch(`/api/workorders/${woUUID}/close`, {
@@ -1720,9 +1722,9 @@ async function closeOTConfirmed(id) {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al cerrar OT'); return; }
 
-  ot.status = 'Cerrada'; ot.labor_cost = labor;
+  ot.status = 'Cerrada'; ot.labor_cost = 0;
   closeModal();
-  showToast('ok', `${id} cerrada${descuentos>0?' · '+descuentos+' ítems descontados del stock':''}`);
+  showToast('ok', `${id} cerrada${descuentos>0?' · '+descuentos+' ítems descontados del stock':''}${externos>0?' · OC generada para externo':''}`);
   await afterSave({ page: 'workorders' });
 }
 
@@ -1762,11 +1764,8 @@ async function printOT(id) {
 
   // Calcular totales
   const partsTotal = partsData.reduce((a, p) => a + (parseFloat(p.subtotal) || (p.qty * p.unit_cost)), 0);
-  const laborTotal = laborData.reduce((a, l) => a + (parseFloat(l.subtotal) || 0), 0);
   const laborHours = laborData.reduce((a, l) => a + (parseFloat(l.hours) || 0), 0);
-  // labor_cost de la OT (por si es distinto del calculado, priorizamos el del backend)
-  const laborCostFinal = laborTotal > 0 ? laborTotal : (parseFloat(ot.labor_cost) || 0);
-  const totalCost = partsTotal + laborCostFinal;
+  const totalCost = partsTotal;
 
   // Filas de repuestos
   let partsRows = '';
@@ -1795,19 +1794,16 @@ async function printOT(id) {
   if (laborData.length > 0) {
     laborData.forEach(l => {
       const hours = parseFloat(l.hours) || 0;
-      const rate = parseFloat(l.rate) || 0;
-      const subtotal = parseFloat(l.subtotal) || (hours * rate);
       const fecha = l.work_date ? new Date(l.work_date).toLocaleDateString('es-AR') : '—';
       laborRows += `<tr>
         <td>${l.worker_name || '—'}</td>
         <td style="text-align:center">${fecha}</td>
         <td style="text-align:right">${hours.toFixed(2)} h</td>
-        <td style="text-align:right">$${Math.round(rate).toLocaleString('es-AR')}/h</td>
-        <td style="text-align:right;font-weight:600">$${Math.round(subtotal).toLocaleString('es-AR')}</td>
+        <td>${l.notes || '—'}</td>
       </tr>`;
     });
   } else {
-    laborRows = `<tr><td colspan="5" style="padding:10px;color:#9ca3af;text-align:center">Sin partes de trabajo registrados${laborCostFinal > 0 ? ` · Costo MO global: $${Math.round(laborCostFinal).toLocaleString('es-AR')}` : ''}</td></tr>`;
+    laborRows = `<tr><td colspan="4" style="padding:10px;color:#9ca3af;text-align:center">Sin partes de trabajo registrados</td></tr>`;
   }
 
   const win = window.open('', '_blank');
@@ -1930,16 +1926,14 @@ async function printOT(id) {
           <th>Trabajador</th>
           <th style="text-align:center">Fecha</th>
           <th style="text-align:right">Horas</th>
-          <th style="text-align:right">Tarifa</th>
-          <th style="text-align:right">Subtotal</th>
+          <th>Notas</th>
         </tr></thead>
         <tbody>${laborRows}</tbody>
         ${laborData.length > 0 ? `<tfoot>
           <tr class="total-row">
-            <td colspan="2" style="text-align:right">Totales:</td>
+            <td colspan="2" style="text-align:right">Total horas:</td>
             <td style="text-align:right">${laborHours.toFixed(2)} h</td>
-            <td></td>
-            <td style="text-align:right">$${Math.round(laborCostFinal).toLocaleString('es-AR')}</td>
+            <td style="text-align:right;color:#6b7280">Sin precio</td>
           </tr>
         </tfoot>` : ''}
       </table>
@@ -1953,7 +1947,7 @@ async function printOT(id) {
         </tr>
       </table>
       <div style="font-size:10px;color:#6b7280;margin-top:6px;text-align:right">
-        Repuestos: $${Math.round(partsTotal).toLocaleString('es-AR')} · Mano de obra: $${Math.round(laborCostFinal).toLocaleString('es-AR')}
+        Repuestos: $${Math.round(partsTotal).toLocaleString('es-AR')} · Mano de obra propia sin precio
       </div>
     </div>
 
@@ -3883,8 +3877,9 @@ function renderStock() {
     const managerBtns = canManage
       ? '<button class="btn btn-secondary btn-sm" onclick="openEditStockModal(\''+s.id+'\')">Editar</button>'
         + '<button class="btn btn-secondary btn-sm" onclick="openStockIngresoModal(\''+s.id+'\')">Ingreso</button>'
+        + '<button class="btn btn-secondary btn-sm" onclick="openStockTransferModal(\''+s.id+'\')" title="Traslado interno entre sucursales o áreas">↔ Trasladar</button>'
         + '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Baja auditada">✕ Baja</button>'
-      : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Sin permiso para editar depósito">🔒</span>';
+      : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Sin permiso para editar stock">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+stockFormValue(s.code)+'</td>'
       + '<td>'+stockFormValue(s.name)+'</td>'
@@ -3929,7 +3924,7 @@ function renderStock() {
   const histSection = histRows
     ? '<div class="card" style="margin-top:16px">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-      +   '<div class="card-title" style="margin:0">Últimos movimientos del pañol filtrado</div>'
+      +   '<div class="card-title" style="margin:0">Últimos movimientos del stock filtrado</div>'
       +   '<button class="btn btn-secondary btn-sm" onclick="exportStockHistoryPDF()">📄 PDF</button>'
       + '</div>'
       + '<div class="table-wrap"><table>'
@@ -3940,7 +3935,7 @@ function renderStock() {
 
   const bajaBtnHeader = canManage ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Baja auditada</button>' : '';
   const adminButtons = canManage
-    ? bajaBtnHeader + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>' + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    ? bajaBtnHeader + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockTransferModal()">↔ Traslado interno</button>' + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
     : '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>';
 
   document.getElementById('page-stock').innerHTML =
@@ -3962,7 +3957,7 @@ function renderStock() {
     + '<div class="table-wrap"><table><thead><tr><th>Sucursal</th><th>Área / Pañol</th><th>Ítems</th><th>Críticos</th><th>Valorización</th></tr></thead><tbody>'+summaryRows+'</tbody></table></div>'
     + '</div>'
     + '<div class="section-header">'
-    +   '<div><div class="section-title">Inventario por sucursal y área</div><div class="section-sub">Cada área administra su propio pañol: Administración · Depósito · Taller</div></div>'
+    +   '<div><div class="section-title">Inventario por sucursal y área</div><div class="section-sub">Cada área administra su propio stock/pañol: Administración · Depósito · Taller</div></div>'
     +   '<div style="display:flex;gap:8px;flex-wrap:wrap">'+adminButtons+'</div>'
     + '</div>'
     + '<div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr>'
@@ -4034,7 +4029,7 @@ async function saveStockEgreso(stockId) {
 }
 
 function openStockIngresoModal(stockId) {
-  if (!stockCanManage()) { showToast('warn','No tenés permiso para cargar ingresos al depósito'); return; }
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para cargar ingresos al stock'); return; }
   const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
   openModal('Ingreso de stock — '+s.name, ''
@@ -4091,9 +4086,9 @@ async function saveEditStockItem(stockId) {
 }
 
 function openStockBajaModal() {
-  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del depósito'); return; }
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del stock'); return; }
   const opts = stockFilteredItems().map(function(s){ return '<option value="'+s.id+'">'+stockFormValue(s.name)+' — '+stockFormValue(s.sucursal||'Central')+' / '+stockFormValue(s.area||'Depósito')+' — Stock: '+s.qty+' '+stockFormValue(s.unit)+'</option>'; }).join('');
-  openModal('Baja auditada de depósito', ''
+  openModal('Baja auditada de stock y depósito', ''
     + '<div style="background:var(--warn-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px"><strong>Acción auditada.</strong> Registra una baja definitiva del inventario por robo, pérdida, daño o vencimiento.</div>'
     + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label><select class="form-select" id="bj-id" onchange="onBajaItemSelect()"><option value="">— Seleccioná un ítem —</option>'+opts+'</select></div>'
     + '<div id="baja-detail" style="display:none"><div class="form-row"><div class="form-group"><label class="form-label">Cantidad a dar de baja</label><input class="form-input" type="number" id="bj-qty" value="1" min="0.01" step="0.01" oninput="updateBajaSummary()"></div><div class="form-group"><label class="form-label">Motivo de la baja</label><select class="form-select" id="bj-motivo"><option value="robo">Robo</option><option value="perdida">Pérdida / extravío</option><option value="danio">Daño / inutilizable</option><option value="vencimiento">Vencimiento</option><option value="diferencia">Diferencia de inventario</option><option value="otro">Otro</option></select></div></div><div class="form-group"><label class="form-label">Detalle completo (obligatorio)</label><textarea class="form-textarea" id="bj-obs" placeholder="Describí qué pasó, cuándo, dónde y cómo se detectó la diferencia..."></textarea></div><div id="bj-summary" style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3)">Impacto en valorización: —</div></div>',
@@ -4108,7 +4103,7 @@ function onBajaItemSelect() { const id = document.getElementById('bj-id')?.value
 function updateBajaSummary() { const id = document.getElementById('bj-id')?.value || ''; const qty = parseFloat(document.getElementById('bj-qty')?.value) || 1; const sum = document.getElementById('bj-summary'); const s = App.data.stock.find(function(x){ return String(x.id)===String(id); }); if (!sum || !s) return; sum.innerHTML = 'Impacto: <strong style="color:var(--danger)">-'+qty+' '+stockFormValue(s.unit)+'</strong> · Pérdida valorizada: <strong style="color:var(--danger)">$'+Math.round(qty*s.cost).toLocaleString('es-AR')+'</strong>'; }
 
 async function saveStockBaja() {
-  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del depósito'); return; }
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del stock'); return; }
   const id = document.getElementById('bj-id')?.value;
   const qty = parseFloat(document.getElementById('bj-qty')?.value) || 0;
   const obs = (document.getElementById('bj-obs')?.value || '').trim();
@@ -4121,6 +4116,61 @@ async function saveStockBaja() {
   const res = await apiFetch('/api/stock/'+id+'/baja', { method:'POST', body: JSON.stringify({ qty, reason: obs, motive: motivo }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar baja'); return; }
   closeModal(); showToast('ok', 'Baja registrada: '+qty+' '+s.unit+' de '+s.name+' — Motivo: '+motivo); await afterSave({ page:'stock' });
+}
+
+function openStockTransferModal(stockId) {
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para trasladar stock'); return; }
+  const items = stockFilteredItems();
+  const opts = items.map(function(s){ return '<option value="'+s.id+'" '+(String(s.id)===String(stockId||'')?'selected':'')+'>'+stockFormValue(s.code)+' — '+stockFormValue(s.name)+' · '+stockFormValue(s.sucursal||'Central')+' / '+stockFormValue(s.area||'Depósito')+' · '+s.qty+' '+stockFormValue(s.unit)+'</option>'; }).join('');
+  const branches = stockBaseOptions();
+  const current = App.data.stock.find(function(x){ return String(x.id)===String(stockId||''); }) || items[0] || {};
+  const defaultDestSucursal = App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal ? App.currentUser.sucursal : (current.sucursal || current.base_location || branches[0] || 'Central');
+  const defaultDestArea = current.area || 'Depósito';
+  openModal('Traslado interno de stock', ''
+    + '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3);margin-bottom:14px">Usalo cuando una sucursal o área tiene stock y otra necesita. No genera compra: mueve cantidad interna y deja historial.</div>'
+    + '<div class="form-group"><label class="form-label">Artículo origen</label><select class="form-select" id="tr-stock-id" onchange="onStockTransferItemChange()"><option value="">— Seleccioná —</option>'+opts+'</select></div>'
+    + '<div id="tr-stock-info" style="font-size:12px;color:var(--text3);margin:-6px 0 12px 0"></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Cantidad a trasladar</label><input class="form-input" type="number" id="tr-qty" min="0.01" step="0.01" value="1"></div><div class="form-group"><label class="form-label">Responsable / transporte</label><input class="form-input" id="tr-resp" placeholder="Quién entrega o traslada"></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Sucursal destino</label><select class="form-select" id="tr-dest-sucursal" onchange="stockRefreshAreaOptions(\'tr-dest\')">'+branches.map(function(b){ return '<option value="'+stockFormValue(b)+'" '+(b===defaultDestSucursal?'selected':'')+'>'+stockFormValue(b)+'</option>'; }).join('')+'</select></div><div class="form-group"><label class="form-label">Área / Pañol destino</label><select class="form-select" id="tr-dest-area">'+stockAreaOptions(defaultDestSucursal).map(function(a){ return '<option value="'+stockFormValue(a)+'" '+(a===defaultDestArea?'selected':'')+'>'+stockFormValue(a)+'</option>'; }).join('')+'</select></div></div>'
+    + '<div class="form-group"><label class="form-label">Motivo / observación</label><input class="form-input" id="tr-reason" placeholder="Ej: Reposición interna para sucursal / taller"></div>',
+  [
+    { label:'Confirmar traslado', cls:'btn-primary', fn: saveStockTransfer },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
+  ]);
+  setTimeout(onStockTransferItemChange, 50);
+}
+
+function onStockTransferItemChange() {
+  const id = document.getElementById('tr-stock-id')?.value || '';
+  const info = document.getElementById('tr-stock-info');
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(id); });
+  if (!info) return;
+  if (!s) { info.innerHTML = ''; return; }
+  info.innerHTML = 'Origen: <strong>'+stockFormValue(s.sucursal||'Central')+' / '+stockFormValue(s.area||'Depósito')+'</strong> · Disponible: <strong class="td-mono">'+s.qty+' '+stockFormValue(s.unit)+'</strong>';
+  const qtyEl = document.getElementById('tr-qty');
+  if (qtyEl) qtyEl.max = s.qty;
+}
+
+async function saveStockTransfer() {
+  const id = document.getElementById('tr-stock-id')?.value || '';
+  const qty = parseFloat(document.getElementById('tr-qty')?.value) || 0;
+  const dest_sucursal = document.getElementById('tr-dest-sucursal')?.value || 'Central';
+  const dest_area = document.getElementById('tr-dest-area')?.value || 'Depósito';
+  const responsible = (document.getElementById('tr-resp')?.value || '').trim();
+  const reason = (document.getElementById('tr-reason')?.value || '').trim();
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(id); });
+  if (!s) { showToast('warn','Seleccioná un artículo'); return; }
+  if (qty <= 0) { showToast('warn','Ingresá una cantidad válida'); return; }
+  if (qty > s.qty) { showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
+  if ((s.sucursal || s.base_location) === dest_sucursal && (s.area || 'Depósito') === dest_area) {
+    showToast('warn','El destino debe ser distinto al origen'); return;
+  }
+  const res = await apiFetch('/api/stock/'+id+'/transfer', { method:'POST', body: JSON.stringify({ qty, dest_sucursal, dest_area, responsible, reason }) });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al trasladar stock'); return; }
+  const data = await res.json();
+  closeModal();
+  showToast('ok', 'Traslado registrado: '+qty+' '+s.unit+' de '+s.name+' → '+dest_sucursal+' / '+dest_area);
+  await afterSave({ page:'stock' });
 }
 
 function openStockAjusteModal() {
@@ -5410,7 +5460,7 @@ const ROLES_LIST = [
   { value:'mecanico',              label:'Mecánico' },
   { value:'chofer',                label:'Chofer' },
   { value:'encargado_combustible', label:'Encargado combustible' },
-  { value:'paniol',                label:'Depósito' },
+  { value:'paniol',                label:'Stock / Depósito' },
   { value:'contador',              label:'Administración' },
   { value:'gerente_sucursal',      label:'Gerente de sucursal' },
   { value:'auditor',               label:'Auditor' },
@@ -6048,7 +6098,7 @@ function _otRenderRows() {
 
   // Ordenar
   const getSortVal = (o, k) => {
-    if (k === 'cost') return (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0);
+    if (k === 'cost') return (parseFloat(o.parts_cost)||0);
     if (k === 'opened') return o.opened || '';
     if (k === 'priority') {
       const order = {'Urgente':4,'Crítica':4,'Alta':3,'Media':2,'Normal':1,'Baja':0};
@@ -6097,7 +6147,7 @@ function _otRenderRows() {
 
   // Footer con conteo
   if (footer) {
-    const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0), 0);
+    const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0), 0);
     footer.innerHTML = `
       <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OTs</span>
       <span>Costo total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalCost).toLocaleString('es-AR')}</b></span>
@@ -6129,7 +6179,7 @@ function _otRenderRow(o) {
                     o.status === 'En proceso' ? 'var(--info)' :
                     (o.status||'').includes('Esperando') ? 'var(--warn)' : 'var(--text3)';
 
-  const totalCost = (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0);
+  const totalCost = (parseFloat(o.parts_cost)||0);
   const isClosed = o.status === 'Cerrada';
 
   // Opciones de estados/prioridades para inline edit
@@ -6310,7 +6360,7 @@ function _otExportPDF() {
   });
 
   // Total en el pie
-  const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0), 0);
+  const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0), 0);
   const finalY = doc.lastAutoTable.finalY || 90;
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
@@ -7005,13 +7055,17 @@ function openNewOTModal(preselectedVehicle) {
       Total repuestos: <strong id="ot-parts-total-val">$0</strong>
     </div>
 
-    <div class="form-row" style="margin-top:10px">
-      <div class="form-group"><label class="form-label">Mano de obra ($)</label>
-        <input class="form-input" type="number" placeholder="0" id="ot-labor" oninput="updateOTTotal()">
-      </div>
-      <div class="form-group"><label class="form-label">Costo total estimado</label>
-        <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
-      </div>
+    <div style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text3)">
+      La mano de obra propia se registra por horas/partes de trabajo, sin precio. Si el trabajo debe salir a un externo, marcá la opción de abajo para generar una OC a Compras.
+    </div>
+    <div style="margin-top:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);padding:10px 12px">
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text);cursor:pointer">
+        <input type="checkbox" id="ot-external-required" style="margin-top:2px">
+        <span><strong>Trabajo externo / tercerizado</strong><br><span style="font-size:11px;color:var(--text3)">Al crear la OT se genera una OC pendiente para que Compras cotice y negocie.</span></span>
+      </label>
+    </div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Costo estimado de repuestos</label>
+      <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
     </div>
     <div class="form-group"><label class="form-label">Notas adicionales</label>
       <textarea class="form-input" rows="2" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
@@ -7091,7 +7145,7 @@ function addOTPart() {
     <select class="form-select" id="otp-origin-${idx}"
       onchange="changeOTPartOrigin(${idx}, this.value)"
       style="font-size:12px;padding:6px">
-      <option value="externo">🛒 Externo</option>
+      <option value="externo">🛒 Externo / genera OC</option>
       <option value="stock">📦 Pañol</option>
     </select>
     <div style="position:relative">
@@ -7292,8 +7346,7 @@ function updateOTTotal() {
     const cost  = parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0;
     partsTotal += qty * cost;
   });
-  const labor = parseFloat(document.getElementById('ot-labor')?.value) || 0;
-  const total = partsTotal + labor;
+  const total = partsTotal;
   const totalEl    = document.getElementById('ot-total-display');
   const partsValEl = document.getElementById('ot-parts-total-val');
   const partsTotalDiv = document.getElementById('ot-parts-total');
@@ -7536,32 +7589,13 @@ function renderConfig() {
 
     </div>
 
-    <!-- COSTO HORA DEL TALLER -->
+    <!-- MANO DE OBRA INTERNA -->
     <div class="card" style="max-width:900px;border-left:3px solid var(--accent)">
-      <div class="card-title">⏱️ Costo hora del taller (para Mano de Obra interna)</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:14px;max-width:680px">
-        Este valor se usa como tarifa por defecto al cargar partes de trabajo en OTs hechas por tu taller propio.
-        Incluí: sueldos + cargas sociales + herramientas + espacio + consumibles (trapos, etc.). Dividido por las horas productivas promedio del mes.
-        <br><br>
-        <b>No es el sueldo de nadie</b> — es un número interno para valorizar el trabajo del taller. Solo lo ve el dueño/gerencia.
-      </div>
-      <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start">
-        <div>
-          <label class="form-label">Tarifa por hora ($)</label>
-          <input class="form-input" type="number" id="cfg-labor-rate" value="${laborRate}" min="0" step="100" style="font-size:14px;font-weight:700">
-          <div style="font-size:11px;color:var(--text3);margin-top:6px">Ej: 4500, 5000, 7500</div>
-          <button class="btn btn-primary btn-sm" onclick="saveConfig()" style="margin-top:12px">Guardar tarifa</button>
-        </div>
-        <div style="background:var(--bg3);padding:12px;border-radius:var(--radius);font-size:12px;color:var(--text2)">
-          <div style="font-weight:700;margin-bottom:6px;color:var(--text)">💡 Cómo calcular tu tarifa real</div>
-          <div style="line-height:1.6">
-            Sueldos totales mensuales (todos los mecánicos): <b>$A</b><br>
-            Horas productivas del mes (mecánicos × horas): <b>H</b> (ej: 3 personas × 160h = 480h)<br>
-            Costo sueldos por hora: <b>$A / H</b><br>
-            + Overhead 30-40% (herramientas, espacio, consumibles)<br>
-            <b style="color:var(--accent)">= Tarifa realista</b>
-          </div>
-        </div>
+      <div class="card-title">⏱️ Mano de obra interna</div>
+      <div style="font-size:12px;color:var(--text3);line-height:1.6">
+        La mano de obra propia del taller se registra por <b>partes de trabajo y horas</b>.
+        No se valoriza con precio dentro de la OT.
+        Si un trabajo sale a un externo, la OT genera una <b>OC pendiente para Compras</b>, donde se cotiza y negocia.
       </div>
     </div>`;
 }
@@ -11819,8 +11853,7 @@ async function _labLoadList() {
 function _labRender(partes) {
   const container = document.getElementById('eo-labor-list');
   const totalDiv  = document.getElementById('eo-labor-total');
-  const totalVal  = document.getElementById('eo-labor-total-val');
-  const totalHrs  = document.getElementById('eo-labor-total-hours');
+    const totalHrs  = document.getElementById('eo-labor-total-hours');
   const eoLabor   = document.getElementById('eo-labor');
   if (!container) return;
 
@@ -11835,17 +11868,15 @@ function _labRender(partes) {
 
   container.innerHTML = partes.map(p => {
     const hours    = parseFloat(p.hours || 0);
-    const rate     = parseFloat(p.rate || 0);
-    const subtotal = parseFloat(p.subtotal || 0);
+    const rate     = 0;
+    const subtotal = 0;
     const fecha    = p.work_date ? new Date(p.work_date).toLocaleDateString('es-AR') : '—';
-    return `<div style="display:grid;grid-template-columns:1fr 60px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
+    return `<div style="display:grid;grid-template-columns:1fr 70px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div>
         <div style="font-weight:600">${p.worker_name}</div>
         <div style="color:var(--text3);font-size:10px">${fecha}${p.notes ? ' · ' + p.notes.substring(0,50) : ''}</div>
       </div>
-      <div style="text-align:center;font-family:var(--mono)">${hours}h</div>
-      <div style="text-align:right;font-family:var(--mono);color:var(--text3)">$${Math.round(rate).toLocaleString('es-AR')}/h</div>
-      <div style="text-align:right;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(subtotal).toLocaleString('es-AR')}</div>
+      <div style="text-align:center;font-family:var(--mono)">${hours} h</div>
       <button type="button" onclick="_labDelete('${p.id}')"
         title="Eliminar este parte"
         style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>
@@ -11853,11 +11884,9 @@ function _labRender(partes) {
   }).join('');
 
   const totalH = partes.reduce((a,p) => a + parseFloat(p.hours||0), 0);
-  const totalM = partes.reduce((a,p) => a + parseFloat(p.subtotal||0), 0);
   if (totalDiv) totalDiv.style.display = 'block';
-  if (totalVal) totalVal.textContent = '$' + Math.round(totalM).toLocaleString('es-AR');
   if (totalHrs) totalHrs.textContent = totalH.toFixed(1);
-  if (eoLabor)  eoLabor.value = totalM.toFixed(2);
+  if (eoLabor)  eoLabor.value = 'Sin precio · ' + totalH.toFixed(1) + ' h';
 }
 
 // Modal para agregar un parte nuevo
@@ -11870,13 +11899,10 @@ function _labAddRow() {
   );
   const mechOpts = mechanics.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name} (${u.role})</option>`).join('');
 
-  // Rate default: traer labor_rate del config
-  const defaultRate = parseFloat(App.config?.labor_rate || 0);
-
   const body = `
     <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
-      💡 <b>Parte de trabajo:</b> registrá quién trabajó, cuántas horas y a qué tarifa.
-      El costo se calcula solo y se suma al total MO de la OT.
+      💡 <b>Parte de trabajo:</b> registrá quién trabajó y cuántas horas.
+      La mano de obra propia queda registrada sin precio.
     </div>
 
     <div class="form-group">
@@ -11899,9 +11925,9 @@ function _labAddRow() {
         <div style="font-size:10px;color:var(--text3);margin-top:3px">Ej: 0.5 (media hora), 3 (tres horas), 3.5 (tres y media)</div>
       </div>
       <div class="form-group">
-        <label class="form-label">Tarifa por hora ($)</label>
-        <input class="form-input" type="number" id="lab-rate" min="0" value="${defaultRate}" oninput="_labRecalc()">
-        <div style="font-size:10px;color:var(--text3);margin-top:3px">Default: ${defaultRate > 0 ? '$' + defaultRate.toLocaleString('es-AR') + ' (configuración)' : 'Configurala en Config.'}</div>
+        <label class="form-label">Valorización</label>
+        <input class="form-input" readonly value="Sin precio" style="background:var(--bg3);color:var(--text3)">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">La empresa registra horas, no precio de mano de obra propia.</div>
       </div>
     </div>
 
@@ -11911,8 +11937,8 @@ function _labAddRow() {
         <input class="form-input" type="date" id="lab-date" value="${todayISO()}">
       </div>
       <div class="form-group">
-        <label class="form-label">Total calculado</label>
-        <input class="form-input" id="lab-subtotal" readonly style="background:var(--bg3);font-weight:700;color:var(--accent);font-size:14px" value="$0">
+        <label class="form-label">Resumen</label>
+        <input class="form-input" id="lab-subtotal" readonly style="background:var(--bg3);font-weight:700;color:var(--accent);font-size:14px" value="1 h registrada">
       </div>
     </div>
 
@@ -11940,9 +11966,8 @@ function _labUserChanged() {
 // Recalcular subtotal en tiempo real
 function _labRecalc() {
   const hours = parseFloat(document.getElementById('lab-hours')?.value) || 0;
-  const rate  = parseFloat(document.getElementById('lab-rate')?.value)  || 0;
   const subtotalEl = document.getElementById('lab-subtotal');
-  if (subtotalEl) subtotalEl.value = '$' + Math.round(hours * rate).toLocaleString('es-AR');
+  if (subtotalEl) subtotalEl.value = hours ? (hours + ' h registrada/s') : 'Sin horas';
 }
 
 // Guardar el parte
@@ -11973,7 +11998,7 @@ async function _labSave() {
   if (!worker_name) { showToast('error', 'Indicá quién trabajó'); return; }
 
   const hours = parseFloat(document.getElementById('lab-hours')?.value);
-  const rate  = parseFloat(document.getElementById('lab-rate')?.value) || 0;
+  const rate  = 0;
   const work_date = document.getElementById('lab-date')?.value || null;
   const notes = (document.getElementById('lab-notes')?.value || '').trim() || null;
 
@@ -11985,7 +12010,7 @@ async function _labSave() {
       body: JSON.stringify({ user_id, worker_name, hours, rate, work_date, notes })
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
-    showToast('ok', `Parte agregado: ${worker_name} · ${hours}h · $${Math.round(hours*rate).toLocaleString('es-AR')}`);
+    showToast('ok', `Parte agregado: ${worker_name} · ${hours} h`);
     closeModal();
     // Reabrir modal de edición y refrescar
     openEditOTModal(otId);
@@ -12091,13 +12116,13 @@ function _partsAddRow() {
 
   const body = `
     <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
-      💡 Elegí el origen del repuesto: 📦 Pañol (descuenta stock) o 🛒 Externo (compra afuera).
+      💡 Elegí el origen: 📦 Pañol descuenta stock. 🛒 Externo genera una OC pendiente para Compras.
     </div>
 
     <div class="form-group">
       <label class="form-label">Origen *</label>
       <select class="form-select" id="pnew-origin" onchange="_partsOriginChanged()">
-        <option value="externo">🛒 Externo (compra afuera)</option>
+        <option value="externo">🛒 Externo (genera OC a Compras)</option>
         <option value="stock">📦 Pañol (usar stock existente)</option>
       </select>
     </div>
@@ -12123,13 +12148,13 @@ function _partsAddRow() {
     </div>
 
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Precio unitario ($)</label>
-        <input class="form-input" type="number" id="pnew-cost" min="0" value="0"
-          oninput="_partsRecalc()" style="font-size:14px">
+      <div class="form-group" id="pnew-cost-wrap" style="display:none">
+        <label class="form-label">Costo pañol ($)</label>
+        <input class="form-input" type="number" id="pnew-cost" min="0" value="0" readonly
+          oninput="_partsRecalc()" style="font-size:14px;background:var(--bg3)">
       </div>
-      <div class="form-group">
-        <label class="form-label">Total calculado</label>
+      <div class="form-group" id="pnew-total-wrap" style="display:none">
+        <label class="form-label">Total valorizado</label>
         <input class="form-input" id="pnew-subtotal" readonly style="background:var(--bg3);font-weight:700;color:var(--accent);font-size:14px" value="$0">
       </div>
     </div>
@@ -12142,25 +12167,32 @@ function _partsAddRow() {
   // Limpiar dataset para nueva entrada
   window._pnewStockId = null;
   window._pnewStockAvailable = 0;
+  setTimeout(() => _partsOriginChanged(), 30);
 }
 
 function _partsOriginChanged() {
   const origin = document.getElementById('pnew-origin')?.value;
   const nameEl = document.getElementById('pnew-name');
   const costEl = document.getElementById('pnew-cost');
+  const costWrap = document.getElementById('pnew-cost-wrap');
+  const totalWrap = document.getElementById('pnew-total-wrap');
   const sugEl = document.getElementById('pnew-suggestions');
   const infoEl = document.getElementById('pnew-stock-info');
 
   if (origin === 'externo') {
-    if (nameEl) { nameEl.placeholder = 'Descripción del repuesto (compra externa)'; nameEl.value = ''; nameEl.style.borderLeft = ''; }
-    if (costEl) { costEl.readOnly = false; costEl.style.background = ''; costEl.value = 0; }
+    if (nameEl) { nameEl.placeholder = 'Descripción del repuesto/servicio externo para Compras'; nameEl.value = ''; nameEl.style.borderLeft = ''; }
+    if (costEl) { costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; costEl.value = 0; }
+    if (costWrap) costWrap.style.display = 'none';
+    if (totalWrap) totalWrap.style.display = 'none';
     if (sugEl)  sugEl.style.display = 'none';
-    if (infoEl) infoEl.style.display = 'none';
+    if (infoEl) { infoEl.style.display = 'block'; infoEl.innerHTML = '<span style="color:var(--warn)">🛒 Se generará una OC pendiente para que Compras cotice/negocie. No cargues precio en la OT.</span>'; }
     window._pnewStockId = null;
     window._pnewStockAvailable = 0;
   } else {
     if (nameEl) { nameEl.placeholder = 'Escribí para buscar en el pañol...'; nameEl.value = ''; nameEl.style.borderLeft = ''; }
-    if (costEl) { costEl.value = 0; costEl.readOnly = false; costEl.style.background = ''; }
+    if (costEl) { costEl.value = 0; costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; }
+    if (costWrap) costWrap.style.display = '';
+    if (totalWrap) totalWrap.style.display = '';
     if (infoEl) { infoEl.style.display = 'block'; infoEl.innerHTML = '<span style="color:var(--accent)">📦 Elegí un ítem del pañol</span>'; }
     window._pnewStockId = null;
   }
@@ -12257,10 +12289,11 @@ function _partsQtyChanged() {
 }
 
 function _partsRecalc() {
+  const origin = document.getElementById('pnew-origin')?.value || 'externo';
   const qty = parseFloat(document.getElementById('pnew-qty')?.value) || 0;
-  const cost = parseFloat(document.getElementById('pnew-cost')?.value) || 0;
+  const cost = origin === 'stock' ? (parseFloat(document.getElementById('pnew-cost')?.value) || 0) : 0;
   const subtotalEl = document.getElementById('pnew-subtotal');
-  if (subtotalEl) subtotalEl.value = '$' + Math.round(qty * cost).toLocaleString('es-AR');
+  if (subtotalEl) subtotalEl.value = origin === 'stock' ? ('$' + Math.round(qty * cost).toLocaleString('es-AR')) : 'OC a cotizar';
 }
 
 async function _partsSave() {
@@ -12271,7 +12304,7 @@ async function _partsSave() {
   const name = (document.getElementById('pnew-name')?.value || '').trim();
   const qty = parseFloat(document.getElementById('pnew-qty')?.value);
   const unit = document.getElementById('pnew-unit')?.value || 'un';
-  const unit_cost = parseFloat(document.getElementById('pnew-cost')?.value) || 0;
+  const unit_cost = origin === 'stock' ? (parseFloat(document.getElementById('pnew-cost')?.value) || 0) : 0;
 
   if (!name || name.length < 2) { showToast('error', 'Ingresá el nombre del repuesto'); return; }
   if (!qty || qty <= 0) { showToast('error', 'Cantidad inválida'); return; }
@@ -12287,7 +12320,7 @@ async function _partsSave() {
       body: JSON.stringify(payload)
     });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
-    showToast('ok', `Repuesto agregado: ${name} · $${Math.round(qty*unit_cost).toLocaleString('es-AR')}`);
+    showToast('ok', origin === 'externo' ? `Repuesto externo agregado: ${name} · OC generada para Compras` : `Repuesto agregado: ${name}`);
     closeModal();
     // Refrescar stock global (si vino del pañol) y reabrir modal edit
     try { await loadInitialData(); } catch(e) {}
