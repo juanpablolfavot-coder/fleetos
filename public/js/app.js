@@ -166,7 +166,7 @@ window.FleetRoles = {
   mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
   contador:      { code:'contador',      label:'Administración',    modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel'] },
-  gerente_sucursal: { code:'gerente_sucursal', label:'Gerente de sucursal', modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs'] },
+  gerente_sucursal: { code:'gerente_sucursal', label:'Gerente de sucursal', modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'] },
   compras:       { code:'compras',       label:'Compras',           modules:['dashboard','purchase_orders','suppliers','fuel'] },
   tesoreria:     { code:'tesoreria',     label:'Tesorería',         modules:['dashboard','tesoreria_panel','purchase_orders'] },
   proveedores:   { code:'proveedores',   label:'Proveedores',       modules:['proveedor_panel','suppliers','purchase_orders'] },
@@ -8680,7 +8680,7 @@ async function renderPurchaseOrders() {
   if (!root) return;
 
   const role = App.currentUser?.role;
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento','compras','paniol','contador'].includes(role);
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'].includes(role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
