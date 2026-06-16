@@ -69,6 +69,59 @@ async function ensureFuelTankEntriesTable() {
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status ON fuel_internal_dispatches(status)").catch(() => {});
 }
 
+function _userSucursal(req) {
+  return String(req?.user?.sucursal || '').trim();
+}
+function _isGerenteSucursal(req) {
+  return req?.user?.role === 'gerente_sucursal';
+}
+function _normalizeSucursalText(value) {
+  return String(value || '')
+    .trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+function _branchPatterns(sucursal) {
+  const raw = String(sucursal || '').trim();
+  const noParen = raw.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  return Array.from(new Set([raw, noParen].map(_normalizeSucursalText).filter(x => x.length >= 3)));
+}
+function _normSql(column) {
+  return `LOWER(translate(COALESCE(${column},''),'áéíóúÁÉÍÓÚñÑ','aeiouAEIOUnN'))`;
+}
+function _likeSucursal(sucursal) {
+  return `%${_normalizeSucursalText(sucursal)}%`;
+}
+function _branchEmptyJson(req, res) {
+  if (_isGerenteSucursal(req) && !_userSucursal(req)) {
+    res.json([]);
+    return true;
+  }
+  return false;
+}
+function _appendBranchTextPredicate(req, params, sqlRef, columns) {
+  const suc = _userSucursal(req);
+  if (!_isGerenteSucursal(req)) return;
+  const patterns = _branchPatterns(suc);
+  if (!patterns.length) {
+    sqlRef.value += ' AND 1=0';
+    return;
+  }
+  const pieces = [];
+  for (const pat of patterns) {
+    params.push(`%${pat}%`);
+    const idx = params.length;
+    for (const c of columns) pieces.push(`${_normSql(c)} LIKE $${idx}`);
+  }
+  sqlRef.value += ' AND (' + pieces.join(' OR ') + ')';
+}
+function _addVehicleBranchFilter(req, params, sqlRef, alias = 'v') {
+  _appendBranchTextPredicate(req, params, sqlRef, [`${alias}.base`]);
+}
+function _addTextBranchFilter(req, params, sqlRef, columns) {
+  _appendBranchTextPredicate(req, params, sqlRef, columns);
+}
+
 (async () => {
   try {
     await ensureFuelTankEntriesTable();
@@ -82,14 +135,23 @@ fuelRouter.get('/', authenticate, async (req, res) => {
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id WHERE 1=1`;
     const params = [];
-    if (req.user.role === 'chofer') { params.push(req.user.id); sql += ` AND fl.driver_id=$${params.length}`; }
-    if (vehicle_id) { params.push(vehicle_id); sql += ` AND fl.vehicle_id=$${params.length}`; }
-    sql += ` ORDER BY fl.logged_at DESC LIMIT $${params.length+1}`; params.push(parseInt(limit));
-    res.json((await query(sql, params)).rows);
+    const ref = { value: sql };
+    if (req.user.role === 'chofer') { params.push(req.user.id); ref.value += ` AND fl.driver_id=$${params.length}`; }
+    _addVehicleBranchFilter(req, params, ref, 'v');
+    if (vehicle_id) { params.push(vehicle_id); ref.value += ` AND fl.vehicle_id=$${params.length}`; }
+    ref.value += ` ORDER BY fl.logged_at DESC LIMIT $${params.length+1}`; params.push(parseInt(limit));
+    res.json((await query(ref.value, params)).rows);
   } catch (err) { res.status(500).json({ error: 'Error combustible' }); }
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
-  try { res.json((await query('SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC, location ASC')).rows); }
+  try {
+    let sql = 'SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks WHERE active IS DISTINCT FROM FALSE';
+    const params = [];
+    const ref = { value: sql };
+    _addTextBranchFilter(req, params, ref, ['location']);
+    ref.value += ' ORDER BY type ASC, location ASC';
+    res.json((await query(ref.value, params)).rows);
+  }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
 
@@ -98,14 +160,18 @@ fuelRouter.get('/tank-entries', authenticate, async (req, res) => {
   try {
     await ensureFuelTankEntriesTable();
     const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
-    const r = await query(`
+    const params = [];
+    let sql = `
       SELECT e.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
       FROM fuel_tank_entries e
       LEFT JOIN tanks t ON t.id = e.tank_id
       LEFT JOIN users u ON u.id = e.created_by
-      ORDER BY e.created_at DESC
-      LIMIT $1
-    `, [limit]);
+      WHERE 1=1`;
+    const ref = { value: sql };
+    _addTextBranchFilter(req, params, ref, ['t.location']);
+    params.push(limit);
+    ref.value += ` ORDER BY e.created_at DESC LIMIT $${params.length}`;
+    const r = await query(ref.value, params);
     res.json(r.rows);
   } catch (err) {
     console.error('[fuel tank-entries GET]', err.message);
@@ -187,14 +253,18 @@ fuelRouter.get('/dispatches', authenticate, async (req, res) => {
   try {
     await ensureFuelTankEntriesTable();
     const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
-    const r = await query(`
+    const params = [];
+    let sql = `
       SELECT d.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
       FROM fuel_internal_dispatches d
       LEFT JOIN tanks t ON t.id = d.tank_id
       LEFT JOIN users u ON u.id = d.created_by
-      ORDER BY d.created_at DESC
-      LIMIT $1
-    `, [limit]);
+      WHERE 1=1`;
+    const ref = { value: sql };
+    _addTextBranchFilter(req, params, ref, ['d.destination','d.destination_detail','t.location']);
+    params.push(limit);
+    ref.value += ` ORDER BY d.created_at DESC LIMIT $${params.length}`;
+    const r = await query(ref.value, params);
     res.json(r.rows);
   } catch (err) {
     console.error('[fuel dispatches GET]', err.message);
@@ -267,7 +337,7 @@ fuelRouter.post('/dispatches', authenticate, requireRole('dueno','gerencia','jef
   }
 });
 
-fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico'), validateUUID('id'), async (req, res) => {
+fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico','gerente_sucursal'), validateUUID('id'), async (req, res) => {
   try {
     await ensureFuelTankEntriesTable();
     const { received_by, received_liters, receive_notes } = req.body || {};
@@ -275,16 +345,24 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
     if (liters !== null && (!Number.isFinite(liters) || liters < 0)) {
       return res.status(400).json({ error: 'Litros recibidos inválidos' });
     }
-    const r = await query(`
+    const branch = _userSucursal(req);
+    let sql = `
       UPDATE fuel_internal_dispatches
          SET status='recibido',
              received_by=$2,
              received_liters=$3,
              receive_notes=$4,
              received_at=NOW()
-       WHERE id=$1
-       RETURNING *
-    `, [req.params.id, received_by || null, liters, receive_notes || null]);
+       WHERE id=$1`;
+    const params = [req.params.id, received_by || null, liters, receive_notes || null];
+    if (_isGerenteSucursal(req)) {
+      if (!branch) return res.status(403).json({ error: 'El gerente de sucursal no tiene sucursal asignada' });
+      const ref = { value: sql };
+      _addTextBranchFilter(req, params, ref, ['destination','destination_detail']);
+      sql = ref.value;
+    }
+    sql += ` RETURNING *`;
+    const r = await query(sql, params);
     if (!r.rows[0]) return res.status(404).json({ error: 'Despacho no encontrado' });
     res.json({ ok:true, dispatch: r.rows[0] });
   } catch (err) {
@@ -816,27 +894,61 @@ checklistRouter.get('/', authenticate, async (req, res) => {
 // ======= DASHBOARD ENCARGADO =======
 const encargadoRouter = express.Router();
 
-encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico'), async (req, res) => {
+encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico','gerente_sucursal'), async (req, res) => {
   try {
     await ensureChecklistTable();
-    // Fecha de hoy en Argentina (el server corre en UTC en Render; sin esto, cerca de medianoche AR los checklists del día no aparecían)
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+    const branch = _userSucursal(req);
+    const scoped = _isGerenteSucursal(req);
+
+    if (scoped && !branch) {
+      return res.json({
+        fecha: today,
+        flota: {},
+        checklists_hoy: [],
+        checklists_count: 0,
+        checklists_con_problema: 0,
+        novedades_abiertas: [],
+        novedades_count: 0,
+        sin_checklist: [],
+        sin_checklist_count: 0,
+        cargas_hoy: [],
+        cargas_count: 0,
+        litros_hoy: 0,
+        aviso: 'Gerente de sucursal sin sucursal asignada'
+      });
+    }
+
+    const pDate = scoped ? [today, branch] : [today];
+    const pBranch = scoped ? [branch] : [];
+    const branchCheck = scoped ? ' AND v.base = $2' : '';
+    const branchOnly  = scoped ? ' AND v.base = $1' : '';
 
     const [checklists, novedades, sinChecklist, fuelHoy, vehiculos] = await Promise.all([
-      // Checklists de hoy
-      query(`SELECT c.*, v.code as vcode FROM checklists c LEFT JOIN vehicles v ON v.id=c.vehicle_id WHERE DATE(c.created_at)=$1 ORDER BY c.created_at DESC`, [today]),
-      // Novedades abiertas (OTs) — todas las que NO están Cerradas/canceladas
-      // FIX: antes filtraba status='Abierta' pero ninguna OT real usa ese estado.
-      //      Los estados reales son: Pendiente, Asignada, En proceso, Esperando repuesto,
-      //      Esperando tercerizado, Cerrada. También usaba ORDER BY created_at que
-      //      en work_orders es opened_at.
-      query(`SELECT wo.*, v.code as vehicle_code FROM work_orders wo LEFT JOIN vehicles v ON v.id=wo.vehicle_id WHERE wo.status <> 'Cerrada' ORDER BY wo.opened_at DESC LIMIT 20`),
-      // Vehículos activos que NO hicieron checklist hoy
-      query(`SELECT v.code, v.plate, v.driver_name, v.base FROM vehicles v WHERE v.active=TRUE AND v.id NOT IN (SELECT vehicle_id FROM checklists WHERE DATE(created_at)=$1 AND vehicle_id IS NOT NULL) ORDER BY v.code`, [today]),
-      // Cargas de combustible hoy
-      query(`SELECT fl.*, v.code as vehicle_code FROM fuel_logs fl LEFT JOIN vehicles v ON v.id=fl.vehicle_id WHERE DATE(fl.logged_at)=$1 ORDER BY fl.logged_at DESC`, [today]),
-      // Resumen flota
-      query(`SELECT status, COUNT(*) as cnt FROM vehicles WHERE active=TRUE GROUP BY status`),
+      query(`SELECT c.*, v.code as vcode, v.code as vehicle_code, v.plate, v.driver_name
+             FROM checklists c
+             LEFT JOIN vehicles v ON v.id=c.vehicle_id
+             WHERE DATE(c.created_at)=$1${branchCheck}
+             ORDER BY c.created_at DESC`, pDate),
+      query(`SELECT wo.*, v.code as vehicle_code
+             FROM work_orders wo
+             LEFT JOIN vehicles v ON v.id=wo.vehicle_id
+             WHERE wo.status <> 'Cerrada'${branchOnly}
+             ORDER BY wo.opened_at DESC LIMIT 20`, pBranch),
+      query(`SELECT v.code, v.plate, v.driver_name, v.base
+             FROM vehicles v
+             WHERE v.active=TRUE${branchCheck}
+               AND v.id NOT IN (SELECT vehicle_id FROM checklists WHERE DATE(created_at)=$1 AND vehicle_id IS NOT NULL)
+             ORDER BY v.code`, pDate),
+      query(`SELECT fl.*, v.code as vehicle_code
+             FROM fuel_logs fl
+             LEFT JOIN vehicles v ON v.id=fl.vehicle_id
+             WHERE DATE(fl.logged_at)=$1${branchCheck}
+             ORDER BY fl.logged_at DESC`, pDate),
+      query(`SELECT status, COUNT(*) as cnt
+             FROM vehicles v
+             WHERE active=TRUE${branchOnly}
+             GROUP BY status`, pBranch),
     ]);
 
     const flotaResumen = {};
@@ -844,6 +956,7 @@ encargadoRouter.get('/resumen', authenticate, requireRole('dueno','gerencia','je
 
     res.json({
       fecha: today,
+      sucursal: scoped ? branch : null,
       flota: flotaResumen,
       checklists_hoy: checklists.rows,
       checklists_count: checklists.rows.length,
@@ -916,21 +1029,25 @@ fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
   } catch(err) { console.error('[fuel DELETE]', err.message); res.status(500).json({ error: 'Error al eliminar carga' }); }
 });
 
-fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico'), async (req, res) => {
+fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico','gerente_sucursal'), async (req, res) => {
   try {
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ").catch(()=>{});
-    const r = await query(`
+    const params = [];
+    let sql = `
       SELECT fl.id, fl.vehicle_id, fl.liters, fl.price_per_l, fl.logged_at, fl.location,
              fl.ticket_estado, fl.ticket_obs, fl.ticket_image,
              v.code as vehicle_code, u.name as driver_name
       FROM fuel_logs fl
       JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id
-      WHERE fl.ticket_image IS NOT NULL AND (fl.ticket_estado IS NULL OR fl.ticket_estado = 'pendiente')
-      ORDER BY fl.logged_at DESC LIMIT 50`);
+      WHERE fl.ticket_image IS NOT NULL AND (fl.ticket_estado IS NULL OR fl.ticket_estado = 'pendiente')`;
+    const ref = { value: sql };
+    _addVehicleBranchFilter(req, params, ref, 'v');
+    ref.value += ' ORDER BY fl.logged_at DESC LIMIT 50';
+    const r = await query(ref.value, params);
     res.json(r.rows);
   } catch(err) { console.error('[fuel pendientes]', err.message); res.status(500).json({ error: 'Error al obtener pendientes' }); }
 });
