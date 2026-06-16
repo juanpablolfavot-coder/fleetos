@@ -3,6 +3,35 @@
 //  Gestión de sesión, roles, y carga inicial
 // ═══════════════════════════════════════════
 
+
+const DEFAULT_VEHICLE_TYPES_ROLES = ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
+function _rolesNormalizeVehicleType(type) {
+  const raw = String(type || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+  const aliases = {
+    semi: 'semirremolque',
+    semirremolques: 'semirremolque',
+    semi_remolque: 'semirremolque',
+    acoplados: 'acoplado',
+    auto_elevador: 'autoelevador',
+    autoelevadores: 'autoelevador',
+    montacargas: 'autoelevador',
+    camioneta: 'utilitario',
+  };
+  return aliases[raw] || raw || 'otro';
+}
+function _rolesMergeVehicleTypes(value) {
+  const incoming = Array.isArray(value) ? value : [];
+  const out = [];
+  [...incoming, ...DEFAULT_VEHICLE_TYPES_ROLES].forEach(t => {
+    const n = _rolesNormalizeVehicleType(t);
+    if (n && !out.includes(n)) out.push(n);
+  });
+  return out;
+}
+
 // Token JWT solo en memoria — la sesión se restaura con la cookie refreshToken
 let _accessToken = null;
 
@@ -461,16 +490,18 @@ function _mapTireMovement(m) {
 }
 
 function _mapVehicle(v) {
+  const type = _rolesNormalizeVehicleType(v.type);
+  const code = String(v.code || '').trim();
   return {
     id:          v.id,
-    code:        v.code,
-    plate:       v.plate,
-    brand:       v.brand,
-    model:       v.model,
-    year:        v.year,
-    type:        v.type,
+    code:        code,
+    plate:       v.plate || code || '—',
+    brand:       v.brand || 'Sin marca',
+    model:       v.model || (type === 'autoelevador' ? 'Autoelevador' : 'Sin modelo'),
+    year:        parseInt(v.year, 10) || new Date().getFullYear(),
+    type:        type,
     status:      v.status || 'ok',
-    km:          v.km_current || 0,
+    km:          parseInt(v.km_current, 10) || 0,
     base:        v.base || 'Central',
     driver:      v.driver_name || v.driver_name_joined || '—',
     cost_km:     parseFloat(v.cost_km) || 0,
@@ -735,7 +766,7 @@ async function loadInitialData() {
       const cfg = await configRes.json();
       App.config = App.config || {};
       App.config.bases         = cfg.bases         || ['Central','Norte','Sur'];
-      App.config.vehicle_types = cfg.vehicle_types || ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'];
+      App.config.vehicle_types = _rolesMergeVehicleTypes(cfg.vehicle_types || DEFAULT_VEHICLE_TYPES_ROLES);
       App.config.labor_rate    = parseFloat(cfg.labor_rate) || 0;
       App.config.areas         = cfg.areas         || {};
     }
@@ -754,7 +785,7 @@ async function loadInitialData() {
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
     if (!App.data.stockHistory) App.data.stockHistory = [];
-    if (!App.config) App.config = { bases: ['Central','Norte','Sur'], vehicle_types: ['tractor','camion','semirremolque','acoplado','utilitario','autoelevador'], labor_rate: 0 };
+    if (!App.config) App.config = { bases: ['Central','Norte','Sur'], vehicle_types: _rolesMergeVehicleTypes(DEFAULT_VEHICLE_TYPES_ROLES), labor_rate: 0 };
     if (App.config.labor_rate === undefined) App.config.labor_rate = 0;
 
     // Normalizar campos de la API al formato que usa el frontend
