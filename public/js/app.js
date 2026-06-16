@@ -11147,6 +11147,49 @@ function _supRenderRow(s) {
   </tr>`;
 }
 
+
+function _supTitleCase(value) {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw) return '';
+  const upperTokens = new Set(['SA','S.A','S.A.','SRL','S.R.L','S.R.L.','SAS','S.A.S','S.A.S.','SNC','CUIT','IVA','CBU','CVU','YPF','ACA','R3M','LD']);
+  const romanTokens = new Set(['I','II','III','IV','V','VI','VII','VIII','IX','X']);
+  const lowerJoiners = new Set(['de','del','la','las','los','y','e','el','en','a','al','da','do']);
+  return raw.split(' ').map((word, index) => {
+    const cleanUpper = word.replace(/[.,]/g, '').toUpperCase();
+    if (upperTokens.has(cleanUpper) || romanTokens.has(cleanUpper)) return cleanUpper;
+    const lower = word.toLocaleLowerCase('es-AR');
+    if (index > 0 && lowerJoiners.has(lower)) return lower;
+    return lower.replace(/(^|[-'’/])([\p{L}])/gu, (_, sep, letter) => sep + letter.toLocaleUpperCase('es-AR'));
+  }).join(' ');
+}
+
+function _supLowerClean(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function _supNormalizeFormFields() {
+  const titleIds = ['sup-name','sup-razon','sup-contact','sup-address','sup-city','sup-province','sup-bank'];
+  titleIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = _supTitleCase(el.value);
+  });
+
+  const cuit = document.getElementById('sup-cuit');
+  if (cuit) cuit.value = String(cuit.value || '').replace(/\D/g, '');
+
+  const email = document.getElementById('sup-email');
+  if (email) email.value = _supLowerClean(email.value);
+
+  const website = document.getElementById('sup-website');
+  if (website) {
+    const v = _supLowerClean(website.value);
+    website.value = (v === 'https://' || v === 'http://') ? '' : v;
+  }
+
+  const alias = document.getElementById('sup-alias');
+  if (alias) alias.value = _supLowerClean(alias.value);
+}
+
 // ── Modal nuevo proveedor (también sirve para editar) ────
 function openNewSupplierModal() { _openSupplierModal(null); }
 function openEditSupplierModal(id) {
@@ -11326,7 +11369,7 @@ function _openSupplierModal(existing) {
     ]
   );
 
-  // Toggle del campo razón de blacklist según status elegido
+  // Toggle del campo razón de blacklist según status elegido + normalización al salir de los campos
   setTimeout(() => {
     const statusSel = document.getElementById('sup-status');
     const blRow     = document.getElementById('sup-blacklist-row');
@@ -11335,6 +11378,9 @@ function _openSupplierModal(existing) {
         blRow.style.display = statusSel.value === 'blacklist' ? 'block' : 'none';
       });
     }
+
+    ['sup-name','sup-razon','sup-contact','sup-address','sup-city','sup-province','sup-bank','sup-cuit','sup-email','sup-website','sup-alias']
+      .forEach(id => document.getElementById(id)?.addEventListener('blur', _supNormalizeFormFields));
   }, 100);
 }
 
@@ -11345,18 +11391,20 @@ async function _supSave(id) {
     return (v === '' || v == null) ? null : parseFloat(v);
   };
 
+  _supNormalizeFormFields();
+
   const payload = {
-    name:          val('sup-name'),
-    razon_social:  val('sup-razon'),
+    name:          _supTitleCase(val('sup-name')),
+    razon_social:  _supTitleCase(val('sup-razon')),
     cuit:          val('sup-cuit'),
     iva_condition: val('sup-iva') || null,
-    contact_person:val('sup-contact'),
+    contact_person:_supTitleCase(val('sup-contact')),
     phone:         val('sup-phone'),
-    email:         val('sup-email'),
-    website:       val('sup-website'),
-    address:       val('sup-address'),
-    city:          val('sup-city'),
-    province:      val('sup-province'),
+    email:         _supLowerClean(val('sup-email')),
+    website:       _supLowerClean(val('sup-website')) === 'https://' || _supLowerClean(val('sup-website')) === 'http://' ? '' : _supLowerClean(val('sup-website')),
+    address:       _supTitleCase(val('sup-address')),
+    city:          _supTitleCase(val('sup-city')),
+    province:      _supTitleCase(val('sup-province')),
     postal_code:   val('sup-cp'),
     rubros:        val('sup-rubros').split(',').map(r => r.trim().toLowerCase()).filter(Boolean),
     forma_pago:    val('sup-fpago') || null,
@@ -11365,9 +11413,9 @@ async function _supSave(id) {
     discount_pct:  numOrNull('sup-disc'),
     delivery_time_days: numOrNull('sup-deliv'),
     rating:        (() => { const v = numOrNull('sup-rating'); if (v == null) return null; if (v > 5) return 5; if (v < 0) return 0; return v; })(),
-    bank_name:     val('sup-bank'),
+    bank_name:     _supTitleCase(val('sup-bank')),
     bank_cbu:      val('sup-cbu'),
-    bank_alias:    val('sup-alias'),
+    bank_alias:    _supLowerClean(val('sup-alias')),
     notes:         val('sup-notes'),
     status:        val('sup-status') || 'activo',
     blacklist_reason: val('sup-blreason') || null,
