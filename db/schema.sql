@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════
--- FleetOS — Esquema de base de datos PostgreSQL  (Expreso Biletta S.A.)
+-- FleetOS — Esquema de base de datos PostgreSQL  (Expreso Biletta SRL)
 -- ──────────────────────────────────────────────────────────────────────
 -- Este archivo es la fuente de verdad del esquema completo de la base.
 -- Cualquier tabla o columna que el sistema use en producción debe estar
@@ -150,6 +150,34 @@ CREATE TABLE IF NOT EXISTS fuel_tank_entries (
 
 CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_created ON fuel_tank_entries(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_tank    ON fuel_tank_entries(tank_id);
+
+-- fuel_internal_dispatches: remitos internos de cisterna a sucursales, bidones o tanques chicos
+-- No son consumo de vehículo: solo descuentan stock de cisterna y dejan ticket/remito imprimible.
+CREATE TABLE IF NOT EXISTS fuel_internal_dispatches (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tank_id             UUID REFERENCES tanks(id),
+    type                VARCHAR(20) NOT NULL DEFAULT 'gasoil',
+    liters              NUMERIC(12,2) NOT NULL,
+    destination         TEXT NOT NULL,
+    destination_detail  TEXT,
+    responsible         TEXT,
+    transport_vehicle   TEXT,
+    remito              TEXT,
+    notes               TEXT,
+    previous_l          NUMERIC(12,2),
+    new_l               NUMERIC(12,2),
+    status              VARCHAR(20) NOT NULL DEFAULT 'despachado',
+    received_by         TEXT,
+    received_liters     NUMERIC(12,2),
+    receive_notes       TEXT,
+    received_at         TIMESTAMPTZ,
+    created_by          UUID REFERENCES users(id),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_created ON fuel_internal_dispatches(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_tank    ON fuel_internal_dispatches(tank_id);
+CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status  ON fuel_internal_dispatches(status);
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 4.  STOCK (pañol / depósito)
