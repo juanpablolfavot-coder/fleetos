@@ -69,7 +69,7 @@ function _pdfDrawLogo(doc, x, y) {
   doc.setTextColor(D[0], D[1], D[2]);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text('Expreso Biletta', x + 42, y + 14);
+  doc.text('Expreso Biletta SRL', x + 42, y + 14);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(100, 105, 120);
@@ -176,6 +176,7 @@ window.FleetRoles = {
 App.data.vehicles    = App.data.vehicles    || [];
 App.data.workOrders  = App.data.workOrders  || [];
 App.data.fuelLogs    = App.data.fuelLogs    || [];
+App.data.fuelDispatches = App.data.fuelDispatches || [];
 App.data.tires       = App.data.tires       || [];
 App.data.stock       = App.data.stock       || [];
 App.data.documents   = App.data.documents   || [];
@@ -1774,7 +1775,7 @@ async function printOT(id) {
       <div class="logo-wrap">
         <div class="logo-square">EB</div>
         <div>
-          <div class="empresa">Expreso Biletta S.A.</div>
+          <div class="empresa">Expreso Biletta SRL</div>
           <div class="empresa-sub">Sistema de gestión de flota y taller</div>
         </div>
       </div>
@@ -1876,7 +1877,7 @@ async function printOT(id) {
     </div>
 
     <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
-      Expreso Biletta S.A. · Orden de Trabajo ${ot.id} · Generado el ${nowDateAR()} ${nowTimeAR()}
+      Expreso Biletta SRL · Orden de Trabajo ${ot.id} · Generado el ${nowDateAR()} ${nowTimeAR()}
     </div>
 
     <script>window.onload=function(){setTimeout(function(){window.print();},200);}<\/script>
@@ -1899,6 +1900,7 @@ function renderFuel() {
   const gasoilClass = tankLevel < 10000 ? 'warn' : 'info';
   const ureaClass   = ureaPct   < 20 ? 'warn' : 'info';
   const tankEntries = App.data.tankEntries || [];
+  const fuelDispatches = App.data.fuelDispatches || [];
 
   // ── Litros cargados HOY ──
   const today = todayISO();
@@ -1954,6 +1956,7 @@ function renderFuel() {
         </div>
         <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
           ${_fuelPuedeGestionarCisterna(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button>` : ''}
+          ${_fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-secondary" onclick="openFuelDispatchModal()">🚚 Despacho interno</button>` : ''}
           ${_fuelPuedeVerificarTickets(App.currentUser?.role) ? `<button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button>` : ''}
         </div>
         <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
@@ -1981,6 +1984,46 @@ function renderFuel() {
         <div style="position:relative;height:180px"><canvas id="fuelChart" role="img" aria-label="Consumo de combustible por unidad"></canvas></div>
       </div>
     </div>
+
+    <div class="card" style="margin-bottom:20px;padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin:0">🚚 Despachos internos a sucursales / bidones</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Salida de cisterna sin cargar consumo a una unidad. Genera remito interno imprimible.</div>
+        </div>
+        ${_fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchModal()">+ Nuevo despacho</button>` : ''}
+      </div>
+      ${fuelDispatches.length === 0 ? `
+        <div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Todavía no hay despachos internos registrados.</div>
+      ` : `
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Fecha</th><th>Destino</th><th>Producto</th><th>Litros</th><th>Responsable</th><th>Estado</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${fuelDispatches.slice(0,8).map(d => `
+                <tr>
+                  <td class="td-mono" style="font-size:11px">${d.date || '—'}</td>
+                  <td><b>${d.destination || '—'}</b>${d.destination_detail ? `<div style="font-size:11px;color:var(--text3)">${d.destination_detail}</div>` : ''}</td>
+                  <td><span class="badge ${d.type==='urea'?'badge-info':'badge-ok'}">${d.type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
+                  <td class="td-mono">${Math.round(d.liters||0).toLocaleString('es-AR')} L</td>
+                  <td>${d.responsible || d.created_by_name || '—'}</td>
+                  <td><span class="badge ${d.status==='recibido'?'badge-ok':'badge-warn'}">${d.status==='recibido'?'Recibido':'Despachado'}</span></td>
+                  <td>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap">
+                      <button class="btn btn-secondary btn-sm" onclick="openFuelDispatchTicket('${d.id}')">🧾 Remito</button>
+                      ${d.status !== 'recibido' && _fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchReceiveModal('${d.id}')">✓ Recibir</button>` : ''}
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+    </div>
+
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -2422,7 +2465,7 @@ function openFuelTankEntryTicket(entryOrId) {
     <div id="fuel-tank-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
       <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:14px">
         <div>
-          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta</div>
+          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta SRL</div>
           <div style="font-size:12px;color:var(--text3)">Ingreso a cisterna</div>
         </div>
         <div style="text-align:right">
@@ -2476,7 +2519,7 @@ function printFuelTankEntryTicket(entryId) {
       b{display:block;margin-bottom:3px;color:#374151}@media print{button{display:none}}
     </style></head><body>
       <div class="ticket">
-        <div class="head"><div><div class="brand">Expreso Biletta</div><div class="sub">Ingreso a cisterna</div></div><div><div class="code">${ticketCode}</div><div class="sub">${fecha}</div></div></div>
+        <div class="head"><div><div class="brand">Expreso Biletta SRL</div><div class="sub">Ingreso a cisterna</div></div><div><div class="code">${ticketCode}</div><div class="sub">${fecha}</div></div></div>
         <div class="grid">
           <div><b>Producto</b>${_fuelTankTypeLabel(entry.type)}</div><div><b>Litros ingresados</b>${litros} L</div>
           <div><b>Cisterna</b>${entry.tank_location || 'Cisterna'}</div><div><b>Proveedor</b>${entry.supplier || '—'}</div>
@@ -2488,6 +2531,287 @@ function printFuelTankEntryTicket(entryId) {
       <script>window.onload=function(){setTimeout(function(){window.print();},250);}<\/script>
     </body></html>`);
   win.document.close();
+}
+
+
+function openFuelDispatchModal() {
+  if (!_fuelPuedeGestionarDespachos(App.currentUser?.role)) {
+    showToast('error', 'No tenés permiso para registrar despachos internos');
+    return;
+  }
+  const bases = (App.config && Array.isArray(App.config.bases) && App.config.bases.length)
+    ? App.config.bases
+    : ['Río Tercero', 'Sucursal', 'Tanque chico', 'Bidones'];
+  const gasoilTank = _fuelFindTankForType('gasoil');
+  const ureaTank = _fuelFindTankForType('urea');
+  const tankInfo = (type) => {
+    const t = _fuelFindTankForType(type);
+    if (!t) return 'Sin cisterna configurada';
+    return `${t.location || 'Cisterna'} · ${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L disponibles`;
+  };
+  openModal('🚚 Despacho interno de combustible', `
+    <div style="background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.25);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.45;margin-bottom:12px">
+      Esto es para enviar gasoil/urea a <b>sucursales, bidones o tanques chicos</b>. No se carga a ningún vehículo y no afecta el rendimiento de unidades.
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Producto</label>
+        <select class="form-select" id="fd-type" onchange="updateFuelDispatchTankInfo()">
+          <option value="gasoil">🟡 Gasoil</option>
+          <option value="urea">🔵 Urea / AdBlue</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Litros a despachar *</label><input class="form-input" type="number" id="fd-liters" min="1" placeholder="Ej: 500"></div>
+    </div>
+    <div id="fd-tank-info" style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text3);margin-bottom:10px">
+      Origen: <b>${tankInfo('gasoil')}</b>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Destino *</label>
+        <select class="form-select" id="fd-destination">
+          ${bases.map(b => `<option value="${String(b).replace(/"/g,'&quot;')}">${b}</option>`).join('')}
+          <option value="Bidones / tanque chico">Bidones / tanque chico</option>
+          <option value="Otra sucursal">Otra sucursal</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Detalle destino</label><input class="form-input" id="fd-destination-detail" placeholder="Ej: tanque patio, bidones, obra, depósito..."></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Responsable que retira</label><input class="form-input" id="fd-responsible" placeholder="Nombre y apellido"></div>
+      <div class="form-group"><label class="form-label">Vehículo / transporte</label><input class="form-input" id="fd-transport" placeholder="Patente o unidad que transporta"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Remito interno</label><input class="form-input" id="fd-remito" placeholder="Ej: DI-001 / Remito papel"></div>
+      <div class="form-group"><label class="form-label">Observación</label><input class="form-input" id="fd-notes" placeholder="Opcional"></div>
+    </div>
+  `, [
+    { label:'Confirmar despacho', cls:'btn-primary', fn: saveFuelDispatch },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+function updateFuelDispatchTankInfo() {
+  const type = document.getElementById('fd-type')?.value || 'gasoil';
+  const t = _fuelFindTankForType(type);
+  const el = document.getElementById('fd-tank-info');
+  if (!el) return;
+  if (!t) {
+    el.innerHTML = 'Origen: <b style="color:var(--danger)">No hay cisterna configurada para este producto</b>';
+    return;
+  }
+  el.innerHTML = `Origen: <b>${t.location || 'Cisterna'}</b> · Disponible: <b>${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L</b>`;
+}
+
+async function saveFuelDispatch() {
+  const type = document.getElementById('fd-type')?.value || 'gasoil';
+  const liters = parseFloat(document.getElementById('fd-liters')?.value) || 0;
+  const destination = (document.getElementById('fd-destination')?.value || '').trim();
+  const destination_detail = (document.getElementById('fd-destination-detail')?.value || '').trim();
+  const responsible = (document.getElementById('fd-responsible')?.value || '').trim();
+  const transport_vehicle = (document.getElementById('fd-transport')?.value || '').trim();
+  const remito = (document.getElementById('fd-remito')?.value || '').trim();
+  const notes = (document.getElementById('fd-notes')?.value || '').trim();
+
+  if (liters <= 0) { showToast('error', 'Ingresá los litros a despachar'); return; }
+  if (!destination) { showToast('error', 'Indicá el destino'); return; }
+
+  const tank = _fuelFindTankForType(type);
+  if (!tank) { showToast('error', 'No se encontró cisterna de origen para ' + _fuelTankTypeLabel(type)); return; }
+  const disponible = parseFloat(tank.current_l) || 0;
+  if (liters > disponible) {
+    showToast('error', `Stock insuficiente: hay ${Math.round(disponible).toLocaleString('es-AR')} L disponibles`);
+    return;
+  }
+
+  const res = await apiFetch('/api/fuel/dispatches', {
+    method: 'POST',
+    body: JSON.stringify({
+      tank_id: tank.id,
+      type,
+      liters,
+      destination,
+      destination_detail,
+      responsible,
+      transport_vehicle,
+      remito,
+      notes
+    })
+  });
+  let data = {};
+  try { data = await res.json(); } catch(_) {}
+  if (!res.ok) { showToast('error', data.error || 'Error al registrar despacho'); return; }
+
+  if (data.tank) {
+    const idx = (App.data.tanks || []).findIndex(t => t.id === data.tank.id);
+    if (idx >= 0) App.data.tanks[idx] = data.tank;
+  }
+
+  let d = data.dispatch || null;
+  if (d) {
+    d = {
+      id: d.id,
+      type: d.type || type,
+      liters: parseFloat(d.liters) || liters,
+      destination: d.destination || destination,
+      destination_detail: d.destination_detail || destination_detail,
+      responsible: d.responsible || responsible,
+      transport_vehicle: d.transport_vehicle || transport_vehicle,
+      remito: d.remito || remito,
+      notes: d.notes || notes,
+      previous_l: parseFloat(d.previous_l) || disponible,
+      new_l: parseFloat(d.new_l) || (disponible - liters),
+      status: d.status || 'despachado',
+      received_by: d.received_by || '',
+      received_liters: d.received_liters === null || d.received_liters === undefined ? null : parseFloat(d.received_liters),
+      receive_notes: d.receive_notes || '',
+      received_at: d.received_at || null,
+      created_at: d.created_at || new Date().toISOString(),
+      date: d.created_at ? d.created_at.slice(0,16).replace('T',' ') : new Date().toISOString().slice(0,16).replace('T',' '),
+      tank_id: d.tank_id || tank.id,
+      tank_location: tank.location || 'Cisterna',
+      created_by_name: App.currentUser?.name || '—',
+      _raw: d
+    };
+    App.data.fuelDispatches = [d, ...(App.data.fuelDispatches || [])];
+  }
+
+  closeModal();
+  showToast('ok', `Despacho interno registrado — ${Math.round(liters).toLocaleString('es-AR')} L descontados de cisterna`);
+  try { await loadInitialData(); } catch(e) {}
+  renderFuel();
+  if (d) setTimeout(() => openFuelDispatchTicket(d.id), 150);
+}
+
+function openFuelDispatchTicket(dispatchId) {
+  const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  const code = _fuelDispatchCode(d);
+  const fecha = d.created_at ? new Date(d.created_at).toLocaleString('es-AR') : (d.date || '—');
+  const recibido = d.status === 'recibido';
+  openModal(`🧾 Remito ${code}`, `
+    <div id="fuel-dispatch-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+      <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta SRL</div>
+          <div style="font-size:12px;color:var(--text3)">Remito interno de combustible</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:900;color:var(--accent);font-family:var(--mono)">${code}</div>
+          <div style="font-size:11px;color:var(--text3)">${fecha}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+        <div><b>Producto</b><br>${_fuelTankTypeLabel(d.type)}</div>
+        <div><b>Litros despachados</b><br>${Math.round(d.liters||0).toLocaleString('es-AR')} L</div>
+        <div><b>Origen</b><br>${d.tank_location || 'Cisterna'}</div>
+        <div><b>Destino</b><br>${d.destination || '—'}</div>
+        <div><b>Detalle destino</b><br>${d.destination_detail || '—'}</div>
+        <div><b>Responsable retira</b><br>${d.responsible || '—'}</div>
+        <div><b>Vehículo / transporte</b><br>${d.transport_vehicle || '—'}</div>
+        <div><b>Remito referencia</b><br>${d.remito || '—'}</div>
+        <div><b>Registró</b><br>${d.created_by_name || App.currentUser?.name || '—'}</div>
+        <div><b>Estado</b><br>${recibido ? 'Recibido' : 'Despachado'}</div>
+      </div>
+      ${d.notes ? `<div style="margin-top:12px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)"><b>Observación</b><br>${d.notes}</div>` : ''}
+      <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
+        Nivel anterior: <b>${Math.round(d.previous_l||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b>${Math.round(d.new_l||0).toLocaleString('es-AR')} L</b>
+      </div>
+      ${recibido ? `<div style="margin-top:12px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.25);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--ok)">
+        Recibió: <b>${d.received_by || '—'}</b> · Litros recibidos: <b>${d.received_liters !== null && d.received_liters !== undefined ? Math.round(d.received_liters).toLocaleString('es-AR') + ' L' : '—'}</b>
+        ${d.received_at ? ` · ${new Date(d.received_at).toLocaleString('es-AR')}` : ''}
+        ${d.receive_notes ? `<br>Observación recepción: ${d.receive_notes}` : ''}
+      </div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px;font-size:12px;color:var(--text3)">
+        <div style="border-top:1px solid var(--border);padding-top:8px;text-align:center">Firma entrega</div>
+        <div style="border-top:1px solid var(--border);padding-top:8px;text-align:center">Firma recibe</div>
+      </div>
+    </div>
+  `, [
+    { label:'🖨 Imprimir', cls:'btn-primary', fn: () => printFuelDispatchTicket(dispatchId) },
+    ...(d.status !== 'recibido' && _fuelPuedeGestionarDespachos(App.currentUser?.role) ? [{ label:'✓ Marcar recibido', cls:'btn-secondary', fn: () => openFuelDispatchReceiveModal(dispatchId) }] : []),
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+function printFuelDispatchTicket(dispatchId) {
+  const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  const code = _fuelDispatchCode(d);
+  const fecha = d.created_at ? new Date(d.created_at).toLocaleString('es-AR') : (d.date || '—');
+  const recibido = d.status === 'recibido';
+  const receivedHtml = recibido ? `
+    <div class="box ok">Recibió: <b style="display:inline">${d.received_by || '—'}</b> · Litros recibidos: <b style="display:inline">${d.received_liters !== null && d.received_liters !== undefined ? Math.round(d.received_liters).toLocaleString('es-AR') + ' L' : '—'}</b>${d.received_at ? ' · ' + new Date(d.received_at).toLocaleString('es-AR') : ''}${d.receive_notes ? '<br>Obs.: '+d.receive_notes : ''}</div>
+  ` : '';
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>${code}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111827}.ticket{border:1px solid #d1d5db;border-radius:10px;padding:18px;max-width:760px;margin:auto}
+      .head{display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:14px}.brand{font-size:20px;font-weight:800}.sub{font-size:12px;color:#6b7280}.code{font:700 16px monospace;color:#2563eb;text-align:right}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px}.box{background:#f3f4f6;border-radius:8px;padding:10px;margin-top:14px;font-size:12px}.ok{background:#ecfdf5;color:#047857}
+      b{display:block;margin-bottom:3px;color:#374151}.firma{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:42px}.firma div{border-top:1px solid #9ca3af;text-align:center;padding-top:8px;font-size:12px;color:#6b7280}@media print{button{display:none}}
+    </style></head><body>
+      <div class="ticket">
+        <div class="head"><div><div class="brand">Expreso Biletta SRL</div><div class="sub">Remito interno de combustible</div></div><div><div class="code">${code}</div><div class="sub">${fecha}</div></div></div>
+        <div class="grid">
+          <div><b>Producto</b>${_fuelTankTypeLabel(d.type)}</div><div><b>Litros despachados</b>${Math.round(d.liters||0).toLocaleString('es-AR')} L</div>
+          <div><b>Origen</b>${d.tank_location || 'Cisterna'}</div><div><b>Destino</b>${d.destination || '—'}</div>
+          <div><b>Detalle destino</b>${d.destination_detail || '—'}</div><div><b>Responsable retira</b>${d.responsible || '—'}</div>
+          <div><b>Vehículo / transporte</b>${d.transport_vehicle || '—'}</div><div><b>Remito referencia</b>${d.remito || '—'}</div>
+          <div><b>Registró</b>${d.created_by_name || App.currentUser?.name || '—'}</div><div><b>Estado</b>${recibido ? 'Recibido' : 'Despachado'}</div>
+        </div>
+        ${d.notes ? `<div class="box"><b>Observación</b>${d.notes}</div>` : ''}
+        <div class="box">Nivel anterior: <b style="display:inline">${Math.round(d.previous_l||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(d.new_l||0).toLocaleString('es-AR')} L</b></div>
+        ${receivedHtml}
+        <div class="firma"><div>Firma entrega</div><div>Firma recibe</div></div>
+      </div>
+      <script>window.onload=function(){setTimeout(function(){window.print();},250);}<\/script>
+    </body></html>`);
+  win.document.close();
+}
+
+function openFuelDispatchReceiveModal(dispatchId) {
+  const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  openModal('✓ Confirmar recepción del despacho', `
+    <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text2);margin-bottom:12px">
+      ${_fuelDispatchCode(d)} · ${d.destination || '—'} · <b>${Math.round(d.liters||0).toLocaleString('es-AR')} L</b>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Quién recibió</label><input class="form-input" id="fdr-received-by" placeholder="Nombre y apellido"></div>
+      <div class="form-group"><label class="form-label">Litros recibidos</label><input class="form-input" type="number" id="fdr-liters" value="${parseFloat(d.liters)||0}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Observación</label><input class="form-input" id="fdr-notes" placeholder="Ej: recibido completo / diferencia / bidones devueltos"></div>
+  `, [
+    { label:'Confirmar recibido', cls:'btn-primary', fn: () => saveFuelDispatchReception(dispatchId) },
+    { label:'Cancelar', cls:'btn-secondary', fn: () => openFuelDispatchTicket(dispatchId) }
+  ]);
+}
+
+async function saveFuelDispatchReception(dispatchId) {
+  const received_by = (document.getElementById('fdr-received-by')?.value || '').trim();
+  const received_liters = parseFloat(document.getElementById('fdr-liters')?.value) || null;
+  const receive_notes = (document.getElementById('fdr-notes')?.value || '').trim();
+  const res = await apiFetch(`/api/fuel/dispatches/${dispatchId}/receive`, {
+    method:'PATCH',
+    body: JSON.stringify({ received_by, received_liters, receive_notes })
+  });
+  let data = {};
+  try { data = await res.json(); } catch(_) {}
+  if (!res.ok) { showToast('error', data.error || 'Error al confirmar recepción'); return; }
+  const idx = (App.data.fuelDispatches || []).findIndex(x => x.id === dispatchId);
+  if (idx >= 0 && data.dispatch) {
+    App.data.fuelDispatches[idx] = Object.assign(App.data.fuelDispatches[idx], {
+      status: data.dispatch.status || 'recibido',
+      received_by: data.dispatch.received_by || received_by,
+      received_liters: data.dispatch.received_liters === null || data.dispatch.received_liters === undefined ? received_liters : parseFloat(data.dispatch.received_liters),
+      receive_notes: data.dispatch.receive_notes || receive_notes,
+      received_at: data.dispatch.received_at || new Date().toISOString(),
+    });
+  }
+  showToast('ok', 'Despacho marcado como recibido');
+  try { await loadInitialData(); } catch(e) {}
+  renderFuel();
+  setTimeout(() => openFuelDispatchTicket(dispatchId), 150);
 }
 
 
@@ -5017,6 +5341,10 @@ function _fuelPuedeGestionarCisterna(role) {
   return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento'].includes(role);
 }
 
+function _fuelPuedeGestionarDespachos(role) {
+  return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento','mecanico'].includes(role);
+}
+
 function _fuelPuedeVerificarTickets(role) {
   return ['dueno','gerencia','jefe_mantenimiento','encargado_combustible'].includes(role);
 }
@@ -5031,6 +5359,22 @@ function _fuelTankEntryCode(entry) {
 function _fuelTankTypeLabel(type) {
   const t = String(type || '').toLowerCase();
   return t === 'urea' ? 'Urea / AdBlue' : 'Gasoil';
+}
+
+function _fuelDispatchCode(d) {
+  if (!d) return 'DI-0000';
+  const raw = d.created_at || new Date().toISOString();
+  const dt = new Date(raw);
+  const ymd = isNaN(dt.getTime()) ? todayISO().replace(/-/g,'') : dt.toISOString().slice(0,10).replace(/-/g,'');
+  return `DI-${ymd}-${String(d.id || '').slice(0,6).toUpperCase()}`;
+}
+
+function _fuelFindTankForType(type) {
+  const tanks = App.data.tanks || [];
+  const tipoDb = type === 'urea' ? 'urea' : 'fuel';
+  return tanks.find(t => (t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil')) && (t.location || '').includes('Cisterna R3'))
+      || tanks.find(t => t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil'))
+      || null;
 }
 
 function _getGasoilTankForAlert() {
@@ -7898,7 +8242,7 @@ async function sendAuditorIA() {
 
     const contexto = `
 Sos un auditor experto en empresas de transporte de cargas de Argentina.
-Tenés acceso a los datos en tiempo real del sistema FleetOS de Expreso Biletta.
+Tenés acceso a los datos en tiempo real del sistema FleetOS de Expreso Biletta SRL.
 Hoy es ${new Date().toLocaleDateString('es-AR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}.
 
 FLOTA HOY (GPS en tiempo real):
@@ -9645,7 +9989,7 @@ async function printPO(id) {
         <div class="logo-wrap">
           <div class="logo-square">EB</div>
           <div>
-            <div class="empresa">Expreso Biletta S.A.</div>
+            <div class="empresa">Expreso Biletta SRL</div>
             <div class="empresa-sub">Sistema de gestión de flota y taller</div>
           </div>
         </div>
@@ -9817,7 +10161,7 @@ async function printPO(id) {
       </div>
 
       <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
-        Expreso Biletta S.A. · Orden de Compra ${po.code} · Generado el ${nowDateAR()} ${nowTimeAR()}
+        Expreso Biletta SRL · Orden de Compra ${po.code} · Generado el ${nowDateAR()} ${nowTimeAR()}
       </div>
     </body></html>`);
     win.document.close();
@@ -12317,7 +12661,7 @@ function openFuelVehicleTicket(logId) {
     <div id="fuel-vehicle-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
       <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:14px">
         <div>
-          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta</div>
+          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta SRL</div>
           <div style="font-size:12px;color:var(--text3)">Salida de cisterna a vehículo</div>
         </div>
         <div style="text-align:right">
@@ -12375,7 +12719,7 @@ function printFuelVehicleTicket(logId) {
       b{display:block;margin-bottom:3px;color:#374151}@media print{button{display:none}}
     </style></head><body>
       <div class="ticket">
-        <div class="head"><div><div class="brand">Expreso Biletta</div><div class="sub">Salida de cisterna a vehículo</div></div><div><div class="code">${code}</div><div class="sub">${fecha}</div></div></div>
+        <div class="head"><div><div class="brand">Expreso Biletta SRL</div><div class="sub">Salida de cisterna a vehículo</div></div><div><div class="code">${code}</div><div class="sub">${fecha}</div></div></div>
         <div class="grid">
           <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${f.plate || '—'}</div>
           <div><b>Producto</b>${_fuelProductLabel(f.fuel_type)}</div><div><b>Litros cargados</b>${litros} L</div>
