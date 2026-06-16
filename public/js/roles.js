@@ -323,7 +323,7 @@ function getRoleData(role) {
     paniol:                { label:'Depósito',                 badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
     contador:              { label:'Administración',           badge:'role-contador',   modules:['costs','documents','contador_panel','auditor_panel','suppliers'], canEdit:[] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
-    compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers'], canEdit:['purchase_orders'] },
+    compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
     proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
   };
@@ -392,6 +392,11 @@ function bootApp() {
     else if (u.role === 'gerencia')           navigate('dashboard');
     else if (u.role === 'dueno')              navigate('dashboard');
     else                                      navigate('dashboard');
+
+    // Aviso automático para Compras cuando la cisterna de gasoil queda baja.
+    setTimeout(() => {
+      if (typeof checkGasoilLowForCompras === 'function') checkGasoilLowForCompras();
+    }, 350);
   });
 }
 
@@ -524,6 +529,26 @@ function _mapFuelLog(f) {
   };
 }
 
+function _mapTankEntry(e) {
+  return {
+    id:              e.id,
+    type:            e.type || 'gasoil',
+    liters:          parseFloat(e.liters) || 0,
+    price_per_l:     e.price_per_l === null || e.price_per_l === undefined ? null : parseFloat(e.price_per_l),
+    supplier:        e.supplier || '',
+    remito:          e.remito || '',
+    notes:           e.notes || '',
+    previous_l:      parseFloat(e.previous_l) || 0,
+    new_l:           parseFloat(e.new_l) || 0,
+    created_at:      e.created_at || null,
+    date:            e.created_at ? e.created_at.slice(0,16).replace('T',' ') : '—',
+    tank_id:         e.tank_id || null,
+    tank_location:   e.tank_location || 'Cisterna',
+    created_by_name: e.created_by_name || '—',
+    _raw:            e,
+  };
+}
+
 function _mapStockItem(s) {
   return {
     id:       s.id,
@@ -602,7 +627,7 @@ async function loadInitialData() {
     const canLoadUsers = ['dueno','gerencia'].includes(App.currentUser?.role);
     const usersFetch   = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -616,6 +641,7 @@ async function loadInitialData() {
       apiFetch('/api/suppliers'),
       apiFetch('/api/assets'),
       apiFetch('/api/stock/movements?limit=50'),
+      apiFetch('/api/fuel/tank-entries?limit=50'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -651,6 +677,9 @@ async function loadInitialData() {
     if (tanksRes?.ok)       App.data.tanks       = await tanksRes.json();
     else App.data.tanks = App.data.tanks || [];
 
+    if (tankEntriesRes?.ok) App.data.tankEntries = await tankEntriesRes.json();
+    else App.data.tankEntries = App.data.tankEntries || [];
+
     if (suppliersRes?.ok)   App.data.suppliers   = await suppliersRes.json();
     else App.data.suppliers = App.data.suppliers || [];
 
@@ -685,6 +714,7 @@ async function loadInitialData() {
     if (!App.data.documents)   App.data.documents   = [];
     if (!App.data.users)       App.data.users       = [];
     if (!App.data.suppliers)   App.data.suppliers   = [];
+    if (!App.data.tankEntries) App.data.tankEntries = [];
     if (!App.data.assets)      App.data.assets      = [];
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
@@ -696,6 +726,7 @@ async function loadInitialData() {
     App.data.vehicles   = App.data.vehicles.map(_mapVehicle);
     App.data.workOrders = App.data.workOrders.map(_mapWorkOrder);
     App.data.fuelLogs   = App.data.fuelLogs.map(_mapFuelLog);
+    App.data.tankEntries = (App.data.tankEntries || []).map(_mapTankEntry);
     App.data.stock      = App.data.stock.map(_mapStockItem);
     App.data.documents  = App.data.documents.map(_mapDocument);
 
