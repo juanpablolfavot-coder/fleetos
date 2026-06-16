@@ -100,12 +100,17 @@ router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), as
         f.iva_pct, f.forma_pago, f.cc_dias, f.vencimiento, f.file_url,
         f.uploaded_at, f.uploaded_by, f.pagada, f.monto_pagado, f.notes,
         u.name AS uploaded_by_name,
+        po.proveedor, po.supplier_id,
+        s.name AS supplier_name, s.cuit AS supplier_cuit,
+        s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias,
         COALESCE(SUM(p.monto), 0) AS total_pagado
       FROM purchase_order_invoices f
+      JOIN purchase_orders po ON po.id = f.po_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN users u ON u.id = f.uploaded_by
       LEFT JOIN purchase_order_payments p ON p.invoice_id = f.id
       WHERE f.po_id = $1
-      GROUP BY f.id, u.name
+      GROUP BY f.id, u.name, po.proveedor, po.supplier_id, s.name, s.cuit, s.bank_name, s.bank_cbu, s.bank_alias
       ORDER BY f.invoice_fecha DESC, f.uploaded_at DESC
     `, [req.params.id]);
 
