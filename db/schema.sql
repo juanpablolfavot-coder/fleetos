@@ -81,16 +81,36 @@ CREATE TABLE IF NOT EXISTS vehicles (
 );
 
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS code        VARCHAR(20);
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS base        TEXT DEFAULT 'Central';
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_id   UUID;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS km_current  INT DEFAULT 0;
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         TEXT;
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   TEXT;
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center TEXT;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_spec   JSONB DEFAULT '{}'::jsonb;
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS active      BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- Normalización de tipos de vehículos para bases ya existentes.
+-- Corrige el constraint viejo que no aceptaba autoelevador, semirremolque ni acoplado.
+DO $$
+BEGIN
+  UPDATE vehicles
+     SET type = CASE
+       WHEN type IS NULL OR BTRIM(type) = '' THEN 'camion'
+       WHEN REPLACE(LOWER(BTRIM(type)), 'ó', 'o') = 'camion' THEN 'camion'
+       WHEN LOWER(BTRIM(type)) = 'tractor' THEN 'tractor'
+       WHEN LOWER(BTRIM(type)) IN ('semi','semirremolque','semi remolque','semi-remolque','semi_remolque') THEN 'semirremolque'
+       WHEN LOWER(BTRIM(type)) = 'acoplado' THEN 'acoplado'
+       WHEN LOWER(BTRIM(type)) = 'utilitario' THEN 'utilitario'
+       WHEN LOWER(BTRIM(type)) IN ('autoelevador','auto elevador','auto-elevador','auto_elevador') THEN 'autoelevador'
+       WHEN REPLACE(LOWER(BTRIM(type)), 'ó', 'o') = 'furgon' THEN 'furgon'
+       WHEN LOWER(BTRIM(type)) = 'moto' THEN 'moto'
+       WHEN LOWER(BTRIM(type)) = 'otro' THEN 'otro'
+       ELSE 'otro'
+     END;
+
+  ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS vehicles_type_check;
+  ALTER TABLE vehicles ADD CONSTRAINT vehicles_type_check
+    CHECK (type IN ('camion','tractor','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'));
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'No se pudo normalizar vehicles_type_check: %', SQLERRM;
+END $$;
+
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 3.  COMBUSTIBLE (cisternas propias)
