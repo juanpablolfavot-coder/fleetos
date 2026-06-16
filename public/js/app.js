@@ -165,7 +165,8 @@ window.FleetRoles = {
   gerencia:      { code:'gerencia',      label:'Gerencia',          modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','encargado_panel','contador_panel'] },
   mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
-  contador:      { code:'contador',      label:'Contador',          modules:['dashboard','costs','documents','contador_panel'] },
+  contador:      { code:'contador',      label:'Administración',    modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel'] },
+  gerente_sucursal: { code:'gerente_sucursal', label:'Gerente de sucursal', modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs'] },
   compras:       { code:'compras',       label:'Compras',           modules:['dashboard','purchase_orders','suppliers','fuel'] },
   tesoreria:     { code:'tesoreria',     label:'Tesorería',         modules:['dashboard','tesoreria_panel','purchase_orders'] },
   proveedores:   { code:'proveedores',   label:'Proveedores',       modules:['proveedor_panel','suppliers','purchase_orders'] },
@@ -202,7 +203,7 @@ function getPageTitle(p) {
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Repuestos · insumos · alertas', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs', auditor_panel:'Anomalías · trazabilidad · log de acciones', assets:'Edificios · herramientas · equipos · informática', proveedor_panel:'OCs aprobadas · Cargá las facturas correspondientes', tesoreria_panel:'Facturas pendientes de pago · Vencimientos' };
+  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Stock por sucursal y área · pañoles propios', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs', auditor_panel:'Anomalías · trazabilidad · log de acciones', assets:'Edificios · herramientas · equipos · informática', proveedor_panel:'OCs aprobadas · Cargá las facturas correspondientes', tesoreria_panel:'Facturas pendientes de pago · Vencimientos' };
   return s[p] || '';
 }
 
@@ -227,8 +228,8 @@ function renderDashboard() {
   const otsUrgentes = (App.data.workOrders||[]).filter(o => o.priority === 'Urgente' && o.status !== 'Cerrada');
   const otsAbiertas = (App.data.workOrders||[]).filter(o => o.status !== 'Cerrada');
   const stockBajo   = (App.data.stock||[]).filter(s => {
-    const cur = parseFloat(s.qty_current) || 0;
-    const min = parseFloat(s.qty_min) || 0;
+    const cur = parseFloat(s.qty_current ?? s.qty) || 0;
+    const min = parseFloat(s.qty_min ?? s.min) || 0;
     return min > 0 && cur <= min;
   });
   const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'pendiente_cotizacion' || p.status === 'en_cotizacion');
@@ -3777,23 +3778,107 @@ function stockFormValue(v) {
     .replace(/>/g, '&gt;');
 }
 
+
 function stockCanManage() {
-  return userHasRole('dueno','gerencia','jefe_mantenimiento','paniol');
+  return userHasRole('dueno','gerencia','jefe_mantenimiento','paniol','contador','gerente_sucursal');
+}
+
+function stockBaseOptions() {
+  const cfgBases = Array.isArray(App.config?.bases) ? App.config.bases : [];
+  const dataBases = (App.data.stock || []).map(s => s.sucursal || s.base_location).filter(Boolean);
+  const fallback = App.currentUser?.sucursal ? [App.currentUser.sucursal] : ['Central'];
+  return [...new Set([...fallback, ...cfgBases, ...dataBases])].filter(Boolean);
+}
+
+function stockAreaOptions(sucursal) {
+  const fixed = ['Administración', 'Depósito', 'Taller'];
+  const cfg = App.config?.areas || {};
+  const fromCfg = Array.isArray(cfg[sucursal]) ? cfg[sucursal].map(a => typeof a === 'string' ? a : (a.nombre || a.area || '')).filter(Boolean) : [];
+  const fromData = (App.data.stock || []).filter(s => !sucursal || s.sucursal === sucursal || s.base_location === sucursal).map(s => s.area).filter(Boolean);
+  return [...new Set([...fixed, ...fromCfg, ...fromData])].filter(Boolean);
+}
+
+function stockCurrentFilters() {
+  App.stockFilters = App.stockFilters || { sucursal:'all', area:'all', q:'' };
+  if (App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal) {
+    App.stockFilters.sucursal = App.currentUser.sucursal;
+  }
+  return App.stockFilters;
+}
+
+function stockFilteredItems() {
+  const f = stockCurrentFilters();
+  const q = (f.q || '').trim().toLowerCase();
+  return (App.data.stock || []).filter(s => {
+    const suc = s.sucursal || s.base_location || 'Central';
+    const area = s.area || 'Depósito';
+    if (f.sucursal !== 'all' && suc !== f.sucursal) return false;
+    if (f.area !== 'all' && area !== f.area) return false;
+    if (q) {
+      const hay = [s.code, s.name, s.cat, s.supplier, suc, area].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function stockSetFilter(key, value) {
+  const f = stockCurrentFilters();
+  f[key] = value || 'all';
+  if (key === 'sucursal') f.area = 'all';
+  renderStock();
+}
+
+function stockSummaryByArea(items) {
+  const map = new Map();
+  items.forEach(s => {
+    const suc = s.sucursal || s.base_location || 'Central';
+    const area = s.area || 'Depósito';
+    const key = suc + '||' + area;
+    if (!map.has(key)) map.set(key, { sucursal:suc, area, items:0, critical:0, value:0 });
+    const r = map.get(key);
+    r.items += 1;
+    r.value += (parseFloat(s.qty)||0) * (parseFloat(s.cost)||0);
+    if ((parseFloat(s.min)||0) > 0 && (parseFloat(s.qty)||0) <= (parseFloat(s.min)||0)) r.critical += 1;
+  });
+  return [...map.values()].sort((a,b) => (a.sucursal+a.area).localeCompare(b.sucursal+b.area));
+}
+
+function stockSelectHTML(id, opts, selected, allLabel, key, disabled) {
+  return '<select class="form-select" id="'+id+'" '+(disabled?'disabled':'')+' onchange="stockSetFilter(\''+key+'\', this.value)" style="max-width:220px">'
+    + (allLabel ? '<option value="all" '+(selected==='all'?'selected':'')+'>'+allLabel+'</option>' : '')
+    + opts.map(o => '<option value="'+stockFormValue(o)+'" '+(o===selected?'selected':'')+'>'+stockFormValue(o)+'</option>').join('')
+    + '</select>';
 }
 
 function renderStock() {
-  const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
-  const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
+  const allItems = App.data.stock || [];
+  const filters = stockCurrentFilters();
+  const branches = stockBaseOptions();
+  const areas = filters.sucursal !== 'all' ? stockAreaOptions(filters.sucursal) : ['Administración','Depósito','Taller', ...stockAreaOptions()].filter(Boolean);
+  const items = stockFilteredItems();
+  const critical = items.filter(s => (parseFloat(s.min)||0) > 0 && (parseFloat(s.qty)||0) <= (parseFloat(s.min)||0)).length;
+  const totalVal = items.reduce((a,b)=>a+(parseFloat(b.qty)||0)*(parseFloat(b.cost)||0),0);
   const canManage = stockCanManage();
+  const gerenteBloqueadoSucursal = App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal;
 
-  // Construir filas de la tabla sin template literals anidados
+  const summaryRows = stockSummaryByArea(allItems).map(r => '<tr>'
+    + '<td>'+stockFormValue(r.sucursal)+'</td>'
+    + '<td>'+stockFormValue(r.area)+'</td>'
+    + '<td class="td-mono">'+r.items+'</td>'
+    + '<td class="td-mono" style="color:'+(r.critical>0?'var(--danger)':'var(--ok)')+'">'+r.critical+'</td>'
+    + '<td class="td-mono">$'+Math.round(r.value).toLocaleString('es-AR')+'</td>'
+    + '</tr>').join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:14px">Sin stock por área</td></tr>';
+
   let tableRows = '';
-  if (App.data.stock.length === 0) {
-    tableRows = '<tr><td colspan="11" style="text-align:center;padding:32px;color:var(--text3)">Sin ítems en stock. Usá el botón <strong>+ Registrar ítem</strong> para agregar.</td></tr>';
+  if (items.length === 0) {
+    tableRows = '<tr><td colspan="13" style="text-align:center;padding:32px;color:var(--text3)">Sin ítems con esos filtros. Usá <strong>+ Registrar ítem</strong> para agregar stock por sucursal y área.</td></tr>';
   }
-  App.data.stock.forEach(function(s) {
-    const pct   = s.qty / s.min;
-    const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
+  items.forEach(function(s) {
+    const min = parseFloat(s.min) || 0;
+    const qty = parseFloat(s.qty) || 0;
+    const pct = min > 0 ? qty / min : 99;
+    const st = pct <= 1 ? 'danger' : pct <= 1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
     const managerBtns = canManage
       ? '<button class="btn btn-secondary btn-sm" onclick="openEditStockModal(\''+s.id+'\')">Editar</button>'
@@ -3801,15 +3886,17 @@ function renderStock() {
         + '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Baja auditada">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Sin permiso para editar depósito">🔒</span>';
     tableRows += '<tr>'
-      + '<td class="td-mono td-main">'+s.code+'</td>'
-      + '<td>'+s.name+'</td>'
-      + '<td><span class="tag" style="background:var(--bg4);color:var(--text2)">'+s.cat+'</span></td>'
-      + '<td class="td-mono" style="color:var(--'+st+')">'+s.qty+' '+s.unit+'</td>'
-      + '<td class="td-mono">'+s.min+' '+s.unit+'</td>'
-      + '<td class="td-mono">'+s.reorder+' '+s.unit+'</td>'
-      + '<td class="td-mono">$'+s.cost.toLocaleString()+'</td>'
-      + '<td class="td-mono">$'+(s.qty*s.cost).toLocaleString()+'</td>'
-      + '<td style="font-size:12px">'+s.supplier+'</td>'
+      + '<td class="td-mono td-main">'+stockFormValue(s.code)+'</td>'
+      + '<td>'+stockFormValue(s.name)+'</td>'
+      + '<td>'+stockFormValue(s.sucursal || s.base_location || 'Central')+'</td>'
+      + '<td><span class="tag" style="background:rgba(14,165,233,.12);color:var(--accent)">'+stockFormValue(s.area || 'Depósito')+'</span></td>'
+      + '<td><span class="tag" style="background:var(--bg4);color:var(--text2)">'+stockFormValue(s.cat)+'</span></td>'
+      + '<td class="td-mono" style="color:var(--'+st+')">'+qty+' '+stockFormValue(s.unit)+'</td>'
+      + '<td class="td-mono">'+min+' '+stockFormValue(s.unit)+'</td>'
+      + '<td class="td-mono">'+(parseFloat(s.reorder)||0)+' '+stockFormValue(s.unit)+'</td>'
+      + '<td class="td-mono">$'+(parseFloat(s.cost)||0).toLocaleString('es-AR')+'</td>'
+      + '<td class="td-mono">$'+Math.round(qty*(parseFloat(s.cost)||0)).toLocaleString('es-AR')+'</td>'
+      + '<td style="font-size:12px">'+stockFormValue(s.supplier || '—')+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
       + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px;flex-wrap:wrap">'
       +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
@@ -3818,154 +3905,144 @@ function renderStock() {
       + '</tr>';
   });
 
-  // Construir filas del historial
   let histRows = '';
-  (App.data.stockHistory || []).slice(0,15).forEach(function(h) {
-    const tc   = h.type==='Baja'?'badge-danger':h.type==='Egreso'?'badge-warn':h.type==='Ajuste'?'badge-purple':'badge-ok';
+  (App.data.stockHistory || []).filter(h => {
+    if (filters.sucursal !== 'all' && h.sucursal !== filters.sucursal) return false;
+    if (filters.area !== 'all' && h.area !== filters.area) return false;
+    return true;
+  }).slice(0,15).forEach(function(h) {
+    const tc = h.type==='Baja'?'badge-danger':h.type==='Egreso'?'badge-warn':h.type==='Ajuste'?'badge-purple':'badge-ok';
     const sign = (h.type==='Baja'||h.type==='Egreso') ? '-' : '+';
-    const cc   = (h.type==='Baja'||h.type==='Egreso') ? 'danger' : 'ok';
+    const cc = (h.type==='Baja'||h.type==='Egreso') ? 'danger' : 'ok';
     histRows += '<tr>'
       + '<td class="td-mono" style="font-size:11px">'+h.date+'</td>'
-      + '<td style="color:var(--text)">'+h.name+'</td>'
-      + '<td><span class="badge '+tc+'">'+h.type+'</span></td>'
-      + '<td class="td-mono" style="color:var(--'+cc+')">'+sign+h.qty+' '+h.unit+'</td>'
-      + '<td style="font-size:12px;color:var(--text3)">'+h.motivo+'</td>'
-      + '<td style="font-size:12px">'+h.user+'</td>'
+      + '<td style="color:var(--text)">'+stockFormValue(h.name)+'</td>'
+      + '<td>'+stockFormValue(h.sucursal || 'Central')+'</td>'
+      + '<td>'+stockFormValue(h.area || 'Depósito')+'</td>'
+      + '<td><span class="badge '+tc+'">'+stockFormValue(h.type)+'</span></td>'
+      + '<td class="td-mono" style="color:var(--'+cc+')">'+sign+h.qty+' '+stockFormValue(h.unit)+'</td>'
+      + '<td style="font-size:12px;color:var(--text3)">'+stockFormValue(h.motivo)+'</td>'
+      + '<td style="font-size:12px">'+stockFormValue(h.user)+'</td>'
       + '</tr>';
   });
 
   const histSection = histRows
     ? '<div class="card" style="margin-top:16px">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
-      +   '<div class="card-title" style="margin:0">Últimos movimientos del pañol</div>'
+      +   '<div class="card-title" style="margin:0">Últimos movimientos del pañol filtrado</div>'
       +   '<button class="btn btn-secondary btn-sm" onclick="exportStockHistoryPDF()">📄 PDF</button>'
       + '</div>'
       + '<div class="table-wrap"><table>'
-      + '<thead><tr><th>Fecha</th><th>Ítem</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Usuario</th></tr></thead>'
+      + '<thead><tr><th>Fecha</th><th>Ítem</th><th>Sucursal</th><th>Área</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Usuario</th></tr></thead>'
       + '<tbody>'+histRows+'</tbody>'
       + '</table></div></div>'
     : '';
 
-  const bajaBtnHeader = canManage
-    ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Baja auditada</button>'
-    : '';
+  const bajaBtnHeader = canManage ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Baja auditada</button>' : '';
   const adminButtons = canManage
-    ? bajaBtnHeader
-      + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>'
-      + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
-      + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    ? bajaBtnHeader + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>' + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
     : '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>';
 
   document.getElementById('page-stock').innerHTML =
     '<div class="kpi-row kpi-row-3" style="margin-bottom:20px">'
-    + '<div class="kpi-card '+(critical===0?'ok':'danger')+'">'
-    +   '<div class="kpi-label">Ítems en stock crítico</div>'
-    +   '<div class="kpi-value '+(critical===0?'ok':'danger')+'">'+critical+'</div>'
-    +   '<div class="kpi-trend">debajo del mínimo</div>'
+    + '<div class="kpi-card '+(critical===0?'ok':'danger')+'"><div class="kpi-label">Crítico según filtro</div><div class="kpi-value '+(critical===0?'ok':'danger')+'">'+critical+'</div><div class="kpi-trend">debajo del mínimo</div></div>'
+    + '<div class="kpi-card info"><div class="kpi-label">Ítems visibles</div><div class="kpi-value white">'+items.length+'</div><div class="kpi-trend">de '+allItems.length+' totales</div></div>'
+    + '<div class="kpi-card ok"><div class="kpi-label">Valor visible</div><div class="kpi-value ok">$'+Math.round(totalVal/1000)+'K</div><div class="kpi-trend">valorización al costo actual</div></div>'
     + '</div>'
-    + '<div class="kpi-card info">'
-    +   '<div class="kpi-label">Total ítems</div>'
-    +   '<div class="kpi-value white">'+App.data.stock.length+'</div>'
-    +   '<div class="kpi-trend">en el pañol</div>'
+    + '<div class="card" style="margin-bottom:14px;padding:12px 14px">'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + stockSelectHTML('stock-filter-sucursal', branches, filters.sucursal, gerenteBloqueadoSucursal ? '' : 'Sucursal: todas', 'sucursal', gerenteBloqueadoSucursal)
+    + stockSelectHTML('stock-filter-area', areas, filters.area, 'Área: todas', 'area', false)
+    + '<input class="form-input" style="max-width:260px" placeholder="Buscar código, artículo, proveedor..." value="'+stockFormValue(filters.q || '')+'" oninput="App.stockFilters.q=this.value;renderStock()">'
+    + '<button class="btn btn-secondary btn-sm" onclick="App.stockFilters={sucursal:\''+(gerenteBloqueadoSucursal ? App.currentUser.sucursal : 'all')+'\',area:\'all\',q:\'\'};renderStock()">Limpiar</button>'
     + '</div>'
-    + '<div class="kpi-card ok">'
-    +   '<div class="kpi-label">Valor stock total</div>'
-    +   '<div class="kpi-value ok">$'+Math.round(totalVal/1000)+'K</div>'
-    +   '<div class="kpi-trend">valorización al costo actual</div>'
     + '</div>'
+    + '<div class="card" style="margin-bottom:14px;padding:0">'
+    + '<div style="padding:10px 14px;border-bottom:1px solid var(--border);font-weight:700;color:var(--text)">Resumen total por sucursal y área</div>'
+    + '<div class="table-wrap"><table><thead><tr><th>Sucursal</th><th>Área / Pañol</th><th>Ítems</th><th>Críticos</th><th>Valorización</th></tr></thead><tbody>'+summaryRows+'</tbody></table></div>'
     + '</div>'
     + '<div class="section-header">'
-    +   '<div><div class="section-title">Inventario de repuestos e insumos</div></div>'
-    +   '<div style="display:flex;gap:8px;flex-wrap:wrap">'
-    +   adminButtons
-    +   '</div>'
+    +   '<div><div class="section-title">Inventario por sucursal y área</div><div class="section-sub">Cada área administra su propio pañol: Administración · Depósito · Taller</div></div>'
+    +   '<div style="display:flex;gap:8px;flex-wrap:wrap">'+adminButtons+'</div>'
     + '</div>'
-    + '<div class="card" style="padding:0">'
-    +   '<div class="table-wrap">'
-    +   '<table><thead><tr>'
-    +   '<th>Código</th><th>Descripción</th><th>Cat.</th>'
-    +   '<th>Stock</th><th>Mínimo</th><th>P. pedido</th>'
-    +   '<th>Costo unit.</th><th>Valorización</th><th>Proveedor</th>'
-    +   '<th>Estado</th><th></th>'
-    +   '</tr></thead>'
-    +   '<tbody>'+tableRows+'</tbody>'
-    +   '</table></div>'
-    + '</div>'
+    + '<div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr>'
+    + '<th>Código</th><th>Descripción</th><th>Sucursal</th><th>Área</th><th>Cat.</th><th>Stock</th><th>Mínimo</th><th>P. pedido</th><th>Costo unit.</th><th>Valorización</th><th>Proveedor</th><th>Estado</th><th></th>'
+    + '</tr></thead><tbody>'+tableRows+'</tbody></table></div></div>'
     + histSection;
 }
 
-// ── EGRESO de stock (pañolero, jefe mantenimiento, encargado)
+function stockLocationControls(prefix, currentSucursal, currentArea) {
+  const branches = stockBaseOptions();
+  const areas = stockAreaOptions(currentSucursal || branches[0] || 'Central');
+  const lockSucursal = App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal;
+  const suc = lockSucursal ? App.currentUser.sucursal : (currentSucursal || branches[0] || 'Central');
+  const area = currentArea || 'Depósito';
+  return '<div class="form-row">'
+    + '<div class="form-group"><label class="form-label">Sucursal</label><select class="form-select" id="'+prefix+'-sucursal" '+(lockSucursal?'disabled':'')+' onchange="stockRefreshAreaOptions(\''+prefix+'\')">'
+    + branches.map(b => '<option value="'+stockFormValue(b)+'" '+(b===suc?'selected':'')+'>'+stockFormValue(b)+'</option>').join('')
+    + '</select></div>'
+    + '<div class="form-group"><label class="form-label">Área / Pañol</label><select class="form-select" id="'+prefix+'-area">'
+    + stockAreaOptions(suc).map(a => '<option value="'+stockFormValue(a)+'" '+(a===area?'selected':'')+'>'+stockFormValue(a)+'</option>').join('')
+    + '</select></div>'
+    + '</div>';
+}
+
+function stockRefreshAreaOptions(prefix) {
+  const suc = document.getElementById(prefix+'-sucursal')?.value || 'Central';
+  const areaEl = document.getElementById(prefix+'-area');
+  if (!areaEl) return;
+  const old = areaEl.value;
+  const areas = stockAreaOptions(suc);
+  areaEl.innerHTML = areas.map(a => '<option value="'+stockFormValue(a)+'" '+(a===old?'selected':'')+'>'+stockFormValue(a)+'</option>').join('');
+}
+
+function stockPayloadLocation(prefix) {
+  const suc = App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal
+    ? App.currentUser.sucursal
+    : (document.getElementById(prefix+'-sucursal')?.value || 'Central');
+  const area = document.getElementById(prefix+'-area')?.value || 'Depósito';
+  return { base_location: suc, sucursal: suc, area };
+}
+
+// ── EGRESO de stock
 function openStockEgresoModal(stockId) {
-  const s = App.data.stock.find(function(x){ return x.id===stockId; });
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
   openModal('Registrar egreso — '+s.name, ''
     + '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px">'
-    + '<div style="font-size:13px;font-weight:500;color:var(--text)">'+s.name+'</div>'
-    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">'
-    + 'Stock actual: <span style="font-family:var(--mono);color:var(--text)">'+s.qty+' '+s.unit+'</span>'
-    + ' &nbsp;·&nbsp; '
-    + 'Costo unit.: <span style="font-family:var(--mono);color:var(--text)">$'+s.cost.toLocaleString()+'</span>'
-    + '</div></div>'
-    + '<div class="form-row">'
-    + '<div class="form-group"><label class="form-label">Cantidad a egresar</label>'
-    + '<input class="form-input" type="number" id="eg-qty" value="1" min="1" max="'+s.qty+'"></div>'
-    + '<div class="form-group"><label class="form-label">Destino / uso</label>'
-    + '<select class="form-select" id="eg-dest">'
-    + '<option value="ot">Orden de trabajo</option>'
-    + '<option value="taller">Consumo taller</option>'
-    + '<option value="otro">Otro uso</option>'
-    + '</select></div>'
-    + '</div>'
-    + '<div class="form-group"><label class="form-label">Referencia (OT, observación)</label>'
-    + '<input class="form-input" id="eg-ref" placeholder="Ej: OT-0284 o descripción del uso"></div>',
+    + '<div style="font-size:13px;font-weight:500;color:var(--text)">'+stockFormValue(s.name)+'</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+stockFormValue(s.sucursal||'Central')+' · '+stockFormValue(s.area||'Depósito')+' · Stock actual: <span style="font-family:var(--mono);color:var(--text)">'+s.qty+' '+stockFormValue(s.unit)+'</span></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Cantidad a egresar</label><input class="form-input" type="number" id="eg-qty" value="1" min="0.01" max="'+s.qty+'" step="0.01"></div>'
+    + '<div class="form-group"><label class="form-label">Destino / uso</label><select class="form-select" id="eg-dest"><option value="ot">Orden de trabajo</option><option value="taller">Consumo taller</option><option value="administracion">Administración</option><option value="otro">Otro uso</option></select></div></div>'
+    + '<div class="form-group"><label class="form-label">Referencia (OT, observación)</label><input class="form-input" id="eg-ref" placeholder="Ej: OT-0284 o descripción del uso"></div>',
   [
-    { label:'Confirmar egreso', cls:'btn-primary',   fn: function(){ saveStockEgreso(stockId); } },
-    { label:'Cancelar',         cls:'btn-secondary', fn: closeModal },
+    { label:'Confirmar egreso', cls:'btn-primary', fn: function(){ saveStockEgreso(stockId); } },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
 async function saveStockEgreso(stockId) {
-  const s   = App.data.stock.find(function(x){ return x.id===stockId; });
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
-  const qty    = parseFloat(document.getElementById('eg-qty')?.value)    || 0;
+  const qty = parseFloat(document.getElementById('eg-qty')?.value) || 0;
   const reason = (document.getElementById('eg-ref')?.value || '').trim();
-  if (qty <= 0)   { showToast('warn','Ingresá una cantidad'); return; }
+  if (qty <= 0) { showToast('warn','Ingresá una cantidad'); return; }
   if (qty > s.qty){ showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
-
-  const res = await apiFetch(`/api/stock/${stockId}/egreso`, {
-    method: 'POST',
-    body: JSON.stringify({ qty, reason: reason || 'Egreso manual' })
-  });
+  const res = await apiFetch('/api/stock/'+stockId+'/egreso', { method:'POST', body: JSON.stringify({ qty, reason: reason || 'Egreso manual' }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar egreso'); return; }
-
-  closeModal();
-  showToast('ok', 'Egreso registrado: '+qty+' '+s.unit+' de '+s.name);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Egreso registrado: '+qty+' '+s.unit+' de '+s.name); await afterSave({ page:'stock' });
 }
 
-
-
 function openStockIngresoModal(stockId) {
-  if (!stockCanManage()) {
-    showToast('warn','No tenés permiso para cargar ingresos al depósito');
-    return;
-  }
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para cargar ingresos al depósito'); return; }
   const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
   openModal('Ingreso de stock — '+s.name, ''
-    + '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px">'
-    + '<div style="font-size:13px;font-weight:500;color:var(--text)">'+s.name+'</div>'
-    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">Stock actual: <span class="td-mono">'+s.qty+' '+s.unit+'</span></div>'
-    + '</div>'
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Cantidad que ingresa</label>'
-    +   '<input class="form-input" type="number" id="ing-qty" value="1" min="0.01" step="0.01"></div>'
-    +   '<div class="form-group"><label class="form-label">Motivo / comprobante</label>'
-    +   '<input class="form-input" id="ing-ref" placeholder="Ej: remito, compra, devolución, recuento"></div>'
-    + '</div>',
+    + '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px"><div style="font-size:13px;font-weight:500;color:var(--text)">'+stockFormValue(s.name)+'</div><div style="font-size:12px;color:var(--text3);margin-top:2px">'+stockFormValue(s.sucursal||'Central')+' · '+stockFormValue(s.area||'Depósito')+' · Stock actual: <span class="td-mono">'+s.qty+' '+stockFormValue(s.unit)+'</span></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Cantidad que ingresa</label><input class="form-input" type="number" id="ing-qty" value="1" min="0.01" step="0.01"></div><div class="form-group"><label class="form-label">Motivo / comprobante</label><input class="form-input" id="ing-ref" placeholder="Ej: remito, compra, devolución, recuento"></div></div>',
   [
-    { label:'Confirmar ingreso', cls:'btn-primary',   fn: function(){ saveStockIngreso(stockId); } },
-    { label:'Cancelar',          cls:'btn-secondary', fn: closeModal },
+    { label:'Confirmar ingreso', cls:'btn-primary', fn: function(){ saveStockIngreso(stockId); } },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
@@ -3975,294 +4052,133 @@ async function saveStockIngreso(stockId) {
   const qty = parseFloat(document.getElementById('ing-qty')?.value) || 0;
   const reason = (document.getElementById('ing-ref')?.value || '').trim();
   if (qty <= 0) { showToast('warn','Ingresá una cantidad válida'); return; }
-
-  const res = await apiFetch(`/api/stock/${stockId}/ingreso`, {
-    method: 'POST',
-    body: JSON.stringify({ qty, reason: reason || 'Ingreso manual' })
-  });
+  const res = await apiFetch('/api/stock/'+stockId+'/ingreso', { method:'POST', body: JSON.stringify({ qty, reason: reason || 'Ingreso manual' }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar ingreso'); return; }
-
-  closeModal();
-  showToast('ok', 'Ingreso registrado: '+qty+' '+s.unit+' de '+s.name);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Ingreso registrado: '+qty+' '+s.unit+' de '+s.name); await afterSave({ page:'stock' });
 }
 
 function openEditStockModal(stockId) {
-  if (!stockCanManage()) {
-    showToast('warn','No tenés permiso para editar artículos del depósito');
-    return;
-  }
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para editar artículos del depósito'); return; }
   const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
   openModal('Editar artículo — '+s.name, ''
-    + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'
-    + 'Editá la ficha del artículo. La cantidad física no se modifica desde acá: para eso usá Ingreso, Egreso, Baja o Ajuste.'
-    + '</div>'
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Código interno</label>'
-    +   '<input class="form-input" id="es-code" value="'+stockFormValue(s.code)+'"></div>'
-    +   '<div class="form-group"><label class="form-label">Categoría</label>'
-    +   '<input class="form-input" id="es-cat" value="'+stockFormValue(s.cat)+'" placeholder="Filtros, Lubricantes, Frenos..."></div>'
-    + '</div>'
-    + '<div class="form-group"><label class="form-label">Descripción completa</label>'
-    + '<input class="form-input" id="es-name" value="'+stockFormValue(s.name)+'"></div>'
-    + '<div class="form-row form-row-3">'
-    +   '<div class="form-group"><label class="form-label">Stock mínimo</label>'
-    +   '<input class="form-input" type="number" id="es-min" value="'+stockFormValue(s.min)+'" min="0" step="0.01"></div>'
-    +   '<div class="form-group"><label class="form-label">Punto de pedido</label>'
-    +   '<input class="form-input" type="number" id="es-reorder" value="'+stockFormValue(s.reorder)+'" min="0" step="0.01"></div>'
-    +   '<div class="form-group"><label class="form-label">Unidad</label>'
-    +   '<select class="form-select" id="es-unit">'
-    +     ['un','L','kg','jgo','m'].map(function(u){ return '<option '+(s.unit===u?'selected':'')+'>'+u+'</option>'; }).join('')
-    +   '</select></div>'
-    + '</div>'
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Costo unitario ($)</label>'
-    +   '<input class="form-input" type="number" id="es-cost" value="'+stockFormValue(s.cost)+'" min="0" step="0.01"></div>'
-    +   '<div class="form-group"><label class="form-label">Proveedor</label>'
-    +   '<input class="form-input" id="es-supplier" value="'+stockFormValue(s.supplier==='—'?'':s.supplier)+'"></div>'
-    + '</div>',
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Editá la ficha del artículo. La cantidad física se modifica con Ingreso, Egreso, Baja o Ajuste.</div>'
+    + stockLocationControls('es', s.sucursal || s.base_location || 'Central', s.area || 'Depósito')
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="es-code" value="'+stockFormValue(s.code)+'"></div><div class="form-group"><label class="form-label">Categoría</label><input class="form-input" id="es-cat" value="'+stockFormValue(s.cat)+'" placeholder="Filtros, Lubricantes, Frenos..."></div></div>'
+    + '<div class="form-group"><label class="form-label">Descripción completa</label><input class="form-input" id="es-name" value="'+stockFormValue(s.name)+'"></div>'
+    + '<div class="form-row form-row-3"><div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" id="es-min" value="'+stockFormValue(s.min)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Punto de pedido</label><input class="form-input" type="number" id="es-reorder" value="'+stockFormValue(s.reorder)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Unidad</label><select class="form-select" id="es-unit">'+['un','L','kg','jgo','m'].map(function(u){ return '<option '+(s.unit===u?'selected':'')+'>'+u+'</option>'; }).join('')+'</select></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" id="es-cost" value="'+stockFormValue(s.cost)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" id="es-supplier" value="'+stockFormValue(s.supplier==='—'?'':s.supplier)+'"></div></div>',
   [
-    { label:'Guardar cambios', cls:'btn-primary',   fn: function(){ saveEditStockItem(stockId); } },
-    { label:'Cancelar',        cls:'btn-secondary', fn: closeModal },
+    { label:'Guardar cambios', cls:'btn-primary', fn: function(){ saveEditStockItem(stockId); } },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
 async function saveEditStockItem(stockId) {
-  const code     = (document.getElementById('es-code')?.value || '').trim();
-  const name     = (document.getElementById('es-name')?.value || '').trim();
+  const code = (document.getElementById('es-code')?.value || '').trim();
+  const name = (document.getElementById('es-name')?.value || '').trim();
   const category = (document.getElementById('es-cat')?.value || 'General').trim();
-  const unit     = document.getElementById('es-unit')?.value || 'un';
-  const qty_min  = parseFloat(document.getElementById('es-min')?.value) || 0;
+  const unit = document.getElementById('es-unit')?.value || 'un';
+  const qty_min = parseFloat(document.getElementById('es-min')?.value) || 0;
   const qty_reorder = parseFloat(document.getElementById('es-reorder')?.value) || Math.max(qty_min * 2, 1);
   const unit_cost = parseFloat(document.getElementById('es-cost')?.value) || 0;
   const supplier = (document.getElementById('es-supplier')?.value || '').trim();
-
   if (!code) { showToast('warn','Ingresá el código del artículo'); return; }
   if (!name) { showToast('warn','Ingresá la descripción del artículo'); return; }
-
-  const res = await apiFetch(`/api/stock/${stockId}`, {
-    method: 'PUT',
-    body: JSON.stringify({ code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier: supplier || null })
-  });
+  const res = await apiFetch('/api/stock/'+stockId, { method:'PUT', body: JSON.stringify({ code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier: supplier || null, ...stockPayloadLocation('es') }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al editar artículo'); return; }
-
-  closeModal();
-  showToast('ok', 'Artículo actualizado: '+name);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Artículo actualizado: '+name); await afterSave({ page:'stock' });
 }
 
 function openStockBajaModal() {
-  if (!stockCanManage()) {
-    showToast('warn','No tenés permiso para dar de baja ítems del depósito');
-    return;
-  }
-  const opts = App.data.stock.map(function(s){
-    return '<option value="'+s.id+'">'+s.name+' — Stock: '+s.qty+' '+s.unit+'</option>';
-  }).join('');
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del depósito'); return; }
+  const opts = stockFilteredItems().map(function(s){ return '<option value="'+s.id+'">'+stockFormValue(s.name)+' — '+stockFormValue(s.sucursal||'Central')+' / '+stockFormValue(s.area||'Depósito')+' — Stock: '+s.qty+' '+stockFormValue(s.unit)+'</option>'; }).join('');
   openModal('Baja auditada de depósito', ''
-    + '<div style="background:var(--warn-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px">'
-    + '<strong>Acción auditada.</strong> Registra una baja definitiva del inventario '
-    + 'por robo, pérdida, daño o vencimiento. Queda registrado con usuario, fecha y motivo detallado.'
-    + '</div>'
-    + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label>'
-    + '<select class="form-select" id="bj-id" onchange="onBajaItemSelect()">'
-    + '<option value="">— Seleccioná un ítem —</option>'+opts
-    + '</select></div>'
-    + '<div id="baja-detail" style="display:none">'
-    +   '<div class="form-row">'
-    +     '<div class="form-group"><label class="form-label">Cantidad a dar de baja</label>'
-    +     '<input class="form-input" type="number" id="bj-qty" value="1" min="1" oninput="updateBajaSummary()"></div>'
-    +     '<div class="form-group"><label class="form-label">Motivo de la baja</label>'
-    +     '<select class="form-select" id="bj-motivo">'
-    +       '<option value="robo">Robo</option>'
-    +       '<option value="perdida">Pérdida / extravío</option>'
-    +       '<option value="danio">Daño / inutilizable</option>'
-    +       '<option value="vencimiento">Vencimiento</option>'
-    +       '<option value="diferencia">Diferencia de inventario</option>'
-    +       '<option value="otro">Otro</option>'
-    +     '</select></div>'
-    +   '</div>'
-    +   '<div class="form-group"><label class="form-label">Detalle completo (obligatorio)</label>'
-    +   '<textarea class="form-textarea" id="bj-obs" '
-    +   'placeholder="Describí qué pasó, cuándo, dónde y cómo se detectó la diferencia..."></textarea></div>'
-    +   '<div id="bj-summary" style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3)">'
-    +   'Impacto en valorización: —</div>'
-    + '</div>',
+    + '<div style="background:var(--warn-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px"><strong>Acción auditada.</strong> Registra una baja definitiva del inventario por robo, pérdida, daño o vencimiento.</div>'
+    + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label><select class="form-select" id="bj-id" onchange="onBajaItemSelect()"><option value="">— Seleccioná un ítem —</option>'+opts+'</select></div>'
+    + '<div id="baja-detail" style="display:none"><div class="form-row"><div class="form-group"><label class="form-label">Cantidad a dar de baja</label><input class="form-input" type="number" id="bj-qty" value="1" min="0.01" step="0.01" oninput="updateBajaSummary()"></div><div class="form-group"><label class="form-label">Motivo de la baja</label><select class="form-select" id="bj-motivo"><option value="robo">Robo</option><option value="perdida">Pérdida / extravío</option><option value="danio">Daño / inutilizable</option><option value="vencimiento">Vencimiento</option><option value="diferencia">Diferencia de inventario</option><option value="otro">Otro</option></select></div></div><div class="form-group"><label class="form-label">Detalle completo (obligatorio)</label><textarea class="form-textarea" id="bj-obs" placeholder="Describí qué pasó, cuándo, dónde y cómo se detectó la diferencia..."></textarea></div><div id="bj-summary" style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3)">Impacto en valorización: —</div></div>',
   [
-    { label:'Confirmar baja', cls:'btn-danger',    fn: saveStockBaja },
-    { label:'Cancelar',       cls:'btn-secondary', fn: closeModal },
+    { label:'Confirmar baja', cls:'btn-danger', fn: saveStockBaja },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
-function openStockBajaItemModal(stockId) {
-  openStockBajaModal();
-  setTimeout(function() {
-    const sel = document.getElementById('bj-id');
-    if (sel) { sel.value = stockId; onBajaItemSelect(); }
-  }, 150);
-}
-
-function onBajaItemSelect() {
-  const id  = (document.getElementById('bj-id')||{}).value || '';
-  const det = document.getElementById('baja-detail');
-  if (!det) return;
-  if (id) {
-    det.style.display = '';
-    updateBajaSummary();
-  } else {
-    det.style.display = 'none';
-  }
-}
-
-function updateBajaSummary() {
-  const id  = (document.getElementById('bj-id')||{}).value || '';
-  const qty = parseFloat((document.getElementById('bj-qty')||{}).value) || 1;
-  const sum = document.getElementById('bj-summary');
-  const s   = App.data.stock.find(function(x){ return String(x.id)===String(id); });
-  if (!sum || !s) return;
-  sum.innerHTML = 'Impacto: <strong style="color:var(--danger)">-'+qty+' '+s.unit+'</strong>'
-    + ' &nbsp;·&nbsp; '
-    + 'Pérdida valorizada: <strong style="color:var(--danger)">$'+(qty*s.cost).toLocaleString()+'</strong>';
-}
+function openStockBajaItemModal(stockId) { openStockBajaModal(); setTimeout(function(){ const sel = document.getElementById('bj-id'); if (sel) { sel.value = stockId; onBajaItemSelect(); } }, 150); }
+function onBajaItemSelect() { const id = document.getElementById('bj-id')?.value || ''; const det = document.getElementById('baja-detail'); if (!det) return; det.style.display = id ? '' : 'none'; if (id) updateBajaSummary(); }
+function updateBajaSummary() { const id = document.getElementById('bj-id')?.value || ''; const qty = parseFloat(document.getElementById('bj-qty')?.value) || 1; const sum = document.getElementById('bj-summary'); const s = App.data.stock.find(function(x){ return String(x.id)===String(id); }); if (!sum || !s) return; sum.innerHTML = 'Impacto: <strong style="color:var(--danger)">-'+qty+' '+stockFormValue(s.unit)+'</strong> · Pérdida valorizada: <strong style="color:var(--danger)">$'+Math.round(qty*s.cost).toLocaleString('es-AR')+'</strong>'; }
 
 async function saveStockBaja() {
-  if (!stockCanManage()) {
-    showToast('warn','No tenés permiso para dar de baja ítems del depósito');
-    return;
-  }
-  const id     = document.getElementById('bj-id')?.value;
-  const qty    = parseFloat(document.getElementById('bj-qty')?.value)   || 0;
-  const obs    = (document.getElementById('bj-obs')?.value   || '').trim();
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para dar de baja ítems del depósito'); return; }
+  const id = document.getElementById('bj-id')?.value;
+  const qty = parseFloat(document.getElementById('bj-qty')?.value) || 0;
+  const obs = (document.getElementById('bj-obs')?.value || '').trim();
   const motivo = document.getElementById('bj-motivo')?.value || 'otro';
-  const s      = App.data.stock.find(function(x){ return x.id===id; });
-  if (!id)         { showToast('warn','Seleccioná un ítem'); return; }
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(id); });
+  if (!id) { showToast('warn','Seleccioná un ítem'); return; }
   if (!obs || obs.length < 10) { showToast('warn','El motivo debe tener al menos 10 caracteres'); return; }
-  if (!s)          { showToast('warn','Ítem no encontrado'); return; }
+  if (!s) { showToast('warn','Ítem no encontrado'); return; }
   if (qty > s.qty) { showToast('warn','Cantidad mayor al stock disponible ('+s.qty+')'); return; }
-
-  const res = await apiFetch(`/api/stock/${id}/baja`, {
-    method: 'POST',
-    body: JSON.stringify({ qty, reason: obs, motive: motivo })
-  });
+  const res = await apiFetch('/api/stock/'+id+'/baja', { method:'POST', body: JSON.stringify({ qty, reason: obs, motive: motivo }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar baja'); return; }
-
-  closeModal();
-  showToast('ok', 'Baja registrada: '+qty+' '+s.unit+' de '+s.name+' — Motivo: '+motivo);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Baja registrada: '+qty+' '+s.unit+' de '+s.name+' — Motivo: '+motivo); await afterSave({ page:'stock' });
 }
 
-
 function openStockAjusteModal() {
-  const opts = App.data.stock.map(function(s){
-    return '<option value="'+s.id+'">'+s.name+' — Sistema: '+s.qty+' '+s.unit+'</option>';
-  }).join('');
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para ajustar inventario'); return; }
+  const opts = stockFilteredItems().map(function(s){ return '<option value="'+s.id+'">'+stockFormValue(s.name)+' — '+stockFormValue(s.sucursal||'Central')+' / '+stockFormValue(s.area||'Depósito')+' — Sistema: '+s.qty+' '+stockFormValue(s.unit)+'</option>'; }).join('');
   openModal('Ajuste de inventario', ''
-    + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'
-    + 'Para corregir diferencias entre el sistema y el recuento físico. '
-    + 'Si la diferencia es por robo, pérdida, daño o vencimiento, usá "Baja auditada".'
-    + '</div>'
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Ítem</label>'
-    +   '<select class="form-select" id="aj-id"><option value="">— Seleccioná —</option>'+opts+'</select></div>'
-    +   '<div class="form-group"><label class="form-label">Cantidad real (recuento físico)</label>'
-    +   '<input class="form-input" type="number" id="aj-qty" placeholder="Cantidad que hay realmente"></div>'
-    + '</div>'
-    + '<div class="form-group"><label class="form-label">Motivo del ajuste</label>'
-    + '<input class="form-input" id="aj-obs" placeholder="Ej: Recuento físico mensual, diferencia detectada..."></div>',
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Para corregir diferencias entre el sistema y el recuento físico. Si es robo, pérdida, daño o vencimiento, usá Baja auditada.</div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Ítem</label><select class="form-select" id="aj-id"><option value="">— Seleccioná —</option>'+opts+'</select></div><div class="form-group"><label class="form-label">Cantidad real</label><input class="form-input" type="number" id="aj-qty" placeholder="Cantidad que hay realmente"></div></div>'
+    + '<div class="form-group"><label class="form-label">Motivo del ajuste</label><input class="form-input" id="aj-obs" placeholder="Ej: Recuento físico mensual, diferencia detectada..."></div>',
   [
-    { label:'Guardar ajuste', cls:'btn-primary',   fn: saveStockAjuste },
-    { label:'Cancelar',       cls:'btn-secondary', fn: closeModal },
+    { label:'Guardar ajuste', cls:'btn-primary', fn: saveStockAjuste },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
 async function saveStockAjuste() {
-  const id     = document.getElementById('aj-id')?.value;
+  const id = document.getElementById('aj-id')?.value;
   const newQty = parseFloat(document.getElementById('aj-qty')?.value);
   const reason = (document.getElementById('aj-obs')?.value || '').trim();
-  const s      = App.data.stock.find(function(x){ return x.id===id; });
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(id); });
   if (!s || isNaN(newQty)) { showToast('warn','Completá todos los campos'); return; }
-
-  const res = await apiFetch(`/api/stock/${id}/ajuste`, {
-    method: 'POST',
-    body: JSON.stringify({ new_qty: newQty, reason: reason || 'Recuento físico' })
-  });
+  const res = await apiFetch('/api/stock/'+id+'/ajuste', { method:'POST', body: JSON.stringify({ new_qty: newQty, reason: reason || 'Recuento físico' }) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al ajustar'); return; }
-
-  closeModal();
-  showToast('ok', 'Inventario ajustado: '+s.name+' → '+newQty+' '+s.unit);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Inventario ajustado: '+s.name+' → '+newQty+' '+s.unit); await afterSave({ page:'stock' });
 }
 
-
 function openNewStockModal() {
+  if (!stockCanManage()) { showToast('warn','No tenés permiso para registrar artículos'); return; }
+  const defaultSucursal = App.currentUser?.sucursal || stockCurrentFilters().sucursal;
+  const defaultArea = stockCurrentFilters().area !== 'all' ? stockCurrentFilters().area : 'Depósito';
   openModal('Registrar nuevo ítem de stock', ''
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Código interno</label>'
-    +   '<input class="form-input" placeholder="FLT-ACE-003" id="ns-code"></div>'
-    +   '<div class="form-group"><label class="form-label">Categoría</label>'
-    +   '<select class="form-select" id="ns-cat">'
-    +   '<option>Filtros</option><option>Lubricantes</option><option>Mecánico</option>'
-    +   '<option>Frenos</option><option>Eléctrico</option><option>Tornillería</option>'
-    +   '</select></div>'
-    + '</div>'
-    + '<div class="form-group"><label class="form-label">Descripción completa</label>'
-    + '<input class="form-input" placeholder="Nombre completo del repuesto o insumo" id="ns-name"></div>'
-    + '<div class="form-row form-row-3">'
-    +   '<div class="form-group"><label class="form-label">Stock inicial</label>'
-    +   '<input class="form-input" type="number" placeholder="0" id="ns-qty"></div>'
-    +   '<div class="form-group"><label class="form-label">Stock mínimo</label>'
-    +   '<input class="form-input" type="number" placeholder="2" id="ns-min"></div>'
-    +   '<div class="form-group"><label class="form-label">Unidad</label>'
-    +   '<select class="form-select" id="ns-unit">'
-    +   '<option>un</option><option>L</option><option>kg</option><option>jgo</option><option>m</option>'
-    +   '</select></div>'
-    + '</div>'
-    + '<div class="form-row">'
-    +   '<div class="form-group"><label class="form-label">Costo unitario ($)</label>'
-    +   '<input class="form-input" type="number" placeholder="0" id="ns-cost"></div>'
-    +   '<div class="form-group"><label class="form-label">Proveedor</label>'
-    +   '<input class="form-input" placeholder="Nombre del proveedor" id="ns-supplier"></div>'
-    + '</div>',
+    + stockLocationControls('ns', defaultSucursal === 'all' ? null : defaultSucursal, defaultArea)
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="FLT-ACE-003" id="ns-code"></div><div class="form-group"><label class="form-label">Categoría</label><select class="form-select" id="ns-cat"><option>Filtros</option><option>Lubricantes</option><option>Mecánico</option><option>Frenos</option><option>Eléctrico</option><option>Tornillería</option><option>Administración</option><option>Herramientas</option></select></div></div>'
+    + '<div class="form-group"><label class="form-label">Descripción completa</label><input class="form-input" placeholder="Nombre completo del repuesto o insumo" id="ns-name"></div>'
+    + '<div class="form-row form-row-3"><div class="form-group"><label class="form-label">Stock inicial</label><input class="form-input" type="number" placeholder="0" id="ns-qty" step="0.01"></div><div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min" step="0.01"></div><div class="form-group"><label class="form-label">Unidad</label><select class="form-select" id="ns-unit"><option>un</option><option>L</option><option>kg</option><option>jgo</option><option>m</option></select></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="0" id="ns-cost" step="0.01"></div><div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="ns-supplier"></div></div>',
   [
-    { label:'Guardar ítem', cls:'btn-primary',   fn: saveNewStockItem },
-    { label:'Cancelar',     cls:'btn-secondary', fn: closeModal },
+    { label:'Guardar ítem', cls:'btn-primary', fn: saveNewStockItem },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
 }
 
 async function saveNewStockItem() {
-  const code     = (document.getElementById('ns-code')?.value  || '').trim();
-  const name     = (document.getElementById('ns-name')?.value  || '').trim();
-  const category = document.getElementById('ns-cat')?.value    || 'general';
-  const unit     = document.getElementById('ns-unit')?.value   || 'un';
-  const qty      = parseFloat(document.getElementById('ns-qty')?.value)   || 0;
-  const min_qty  = parseFloat(document.getElementById('ns-min')?.value)   || 0;
-  const cost     = parseFloat(document.getElementById('ns-cost')?.value)  || 0;
+  const code = (document.getElementById('ns-code')?.value || '').trim();
+  const name = (document.getElementById('ns-name')?.value || '').trim();
+  const category = document.getElementById('ns-cat')?.value || 'General';
+  const unit = document.getElementById('ns-unit')?.value || 'un';
+  const qty = parseFloat(document.getElementById('ns-qty')?.value) || 0;
+  const min_qty = parseFloat(document.getElementById('ns-min')?.value) || 0;
+  const cost = parseFloat(document.getElementById('ns-cost')?.value) || 0;
   const supplier = (document.getElementById('ns-supplier')?.value || '').trim();
-
   if (!code) { showToast('error','Ingresá el código del ítem'); return; }
   if (!name) { showToast('error','Ingresá el nombre / descripción del ítem'); return; }
-
-  // IMPORTANTE: el backend espera qty_current y qty_min (nombres reales de la columna),
-  // no qty y min_qty. Sin este mapeo, el stock inicial quedaba en 0.
-  const res = await apiFetch('/api/stock', {
-    method: 'POST',
-    body: JSON.stringify({
-      code, name, category, unit,
-      qty_current: qty,
-      qty_min: min_qty,
-      qty_reorder: Math.max(min_qty * 2, 1),
-      unit_cost: cost,
-      supplier: supplier || null
-    })
-  });
+  const loc = stockPayloadLocation('ns');
+  const res = await apiFetch('/api/stock', { method:'POST', body: JSON.stringify({ code, name, category, unit, qty_current: qty, qty_min: min_qty, qty_reorder: Math.max(min_qty * 2, 1), unit_cost: cost, supplier: supplier || null, ...loc }) });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al guardar stock'); return; }
-
-  closeModal();
-  showToast('ok', `Ítem "${name}" creado con stock inicial de ${qty} ${unit}`);
-  await afterSave({ page:'stock' });
+  closeModal(); showToast('ok', 'Ítem "'+name+'" creado en '+loc.sucursal+' / '+loc.area); await afterSave({ page:'stock' });
 }
-
 
 function renderDocuments() {
   const docs = App.data.documents || [];
@@ -5496,6 +5412,7 @@ const ROLES_LIST = [
   { value:'encargado_combustible', label:'Encargado combustible' },
   { value:'paniol',                label:'Depósito' },
   { value:'contador',              label:'Administración' },
+  { value:'gerente_sucursal',      label:'Gerente de sucursal' },
   { value:'auditor',               label:'Auditor' },
   { value:'compras',               label:'Compras' },
   { value:'tesoreria',             label:'Tesorería' },
@@ -5747,6 +5664,8 @@ async function renderUsers() {
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Email</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Rol</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Unidad</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Sucursal</th>
+              <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Área</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Estado</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Último acceso</th>
               <th style="padding:12px 16px;text-align:left;font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase">Acciones</th>
@@ -5763,6 +5682,8 @@ async function renderUsers() {
                   </span>
                 </td>
                 <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.vehicle_code || '—'}</td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.sucursal || '—'}</td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.area || '—'}</td>
                 <td style="padding:12px 16px">
                   <span style="background:${u.active ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${u.active ? '#22c55e' : '#ef4444'};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600">
                     ${u.active ? 'Activo' : 'Inactivo'}
@@ -5770,7 +5691,7 @@ async function renderUsers() {
                 </td>
                 <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
                 <td style="padding:12px 16px">
-                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}','${u.name.replace(/'/g,"\\'")}','${u.email}','${u.role}','${u.vehicle_code||''}',${u.active})">Editar</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${JSON.stringify(u.id)},${JSON.stringify(u.name)},${JSON.stringify(u.email)},${JSON.stringify(u.role)},${JSON.stringify(u.vehicle_code||'')},${u.active},${JSON.stringify(u.sucursal||'')},${JSON.stringify(u.area||'')})">Editar</button>
                   ${userHasRole('dueno') && u.email !== 'admin@fleetos.com' ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);margin-left:6px" onclick="confirmDeleteUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">🗑 Eliminar</button>` : ''}
                 </td>
               </tr>
@@ -5803,7 +5724,7 @@ async function approveUser(id) {
 
   const res2 = await apiFetch(`/api/users/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, active: true })
+    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, sucursal: u.sucursal || null, area: u.area || null, active: true })
   });
   if (res2.ok) { showToast('ok', `✓ ${u.name} aprobado — ya puede ingresar al sistema`); renderUsers(); }
   else { const e = await res2.json(); showToast('error', e.error || 'Error al aprobar'); }
@@ -5820,10 +5741,39 @@ async function rejectUser(id, name) {
 
   const res2 = await apiFetch(`/api/users/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, active: false })
+    body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, sucursal: u.sucursal || null, area: u.area || null, active: false })
   });
   if (res2.ok) { showToast('ok', 'Solicitud rechazada'); renderUsers(); }
   else { const e = await res2.json(); showToast('error', e.error || 'Error al rechazar'); }
+}
+
+
+function userOrgOptions(kind, current, sucursal) {
+  let opts = [];
+  if (kind === 'sucursal') opts = stockBaseOptions();
+  else opts = stockAreaOptions(sucursal || App.currentUser?.sucursal || 'Central');
+  if (current && !opts.includes(current)) opts.unshift(current);
+  return [...new Set(opts.filter(Boolean))];
+}
+
+function userOrgSelect(prefix, currentSucursal, currentArea) {
+  const sucursal = currentSucursal || '';
+  const area = currentArea || '';
+  const sucOpts = userOrgOptions('sucursal', sucursal, sucursal);
+  const areaOpts = userOrgOptions('area', area, sucursal || sucOpts[0] || 'Central');
+  return '<div class="form-row">'
+    + '<div class="form-group"><label class="form-label">Sucursal asignada</label><select class="form-select" id="'+prefix+'-sucursal" onchange="refreshUserOrgArea(\''+prefix+'\')"><option value="">— Sin sucursal fija —</option>'+sucOpts.map(function(b){ return '<option value="'+stockFormValue(b)+'" '+(b===sucursal?'selected':'')+'>'+stockFormValue(b)+'</option>'; }).join('')+'</select><div style="font-size:11px;color:var(--text3);margin-top:4px">Para gerente de sucursal se usa para limitar stock, vehículos y pedidos.</div></div>'
+    + '<div class="form-group"><label class="form-label">Área asignada</label><select class="form-select" id="'+prefix+'-area"><option value="">— Sin área fija —</option>'+areaOpts.map(function(a){ return '<option value="'+stockFormValue(a)+'" '+(a===area?'selected':'')+'>'+stockFormValue(a)+'</option>'; }).join('')+'</select><div style="font-size:11px;color:var(--text3);margin-top:4px">Ej: Administración, Depósito o Taller.</div></div>'
+    + '</div>';
+}
+
+function refreshUserOrgArea(prefix) {
+  const sucursal = document.getElementById(prefix+'-sucursal')?.value || 'Central';
+  const areaEl = document.getElementById(prefix+'-area');
+  if (!areaEl) return;
+  const current = areaEl.value || '';
+  const opts = userOrgOptions('area', current, sucursal);
+  areaEl.innerHTML = '<option value="">— Sin área fija —</option>' + opts.map(function(a){ return '<option value="'+stockFormValue(a)+'" '+(a===current?'selected':'')+'>'+stockFormValue(a)+'</option>'; }).join('');
 }
 
 
@@ -5859,6 +5809,7 @@ function openNewUserModal() {
           ${vehiclesOpts}
         </select>
       </div>
+      ${userOrgSelect('nu', '', '')}
     </div>
     <div id="nu-error" style="color:#ef4444;font-size:12px;margin-top:8px;min-height:16px"></div>
   `, [
@@ -5872,12 +5823,15 @@ async function saveNewUser() {
   const email = (document.getElementById('nu-email')?.value || '').trim();
   const role  = document.getElementById('nu-role')?.value   || 'operario';
   const pass  = (document.getElementById('nu-pass')?.value  || '').trim();
+  const vehicle  = document.getElementById('nu-vehicle')?.value || '';
+  const sucursal = document.getElementById('nu-sucursal')?.value || '';
+  const area     = document.getElementById('nu-area')?.value || '';
 
   if (!name || !email || !pass) { showToast('error','Nombre, email y contraseña son obligatorios'); return; }
 
   const res = await apiFetch('/api/users', {
     method: 'POST',
-    body: JSON.stringify({ name, email, role, password: pass })
+    body: JSON.stringify({ name, email, role, password: pass, vehicle_code: vehicle || null, sucursal: sucursal || null, area: area || null })
   });
   if (!res.ok) { const e=await res.json(); showToast('error', e.error||'Error al crear usuario'); return; }
 
@@ -5886,7 +5840,7 @@ async function saveNewUser() {
 }
 
 
-function openEditUserModal(id, name, email, role, vehicle, active) {
+function openEditUserModal(id, name, email, role, vehicle, active, sucursal, area) {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');
   const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate}</option>`).join('');
 
@@ -5907,6 +5861,7 @@ function openEditUserModal(id, name, email, role, vehicle, active) {
           ${vehiclesOpts}
         </select>
       </div>
+      ${userOrgSelect('eu', sucursal || '', area || '')}
       <div class="form-group" id="eu-supplier-group" style="display:${role==='proveedores'?'block':'none'}">
         <label class="form-label">Proveedor vinculado <span style="color:#ef4444">*</span></label>
         <select class="form-select" id="eu-supplier">
@@ -5936,6 +5891,8 @@ async function saveEditUser(id) {
   const vehicle  = document.getElementById('eu-vehicle')?.value;
   const password = document.getElementById('eu-pass')?.value;
   const active   = document.getElementById('eu-active')?.checked;
+  const sucursal = document.getElementById('eu-sucursal')?.value || '';
+  const area     = document.getElementById('eu-area')?.value || '';
   const errDiv   = document.getElementById('eu-error');
 
   if (!name || !role) { if(errDiv) errDiv.textContent = 'Nombre y rol son obligatorios'; return; }
@@ -5943,7 +5900,7 @@ async function saveEditUser(id) {
 
   try {
     const supplier_id = document.getElementById('eu-supplier')?.value || null;
-    const body = { name, role, vehicle_code: vehicle || null, active, supplier_id };
+    const body = { name, role, vehicle_code: vehicle || null, active, supplier_id, sucursal: sucursal || null, area: area || null };
     if (password) body.password = password;
 
     const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -9045,7 +9002,7 @@ async function openNewPOModal() {
   // Roles solicitantes (jefe mant, pañol/depósito, contador/administración)
   // usan un modal específico SIN precios / proveedor.
   // Ese workflow lo completa compras después.
-  if (['jefe_mantenimiento','paniol','contador'].includes(App.currentUser?.role)) {
+  if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(App.currentUser?.role)) {
     return openNewPOModalJefe();
   }
 
@@ -9285,6 +9242,11 @@ async function openNewPOModalJefe() {
   window._presupuestoArchivo = null;
 
   var solicitante = App.currentUser?.name || App.currentUser?.email || '—';
+  var lockedSucursalPO = (App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.sucursal) ? App.currentUser.sucursal : '';
+  var lockedAreaPO = (App.currentUser?.role === 'gerente_sucursal' && App.currentUser?.area) ? App.currentUser.area : '';
+  var sucursalesPO = stockBaseOptions();
+  if (lockedSucursalPO && !sucursalesPO.includes(lockedSucursalPO)) sucursalesPO.unshift(lockedSucursalPO);
+  var sucursalOptionsPO = sucursalesPO.map(b => `<option value="${b}" ${b===lockedSucursalPO?'selected':''}>${b}</option>`).join('');
 
   openModal('📋 Nueva solicitud de compra', `
     <div style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--accent);display:flex;align-items:center;gap:8px">
@@ -9301,9 +9263,9 @@ async function openNewPOModalJefe() {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
-          <select class="form-select" id="poj-sucursal" onchange="updatePOJefeAreaSelect()">
-            <option value="">— Seleccionar sucursal —</option>
-            ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
+          <select class="form-select" id="poj-sucursal" onchange="updatePOJefeAreaSelect()" ${lockedSucursalPO?'disabled':''}>
+            ${lockedSucursalPO ? '' : '<option value="">— Seleccionar sucursal —</option>'}
+            ${sucursalOptionsPO}
           </select>
         </div>
         <div class="form-group" style="margin:0">
@@ -9370,8 +9332,19 @@ async function openNewPOModalJefe() {
     { label:'Enviar solicitud', cls:'btn-primary',   fn: saveNewPOJefe },
   ]);
 
-  // Agregar 1 ítem inicial
-  setTimeout(() => addPOJefeItem(), 50);
+  // Agregar 1 ítem inicial y preseleccionar sucursal/área si es gerente de sucursal
+  setTimeout(async () => {
+    if (lockedSucursalPO) {
+      const suc = document.getElementById('poj-sucursal');
+      if (suc) suc.value = lockedSucursalPO;
+      await updatePOJefeAreaSelect();
+      if (lockedAreaPO) {
+        const area = document.getElementById('poj-area');
+        if (area) area.value = lockedAreaPO;
+      }
+    }
+    addPOJefeItem();
+  }, 50);
 }
 
 function setPOJefeTipo(tipo) {
@@ -13196,13 +13169,15 @@ function exportStockPDF() {
     showToast('error','jsPDF no cargado. Refrescá la página.');
     return;
   }
-  const items = App.data.stock || [];
-  if (items.length === 0) { showToast('warn', 'No hay ítems en el pañol'); return; }
+  const items = (typeof stockFilteredItems === 'function') ? stockFilteredItems() : (App.data.stock || []);
+  if (items.length === 0) { showToast('warn', 'No hay ítems con esos filtros'); return; }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  const startY = _pdfHeader(doc, 'Inventario del pañol', `${items.length} ítem${items.length===1?'':'s'}`);
+  const f = (typeof stockCurrentFilters === 'function') ? stockCurrentFilters() : {sucursal:'all', area:'all'};
+  const filtroTxt = `Sucursal: ${f.sucursal==='all'?'todas':f.sucursal} · Área: ${f.area==='all'?'todas':f.area}`;
+  const startY = _pdfHeader(doc, 'Inventario por sucursal y área', `${items.length} ítem${items.length===1?'':'s'} · ${filtroTxt}`);
 
   const totalVal = items.reduce((a,s) => a + (s.qty * s.cost), 0);
   const criticos = items.filter(s => s.qty <= s.min).length;
@@ -13213,6 +13188,8 @@ function exportStockPDF() {
     return [
       s.code || '—',
       s.name || '—',
+      s.sucursal || s.base_location || 'Central',
+      s.area || 'Depósito',
       s.cat || 'General',
       (s.qty || 0).toString() + ' ' + (s.unit || 'un'),
       (s.min || 0).toString() + ' ' + (s.unit || 'un'),
@@ -13226,19 +13203,19 @@ function exportStockPDF() {
 
   doc.autoTable({
     startY: startY,
-    head: [['Código','Descripción','Categoría','Stock','Mínimo','P. pedido','Costo unit.','Valorización','Proveedor','Estado']],
+    head: [['Código','Descripción','Sucursal','Área','Categoría','Stock','Mínimo','P. pedido','Costo unit.','Valorización','Proveedor','Estado']],
     body: tableData,
     ..._pdfTableStyle(),
     columnStyles: {
-      0: { cellWidth: 65, fontStyle: 'bold' },
-      3: { halign: 'right' },
-      4: { halign: 'right' },
+      0: { cellWidth: 55, fontStyle: 'bold' },
       5: { halign: 'right' },
       6: { halign: 'right' },
-      7: { halign: 'right', fontStyle: 'bold' },
+      7: { halign: 'right' },
+      8: { halign: 'right' },
+      9: { halign: 'right', fontStyle: 'bold' },
     },
     foot: [[
-      'TOTALES', '', '',
+      'TOTALES', '', '', '', '',
       items.length + ' ítems',
       criticos + ' crít.',
       '', '',
@@ -13256,13 +13233,18 @@ function exportStockHistoryPDF() {
     showToast('error','jsPDF no cargado. Refrescá la página.');
     return;
   }
-  const hist = App.data.stockHistory || [];
-  if (hist.length === 0) { showToast('warn', 'No hay movimientos registrados'); return; }
+  const fHist = (typeof stockCurrentFilters === 'function') ? stockCurrentFilters() : {sucursal:'all', area:'all'};
+  const hist = (App.data.stockHistory || []).filter(h => {
+    if (fHist.sucursal !== 'all' && h.sucursal !== fHist.sucursal) return false;
+    if (fHist.area !== 'all' && h.area !== fHist.area) return false;
+    return true;
+  });
+  if (hist.length === 0) { showToast('warn', 'No hay movimientos registrados con esos filtros'); return; }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-  const startY = _pdfHeader(doc, 'Movimientos del pañol', `${hist.length} movimiento${hist.length===1?'':'s'}`);
+  const startY = _pdfHeader(doc, 'Movimientos del pañol', `${hist.length} movimiento${hist.length===1?'':'s'} · Sucursal: ${fHist.sucursal==='all'?'todas':fHist.sucursal} · Área: ${fHist.area==='all'?'todas':fHist.area}`);
 
   // Conteo por tipo para el footer
   const porTipo = hist.reduce((acc, h) => {
@@ -13276,6 +13258,8 @@ function exportStockHistoryPDF() {
     return [
       h.date || '—',
       h.name || '—',
+      h.sucursal || 'Central',
+      h.area || 'Depósito',
       h.type || '—',
       sign + (h.qty || 0) + ' ' + (h.unit || 'un'),
       h.motivo || '—',
@@ -13285,7 +13269,7 @@ function exportStockHistoryPDF() {
 
   doc.autoTable({
     startY: startY,
-    head: [['Fecha','Ítem','Tipo','Cantidad','Motivo','Usuario']],
+    head: [['Fecha','Ítem','Sucursal','Área','Tipo','Cantidad','Motivo','Usuario']],
     body: tableData,
     ..._pdfTableStyle(),
     columnStyles: {
