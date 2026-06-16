@@ -86,6 +86,11 @@ async function nextOCCode() {
   return 'OC-' + String(parseInt(r.rows[0].num)).padStart(4, '0');
 }
 
+const FORMAS_PAGO_OC = ['contado','cuenta_corriente','transferencia','cheque'];
+function normalizarFormaPago(v) {
+  return FORMAS_PAGO_OC.includes(v) ? v : null;
+}
+
 // ─────────────────────────────────────────────────────────────
 //  HELPERS DE PERMISOS
 // ─────────────────────────────────────────────────────────────
@@ -144,7 +149,7 @@ router.get('/', authenticate, async (req, res) => {
     const userId = req.user.id;
 
     // Roles sin acceso al módulo
-    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor'];
+    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores'];
     if (!rolesPermitidos.includes(role)) {
       return res.status(403).json({ error: 'No tenés permiso para ver órdenes de compra' });
     }
@@ -321,7 +326,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     const code = await nextOCCode();
 
     // Armar INSERT con columnas según estado inicial
-    const _fp  = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
+    const _fp  = normalizarFormaPago(forma_pago);
     const _cc  = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
     const _iva = iva_pct != null ? parseFloat(iva_pct) : 0;
@@ -453,7 +458,7 @@ router.patch('/:id', authenticate, async (req, res) => {
       forma_pago:    () => {
         if (req.body.forma_pago === undefined) return undefined;
         const v = req.body.forma_pago;
-        return (v === 'contado' || v === 'cuenta_corriente') ? v : null;
+        return normalizarFormaPago(v);
       },
       cc_dias:       () => (req.body.cc_dias !== undefined ? (req.body.cc_dias ? parseInt(req.body.cc_dias,10) : null) : undefined),
       moneda:        () => (req.body.moneda !== undefined ? (req.body.moneda === 'USD' ? 'USD' : 'ARS') : undefined),
@@ -659,7 +664,7 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
     // y el rol Proveedores carga la factura cuando la recibe del proveedor.
 
     // Validar forma_pago
-    const _fp = (forma_pago === 'contado' || forma_pago === 'cuenta_corriente') ? forma_pago : null;
+    const _fp = normalizarFormaPago(forma_pago);
     const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
 
