@@ -19,11 +19,13 @@ const LOCK_MINS    = parseInt(process.env.LOCK_TIME_MINUTES)  || 15;
     await query(`ALTER TABLE users ADD CONSTRAINT users_role_check
       CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
                       'encargado_combustible','paniol','contador','auditor',
-                      'compras','tesoreria','proveedores'))`);
-    console.log('[auth migración] roles habilitados (incluyendo proveedores)');
-    // Agregar supplier_id a users (vincula usuario rol=proveedores con un supplier del catálogo)
-    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id)`);
-    console.log('[auth migración] users.supplier_id agregado');
+                      'compras','tesoreria','proveedores','gerente_sucursal'))`);
+    console.log('[auth migración] roles habilitados (incluyendo proveedores y gerente_sucursal)');
+    // Datos de organización del usuario
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id)`).catch(()=>{});
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200)`).catch(()=>{});
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS area VARCHAR(100)`).catch(()=>{});
+    console.log('[auth migración] users.supplier_id/sucursal/area agregados');
   } catch(e) { console.error('[auth migración]', e.message); }
 })();
 
@@ -37,7 +39,7 @@ router.post('/login', loginLimiter, checkAccountLock, async (req, res) => {
 
   try {
     const result = await query(
-      'SELECT id, name, email, password_hash, role, vehicle_code, active, login_attempts, locked_until FROM users WHERE email = $1',
+      'SELECT id, name, email, password_hash, role, vehicle_code, sucursal, area, active, login_attempts, locked_until FROM users WHERE email = $1',
       [email.toLowerCase().trim()]
     );
 
@@ -108,6 +110,8 @@ router.post('/login', loginLimiter, checkAccountLock, async (req, res) => {
         email:        user.email,
         role:         user.role,
         vehicle_code: user.vehicle_code,
+        sucursal:     user.sucursal,
+        area:         user.area,
       }
     });
   } catch (err) {
@@ -143,7 +147,7 @@ router.post('/refresh', async (req, res) => {
 
     // Traer datos del usuario para restaurar sesión
     const userRow = await query(
-      'SELECT id, name, email, role, vehicle_code FROM users WHERE id = $1',
+      'SELECT id, name, email, role, vehicle_code, sucursal, area FROM users WHERE id = $1',
       [user_id]
     );
 
