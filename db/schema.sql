@@ -81,9 +81,16 @@ CREATE TABLE IF NOT EXISTS vehicles (
 );
 
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS code        VARCHAR(20);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS base        TEXT DEFAULT 'Central';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_id   UUID;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS km_current  INT DEFAULT 0;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         TEXT;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   TEXT;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center TEXT;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_spec   JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS active      BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 3.  COMBUSTIBLE (cisternas propias)
