@@ -14,6 +14,19 @@
   }
 
   const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const escAttr = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  function datosTransferenciaProveedor() {
+    const f = window._pagoFacturaActual || {};
+    const oc = window._pagoOcActual || {};
+    const bancoDestino = f.supplier_bank || f.supplier_name || oc.proveedor || '';
+    const cbuAlias = f.supplier_alias || f.supplier_cbu || '';
+    return {
+      bancoDestino,
+      cbuAlias,
+      tieneDatos: !!(f.supplier_bank || f.supplier_alias || f.supplier_cbu)
+    };
+  }
 
   // ─────────────────────────────────────────────────────────
   //  PANEL TESORERÍA — facturas pendientes
@@ -119,6 +132,8 @@
   };
 
   function renderModalPago(poId, facId, factura, pagos, oc) {
+    window._pagoFacturaActual = factura;
+    window._pagoOcActual = oc;
     document.querySelector('.modal-pago-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'modal-pago-overlay';
@@ -167,7 +182,7 @@
                 <select id="pago-metodo" class="form-select" onchange="cambiarMetodoPago()">
                   <option value="">— Seleccionar —</option>
                   <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
+                  <option value="transferencia" ${factura.forma_pago==='transferencia'?'selected':''}>Transferencia</option>
                   <option value="cheque">Cheque físico</option>
                   <option value="echeq">eCheq</option>
                   <option value="tarjeta">Tarjeta</option>
@@ -224,6 +239,9 @@
       </div>
     `;
     document.body.appendChild(overlay);
+    setTimeout(() => {
+      if (document.getElementById('pago-metodo')?.value) cambiarMetodoPago();
+    }, 0);
   }
 
   function detallePago(p) {
@@ -260,13 +278,15 @@
     let html = '';
 
     if (metodo === 'transferencia') {
+      const t = datosTransferenciaProveedor();
       html = `
+        ${t.tieneDatos ? '<div style="font-size:12px;color:var(--ok);margin-bottom:8px">✓ Datos bancarios tomados del proveedor cargado en la OC.</div>' : '<div style="font-size:12px;color:var(--warn);margin-bottom:8px">⚠ No hay banco/CBU/Alias cargado en Proveedores. Podés completarlo manualmente acá.</div>'}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
           <div><label style="font-size:12px;color:var(--text3)">Banco origen *</label><input id="pago-banco-origen" type="text" placeholder="Ej: Banco Galicia" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Banco destino *</label><input id="pago-banco-destino" type="text" placeholder="Ej: Banco Provincia" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Banco destino *</label><input id="pago-banco-destino" type="text" value="${escAttr(t.bancoDestino)}" placeholder="Banco del proveedor" class="form-input"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:var(--text3)">CBU / Alias destino</label><input id="pago-cbu" type="text" placeholder="0000003100..." class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">CBU / Alias destino</label><input id="pago-cbu" type="text" value="${escAttr(t.cbuAlias)}" placeholder="CBU o Alias del proveedor" class="form-input"></div>
           <div><label style="font-size:12px;color:var(--text3)">N° comprobante</label><input id="pago-comprobante" type="text" placeholder="Ej: 12345678" class="form-input"></div>
         </div>`;
     } else if (metodo === 'cheque') {
