@@ -358,7 +358,7 @@ function getRoleData(role) {
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
-    gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs'], canEdit:['stock','purchase_orders'] },
+    gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'], canEdit:['stock','purchase_orders'] },
     proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
   };
   return roles[role] || roles['auditor'];
@@ -697,8 +697,11 @@ async function loadInitialData() {
 
     // /api/users solo lo puede consumir dueño/gerencia (requireRole en el backend).
     // Para otros roles devolvemos un response "vacío" en vez de disparar un 403 que ensucia la consola.
-    const canLoadUsers = ['dueno','gerencia'].includes(App.currentUser?.role);
-    const usersFetch   = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
+    const roleCode = App.currentUser?.role;
+    const canLoadUsers = ['dueno','gerencia'].includes(roleCode);
+    const canLoadSuppliers = ['dueno','gerencia','compras','proveedores','contador','jefe_mantenimiento','paniol'].includes(roleCode);
+    const usersFetch     = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
+    const suppliersFetch = canLoadSuppliers ? apiFetch('/api/suppliers') : Promise.resolve({ ok: false, json: async () => [] });
 
     const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes] = await Promise.all([
       apiFetch('/api/vehicles'),
@@ -711,7 +714,7 @@ async function loadInitialData() {
       usersFetch,
       apiFetch('/api/tires'),
       apiFetch('/api/tires/history'),
-      apiFetch('/api/suppliers'),
+      suppliersFetch,
       apiFetch('/api/assets'),
       apiFetch('/api/stock/movements?limit=50'),
       apiFetch('/api/fuel/tank-entries?limit=50'),
