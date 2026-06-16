@@ -166,7 +166,7 @@ window.FleetRoles = {
   mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
   contador:      { code:'contador',      label:'Contador',          modules:['dashboard','costs','documents','contador_panel'] },
-  compras:       { code:'compras',       label:'Compras',           modules:['dashboard','purchase_orders','suppliers'] },
+  compras:       { code:'compras',       label:'Compras',           modules:['dashboard','purchase_orders','suppliers','fuel'] },
   tesoreria:     { code:'tesoreria',     label:'Tesorería',         modules:['dashboard','tesoreria_panel','purchase_orders'] },
   proveedores:   { code:'proveedores',   label:'Proveedores',       modules:['proveedor_panel','suppliers','purchase_orders'] },
   chofer:        { code:'chofer',        label:'Chofer',            modules:['dashboard','fuel','documents','chofer_panel'] }
@@ -1896,8 +1896,9 @@ function renderFuel() {
   const ureaCap    = parseFloat(ureaTank.capacity_l) || 2000;
   const gasoilPct  = tankCap > 0 ? Math.round(tankLevel/tankCap*100) : 0;
   const ureaPct    = ureaCap > 0 ? Math.round(ureaLevel/ureaCap*100) : 0;
-  const gasoilClass = gasoilPct < 20 ? 'warn' : 'info';
+  const gasoilClass = tankLevel < 10000 ? 'warn' : 'info';
   const ureaClass   = ureaPct   < 20 ? 'warn' : 'info';
+  const tankEntries = App.data.tankEntries || [];
 
   // ── Litros cargados HOY ──
   const today = todayISO();
@@ -1935,7 +1936,7 @@ function renderFuel() {
   }
   document.getElementById('page-fuel').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
-      <div class="kpi-card ${gasoilClass}"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
+      <div class="kpi-card ${gasoilClass}"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${tankLevel<10000?' · ⚠ Pedir gasoil / cotizar compra':gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
       <div class="kpi-card ${ureaClass}"><div class="kpi-label">Stock cisterna urea</div><div class="kpi-value ${ureaClass}">${ureaLevel.toLocaleString()} L</div><div class="kpi-trend">${ureaPct}% de capacidad (${ureaCap.toLocaleString()} L)${ureaPct<20?' · ⚠ Solicitar reposición':''}</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Litros cargados hoy</div><div class="kpi-value ok">${litrosHoy.toLocaleString()}</div><div class="kpi-trend">en ${logsHoy.length} cargas · ${App.data.fuelLogs.length} total historial</div></div>
       <div class="kpi-card ${rendimiento==='—'?'':'ok'}"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value ${rendimiento==='—'?'white':'ok'}">${rendimiento}</div><div class="kpi-trend">${rendTrend}</div></div>
@@ -1951,7 +1952,29 @@ function renderFuel() {
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span ${ureaPct<20?'style="color:var(--warn)"':''}>Urea / AdBlue</span><span class="td-mono" ${ureaPct<20?'style="color:var(--warn)"':''}>${ureaLevel.toLocaleString()} / ${ureaCap.toLocaleString()} L ${ureaPct<20?'⚠':''}</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${ureaPct}%;background:${ureaPct<20?'var(--warn)':'var(--ok)'}"></div></div>
         </div>
-        <div style="margin-top:16px;display:flex;gap:8px"><button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button><button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button></div>
+        <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+          ${_fuelPuedeGestionarCisterna(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button>` : ''}
+          ${_fuelPuedeVerificarTickets(App.currentUser?.role) ? `<button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button>` : ''}
+        </div>
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🧾 Últimos tickets de ingreso</div>
+            ${tankEntries.length ? `<span style="font-size:10px;color:var(--text3)">${tankEntries.length} registrados</span>` : ''}
+          </div>
+          ${tankEntries.length === 0 ? `
+            <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px">Todavía no hay ingresos a cisterna registrados con ticket.</div>
+          ` : `
+            <div style="display:flex;flex-direction:column;gap:6px;max-height:145px;overflow:auto">
+              ${tankEntries.slice(0,5).map(e => `
+                <div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border-radius:var(--radius);padding:8px 10px;font-size:12px">
+                  <span style="font-family:var(--mono);color:var(--accent);font-weight:700">${_fuelTankEntryCode(e)}</span>
+                  <span style="flex:1">${_fuelTankTypeLabel(e.type)} · <b>${Math.round(e.liters).toLocaleString('es-AR')} L</b> ${e.supplier ? '· '+e.supplier : ''}</span>
+                  <button class="btn btn-secondary btn-sm" onclick="openFuelTankEntryTicket('${e.id}')">Ver ticket</button>
+                </div>
+              `).join('')}
+            </div>
+          `}
+        </div>
       </div>
       <div class="card">
         <div class="card-title">Consumo por unidad (últimos 30 días)</div>
@@ -2255,7 +2278,7 @@ function openFuelEntryModal() {
   openModal('Ingreso a cisterna', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-select" id="fe-type" onchange="document.getElementById('fe-nivel-actual').textContent=this.value==='Gasoil'?'${gasoilNivel}':'${ureaNivel}'">
+        <select class="form-select" id="fe-type" onchange="document.getElementById('fe-nivel-actual').textContent=this.value==='gasoil'?'${gasoilNivel}':'${ureaNivel}'">
           <option value="gasoil">Gasoil</option>
           <option value="urea">Urea / AdBlue</option>
         </select>
@@ -2284,8 +2307,12 @@ function openFuelEntryModal() {
 }
 
 async function saveFuelEntry() {
-  const type   = document.getElementById('fe-type')?.value || 'gasoil';
-  const liters = parseFloat(document.getElementById('fe-liters')?.value) || 0;
+  const type     = document.getElementById('fe-type')?.value || 'gasoil';
+  const liters   = parseFloat(document.getElementById('fe-liters')?.value) || 0;
+  const supplier = (document.getElementById('fe-supplier')?.value || '').trim();
+  const remito   = (document.getElementById('fe-remito')?.value || '').trim();
+  const ppu      = _fuelPuedeVerPrecios(App.currentUser?.role) ? (parseFloat(document.getElementById('fe-ppu')?.value) || null) : null;
+
   if (liters <= 0) { showToast('error', 'Ingresá la cantidad de litros'); return; }
 
   const tanks = App.data.tanks || [];
@@ -2298,7 +2325,7 @@ async function saveFuelEntry() {
 
   if (!tank) { showToast('error', 'No se encontró la cisterna en el sistema'); return; }
 
-  const capacidad  = parseFloat(tank.capacity_l) || 47000;
+  const capacidad   = parseFloat(tank.capacity_l) || 47000;
   const nivelActual = parseFloat(tank.current_l) || 0;
   const nuevoNivel  = nivelActual + liters;
 
@@ -2307,24 +2334,154 @@ async function saveFuelEntry() {
     return;
   }
 
-  const res = await apiFetch(`/api/fuel/tanks/${tank.id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(
-      _fuelPuedeVerPrecios(App.currentUser?.role)
-        ? { current_l: nuevoNivel, price_per_l: parseFloat(document.getElementById('fe-ppu')?.value) || null }
-        : { current_l: nuevoNivel }
-    )
+  const res = await apiFetch('/api/fuel/tank-entries', {
+    method: 'POST',
+    body: JSON.stringify({
+      tank_id: tank.id,
+      type,
+      liters,
+      price_per_l: ppu,
+      supplier,
+      remito,
+      notes: 'Ingreso registrado desde módulo Combustible'
+    })
   });
 
-  if (!res.ok) { showToast('error', 'Error al registrar ingreso'); return; }
+  if (!res.ok) {
+    let e = {};
+    try { e = await res.json(); } catch(_) {}
+    showToast('error', e.error || 'Error al registrar ingreso');
+    return;
+  }
 
-  // Actualizar en memoria
-  const ppu = _fuelPuedeVerPrecios(App.currentUser?.role) ? (parseFloat(document.getElementById('fe-ppu')?.value) || null) : null;
-  tank.current_l = nuevoNivel;
-  if (ppu) tank.price_per_l = ppu;
+  const data = await res.json();
+  const entry = data.entry || null;
+
+  // Actualizar en memoria para que se vea sin Ctrl+F5.
+  if (data.tank) {
+    const idx = (App.data.tanks || []).findIndex(t => t.id === data.tank.id);
+    if (idx >= 0) App.data.tanks[idx] = data.tank;
+  } else {
+    tank.current_l = nuevoNivel;
+    if (ppu) tank.price_per_l = ppu;
+  }
+  if (entry) {
+    const mapped = {
+      id: entry.id,
+      type: entry.type || type,
+      liters: parseFloat(entry.liters) || liters,
+      price_per_l: entry.price_per_l === null || entry.price_per_l === undefined ? ppu : parseFloat(entry.price_per_l),
+      supplier: entry.supplier || supplier,
+      remito: entry.remito || remito,
+      notes: entry.notes || '',
+      previous_l: parseFloat(entry.previous_l) || nivelActual,
+      new_l: parseFloat(entry.new_l) || nuevoNivel,
+      created_at: entry.created_at || new Date().toISOString(),
+      date: entry.created_at ? entry.created_at.slice(0,16).replace('T',' ') : new Date().toISOString().slice(0,16).replace('T',' '),
+      tank_id: entry.tank_id || tank.id,
+      tank_location: tank.location || 'Cisterna',
+      created_by_name: App.currentUser?.name || '—',
+      _raw: entry
+    };
+    App.data.tankEntries = [mapped, ...(App.data.tankEntries || [])];
+  }
+
   closeModal();
-  showToast('ok', `✅ ${liters.toLocaleString()} L de ${type} ingresados a cisterna — nuevo nivel: ${Math.round(nuevoNivel).toLocaleString()} L`);
+  showToast('ok', `✅ ${liters.toLocaleString()} L de ${_fuelTankTypeLabel(type)} ingresados a cisterna — ticket generado`);
+
+  try { await loadInitialData(); } catch(e) {}
   renderFuel();
+  if (entry) setTimeout(() => openFuelTankEntryTicket(entry.id || entry), 150);
+}
+
+function openFuelTankEntryTicket(entryOrId) {
+  const entries = App.data.tankEntries || [];
+  const entry = typeof entryOrId === 'string'
+    ? entries.find(e => e.id === entryOrId)
+    : entryOrId;
+
+  if (!entry) { showToast('error', 'No se encontró el ticket de cisterna'); return; }
+
+  const ticketCode = _fuelTankEntryCode(entry);
+  const litros = Math.round(parseFloat(entry.liters) || 0).toLocaleString('es-AR');
+  const ppu = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l))
+    ? '$' + Math.round(parseFloat(entry.price_per_l)).toLocaleString('es-AR')
+    : '—';
+  const total = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l))
+    ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR')
+    : '—';
+  const fecha = entry.created_at ? new Date(entry.created_at).toLocaleString('es-AR') : (entry.date || '—');
+
+  openModal(`🧾 Ticket ${ticketCode}`, `
+    <div id="fuel-tank-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+      <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta</div>
+          <div style="font-size:12px;color:var(--text3)">Ingreso a cisterna</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:900;color:var(--accent);font-family:var(--mono)">${ticketCode}</div>
+          <div style="font-size:11px;color:var(--text3)">${fecha}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+        <div><b>Producto</b><br>${_fuelTankTypeLabel(entry.type)}</div>
+        <div><b>Litros ingresados</b><br>${litros} L</div>
+        <div><b>Cisterna</b><br>${entry.tank_location || 'Cisterna'}</div>
+        <div><b>Proveedor</b><br>${entry.supplier || '—'}</div>
+        <div><b>Remito</b><br>${entry.remito || '—'}</div>
+        <div><b>Precio/L</b><br>${ppu}</div>
+        <div><b>Total estimado</b><br>${total}</div>
+        <div><b>Registró</b><br>${entry.created_by_name || App.currentUser?.name || '—'}</div>
+      </div>
+
+      <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
+        Nivel anterior: <b>${Math.round(parseFloat(entry.previous_l)||0).toLocaleString('es-AR')} L</b> ·
+        Nivel nuevo: <b>${Math.round(parseFloat(entry.new_l)||0).toLocaleString('es-AR')} L</b>
+      </div>
+    </div>
+  `, [
+    { label:'🖨 Imprimir ticket', cls:'btn-primary', fn: () => printFuelTankEntryTicket(entry.id) },
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+function printFuelTankEntryTicket(entryId) {
+  const entry = (App.data.tankEntries || []).find(e => e.id === entryId);
+  if (!entry) { showToast('error', 'No se encontró el ticket'); return; }
+
+  const ticketCode = _fuelTankEntryCode(entry);
+  const litros = Math.round(parseFloat(entry.liters) || 0).toLocaleString('es-AR');
+  const ppuVal = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l));
+  const ppu = ppuVal ? '$' + Math.round(parseFloat(entry.price_per_l)).toLocaleString('es-AR') : '—';
+  const total = ppuVal ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR') : '—';
+  const fecha = entry.created_at ? new Date(entry.created_at).toLocaleString('es-AR') : (entry.date || '—');
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>${ticketCode}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111827}
+      .ticket{border:1px solid #d1d5db;border-radius:10px;padding:18px;max-width:720px;margin:auto}
+      .head{display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:14px}
+      .brand{font-size:20px;font-weight:800}.sub{font-size:12px;color:#6b7280}.code{font:700 16px monospace;color:#2563eb;text-align:right}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px}.box{background:#f3f4f6;border-radius:8px;padding:10px;margin-top:14px;font-size:12px}
+      b{display:block;margin-bottom:3px;color:#374151}@media print{button{display:none}}
+    </style></head><body>
+      <div class="ticket">
+        <div class="head"><div><div class="brand">Expreso Biletta</div><div class="sub">Ingreso a cisterna</div></div><div><div class="code">${ticketCode}</div><div class="sub">${fecha}</div></div></div>
+        <div class="grid">
+          <div><b>Producto</b>${_fuelTankTypeLabel(entry.type)}</div><div><b>Litros ingresados</b>${litros} L</div>
+          <div><b>Cisterna</b>${entry.tank_location || 'Cisterna'}</div><div><b>Proveedor</b>${entry.supplier || '—'}</div>
+          <div><b>Remito</b>${entry.remito || '—'}</div><div><b>Precio/L</b>${ppu}</div>
+          <div><b>Total estimado</b>${total}</div><div><b>Registró</b>${entry.created_by_name || App.currentUser?.name || '—'}</div>
+        </div>
+        <div class="box">Nivel anterior: <b style="display:inline">${Math.round(parseFloat(entry.previous_l)||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(parseFloat(entry.new_l)||0).toLocaleString('es-AR')} L</b></div>
+      </div>
+      <script>window.onload=function(){setTimeout(function(){window.print();},250);}<\/script>
+    </body></html>`);
+  win.document.close();
 }
 
 
@@ -4848,6 +5005,59 @@ function _ocPuedeVerPrecios(role) {
 function _fuelPuedeVerPrecios(role) {
   const rolesQueSiVen = ['dueno','gerencia','compras','contador','auditor','encargado_combustible','proveedores'];
   return rolesQueSiVen.includes(role);
+}
+
+function _fuelPuedeGestionarCisterna(role) {
+  return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento'].includes(role);
+}
+
+function _fuelPuedeVerificarTickets(role) {
+  return ['dueno','gerencia','jefe_mantenimiento','encargado_combustible'].includes(role);
+}
+
+function _fuelTankEntryCode(entry) {
+  if (!entry) return 'TC-0000';
+  const d = entry.created_at ? new Date(entry.created_at) : new Date();
+  const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+  return `TC-${ymd}-${String(entry.id || '').slice(0,6).toUpperCase()}`;
+}
+
+function _fuelTankTypeLabel(type) {
+  const t = String(type || '').toLowerCase();
+  return t === 'urea' ? 'Urea / AdBlue' : 'Gasoil';
+}
+
+function checkGasoilLowForCompras(force) {
+  if (App.currentUser?.role !== 'compras') return;
+  const tanks = App.data.tanks || [];
+  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+  if (!gasoilTank) return;
+
+  const level = parseFloat(gasoilTank.current_l) || 0;
+  const cap   = parseFloat(gasoilTank.capacity_l) || 0;
+  if (level >= 10000) return;
+
+  const key = `gasoil-low-alert-${todayISO()}`;
+  if (!force && sessionStorage.getItem(key)) return;
+  sessionStorage.setItem(key, '1');
+
+  const pct = cap > 0 ? Math.round(level / cap * 100) : 0;
+  openModal('⚠ Stock bajo de gasoil', `
+    <div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);border-radius:var(--radius);padding:16px;margin-bottom:14px">
+      <div style="font-size:15px;font-weight:800;color:var(--warn);margin-bottom:6px">La cisterna de gasoil está por debajo del mínimo</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.5">
+        Stock actual: <b>${Math.round(level).toLocaleString('es-AR')} L</b>${cap ? ` de ${Math.round(cap).toLocaleString('es-AR')} L (${pct}%)` : ''}.
+        Conviene iniciar la compra o cotización de gasoil.
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);line-height:1.5">
+      Mínimo configurado: <b>10.000 L</b>. Este aviso se muestra automáticamente al ingresar compras.
+    </div>
+  `, [
+    { label:'🛒 Cotizar / crear OC', cls:'btn-primary', fn: () => { closeModal(); navigate('purchase_orders'); setTimeout(() => { if (typeof openNewPOModal === 'function') openNewPOModal(); }, 250); } },
+    { label:'⛽ Registrar ingreso a cisterna', cls:'btn-secondary', fn: () => { closeModal(); navigate('fuel'); setTimeout(() => { if (typeof openFuelEntryModal === 'function') openFuelEntryModal(); }, 250); } },
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
 }
 // ═══════════════════════════════════════════════════════════
 
