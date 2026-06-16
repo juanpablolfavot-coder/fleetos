@@ -107,6 +107,18 @@ async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, asse
   return po.rows[0];
 }
 
+function _woUserSucursal(req) {
+  return String(req?.user?.sucursal || '').trim();
+}
+function _woIsGerenteSucursal(req) {
+  return req?.user?.role === 'gerente_sucursal';
+}
+async function _woVehicleBelongsToSucursal(client, vehicleId, sucursal) {
+  if (!vehicleId || !sucursal) return false;
+  const r = await client.query('SELECT id FROM vehicles WHERE id=$1 AND active=TRUE AND base=$2', [vehicleId, sucursal]);
+  return !!r.rows[0];
+}
+
 // GET /api/workorders
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -127,6 +139,15 @@ router.get('/', authenticate, async (req, res) => {
     if (req.user.role === 'chofer') {
       params.push(req.user.id);
       sql += ` AND wo.reporter_id = $${params.length}`;
+    }
+    if (_woIsGerenteSucursal(req)) {
+      const suc = _woUserSucursal(req);
+      if (!suc) {
+        sql += ' AND 1=0';
+      } else {
+        params.push(suc);
+        sql += ` AND v.base = $${params.length}`;
+      }
     }
     if (status)     { params.push(status);     sql += ` AND wo.status = $${params.length}`; }
     if (vehicle_id) { params.push(vehicle_id); sql += ` AND wo.vehicle_id = $${params.length}`; }
@@ -162,6 +183,12 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
     if (req.user.role === 'chofer' && wo.rows[0].reporter_id !== req.user.id) {
       return res.status(403).json({ error: 'No autorizado' });
     }
+    if (_woIsGerenteSucursal(req)) {
+      const suc = _woUserSucursal(req);
+      if (!suc || wo.rows[0].base !== suc) {
+        return res.status(403).json({ error: 'Solo podés ver OTs de tu sucursal' });
+      }
+    }
 
     const parts = await query(
       `SELECT wop.*, si.code AS stock_code
@@ -192,6 +219,12 @@ router.post('/', authenticate, async (req, res) => {
     }
     if (ot_tipo !== 'vehiculo' && !asset_id) {
       return res.status(400).json({ error: 'Para OT no-vehicular se requiere asset_id' });
+    }
+    if (_woIsGerenteSucursal(req) && ot_tipo === 'vehiculo') {
+      const suc = _woUserSucursal(req);
+      if (!suc || !(await _woVehicleBelongsToSucursal(client, vehicle_id, suc))) {
+        return res.status(403).json({ error: 'Solo podés crear OTs sobre vehículos de tu sucursal' });
+      }
     }
 
     await client.query('BEGIN');
