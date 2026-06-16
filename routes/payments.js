@@ -88,10 +88,17 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
 
     await client.query('BEGIN');
 
-    // Validar que existe la factura
+    // Validar que existe la factura y traer datos bancarios del proveedor
     const f = await client.query(
-      `SELECT id, invoice_monto, COALESCE(monto_pagado,0) AS monto_pagado, pagada
-       FROM purchase_order_invoices WHERE id=$1 AND po_id=$2 FOR UPDATE`,
+      `SELECT
+         f.id, f.invoice_monto, COALESCE(f.monto_pagado,0) AS monto_pagado, f.pagada,
+         po.proveedor,
+         s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
+       FROM purchase_order_invoices f
+       JOIN purchase_orders po ON po.id = f.po_id
+       LEFT JOIN suppliers s ON s.id = po.supplier_id
+       WHERE f.id=$1 AND f.po_id=$2
+       FOR UPDATE OF f`,
       [req.params.fid, req.params.id]
     );
     if (!f.rows[0]) {
@@ -110,23 +117,36 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
       return res.status(400).json({ error: `El pago supera el saldo pendiente ($${saldo.toFixed(2)})` });
     }
 
+    const clean = (v) => (v == null ? '' : String(v).trim());
+    const failPago = async (message) => {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: message });
+    };
+    const bancoOrigen = clean(b.banco_origen) || null;
+    const bancoDestino = clean(b.banco_destino) || clean(f.rows[0].supplier_bank) || clean(f.rows[0].supplier_name) || clean(f.rows[0].proveedor) || null;
+    const cbuAliasDestino = clean(b.cbu_alias_destino) || clean(f.rows[0].supplier_alias) || clean(f.rows[0].supplier_cbu) || null;
+
     // Validaciones específicas por método
     if (b.metodo === 'transferencia') {
-      if (!b.banco_origen)  return res.status(400).json({ error: 'Falta banco origen' });
-      if (!b.banco_destino) return res.status(400).json({ error: 'Falta banco destino' });
+      if (!bancoOrigen) {
+        return failPago('Falta banco origen');
+      }
+      if (!bancoDestino && !cbuAliasDestino) {
+        return failPago('Faltan datos bancarios del proveedor. Cargá banco/CBU/Alias en Proveedores o completalos manualmente.');
+      }
     }
     if (b.metodo === 'cheque') {
-      if (!b.cheque_nro)         return res.status(400).json({ error: 'Falta N° de cheque' });
-      if (!b.cheque_banco)       return res.status(400).json({ error: 'Falta banco emisor del cheque' });
-      if (!b.cheque_fecha_cobro) return res.status(400).json({ error: 'Falta fecha de cobro' });
+      if (!b.cheque_nro)         return failPago('Falta N° de cheque');
+      if (!b.cheque_banco)       return failPago('Falta banco emisor del cheque');
+      if (!b.cheque_fecha_cobro) return failPago('Falta fecha de cobro');
     }
     if (b.metodo === 'echeq') {
-      if (!b.echeq_nro)        return res.status(400).json({ error: 'Falta N° de eCheq' });
-      if (!b.echeq_banco)      return res.status(400).json({ error: 'Falta banco emisor del eCheq' });
-      if (!b.echeq_fecha_pago) return res.status(400).json({ error: 'Falta fecha de pago' });
+      if (!b.echeq_nro)        return failPago('Falta N° de eCheq');
+      if (!b.echeq_banco)      return failPago('Falta banco emisor del eCheq');
+      if (!b.echeq_fecha_pago) return failPago('Falta fecha de pago');
     }
     if (b.metodo === 'tarjeta') {
-      if (!b.tarjeta_aprobacion) return res.status(400).json({ error: 'Falta N° de aprobación' });
+      if (!b.tarjeta_aprobacion) return failPago('Falta N° de aprobación');
     }
 
     const ins = await client.query(`
@@ -143,7 +163,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
       (b.comprobante_nro || '').trim() || null,
       (b.file_url || '').trim() || null,
       (b.notes || '').trim() || null,
-      b.banco_origen || null, b.banco_destino || null, b.cbu_alias_destino || null,
+      bancoOrigen, bancoDestino, cbuAliasDestino,
       b.cheque_nro || null, b.cheque_banco || null, b.cheque_fecha_cobro || null, b.cheque_a_nombre || null,
       b.echeq_nro || null, b.echeq_banco || null, b.echeq_fecha_pago || null, b.echeq_clave || null,
       b.tarjeta_aprobacion || null, b.tarjeta_cuotas ? parseInt(b.tarjeta_cuotas) : null,
