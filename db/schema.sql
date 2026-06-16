@@ -132,6 +132,25 @@ ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at  TIMESTAMPTZ
 CREATE INDEX IF NOT EXISTS idx_fuel_logs_vehicle ON fuel_logs(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_fuel_logs_date    ON fuel_logs(logged_at DESC);
 
+-- fuel_tank_entries: tickets básicos por cada ingreso a cisterna
+CREATE TABLE IF NOT EXISTS fuel_tank_entries (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tank_id     UUID REFERENCES tanks(id),
+    type        VARCHAR(20) NOT NULL,
+    liters      NUMERIC(12,2) NOT NULL,
+    price_per_l NUMERIC(12,2),
+    supplier    TEXT,
+    remito      TEXT,
+    notes       TEXT,
+    previous_l  NUMERIC(12,2),
+    new_l       NUMERIC(12,2),
+    created_by  UUID REFERENCES users(id),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_created ON fuel_tank_entries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fuel_tank_entries_tank    ON fuel_tank_entries(tank_id);
+
 -- ══════════════════════════════════════════════════════════════════════
 -- 4.  STOCK (pañol / depósito)
 -- ══════════════════════════════════════════════════════════════════════
