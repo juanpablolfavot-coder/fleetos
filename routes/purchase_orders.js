@@ -184,14 +184,14 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     // Solicitantes operativos: ven las OCs que pidieron ellos.
-    // El gerente de sucursal también queda limitado a su sucursal si la tiene asignada.
-    if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role)) {
-      params.push(userId);
-      sql += ` AND po.requested_by = $${params.length}`;
-    }
-    if (role === 'gerente_sucursal' && req.user.sucursal) {
+    // Gerente de sucursal: ve TODO lo pedido para su sucursal, no toda la empresa.
+    if (role === 'gerente_sucursal') {
+      if (!req.user.sucursal) return res.json([]);
       params.push(req.user.sucursal);
       sql += ` AND po.sucursal = $${params.length}`;
+    } else if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
+      params.push(userId);
+      sql += ` AND po.requested_by = $${params.length}`;
     }
 
     // Filtro de estado específico si viene en query
@@ -263,11 +263,12 @@ router.get('/:id', authenticate, async (req, res) => {
     if (estVis !== null && !estVis.includes(oc.status)) {
       return res.status(403).json({ error: 'No tenés permiso para ver esta OC' });
     }
-    if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role) && oc.requested_by !== userId) {
+    if (role === 'gerente_sucursal') {
+      if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
+        return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
+      }
+    } else if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
-    }
-    if (role === 'gerente_sucursal' && req.user.sucursal && oc.sucursal !== req.user.sucursal) {
-      return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
     }
     // Rol proveedores: personal interno que carga facturas de cualquier proveedor.
     // No se valida supplier_id.
