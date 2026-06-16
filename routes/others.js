@@ -15,6 +15,9 @@ const bcrypt     = require('bcryptjs');
 // Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna y despachos internos.
 async function ensureFuelTankEntriesTable() {
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)").catch(() => {});
+  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE").catch(() => {});
+  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
+  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
   await query(`
     CREATE TABLE IF NOT EXISTS fuel_tank_entries (
       id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -92,6 +95,21 @@ function _normSql(column) {
 function _likeSucursal(sucursal) {
   return `%${_normalizeSucursalText(sucursal)}%`;
 }
+function _fuelTankType(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (v === 'urea') return 'urea';
+  return 'fuel';
+}
+function _fuelTankDisplay(type) {
+  return _fuelTankType(type) === 'urea' ? 'Urea' : 'Gasoil';
+}
+function _branchTankLocation(sucursal, type) {
+  const s = String(sucursal || '').trim() || 'Sucursal';
+  return `${s} - Tanque ${_fuelTankDisplay(type)}`;
+}
+function _isAlreadyReceived(status) {
+  return ['recibido','recibida','received'].includes(String(status || '').trim().toLowerCase());
+}
 function _branchEmptyJson(req, res) {
   if (_isGerenteSucursal(req) && !_userSucursal(req)) {
     res.json([]);
@@ -145,6 +163,7 @@ fuelRouter.get('/', authenticate, async (req, res) => {
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
   try {
+    await ensureFuelTankEntriesTable();
     let sql = 'SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks WHERE active IS DISTINCT FROM FALSE';
     const params = [];
     const ref = { value: sql };
@@ -152,7 +171,10 @@ fuelRouter.get('/tanks', authenticate, async (req, res) => {
     ref.value += ' ORDER BY type ASC, location ASC';
     res.json((await query(ref.value, params)).rows);
   }
-  catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
+  catch (err) {
+    console.error('[fuel tanks GET]', err.message);
+    res.status(500).json({ error: 'Error cisternas' });
+  }
 });
 
 // Historial de ingresos a cisterna: sirve como ticket básico del sistema.
@@ -338,36 +360,120 @@ fuelRouter.post('/dispatches', authenticate, requireRole('dueno','gerencia','jef
 });
 
 fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico','gerente_sucursal'), validateUUID('id'), async (req, res) => {
+  const client = await require('../db/pool').pool.connect();
   try {
     await ensureFuelTankEntriesTable();
-    const { received_by, received_liters, receive_notes } = req.body || {};
-    const liters = received_liters === '' || received_liters === undefined || received_liters === null ? null : parseFloat(received_liters);
-    if (liters !== null && (!Number.isFinite(liters) || liters < 0)) {
+    const { received_by, received_liters, receive_notes, destination_sucursal } = req.body || {};
+    const litrosRecibidos = received_liters === '' || received_liters === undefined || received_liters === null ? null : parseFloat(received_liters);
+    if (litrosRecibidos !== null && (!Number.isFinite(litrosRecibidos) || litrosRecibidos < 0)) {
       return res.status(400).json({ error: 'Litros recibidos inválidos' });
     }
+
     const branch = _userSucursal(req);
-    let sql = `
+    await client.query('BEGIN');
+
+    let selectSql = `
+      SELECT d.*, t.type AS origin_type, t.price_per_l AS origin_price_per_l
+        FROM fuel_internal_dispatches d
+        LEFT JOIN tanks t ON t.id = d.tank_id
+       WHERE d.id=$1`;
+    const params = [req.params.id];
+
+    if (_isGerenteSucursal(req)) {
+      if (!branch) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'El gerente de sucursal no tiene sucursal asignada' });
+      }
+      const ref = { value: selectSql };
+      _addTextBranchFilter(req, params, ref, ['d.destination','d.destination_detail']);
+      selectSql = ref.value;
+    }
+
+    selectSql += ' FOR UPDATE OF d';
+    const cur = await client.query(selectSql, params);
+    const dispatch = cur.rows[0];
+    if (!dispatch) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Despacho no encontrado o no pertenece a tu sucursal' });
+    }
+    if (_isAlreadyReceived(dispatch.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este despacho ya fue recibido' });
+    }
+
+    const litrosFinales = litrosRecibidos !== null ? litrosRecibidos : (parseFloat(dispatch.liters) || 0);
+    if (!Number.isFinite(litrosFinales) || litrosFinales <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No hay litros válidos para ingresar al tanque destino' });
+    }
+
+    // La recepción suma combustible al tanque/stock propio de la sucursal destino.
+    // Para gerente_sucursal, siempre usa su sucursal asignada. Para roles centrales,
+    // se puede indicar destination_sucursal o se toma el texto del despacho.
+    const destinoSucursal = branch || String(destination_sucursal || dispatch.destination || '').trim();
+    const tankType = _fuelTankType(dispatch.type || dispatch.origin_type);
+    let destinoTank = null;
+
+    if (destinoSucursal) {
+      const patterns = _branchPatterns(destinoSucursal);
+      let findSql = `SELECT * FROM tanks WHERE type=$1 AND active IS DISTINCT FROM FALSE`;
+      const findParams = [tankType];
+      if (patterns.length) {
+        const pieces = [];
+        for (const pat of patterns) {
+          findParams.push(`%${pat}%`);
+          pieces.push(`${_normSql('location')} LIKE $${findParams.length}`);
+        }
+        findSql += ' AND (' + pieces.join(' OR ') + ')';
+      }
+      findSql += ' ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1 FOR UPDATE';
+      const existing = await client.query(findSql, findParams);
+
+      if (existing.rows[0]) {
+        const current = parseFloat(existing.rows[0].current_l) || 0;
+        const next = current + litrosFinales;
+        const upd = await client.query(
+          `UPDATE tanks
+              SET current_l=$1,
+                  capacity_l=GREATEST(COALESCE(capacity_l,0), $1),
+                  updated_at=NOW()
+            WHERE id=$2
+            RETURNING *`,
+          [next, existing.rows[0].id]
+        );
+        destinoTank = upd.rows[0];
+      } else {
+        const loc = _branchTankLocation(destinoSucursal, tankType);
+        const ins = await client.query(
+          `INSERT INTO tanks(type, capacity_l, current_l, price_per_l, location, active)
+           VALUES ($1,$2,$3,$4,$5,TRUE)
+           RETURNING *`,
+          [tankType, litrosFinales, litrosFinales, dispatch.origin_price_per_l || null, loc]
+        );
+        destinoTank = ins.rows[0];
+      }
+    }
+
+    const updDispatch = await client.query(`
       UPDATE fuel_internal_dispatches
          SET status='recibido',
              received_by=$2,
              received_liters=$3,
              receive_notes=$4,
              received_at=NOW()
-       WHERE id=$1`;
-    const params = [req.params.id, received_by || null, liters, receive_notes || null];
-    if (_isGerenteSucursal(req)) {
-      if (!branch) return res.status(403).json({ error: 'El gerente de sucursal no tiene sucursal asignada' });
-      const ref = { value: sql };
-      _addTextBranchFilter(req, params, ref, ['destination','destination_detail']);
-      sql = ref.value;
-    }
-    sql += ` RETURNING *`;
-    const r = await query(sql, params);
-    if (!r.rows[0]) return res.status(404).json({ error: 'Despacho no encontrado' });
-    res.json({ ok:true, dispatch: r.rows[0] });
+       WHERE id=$1
+       RETURNING *`,
+      [req.params.id, received_by || req.user.name || null, litrosFinales, receive_notes || null]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ok:true, dispatch: updDispatch.rows[0], destination_tank: destinoTank });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('[fuel dispatch receive]', err.message);
     res.status(500).json({ error: 'Error al confirmar recepción' });
+  } finally {
+    client.release();
   }
 });
 
