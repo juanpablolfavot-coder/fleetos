@@ -552,6 +552,33 @@ function _mapTankEntry(e) {
   };
 }
 
+function _mapFuelDispatch(d) {
+  return {
+    id:                 d.id,
+    type:               d.type || 'gasoil',
+    liters:             parseFloat(d.liters) || 0,
+    destination:        d.destination || '',
+    destination_detail: d.destination_detail || '',
+    responsible:        d.responsible || '',
+    transport_vehicle:  d.transport_vehicle || '',
+    remito:             d.remito || '',
+    notes:              d.notes || '',
+    previous_l:         parseFloat(d.previous_l) || 0,
+    new_l:              parseFloat(d.new_l) || 0,
+    status:             d.status || 'despachado',
+    received_by:        d.received_by || '',
+    received_liters:    d.received_liters === null || d.received_liters === undefined ? null : parseFloat(d.received_liters),
+    receive_notes:      d.receive_notes || '',
+    received_at:        d.received_at || null,
+    created_at:         d.created_at || null,
+    date:               d.created_at ? d.created_at.slice(0,16).replace('T',' ') : '—',
+    tank_id:            d.tank_id || null,
+    tank_location:      d.tank_location || 'Cisterna',
+    created_by_name:    d.created_by_name || '—',
+    _raw:               d,
+  };
+}
+
 function _mapStockItem(s) {
   return {
     id:       s.id,
@@ -630,7 +657,7 @@ async function loadInitialData() {
     const canLoadUsers = ['dueno','gerencia'].includes(App.currentUser?.role);
     const usersFetch   = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -645,6 +672,7 @@ async function loadInitialData() {
       apiFetch('/api/assets'),
       apiFetch('/api/stock/movements?limit=50'),
       apiFetch('/api/fuel/tank-entries?limit=50'),
+      apiFetch('/api/fuel/dispatches?limit=50'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -683,6 +711,9 @@ async function loadInitialData() {
     if (tankEntriesRes?.ok) App.data.tankEntries = await tankEntriesRes.json();
     else App.data.tankEntries = App.data.tankEntries || [];
 
+    if (dispatchesRes?.ok)  App.data.fuelDispatches = await dispatchesRes.json();
+    else App.data.fuelDispatches = App.data.fuelDispatches || [];
+
     if (suppliersRes?.ok)   App.data.suppliers   = await suppliersRes.json();
     else App.data.suppliers = App.data.suppliers || [];
 
@@ -718,6 +749,7 @@ async function loadInitialData() {
     if (!App.data.users)       App.data.users       = [];
     if (!App.data.suppliers)   App.data.suppliers   = [];
     if (!App.data.tankEntries) App.data.tankEntries = [];
+    if (!App.data.fuelDispatches) App.data.fuelDispatches = [];
     if (!App.data.assets)      App.data.assets      = [];
     if (!App.data.tires || !App.data.tires.length) App.data.tires = [];
     if (!App.data.tireHistory) App.data.tireHistory = [];
@@ -730,6 +762,7 @@ async function loadInitialData() {
     App.data.workOrders = App.data.workOrders.map(_mapWorkOrder);
     App.data.fuelLogs   = App.data.fuelLogs.map(_mapFuelLog);
     App.data.tankEntries = (App.data.tankEntries || []).map(_mapTankEntry);
+    App.data.fuelDispatches = (App.data.fuelDispatches || []).map(_mapFuelDispatch);
     App.data.stock      = App.data.stock.map(_mapStockItem);
     App.data.documents  = App.data.documents.map(_mapDocument);
 
@@ -753,6 +786,7 @@ async function loadInitialData() {
     App.data.tires       = App.data.tires       || [];
     App.data.tireHistory = App.data.tireHistory || [];
     App.data.stockHistory = App.data.stockHistory || [];
+    App.data.fuelDispatches = App.data.fuelDispatches || [];
   }
 }
 
