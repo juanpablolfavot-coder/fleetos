@@ -334,9 +334,24 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 
     const code = await nextOCCode();
 
-    // Gerente de sucursal: los pedidos quedan siempre marcados con su sucursal/área.
-    const poSucursal = (req.user.role === 'gerente_sucursal' && req.user.sucursal) ? req.user.sucursal : (sucursal || null);
-    const poArea     = (req.user.role === 'gerente_sucursal' && req.user.area) ? req.user.area : (area || null);
+    // Gerente de sucursal: solo solicita compras. No elige proveedor ni precios.
+    // Sus pedidos quedan siempre marcados con su sucursal/área y pasan a Compras.
+    const esGerenteSucursal = req.user.role === 'gerente_sucursal';
+    if (esGerenteSucursal && !req.user.sucursal) {
+      return res.status(403).json({ error: 'El gerente de sucursal no tiene sucursal asignada' });
+    }
+    const poSucursal = (esGerenteSucursal && req.user.sucursal) ? req.user.sucursal : (sucursal || null);
+    const poArea     = (esGerenteSucursal && req.user.area) ? req.user.area : (area || null);
+
+    if (esGerenteSucursal && vehicle_id) {
+      const veh = await client.query('SELECT id, code, base FROM vehicles WHERE id=$1 AND active IS DISTINCT FROM FALSE', [vehicle_id]);
+      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+      if (String(veh.rows[0].base || '').trim() !== String(req.user.sucursal || '').trim()) {
+        return res.status(403).json({ error: 'Solo podés pedir OC para vehículos de tu sucursal' });
+      }
+    }
+    const cleanSupplierId = esGerenteSucursal ? null : (supplier_id || null);
+    const cleanProveedor  = esGerenteSucursal ? null : (proveedor || null);
 
     // Armar INSERT con columnas según estado inicial
     const _fp  = normalizarFormaPago(forma_pago);
@@ -363,11 +378,11 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
       RETURNING *`,
       [
         code, estadoInicial, req.user.id, poSucursal, poArea, tipo||'flota',
-        vehicle_id||null, ot_id||null, asset_id||null, supplier_id||null,
+        vehicle_id||null, ot_id||null, asset_id||null, cleanSupplierId,
         notes||null,
         presupuesto_imagen||null,
         presupuesto_monto_estimado != null ? parseFloat(presupuesto_monto_estimado) : null,
-        proveedor||null, _fp, _cc, _mon, _iva,
+        cleanProveedor, _fp, _cc, _mon, _iva,
         autoCotizado ? req.user.id : null,
         autoCotizado ? new Date() : null,
         autoAprobado ? req.user.id : null,
@@ -450,7 +465,10 @@ router.patch('/:id', authenticate, async (req, res) => {
         // Tesorería solo puede corregir notas, no datos de factura (ya llegan cargados)
         return ['notes'];
       }
-      if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
+      if (role === 'gerente_sucursal' && esCreador && estado === 'pendiente_cotizacion') {
+        return ['notes','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado'];
+      }
+      if (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && estado === 'pendiente_cotizacion') {
         return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado'];
       }
       return [];
@@ -459,6 +477,18 @@ router.patch('/:id', authenticate, async (req, res) => {
     const permitidos = camposPermitidos();
     if (permitidos.length === 0) {
       return res.status(403).json({ error: `No podés editar esta OC en su estado actual (${estado})` });
+    }
+    if (role === 'gerente_sucursal') {
+      if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
+        return res.status(403).json({ error: 'Solo podés editar solicitudes de tu sucursal' });
+      }
+      if (req.body.vehicle_id) {
+        const veh = await query('SELECT id, base FROM vehicles WHERE id=$1 AND active IS DISTINCT FROM FALSE', [req.body.vehicle_id]);
+        if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+        if (String(veh.rows[0].base || '').trim() !== String(req.user.sucursal || '').trim()) {
+          return res.status(403).json({ error: 'Solo podés asignar vehículos de tu sucursal' });
+        }
+      }
     }
 
     // Armar UPDATE dinámico con solo los campos permitidos que llegaron
