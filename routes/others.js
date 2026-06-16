@@ -36,7 +36,7 @@ fuelRouter.get('/tanks', authenticate, async (req, res) => {
   try { res.json((await query('SELECT id, type, capacity_l, current_l, location, price_per_l FROM tanks ORDER BY type ASC, location ASC')).rows); }
   catch (err) { res.status(500).json({ error: 'Error cisternas' }); }
 });
-fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer'), async (req, res) => {
+fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
     const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l: ppuRaw, odometer_km, location, notes, ticket_image } = req.body;
