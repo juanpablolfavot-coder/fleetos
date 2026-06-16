@@ -110,8 +110,8 @@
             </div>
 
             <div style="margin-bottom:12px">
-              <label style="font-size:12px;color:#94a3b8">URL de archivo (opcional, link al PDF)</label>
-              <input id="fac-url" type="text" placeholder="https://drive.google.com/..." style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+              <label style="font-size:12px;color:#94a3b8">Link factura / PDF (opcional)</label>
+              <input id="fac-url" type="text" placeholder="https://link-a-la-factura-o-pdf" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
             </div>
 
             <div style="margin-bottom:12px">
