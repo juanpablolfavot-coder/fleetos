@@ -1641,9 +1641,9 @@ function addCloseOTPart(otId) {
 
   if (origin === 'stock') {
     const sel     = document.getElementById('cl-stock-id');
-    const stockId = parseInt(sel?.value);
+    const stockId = sel?.value || '';
     if (!stockId) { showToast('warn','Seleccioná un ítem del stock'); return; }
-    const item    = App.data.stock.find(s=>s.id===stockId);
+    const item    = App.data.stock.find(s=>String(s.id)===String(stockId));
     if (!item)    return;
     if (item.qty < qty) { showToast('warn',`Stock insuficiente. Disponible: ${item.qty} ${item.unit}`); return; }
     ot.closeParts.push({ name:item.name, origin:'stock', stockId:item.id, qty, cost:cost||item.cost, unit:item.unit });
@@ -3768,10 +3768,23 @@ async function saveManualMove(vehicleCode) {
 }
 
 
+
+function stockFormValue(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function stockCanManage() {
+  return userHasRole('dueno','gerencia','jefe_mantenimiento','paniol');
+}
+
 function renderStock() {
   const critical = App.data.stock.filter(s=>s.qty<=s.min).length;
   const totalVal = App.data.stock.reduce((a,b)=>a+b.qty*b.cost,0);
-  const isDueno  = userHasRole('dueno','gerencia');
+  const canManage = stockCanManage();
 
   // Construir filas de la tabla sin template literals anidados
   let tableRows = '';
@@ -3782,9 +3795,11 @@ function renderStock() {
     const pct   = s.qty / s.min;
     const st    = pct<=1 ? 'danger' : pct<=1.5 ? 'warn' : 'ok';
     const stLbl = st==='ok' ? 'Normal' : st==='warn' ? 'Bajo' : 'Crítico';
-    const bajaBtn = isDueno
-      ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Solo dueño/gerencia">✕ Baja</button>'
-      : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Solo dueño puede dar de baja">🔒</span>';
+    const managerBtns = canManage
+      ? '<button class="btn btn-secondary btn-sm" onclick="openEditStockModal(\''+s.id+'\')">Editar</button>'
+        + '<button class="btn btn-secondary btn-sm" onclick="openStockIngresoModal(\''+s.id+'\')">Ingreso</button>'
+        + '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Baja auditada">✕ Baja</button>'
+      : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Sin permiso para editar depósito">🔒</span>';
     tableRows += '<tr>'
       + '<td class="td-mono td-main">'+s.code+'</td>'
       + '<td>'+s.name+'</td>'
@@ -3796,9 +3811,9 @@ function renderStock() {
       + '<td class="td-mono">$'+(s.qty*s.cost).toLocaleString()+'</td>'
       + '<td style="font-size:12px">'+s.supplier+'</td>'
       + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
-      + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">'
+      + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px;flex-wrap:wrap">'
       +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
-      +   bajaBtn
+      +   managerBtns
       + '</td>'
       + '</tr>';
   });
@@ -3831,9 +3846,15 @@ function renderStock() {
       + '</table></div></div>'
     : '';
 
-  const bajaBtnHeader = isDueno
-    ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Dar de baja</button>'
+  const bajaBtnHeader = canManage
+    ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Baja auditada</button>'
     : '';
+  const adminButtons = canManage
+    ? bajaBtnHeader
+      + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>'
+      + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
+      + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    : '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>';
 
   document.getElementById('page-stock').innerHTML =
     '<div class="kpi-row kpi-row-3" style="margin-bottom:20px">'
@@ -3855,11 +3876,8 @@ function renderStock() {
     + '</div>'
     + '<div class="section-header">'
     +   '<div><div class="section-title">Inventario de repuestos e insumos</div></div>'
-    +   '<div style="display:flex;gap:8px">'
-    +   bajaBtnHeader
-    +   '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>'
-    +   '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>'
-    +   '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    +   '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    +   adminButtons
     +   '</div>'
     + '</div>'
     + '<div class="card" style="padding:0">'
@@ -3920,24 +3938,131 @@ async function saveStockEgreso(stockId) {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar egreso'); return; }
 
-  s.qty -= qty;
   closeModal();
   showToast('ok', 'Egreso registrado: '+qty+' '+s.unit+' de '+s.name);
-  renderStock();
+  await afterSave({ page:'stock' });
 }
 
 
+
+function openStockIngresoModal(stockId) {
+  if (!stockCanManage()) {
+    showToast('warn','No tenés permiso para cargar ingresos al depósito');
+    return;
+  }
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
+  if (!s) return;
+  openModal('Ingreso de stock — '+s.name, ''
+    + '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px">'
+    + '<div style="font-size:13px;font-weight:500;color:var(--text)">'+s.name+'</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">Stock actual: <span class="td-mono">'+s.qty+' '+s.unit+'</span></div>'
+    + '</div>'
+    + '<div class="form-row">'
+    +   '<div class="form-group"><label class="form-label">Cantidad que ingresa</label>'
+    +   '<input class="form-input" type="number" id="ing-qty" value="1" min="0.01" step="0.01"></div>'
+    +   '<div class="form-group"><label class="form-label">Motivo / comprobante</label>'
+    +   '<input class="form-input" id="ing-ref" placeholder="Ej: remito, compra, devolución, recuento"></div>'
+    + '</div>',
+  [
+    { label:'Confirmar ingreso', cls:'btn-primary',   fn: function(){ saveStockIngreso(stockId); } },
+    { label:'Cancelar',          cls:'btn-secondary', fn: closeModal },
+  ]);
+}
+
+async function saveStockIngreso(stockId) {
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
+  if (!s) return;
+  const qty = parseFloat(document.getElementById('ing-qty')?.value) || 0;
+  const reason = (document.getElementById('ing-ref')?.value || '').trim();
+  if (qty <= 0) { showToast('warn','Ingresá una cantidad válida'); return; }
+
+  const res = await apiFetch(`/api/stock/${stockId}/ingreso`, {
+    method: 'POST',
+    body: JSON.stringify({ qty, reason: reason || 'Ingreso manual' })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar ingreso'); return; }
+
+  closeModal();
+  showToast('ok', 'Ingreso registrado: '+qty+' '+s.unit+' de '+s.name);
+  await afterSave({ page:'stock' });
+}
+
+function openEditStockModal(stockId) {
+  if (!stockCanManage()) {
+    showToast('warn','No tenés permiso para editar artículos del depósito');
+    return;
+  }
+  const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
+  if (!s) return;
+  openModal('Editar artículo — '+s.name, ''
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'
+    + 'Editá la ficha del artículo. La cantidad física no se modifica desde acá: para eso usá Ingreso, Egreso, Baja o Ajuste.'
+    + '</div>'
+    + '<div class="form-row">'
+    +   '<div class="form-group"><label class="form-label">Código interno</label>'
+    +   '<input class="form-input" id="es-code" value="'+stockFormValue(s.code)+'"></div>'
+    +   '<div class="form-group"><label class="form-label">Categoría</label>'
+    +   '<input class="form-input" id="es-cat" value="'+stockFormValue(s.cat)+'" placeholder="Filtros, Lubricantes, Frenos..."></div>'
+    + '</div>'
+    + '<div class="form-group"><label class="form-label">Descripción completa</label>'
+    + '<input class="form-input" id="es-name" value="'+stockFormValue(s.name)+'"></div>'
+    + '<div class="form-row form-row-3">'
+    +   '<div class="form-group"><label class="form-label">Stock mínimo</label>'
+    +   '<input class="form-input" type="number" id="es-min" value="'+stockFormValue(s.min)+'" min="0" step="0.01"></div>'
+    +   '<div class="form-group"><label class="form-label">Punto de pedido</label>'
+    +   '<input class="form-input" type="number" id="es-reorder" value="'+stockFormValue(s.reorder)+'" min="0" step="0.01"></div>'
+    +   '<div class="form-group"><label class="form-label">Unidad</label>'
+    +   '<select class="form-select" id="es-unit">'
+    +     ['un','L','kg','jgo','m'].map(function(u){ return '<option '+(s.unit===u?'selected':'')+'>'+u+'</option>'; }).join('')
+    +   '</select></div>'
+    + '</div>'
+    + '<div class="form-row">'
+    +   '<div class="form-group"><label class="form-label">Costo unitario ($)</label>'
+    +   '<input class="form-input" type="number" id="es-cost" value="'+stockFormValue(s.cost)+'" min="0" step="0.01"></div>'
+    +   '<div class="form-group"><label class="form-label">Proveedor</label>'
+    +   '<input class="form-input" id="es-supplier" value="'+stockFormValue(s.supplier==='—'?'':s.supplier)+'"></div>'
+    + '</div>',
+  [
+    { label:'Guardar cambios', cls:'btn-primary',   fn: function(){ saveEditStockItem(stockId); } },
+    { label:'Cancelar',        cls:'btn-secondary', fn: closeModal },
+  ]);
+}
+
+async function saveEditStockItem(stockId) {
+  const code     = (document.getElementById('es-code')?.value || '').trim();
+  const name     = (document.getElementById('es-name')?.value || '').trim();
+  const category = (document.getElementById('es-cat')?.value || 'General').trim();
+  const unit     = document.getElementById('es-unit')?.value || 'un';
+  const qty_min  = parseFloat(document.getElementById('es-min')?.value) || 0;
+  const qty_reorder = parseFloat(document.getElementById('es-reorder')?.value) || Math.max(qty_min * 2, 1);
+  const unit_cost = parseFloat(document.getElementById('es-cost')?.value) || 0;
+  const supplier = (document.getElementById('es-supplier')?.value || '').trim();
+
+  if (!code) { showToast('warn','Ingresá el código del artículo'); return; }
+  if (!name) { showToast('warn','Ingresá la descripción del artículo'); return; }
+
+  const res = await apiFetch(`/api/stock/${stockId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier: supplier || null })
+  });
+  if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al editar artículo'); return; }
+
+  closeModal();
+  showToast('ok', 'Artículo actualizado: '+name);
+  await afterSave({ page:'stock' });
+}
+
 function openStockBajaModal() {
-  if (!userHasRole('dueno','gerencia')) {
-    showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
+  if (!stockCanManage()) {
+    showToast('warn','No tenés permiso para dar de baja ítems del depósito');
     return;
   }
   const opts = App.data.stock.map(function(s){
     return '<option value="'+s.id+'">'+s.name+' — Stock: '+s.qty+' '+s.unit+'</option>';
   }).join('');
-  openModal('Dar de baja ítem del pañol', ''
+  openModal('Baja auditada de depósito', ''
     + '<div style="background:var(--warn-bg);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--warn);margin-bottom:14px">'
-    + '<strong>Acción auditada — solo Dueño / Gerencia.</strong> Registra una baja definitiva del inventario '
+    + '<strong>Acción auditada.</strong> Registra una baja definitiva del inventario '
     + 'por robo, pérdida, daño o vencimiento. Queda registrado con usuario, fecha y motivo detallado.'
     + '</div>'
     + '<div class="form-group"><label class="form-label">Ítem a dar de baja</label>'
@@ -3979,7 +4104,7 @@ function openStockBajaItemModal(stockId) {
 }
 
 function onBajaItemSelect() {
-  const id  = parseInt((document.getElementById('bj-id')||{}).value);
+  const id  = (document.getElementById('bj-id')||{}).value || '';
   const det = document.getElementById('baja-detail');
   if (!det) return;
   if (id) {
@@ -3991,10 +4116,10 @@ function onBajaItemSelect() {
 }
 
 function updateBajaSummary() {
-  const id  = parseInt((document.getElementById('bj-id')||{}).value);
-  const qty = parseInt((document.getElementById('bj-qty')||{}).value) || 1;
+  const id  = (document.getElementById('bj-id')||{}).value || '';
+  const qty = parseFloat((document.getElementById('bj-qty')||{}).value) || 1;
   const sum = document.getElementById('bj-summary');
-  const s   = App.data.stock.find(function(x){ return x.id===id; });
+  const s   = App.data.stock.find(function(x){ return String(x.id)===String(id); });
   if (!sum || !s) return;
   sum.innerHTML = 'Impacto: <strong style="color:var(--danger)">-'+qty+' '+s.unit+'</strong>'
     + ' &nbsp;·&nbsp; '
@@ -4002,9 +4127,8 @@ function updateBajaSummary() {
 }
 
 async function saveStockBaja() {
-  const role = App.currentUser?.role || '';
-  if (role !== 'dueno' && role !== 'gerencia') {
-    showToast('warn','Solo el dueño o gerencia puede dar de baja ítems del pañol');
+  if (!stockCanManage()) {
+    showToast('warn','No tenés permiso para dar de baja ítems del depósito');
     return;
   }
   const id     = document.getElementById('bj-id')?.value;
@@ -4023,10 +4147,9 @@ async function saveStockBaja() {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar baja'); return; }
 
-  s.qty -= qty;
   closeModal();
   showToast('ok', 'Baja registrada: '+qty+' '+s.unit+' de '+s.name+' — Motivo: '+motivo);
-  renderStock();
+  await afterSave({ page:'stock' });
 }
 
 
@@ -4037,7 +4160,7 @@ function openStockAjusteModal() {
   openModal('Ajuste de inventario', ''
     + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">'
     + 'Para corregir diferencias entre el sistema y el recuento físico. '
-    + 'Si la diferencia es por robo o pérdida, usá "Dar de baja" (requiere autorización del dueño).'
+    + 'Si la diferencia es por robo, pérdida, daño o vencimiento, usá "Baja auditada".'
     + '</div>'
     + '<div class="form-row">'
     +   '<div class="form-group"><label class="form-label">Ítem</label>'
@@ -4066,10 +4189,9 @@ async function saveStockAjuste() {
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al ajustar'); return; }
 
-  s.qty = newQty;
   closeModal();
   showToast('ok', 'Inventario ajustado: '+s.name+' → '+newQty+' '+s.unit);
-  renderStock();
+  await afterSave({ page:'stock' });
 }
 
 
@@ -4138,7 +4260,7 @@ async function saveNewStockItem() {
 
   closeModal();
   showToast('ok', `Ítem "${name}" creado con stock inicial de ${qty} ${unit}`);
-  // El auto-refresh ya va a re-cargar la data
+  await afterSave({ page:'stock' });
 }
 
 
@@ -4181,7 +4303,7 @@ function renderDocuments() {
               </td>
               <td style="font-size:11px;color:var(--text3)">${d.ref||'—'}</td>
               <td><span class="badge ${d.status==='ok'?'badge-ok':d.status==='warn'?'badge-warn':'badge-danger'}">${d.status==='ok'?'Vigente':d.status==='warn'?'Por vencer':'Vencido'}</span></td>
-              <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px">
+              <td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px;flex-wrap:wrap">
                 <button class="btn btn-primary btn-sm"   onclick="openRenewDocModal(${idx})">Renovar</button>
                 <button class="btn btn-secondary btn-sm" onclick="openEditDocModal(${idx})">Editar</button>
               </td>
