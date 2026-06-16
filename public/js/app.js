@@ -2258,12 +2258,18 @@ async function saveFuelLoad() {
     })
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar carga'); return; }
+  const savedLog = await res.json().catch(() => null);
 
   const msg = esCisterna
-    ? `Carga registrada — ${liters}L descontados de cisterna`
+    ? `Carga registrada — ${liters}L descontados de cisterna · ticket interno generado`
     : `Carga registrada — ${place}${ticketImg ? ' · con ticket 📄' : ''}`;
   closeModal(); showToast('ok', msg);
   await afterSave({ page: 'fuel' });
+
+  // Si fue una carga desde cisterna a vehículo, abrir ticket básico imprimible.
+  if (esCisterna && savedLog?.id) {
+    setTimeout(() => openFuelVehicleTicket(savedLog.id), 200);
+  }
 }
 
 
@@ -5027,35 +5033,72 @@ function _fuelTankTypeLabel(type) {
   return t === 'urea' ? 'Urea / AdBlue' : 'Gasoil';
 }
 
+function _getGasoilTankForAlert() {
+  const tanks = App.data.tanks || [];
+  return tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || null;
+}
+
+function _renderGasoilLowBannerForCompras() {
+  if (App.currentUser?.role !== 'compras') return '';
+  const gasoilTank = _getGasoilTankForAlert();
+  if (!gasoilTank) return '';
+
+  const level = parseFloat(gasoilTank.current_l) || 0;
+  const cap   = parseFloat(gasoilTank.capacity_l) || 0;
+  if (level >= 10000) return '';
+
+  const pct = cap > 0 ? Math.round(level / cap * 100) : 0;
+  return `
+    <div style="background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.35);border-left:4px solid var(--danger);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="font-size:24px;line-height:1">⛽</div>
+        <div>
+          <div style="font-size:15px;font-weight:900;color:var(--danger);margin-bottom:3px">Materia prima crítica: hay que cotizar / comprar gasoil</div>
+          <div style="font-size:12px;color:var(--text2);line-height:1.45">
+            Stock actual de cisterna: <b>${Math.round(level).toLocaleString('es-AR')} L</b>${cap ? ` de ${Math.round(cap).toLocaleString('es-AR')} L (${pct}%)` : ''}.
+            El aviso queda activo hasta que el stock vuelva a superar <b>10.000 L</b>.
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="openNewPOModal()">🛒 Crear OC / cotizar</button>
+        <button class="btn btn-secondary btn-sm" onclick="navigate('fuel')">Ver cisterna</button>
+      </div>
+    </div>`;
+}
+
 function checkGasoilLowForCompras(force) {
   if (App.currentUser?.role !== 'compras') return;
-  const tanks = App.data.tanks || [];
-  const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil');
+  const gasoilTank = _getGasoilTankForAlert();
   if (!gasoilTank) return;
 
   const level = parseFloat(gasoilTank.current_l) || 0;
   const cap   = parseFloat(gasoilTank.capacity_l) || 0;
   if (level >= 10000) return;
 
-  const key = `gasoil-low-alert-${todayISO()}`;
-  if (!force && sessionStorage.getItem(key)) return;
-  sessionStorage.setItem(key, '1');
+  // No usamos sessionStorage/localStorage: al abrir el sistema debe volver a avisar
+  // todos los días y en cada nuevo ingreso, hasta que la cisterna supere 10.000 L.
+  if (!force) {
+    const last = window._gasoilLowModalLastShownAt || 0;
+    if (Date.now() - last < 5000) return;
+    window._gasoilLowModalLastShownAt = Date.now();
+  }
 
   const pct = cap > 0 ? Math.round(level / cap * 100) : 0;
-  openModal('⚠ Stock bajo de gasoil', `
-    <div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);border-radius:var(--radius);padding:16px;margin-bottom:14px">
-      <div style="font-size:15px;font-weight:800;color:var(--warn);margin-bottom:6px">La cisterna de gasoil está por debajo del mínimo</div>
+  openModal('⚠ Comprar gasoil', `
+    <div style="background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.35);border-left:4px solid var(--danger);border-radius:var(--radius);padding:16px;margin-bottom:14px">
+      <div style="font-size:16px;font-weight:900;color:var(--danger);margin-bottom:6px">La cisterna de gasoil está debajo del mínimo</div>
       <div style="font-size:13px;color:var(--text2);line-height:1.5">
-        Stock actual: <b>${Math.round(level).toLocaleString('es-AR')} L</b>${cap ? ` de ${Math.round(cap).toLocaleString('es-AR')} L (${pct}%)` : ''}.
-        Conviene iniciar la compra o cotización de gasoil.
+        Stock actual: <b>${Math.round(level).toLocaleString('es-AR')} L</b>${cap ? ` de ${Math.round(cap).toLocaleString('es-AR')} L (${pct}%)` : ''}.<br>
+        Es materia prima de la empresa: hay que <b>cotizar / comprar gasoil</b>.
       </div>
     </div>
     <div style="font-size:12px;color:var(--text3);line-height:1.5">
-      Mínimo configurado: <b>10.000 L</b>. Este aviso se muestra automáticamente al ingresar compras.
+      Mínimo configurado: <b>10.000 L</b>. Este aviso vuelve a aparecer al ingresar al sistema mientras el stock siga bajo ese límite.
     </div>
   `, [
-    { label:'🛒 Cotizar / crear OC', cls:'btn-primary', fn: () => { closeModal(); navigate('purchase_orders'); setTimeout(() => { if (typeof openNewPOModal === 'function') openNewPOModal(); }, 250); } },
-    { label:'⛽ Registrar ingreso a cisterna', cls:'btn-secondary', fn: () => { closeModal(); navigate('fuel'); setTimeout(() => { if (typeof openFuelEntryModal === 'function') openFuelEntryModal(); }, 250); } },
+    { label:'🛒 Crear OC / cotizar', cls:'btn-primary', fn: () => { closeModal(); navigate('purchase_orders'); setTimeout(() => { if (typeof openNewPOModal === 'function') openNewPOModal(); }, 250); } },
+    { label:'⛽ Ver cisterna', cls:'btn-secondary', fn: () => { closeModal(); navigate('fuel'); } },
     { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
   ]);
 }
@@ -8069,6 +8112,8 @@ async function renderPurchaseOrders() {
         ${canCreate ? `<button class="btn btn-primary" onclick="openNewPOModal()">+ Nueva OC</button>` : ''}
       </div>
     </div>
+
+    ${_renderGasoilLowBannerForCompras()}
 
     <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
       <div class="kpi-card"><div class="kpi-label">Pendiente cotizar</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe cotizar</div></div>
@@ -12238,6 +12283,113 @@ function openVehicleHistoryModal(vehicleCode) {
 //  COMBUSTIBLE — buscador, filtros, ver ticket, exportar PDF
 // ═══════════════════════════════════════════════════════════
 
+function _fuelIsCisternaVehicleLog(f) {
+  if (!f) return false;
+  const place = String(f.place || f.location || '').toLowerCase();
+  return !!f.tank_id || place.includes('cisterna');
+}
+
+function _fuelVehicleTicketCode(f) {
+  if (!f) return 'CV-0000';
+  const rawDate = f.logged_at || f.date || new Date().toISOString();
+  const d = new Date(rawDate);
+  const ymd = isNaN(d.getTime()) ? todayISO().replace(/-/g,'') : d.toISOString().slice(0,10).replace(/-/g,'');
+  return `CV-${ymd}-${String(f.id || '').slice(0,6).toUpperCase()}`;
+}
+
+function _fuelProductLabel(type) {
+  const t = String(type || '').toLowerCase();
+  return t === 'urea' ? 'Urea / AdBlue' : 'Gasoil';
+}
+
+function openFuelVehicleTicket(logId) {
+  const f = (App.data.fuelLogs || []).find(x => x.id === logId);
+  if (!f) { showToast('error', 'No se encontró la carga'); return; }
+
+  const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
+  const code = _fuelVehicleTicketCode(f);
+  const fecha = f.logged_at ? new Date(f.logged_at).toLocaleString('es-AR') : (f.date || '—');
+  const litros = Math.round(parseFloat(f.liters) || 0).toLocaleString('es-AR');
+  const ppuVal = parseFloat(f.ppu || 0);
+  const totalVal = (parseFloat(f.liters)||0) * (parseFloat(f.ppu)||0);
+
+  openModal(`🧾 Ticket ${code}`, `
+    <div id="fuel-vehicle-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+      <div style="display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:900;color:var(--text)">Expreso Biletta</div>
+          <div style="font-size:12px;color:var(--text3)">Salida de cisterna a vehículo</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:900;color:var(--accent);font-family:var(--mono)">${code}</div>
+          <div style="font-size:11px;color:var(--text3)">${fecha}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+        <div><b>Unidad</b><br>${f.vehicle || '—'}</div>
+        <div><b>Patente</b><br>${f.plate || '—'}</div>
+        <div><b>Producto</b><br>${_fuelProductLabel(f.fuel_type)}</div>
+        <div><b>Litros cargados</b><br>${litros} L</div>
+        <div><b>Odómetro</b><br>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div>
+        <div><b>Lugar / cisterna</b><br>${f.place || 'Cisterna'}</div>
+        <div><b>Registró</b><br>${f.driver || App.currentUser?.name || '—'}</div>
+        <div><b>Estado</b><br>Ticket interno generado</div>
+        ${verPrecios ? `<div><b>Precio/L</b><br>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div><div><b>Total</b><br>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>` : ''}
+      </div>
+
+      <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
+        Este ticket se genera automáticamente al registrar una carga desde cisterna propia. Sirve como comprobante interno para imprimir o archivar.
+      </div>
+    </div>
+  `, [
+    { label:'🖨 Imprimir ticket', cls:'btn-primary', fn: () => printFuelVehicleTicket(logId) },
+    { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+function printFuelVehicleTicket(logId) {
+  const f = (App.data.fuelLogs || []).find(x => x.id === logId);
+  if (!f) { showToast('error', 'No se encontró la carga'); return; }
+
+  const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
+  const code = _fuelVehicleTicketCode(f);
+  const fecha = f.logged_at ? new Date(f.logged_at).toLocaleString('es-AR') : (f.date || '—');
+  const litros = Math.round(parseFloat(f.liters) || 0).toLocaleString('es-AR');
+  const ppuVal = parseFloat(f.ppu || 0);
+  const totalVal = (parseFloat(f.liters)||0) * (parseFloat(f.ppu)||0);
+  const priceHtml = verPrecios ? `
+    <div><b>Precio/L</b>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div>
+    <div><b>Total</b>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>
+  ` : '';
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html><head><title>${code}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111827}
+      .ticket{border:1px solid #d1d5db;border-radius:10px;padding:18px;max-width:720px;margin:auto}
+      .head{display:flex;justify-content:space-between;border-bottom:1px solid #e5e7eb;padding-bottom:12px;margin-bottom:14px}
+      .brand{font-size:20px;font-weight:800}.sub{font-size:12px;color:#6b7280}.code{font:700 16px monospace;color:#2563eb;text-align:right}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px}.box{background:#f3f4f6;border-radius:8px;padding:10px;margin-top:14px;font-size:12px}
+      b{display:block;margin-bottom:3px;color:#374151}@media print{button{display:none}}
+    </style></head><body>
+      <div class="ticket">
+        <div class="head"><div><div class="brand">Expreso Biletta</div><div class="sub">Salida de cisterna a vehículo</div></div><div><div class="code">${code}</div><div class="sub">${fecha}</div></div></div>
+        <div class="grid">
+          <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${f.plate || '—'}</div>
+          <div><b>Producto</b>${_fuelProductLabel(f.fuel_type)}</div><div><b>Litros cargados</b>${litros} L</div>
+          <div><b>Odómetro</b>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div><div><b>Lugar / cisterna</b>${f.place || 'Cisterna'}</div>
+          <div><b>Registró</b>${f.driver || App.currentUser?.name || '—'}</div><div><b>Estado</b>Ticket interno generado</div>
+          ${priceHtml}
+        </div>
+        <div class="box">Comprobante interno generado automáticamente por FleetOS al descontar litros de cisterna propia.</div>
+      </div>
+      <script>window.onload=function(){setTimeout(function(){window.print();},250);}<\/script>
+    </body></html>`);
+  win.document.close();
+}
+
 // Render de una fila de la tabla de combustible (refactorizada para poder filtrar)
 function _renderFuelLogRows(logs) {
   const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
@@ -12259,10 +12411,15 @@ function _renderFuelLogRows(logs) {
     <td>${f.place || '—'}</td>
     <td><span class="badge ${f.ticket_estado==='verificado'?'badge-ok':(f.ticket_estado==='observado'?'badge-warn':'badge-info')}">${f.ticket_estado ? ('Ticket ' + f.ticket_estado) : (f.status||'—')}</span></td>
     <td>
-      <div style="display:flex;gap:4px">
-        ${f.ticket_image
-          ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')" title="Ver ticket">🧾 Ver</button>`
-          : '<span style="color:var(--text3);font-size:11px">sin ticket</span>'}
+      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+        ${_fuelIsCisternaVehicleLog(f)
+          ? `<button class="btn btn-secondary btn-sm" onclick="openFuelVehicleTicket('${f.id}')" title="Ticket interno de cisterna a vehículo">🧾 Ticket</button>`
+          : (f.ticket_image
+              ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')" title="Ver foto del ticket">📷 Foto</button>`
+              : '<span style="color:var(--text3);font-size:11px">sin ticket</span>')}
+        ${f.ticket_image && _fuelIsCisternaVehicleLog(f)
+          ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')" title="Ver foto adjunta">📷</button>`
+          : ''}
         ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar" style="padding:4px 8px">🗑</button>` : ''}
       </div>
     </td>
@@ -12520,6 +12677,10 @@ function viewTicket(logId) {
   if (!f) { showToast('error', 'Carga no encontrada'); return; }
 
   if (!f.ticket_image) {
+    if (_fuelIsCisternaVehicleLog(f)) {
+      openFuelVehicleTicket(logId);
+      return;
+    }
     openModal('🧾 Ticket de carga', `
       <div style="text-align:center;padding:20px">
         <div style="font-size:36px;margin-bottom:12px">📭</div>
