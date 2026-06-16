@@ -166,6 +166,9 @@ window.FleetRoles = {
   mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
   contador:      { code:'contador',      label:'Contador',          modules:['dashboard','costs','documents','contador_panel'] },
+  compras:       { code:'compras',       label:'Compras',           modules:['dashboard','purchase_orders','suppliers'] },
+  tesoreria:     { code:'tesoreria',     label:'Tesorería',         modules:['dashboard','tesoreria_panel','purchase_orders'] },
+  proveedores:   { code:'proveedores',   label:'Proveedores',       modules:['proveedor_panel','suppliers','purchase_orders'] },
   chofer:        { code:'chofer',        label:'Chofer',            modules:['dashboard','fuel','documents','chofer_panel'] }
 };
 
@@ -4843,7 +4846,7 @@ function _ocPuedeVerPrecios(role) {
 // ¿El rol tiene permitido ver precios de combustible ($ por litro, totales)?
 // El jefe mant y el chofer NO ven precios — compras los gestiona
 function _fuelPuedeVerPrecios(role) {
-  const rolesQueSiVen = ['dueno','gerencia','compras','contador','auditor','encargado_combustible'];
+  const rolesQueSiVen = ['dueno','gerencia','compras','contador','auditor','encargado_combustible','proveedores'];
   return rolesQueSiVen.includes(role);
 }
 // ═══════════════════════════════════════════════════════════
@@ -8923,7 +8926,7 @@ async function openPODetail(id) {
       <div style="background:${st.color}22;border:1px solid ${st.color};border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="background:${st.color};color:white;padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700">${st.label}</span>
-          <span style="font-size:13px;color:var(--text2)">${po.moneda==='USD'?'US$':'$'} ${po.forma_pago==='cuenta_corriente'?'Cuenta corriente a '+(po.cc_dias||0)+' días':(po.forma_pago==='contado'?'Contado':'—')}</span>
+          <span style="font-size:13px;color:var(--text2)">${po.moneda==='USD'?'US$':'$'} ${_ocFormaPagoLabel(po.forma_pago, po.cc_dias)}</span>
         </div>
         <div style="font-size:11px;color:var(--text3)">Creada ${fmt(po.created_at)}</div>
       </div>
@@ -9164,7 +9167,7 @@ async function openPODetail(id) {
           (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','pagada'].includes(po.status))
         );
         if (puedeDevolver) {
-          btns.push({ label:'⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) });
+          btns.push({ label: role === 'compras' ? '↩ Rechazo parcial / corregir' : '⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) });
         }
 
         // ❌ Rechazar (cierre definitivo)
@@ -9175,7 +9178,7 @@ async function openPODetail(id) {
           ['dueno','gerencia'].includes(role)
         );
         if (puedeRechazar) {
-          btns.push({ label:'❌ Rechazar', cls:'btn-danger', fn: () => rechazarOC(id) });
+          btns.push({ label: role === 'compras' ? '🚫 Anular compra' : '❌ Rechazar final', cls:'btn-danger', fn: () => rechazarOC(id) });
         }
 
         return btns;
@@ -9421,7 +9424,7 @@ async function printPO(id) {
           <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
-          <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${po.forma_pago==="contado" ? "Contado" : (po.forma_pago==="cuenta_corriente" ? ("Cta. cte. a "+(po.cc_dias||0)+" días") : "—")}</div></div>
+          <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${_ocFormaPagoLabel(po.forma_pago, po.cc_dias)}</div></div>
           <div class="field"><div class="field-label">Estado</div><div class="field-value">${(po.status||'').replace('_',' ')}</div></div>
         </div>
       </div>
@@ -10073,6 +10076,67 @@ async function loadSucursalesFromAPI() {
   } catch(e) { console.warn('loadSucursalesFromAPI', e); }
 }
 
+
+async function devolverOC(id, estadoActual) {
+  const role = App.currentUser?.role;
+  const titulo = role === 'compras'
+    ? 'Motivo del rechazo parcial / devolución para corregir:'
+    : 'Motivo de la devolución:';
+  const motivo = prompt(titulo);
+  if (!motivo || motivo.trim().length < 5) {
+    if (motivo !== null) showToast('error', 'Indicá un motivo de al menos 5 caracteres');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/purchase-orders/' + id + '/devolver', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al devolver OC');
+    showToast('ok', role === 'compras' ? 'OC devuelta para corregir' : 'OC devuelta');
+    closeModal();
+    await renderPurchaseOrders();
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+async function rechazarOC(id) {
+  const role = App.currentUser?.role;
+  const aviso = role === 'compras'
+    ? 'Vas a ANULAR esta compra de forma final. No se podrá seguir avanzando.\n\nMotivo:'
+    : 'Vas a rechazar esta OC de forma final.\n\nMotivo:';
+  const motivo = prompt(aviso);
+  if (!motivo || motivo.trim().length < 5) {
+    if (motivo !== null) showToast('error', 'Indicá un motivo de al menos 5 caracteres');
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/purchase-orders/' + id + '/rechazar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ motivo: motivo.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al rechazar OC');
+    showToast('ok', role === 'compras' ? 'Compra anulada' : 'OC rechazada');
+    closeModal();
+    await renderPurchaseOrders();
+  } catch(err) {
+    showToast('error', err.message);
+  }
+}
+
+function _ocFormaPagoLabel(fp, ccDias) {
+  if (fp === 'contado') return 'Contado';
+  if (fp === 'cuenta_corriente') return 'Cuenta corriente a ' + (ccDias || 0) + ' días';
+  if (fp === 'transferencia') return 'Transferencia';
+  if (fp === 'cheque') return 'Cheque';
+  return '—';
+}
+
 function _ocToggleCC(prefix) {
   var sel = document.getElementById(prefix + '-forma-pago');
   var fld = document.getElementById(prefix + '-cc-dias-field');
@@ -10094,6 +10158,8 @@ function _ocExtrasHTML(prefix, values) {
     +       '<option value="">-- Seleccionar --</option>'
     +       '<option value="contado">Contado</option>'
     +       '<option value="cuenta_corriente">Cuenta corriente</option>'
+    +       '<option value="transferencia">Transferencia</option>'
+    +       '<option value="cheque">Cheque</option>'
     +     '</select>'
     +   '</div>'
     +   '<div class="form-group" id="' + prefix + '-cc-dias-field" style="' + ccDisplay + '">'
@@ -10210,7 +10276,7 @@ async function aprobarOC(id) {
     '¿Aprobar esta OC para enviar al proveedor?',
     '',
     'Proveedor: ' + pod_prov,
-    'Forma de pago: ' + (pod_fp === 'contado' ? 'Contado' : (pod_fp === 'cuenta_corriente' ? ('Cuenta corriente a ' + (pod_cc || 0) + ' días') : '—')),
+    'Forma de pago: ' + _ocFormaPagoLabel(pod_fp, pod_cc),
     'Moneda: ' + (pod_mon || 'ARS'),
     '',
     'La factura la cargará el proveedor cuando entregue la mercadería.',
@@ -10265,7 +10331,7 @@ async function renderSuppliers() {
   const root = document.getElementById('page-suppliers');
   if (!root) return;
 
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role);
+  const canCreate = ['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
@@ -10476,7 +10542,7 @@ function _supRenderRow(s) {
 
     <td style="padding:10px 12px;white-space:nowrap;text-align:right">
       <button class="btn btn-secondary btn-sm" onclick="openSupplierDetail('${s.id}')">Ver</button>
-      ${['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role) ?
+      ${['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role) ?
         `<button class="btn btn-secondary btn-sm" onclick="openEditSupplierModal('${s.id}')" style="margin-left:4px">Editar</button>` : ''}
     </td>
   </tr>`;
@@ -10493,6 +10559,7 @@ function openEditSupplierModal(id) {
 function _openSupplierModal(existing) {
   const s = existing || {};
   const isEdit = !!existing;
+  const canDeleteSupplier = ['dueno','gerencia'].includes(App.currentUser?.role);
 
   const body = `
     <div style="max-height:70vh;overflow-y:auto;padding-right:8px">
@@ -10654,7 +10721,7 @@ function _openSupplierModal(existing) {
     isEdit ? `Editar proveedor — ${s.name}` : 'Nuevo proveedor',
     body,
     [
-      ...(isEdit ? [{ label: '🗑 Eliminar', cls: 'btn-danger', fn: () => _supDelete(s.id) }] : []),
+      ...(isEdit && canDeleteSupplier ? [{ label: '🗑 Eliminar', cls: 'btn-danger', fn: () => _supDelete(s.id) }] : []),
       { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal },
       { label: isEdit ? 'Guardar cambios' : 'Crear proveedor', cls: 'btn-primary', fn: () => _supSave(isEdit ? s.id : null) },
     ]
@@ -10816,7 +10883,7 @@ async function openSupplierDetail(id) {
     body,
     [
       { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
-      ...(['dueno','gerencia','jefe_mantenimiento','paniol'].includes(App.currentUser?.role) ?
+      ...(['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role) ?
         [{ label: '✎ Editar', cls: 'btn-primary', fn: () => { closeModal(); openEditSupplierModal(id); } }] : []),
     ]
   );
