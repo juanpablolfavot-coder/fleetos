@@ -779,9 +779,9 @@ CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
 DECLARE
   v_invoice_id UUID;
   v_po_id UUID;
-  v_invoice_monto NUMERIC;
+  v_invoice_total NUMERIC;
   v_total_pagado NUMERIC;
-  v_total_oc NUMERIC;
+  v_total_facturas NUMERIC;
   v_total_facturas_pagadas NUMERIC;
   v_po_status VARCHAR;
   v_delivery_status VARCHAR;
@@ -789,35 +789,40 @@ DECLARE
 BEGIN
   v_invoice_id := COALESCE(NEW.invoice_id, OLD.invoice_id);
 
-  SELECT po_id, invoice_monto INTO v_po_id, v_invoice_monto
-  FROM purchase_order_invoices WHERE id = v_invoice_id;
+  SELECT po_id, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2)
+    INTO v_po_id, v_invoice_total
+  FROM purchase_order_invoices
+  WHERE id = v_invoice_id;
 
   IF v_po_id IS NULL THEN
     RETURN COALESCE(NEW, OLD);
   END IF;
 
   SELECT COALESCE(SUM(monto), 0) INTO v_total_pagado
-  FROM purchase_order_payments WHERE invoice_id = v_invoice_id;
+  FROM purchase_order_payments
+  WHERE invoice_id = v_invoice_id;
 
   UPDATE purchase_order_invoices
   SET monto_pagado = v_total_pagado,
-      pagada = (v_total_pagado >= v_invoice_monto * 0.999)
+      pagada = (v_total_pagado >= v_invoice_total * 0.999)
   WHERE id = v_invoice_id;
 
   SELECT
-    COALESCE(SUM(invoice_monto), 0),
-    COALESCE(SUM(LEAST(monto_pagado, invoice_monto)), 0)
-  INTO v_total_oc, v_total_facturas_pagadas
-  FROM purchase_order_invoices WHERE po_id = v_po_id;
+    COALESCE(SUM(ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2)), 0),
+    COALESCE(SUM(LEAST(monto_pagado, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2))), 0)
+  INTO v_total_facturas, v_total_facturas_pagadas
+  FROM purchase_order_invoices
+  WHERE po_id = v_po_id;
 
   v_payment_status := CASE
     WHEN v_total_facturas_pagadas <= 0 THEN 'pendiente'
-    WHEN v_total_oc > 0 AND v_total_facturas_pagadas >= v_total_oc * 0.999 THEN 'total'
+    WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas * 0.999 THEN 'total'
     ELSE 'parcial'
   END;
 
   SELECT status, delivery_status INTO v_po_status, v_delivery_status
-  FROM purchase_orders WHERE id = v_po_id;
+  FROM purchase_orders
+  WHERE id = v_po_id;
 
   UPDATE purchase_orders
   SET payment_status = v_payment_status,
@@ -827,12 +832,20 @@ BEGIN
         WHEN v_payment_status = 'total' AND v_po_status = 'aprobada_compras' THEN 'pagada'
         ELSE status
       END,
-      pagado_at = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_at, NOW()) ELSE pagado_at END
+      pagado_at = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_at, NOW()) ELSE pagado_at END,
+      pagado_por = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_por, (
+        SELECT paid_by
+        FROM purchase_order_payments
+        WHERE invoice_id IN (SELECT id FROM purchase_order_invoices WHERE po_id = v_po_id)
+        ORDER BY paid_at DESC
+        LIMIT 1
+      )) ELSE pagado_por END
   WHERE id = v_po_id;
 
   RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
+
 
 DROP TRIGGER IF EXISTS trg_recalc_invoice_payment ON purchase_order_payments;
 CREATE TRIGGER trg_recalc_invoice_payment
