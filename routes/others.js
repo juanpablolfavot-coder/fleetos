@@ -67,6 +67,9 @@ async function ensureFuelTankEntriesTable() {
   await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS received_liters NUMERIC(12,2)").catch(() => {});
   await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS receive_notes TEXT").catch(() => {});
   await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS received_at TIMESTAMPTZ").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_tank_id UUID REFERENCES tanks(id)").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_stock_applied BOOLEAN NOT NULL DEFAULT FALSE").catch(() => {});
+  await query("ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_stock_applied_at TIMESTAMPTZ").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_created ON fuel_internal_dispatches(created_at DESC)").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_tank ON fuel_internal_dispatches(tank_id)").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status ON fuel_internal_dispatches(status)").catch(() => {});
@@ -109,6 +112,55 @@ function _branchTankLocation(sucursal, type) {
 }
 function _isAlreadyReceived(status) {
   return ['recibido','recibida','received'].includes(String(status || '').trim().toLowerCase());
+}
+
+async function _addFuelToDestinationTank(client, { destinoSucursal, tankType, liters, originPricePerL }) {
+  const suc = String(destinoSucursal || '').trim();
+  const litros = parseFloat(liters) || 0;
+  if (!suc || litros <= 0) return null;
+
+  const dbType = _fuelTankType(tankType);
+  const patterns = _branchPatterns(suc);
+  let findSql = `SELECT * FROM tanks WHERE type=$1 AND active IS DISTINCT FROM FALSE`;
+  const findParams = [dbType];
+
+  if (patterns.length) {
+    const pieces = [];
+    for (const pat of patterns) {
+      findParams.push(`%${pat}%`);
+      pieces.push(`${_normSql('location')} LIKE $${findParams.length}`);
+    }
+    findSql += ' AND (' + pieces.join(' OR ') + ')';
+  } else {
+    findSql += ' AND 1=0';
+  }
+
+  findSql += ' ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1 FOR UPDATE';
+  const existing = await client.query(findSql, findParams);
+
+  if (existing.rows[0]) {
+    const current = parseFloat(existing.rows[0].current_l) || 0;
+    const next = current + litros;
+    const upd = await client.query(
+      `UPDATE tanks
+          SET current_l=$1,
+              capacity_l=GREATEST(COALESCE(capacity_l,0), $1),
+              updated_at=NOW()
+        WHERE id=$2
+        RETURNING *`,
+      [next, existing.rows[0].id]
+    );
+    return upd.rows[0];
+  }
+
+  const loc = _branchTankLocation(suc, dbType);
+  const ins = await client.query(
+    `INSERT INTO tanks(type, capacity_l, current_l, price_per_l, location, active)
+     VALUES ($1,$2,$3,$4,$5,TRUE)
+     RETURNING *`,
+    [dbType, litros, litros, originPricePerL || null, loc]
+  );
+  return ins.rows[0];
 }
 function _branchEmptyJson(req, res) {
   if (_isGerenteSucursal(req) && !_userSucursal(req)) {
@@ -412,47 +464,12 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
     // se puede indicar destination_sucursal o se toma el texto del despacho.
     const destinoSucursal = branch || String(destination_sucursal || dispatch.destination || '').trim();
     const tankType = _fuelTankType(dispatch.type || dispatch.origin_type);
-    let destinoTank = null;
-
-    if (destinoSucursal) {
-      const patterns = _branchPatterns(destinoSucursal);
-      let findSql = `SELECT * FROM tanks WHERE type=$1 AND active IS DISTINCT FROM FALSE`;
-      const findParams = [tankType];
-      if (patterns.length) {
-        const pieces = [];
-        for (const pat of patterns) {
-          findParams.push(`%${pat}%`);
-          pieces.push(`${_normSql('location')} LIKE $${findParams.length}`);
-        }
-        findSql += ' AND (' + pieces.join(' OR ') + ')';
-      }
-      findSql += ' ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST LIMIT 1 FOR UPDATE';
-      const existing = await client.query(findSql, findParams);
-
-      if (existing.rows[0]) {
-        const current = parseFloat(existing.rows[0].current_l) || 0;
-        const next = current + litrosFinales;
-        const upd = await client.query(
-          `UPDATE tanks
-              SET current_l=$1,
-                  capacity_l=GREATEST(COALESCE(capacity_l,0), $1),
-                  updated_at=NOW()
-            WHERE id=$2
-            RETURNING *`,
-          [next, existing.rows[0].id]
-        );
-        destinoTank = upd.rows[0];
-      } else {
-        const loc = _branchTankLocation(destinoSucursal, tankType);
-        const ins = await client.query(
-          `INSERT INTO tanks(type, capacity_l, current_l, price_per_l, location, active)
-           VALUES ($1,$2,$3,$4,$5,TRUE)
-           RETURNING *`,
-          [tankType, litrosFinales, litrosFinales, dispatch.origin_price_per_l || null, loc]
-        );
-        destinoTank = ins.rows[0];
-      }
-    }
+    const destinoTank = await _addFuelToDestinationTank(client, {
+      destinoSucursal,
+      tankType,
+      liters: litrosFinales,
+      originPricePerL: dispatch.origin_price_per_l || null
+    });
 
     const updDispatch = await client.query(`
       UPDATE fuel_internal_dispatches
@@ -460,10 +477,13 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
              received_by=$2,
              received_liters=$3,
              receive_notes=$4,
-             received_at=NOW()
+             received_at=COALESCE(received_at, NOW()),
+             destination_tank_id=$5,
+             destination_stock_applied=TRUE,
+             destination_stock_applied_at=NOW()
        WHERE id=$1
        RETURNING *`,
-      [req.params.id, received_by || req.user.name || null, litrosFinales, receive_notes || null]
+      [req.params.id, received_by || req.user.name || null, litrosFinales, receive_notes || null, destinoTank?.id || null]
     );
 
     await client.query('COMMIT');
@@ -477,7 +497,86 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
   }
 });
 
-fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico'), async (req, res) => {
+
+// Regularizar un despacho ya marcado como recibido: suma los litros al tanque de la sucursal.
+// Sirve para despachos recibidos antes de que existiera el tanque propio de sucursal.
+fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico','gerente_sucursal'), validateUUID('id'), async (req, res) => {
+  const client = await require('../db/pool').pool.connect();
+  try {
+    await ensureFuelTankEntriesTable();
+    const branch = _userSucursal(req);
+    await client.query('BEGIN');
+
+    let selectSql = `
+      SELECT d.*, t.type AS origin_type, t.price_per_l AS origin_price_per_l
+        FROM fuel_internal_dispatches d
+        LEFT JOIN tanks t ON t.id = d.tank_id
+       WHERE d.id=$1`;
+    const params = [req.params.id];
+
+    if (_isGerenteSucursal(req)) {
+      if (!branch) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'El gerente de sucursal no tiene sucursal asignada' });
+      }
+      const ref = { value: selectSql };
+      _addTextBranchFilter(req, params, ref, ['d.destination','d.destination_detail']);
+      selectSql = ref.value;
+    }
+
+    selectSql += ' FOR UPDATE OF d';
+    const cur = await client.query(selectSql, params);
+    const dispatch = cur.rows[0];
+    if (!dispatch) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Despacho no encontrado o no pertenece a tu sucursal' });
+    }
+    if (!_isAlreadyReceived(dispatch.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Primero hay que marcar el despacho como recibido' });
+    }
+    if (dispatch.destination_stock_applied === true) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este despacho ya fue sumado al tanque de destino' });
+    }
+
+    const liters = parseFloat(dispatch.received_liters || dispatch.liters) || 0;
+    if (liters <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No hay litros válidos para sumar al tanque' });
+    }
+
+    const destinoSucursal = branch || String(req.body?.destination_sucursal || dispatch.destination || '').trim();
+    const tankType = _fuelTankType(dispatch.type || dispatch.origin_type);
+    const destinoTank = await _addFuelToDestinationTank(client, {
+      destinoSucursal,
+      tankType,
+      liters,
+      originPricePerL: dispatch.origin_price_per_l || null
+    });
+
+    const updDispatch = await client.query(`
+      UPDATE fuel_internal_dispatches
+         SET destination_tank_id=$2,
+             destination_stock_applied=TRUE,
+             destination_stock_applied_at=NOW()
+       WHERE id=$1
+       RETURNING *`,
+      [req.params.id, destinoTank?.id || null]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ok:true, dispatch: updDispatch.rows[0], destination_tank: destinoTank });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel dispatch apply-to-tank]', err.message);
+    res.status(500).json({ error: 'Error al sumar despacho al tanque de sucursal' });
+  } finally {
+    client.release();
+  }
+});
+
+fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico','gerente_sucursal'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
     const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l: ppuRaw, odometer_km, location, notes, ticket_image } = req.body;
@@ -499,6 +598,29 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         return res.status(403).json({ error: 'Solo podés cargar combustible a tu unidad asignada (' + (req.user.vehicle_code||'sin asignar') + ')' });
       }
     }
+    // Gerente de sucursal: solo puede cargar consumos internos desde tanque de su sucursal
+    // y únicamente a vehículos/equipos de su sucursal.
+    if (req.user.role === 'gerente_sucursal') {
+      const branch = _userSucursal(req);
+      if (!branch) return res.status(403).json({ error: 'Tu usuario no tiene sucursal asignada' });
+      if (!tank_id) return res.status(403).json({ error: 'La sucursal solo puede registrar consumo desde su tanque interno' });
+
+      const veh = await client.query('SELECT id, code, base FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
+      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo/equipo no encontrado' });
+      const vehBase = _normalizeSucursalText(veh.rows[0].base);
+      const branchPats = _branchPatterns(branch);
+      if (!vehBase || !branchPats.some(p => vehBase.includes(p) || (vehBase.length >= 3 && p.includes(vehBase)))) {
+        return res.status(403).json({ error: 'Solo podés cargar combustible a vehículos/equipos de tu sucursal' });
+      }
+
+      const tk = await client.query('SELECT id, location FROM tanks WHERE id=$1 AND active IS DISTINCT FROM FALSE', [tank_id]);
+      if (!tk.rows[0]) return res.status(404).json({ error: 'Tanque no encontrado' });
+      const tankLoc = _normalizeSucursalText(tk.rows[0].location);
+      if (!tankLoc || !branchPats.some(p => tankLoc.includes(p) || (tankLoc.length >= 3 && p.includes(tankLoc)))) {
+        return res.status(403).json({ error: 'Solo podés usar el tanque interno de tu sucursal' });
+      }
+    }
+
     // Control de duplicados: misma unidad en los últimos 10 minutos.
     // IMPORTANTE: aplica solo a combustible/gasoil. La urea puede cargarse inmediatamente
     // después de una carga de combustible de la misma unidad.
