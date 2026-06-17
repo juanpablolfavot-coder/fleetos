@@ -5568,10 +5568,23 @@ const OC_ESTADOS = {
 };
 
 // Genera el badge HTML del estado (usa el ícono + label + color)
-function _ocEstadoBadge(status) {
+function _ocEstadoBadge(statusOrPo) {
+  const po = (statusOrPo && typeof statusOrPo === 'object') ? statusOrPo : null;
+  const status = po ? po.status : statusOrPo;
   const e = OC_ESTADOS[status] || { label: status, icon: '❓', bg: '#333', fg: '#fff', border: '#555' };
+
+  let label = e.label;
+  if (po && status === 'recibida') {
+    const invoiceDone = String(po.invoice_status || '').toLowerCase() === 'total' || !!po.factura_nro || (parseFloat(po.factura_monto || 0) > 0);
+    const paymentDone = String(po.payment_status || '').toLowerCase() === 'total';
+    const faltan = [];
+    if (!invoiceDone) faltan.push('factura');
+    if (!paymentDone) faltan.push('pago');
+    if (faltan.length) label = 'Recibida · falta ' + faltan.join('/');
+  }
+
   return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:${e.bg};color:${e.fg};border:1px solid ${e.border};font-size:11px;font-weight:600;white-space:nowrap">
-    <span>${e.icon}</span><span>${e.label}</span>
+    <span>${e.icon}</span><span>${label}</span>
   </span>`;
 }
 
@@ -8833,7 +8846,7 @@ async function renderPurchaseOrders() {
       <div class="kpi-card"><div class="kpi-label">Pendientes de cotización</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe solicitar cotización</div></div>
       <div class="kpi-card"><div class="kpi-label">En cotización / Aprobadas</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 en proceso</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Aprobadas / por recibir</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">📦 esperando mercadería</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 proceso completado</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 mercadería recibida</div></div>
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -9007,7 +9020,8 @@ function _poSort(key) {
 function _poRenderRow(po) {
   const role = App.currentUser?.role;
   const puedeVerPrecios = _ocPuedeVerPrecios(role);
-  const progress = _poProgress(po.status);
+  const progress = _poProgress(po);
+  const progressLabel = _poProgressLabel(po);
 
   const e = OC_ESTADOS[po.status] || { border: '#555', fg: '#aaa' };
   const sideColor = e.fg;
@@ -9047,7 +9061,7 @@ function _poRenderRow(po) {
     <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${po.code||'—'}</td>
 
     <td style="padding:10px 12px">
-      ${_ocEstadoBadge(po.status)}
+      ${_ocEstadoBadge(po)}
     </td>
 
     <td style="padding:10px 12px;font-size:12px">
@@ -9069,6 +9083,7 @@ function _poRenderRow(po) {
         </div>
         <span style="font-size:10px;font-family:var(--mono);color:var(--text3);min-width:30px">${progress}%</span>
       </div>
+      ${progressLabel ? `<div style="font-size:9px;color:${progress===100?'var(--ok)':'var(--warn)'};font-family:var(--mono);margin-top:3px;white-space:nowrap">${progressLabel}</div>` : ''}
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
@@ -9090,16 +9105,42 @@ function _poRenderRow(po) {
   </tr>`;
 }
 
-function _poProgress(status) {
-  const map = {
-    'pendiente_cotizacion': 15,
-    'en_cotizacion':        35,
-    'aprobada_compras':     60,
-    'pagada':               85,
-    'recibida':             100,
-    'rechazada':            0,
-  };
-  return map[status] ?? 10;
+function _poProgress(po) {
+  const status = typeof po === 'string' ? po : (po?.status || '');
+  if (status === 'rechazada') return 0;
+
+  const deliveryDone = ['total','recibida'].includes(String(po?.delivery_status || '').toLowerCase()) || status === 'recibida';
+  const invoiceDone  = String(po?.invoice_status || '').toLowerCase() === 'total' || !!po?.factura_nro || (parseFloat(po?.factura_monto || 0) > 0);
+  const paymentDone  = String(po?.payment_status || '').toLowerCase() === 'total';
+
+  // 100% solo cuando terminó TODO el circuito administrativo:
+  // cotización/aprobación + mercadería recibida + factura cargada + pago completo.
+  if (deliveryDone && invoiceDone && paymentDone) return 100;
+
+  if (status === 'pendiente_cotizacion') return 15;
+  if (status === 'en_cotizacion') return 35;
+  if (status === 'aprobada_compras') return 60;
+
+  // Estados avanzados, pero incompletos: no mostrar 100 para no confundir.
+  let pct = 60;
+  if (deliveryDone) pct = Math.max(pct, 75);
+  if (invoiceDone)  pct = Math.max(pct, 82);
+  if (paymentDone || status === 'pagada') pct = Math.max(pct, 90);
+  return pct;
+}
+
+function _poProgressLabel(po) {
+  if (!po || po.status === 'rechazada') return '';
+  const deliveryDone = ['total','recibida'].includes(String(po.delivery_status || '').toLowerCase()) || po.status === 'recibida';
+  const invoiceDone  = String(po.invoice_status || '').toLowerCase() === 'total' || !!po.factura_nro || (parseFloat(po.factura_monto || 0) > 0);
+  const paymentDone  = String(po.payment_status || '').toLowerCase() === 'total';
+  if (deliveryDone && invoiceDone && paymentDone) return 'Completa';
+
+  const faltan = [];
+  if (!deliveryDone) faltan.push('recibir');
+  if (!invoiceDone)  faltan.push('factura');
+  if (!paymentDone)  faltan.push('pagar');
+  return faltan.length ? 'Falta ' + faltan.join('/') : '';
 }
 
 // Export PDF de OCs (respeta filtros activos)
