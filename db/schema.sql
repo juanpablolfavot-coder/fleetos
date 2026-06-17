@@ -302,6 +302,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS stock_items_code_base_area_uidx
     WHERE active = TRUE;
 
 CREATE INDEX IF NOT EXISTS idx_stock_mov_stock ON stock_movements(stock_id);
+CREATE INDEX IF NOT EXISTS idx_stock_mov_wo    ON stock_movements(wo_id);
 CREATE INDEX IF NOT EXISTS idx_stock_mov_base_area ON stock_movements(base_location, area);
 CREATE INDEX IF NOT EXISTS idx_stock_mov_date  ON stock_movements(created_at DESC);
 
