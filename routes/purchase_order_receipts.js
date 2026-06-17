@@ -63,7 +63,7 @@ async function recalcDeliveryStatus(client, poId) {
       COALESCE(SUM(pori.cantidad), 0) AS recibida
     FROM purchase_order_items poi
     LEFT JOIN purchase_order_receipt_items pori ON pori.po_item_id = poi.id
-    WHERE poi.po_id = $1
+    WHERE poi.po_id = $1::uuid
     GROUP BY poi.id, poi.cantidad
   `, [poId]);
 
@@ -86,49 +86,42 @@ async function recalcDeliveryStatus(client, poId) {
   const status = allDone ? 'total' : (anyDone ? 'parcial' : 'pendiente');
 
   await client.query(`
+    WITH params AS (
+      SELECT $1::varchar(20) AS delivery_status, $2::uuid AS po_id
+    ), ultima_recepcion AS (
+      SELECT r.received_by, r.received_at
+      FROM purchase_order_receipts r
+      JOIN params p ON p.po_id = r.po_id
+      ORDER BY r.received_at DESC
+      LIMIT 1
+    )
     UPDATE purchase_orders po
     SET
-      delivery_status = $1,
+      delivery_status = p.delivery_status,
       status = CASE
-        WHEN $1 = 'total' AND po.status <> 'rechazada' THEN 'recibida'
-        WHEN $1 <> 'total' AND po.status = 'recibida' AND COALESCE(po.payment_status,'pendiente') = 'total' THEN 'pagada'
-        WHEN $1 <> 'total' AND po.status = 'recibida' THEN 'aprobada_compras'
+        WHEN p.delivery_status = 'total' AND po.status <> 'rechazada' THEN 'recibida'
+        WHEN p.delivery_status <> 'total' AND po.status = 'recibida' AND COALESCE(po.payment_status,'pendiente') = 'total' THEN 'pagada'
+        WHEN p.delivery_status <> 'total' AND po.status = 'recibida' THEN 'aprobada_compras'
         ELSE po.status
       END,
       recibido_por = CASE
-        WHEN $1 = 'total' THEN COALESCE(po.recibido_por, (
-          SELECT r.received_by
-          FROM purchase_order_receipts r
-          WHERE r.po_id = $2
-          ORDER BY r.received_at DESC
-          LIMIT 1
-        ))
-        WHEN $1 = 'pendiente' THEN NULL
+        WHEN p.delivery_status = 'total' THEN COALESCE(po.recibido_por, ur.received_by)
+        WHEN p.delivery_status = 'pendiente' THEN NULL
         ELSE po.recibido_por
       END,
       recibido_at = CASE
-        WHEN $1 = 'total' THEN COALESCE(po.recibido_at, (
-          SELECT r.received_at
-          FROM purchase_order_receipts r
-          WHERE r.po_id = $2
-          ORDER BY r.received_at DESC
-          LIMIT 1
-        ))
-        WHEN $1 = 'pendiente' THEN NULL
+        WHEN p.delivery_status = 'total' THEN COALESCE(po.recibido_at, ur.received_at)
+        WHEN p.delivery_status = 'pendiente' THEN NULL
         ELSE po.recibido_at
       END,
       recibido_en = CASE
-        WHEN $1 = 'total' THEN COALESCE(po.recibido_en, (
-          SELECT r.received_at
-          FROM purchase_order_receipts r
-          WHERE r.po_id = $2
-          ORDER BY r.received_at DESC
-          LIMIT 1
-        ))
-        WHEN $1 = 'pendiente' THEN NULL
+        WHEN p.delivery_status = 'total' THEN COALESCE(po.recibido_en, ur.received_at)
+        WHEN p.delivery_status = 'pendiente' THEN NULL
         ELSE po.recibido_en
       END
-    WHERE po.id = $2
+    FROM params p
+    LEFT JOIN ultima_recepcion ur ON TRUE
+    WHERE po.id = p.po_id
   `, [status, poId]);
 
   return status;
@@ -146,7 +139,7 @@ router.get('/:id/recepciones', authenticate, async (req, res) => {
         u.name AS received_by_name
       FROM purchase_order_receipts r
       LEFT JOIN users u ON u.id = r.received_by
-      WHERE r.po_id = $1
+      WHERE r.po_id = $1::uuid
       ORDER BY r.received_at DESC
     `, [req.params.id]);
 
@@ -159,7 +152,7 @@ router.get('/:id/recepciones', authenticate, async (req, res) => {
         poi.descripcion, poi.unidad, poi.cantidad AS cantidad_pedida
       FROM purchase_order_receipt_items ri
       JOIN purchase_order_items poi ON poi.id = ri.po_item_id
-      WHERE ri.receipt_id = ANY($1)
+      WHERE ri.receipt_id = ANY($1::uuid[])
     `, [recIds]);
 
     const itemsByRec = {};
@@ -209,7 +202,7 @@ router.get('/:id/items-pendientes', authenticate, async (req, res) => {
         (poi.cantidad - COALESCE(SUM(pori.cantidad), 0)) AS pendiente
       FROM purchase_order_items poi
       LEFT JOIN purchase_order_receipt_items pori ON pori.po_item_id = poi.id
-      WHERE poi.po_id = $1
+      WHERE poi.po_id = $1::uuid
       GROUP BY poi.id
       ORDER BY poi.created_at
     `, [req.params.id]);
@@ -255,7 +248,7 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
 
     // Verificar que la OC exista y esté en estado válido
     const po = await client.query(
-      `SELECT id, status FROM purchase_orders WHERE id=$1 FOR UPDATE`,
+      `SELECT id, status FROM purchase_orders WHERE id=$1::uuid FOR UPDATE`,
       [req.params.id]
     );
     if (!po.rows[0]) {
@@ -274,7 +267,7 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
         COALESCE(SUM(pori.cantidad), 0) AS recibida
       FROM purchase_order_items poi
       LEFT JOIN purchase_order_receipt_items pori ON pori.po_item_id = poi.id
-      WHERE poi.po_id = $1
+      WHERE poi.po_id = $1::uuid
       GROUP BY poi.id
     `, [req.params.id]);
 
@@ -345,7 +338,7 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
     await ensurePOReceiptStateColumns(client);
 
     const rec = await client.query(
-      `SELECT id, received_by FROM purchase_order_receipts WHERE id=$1 AND po_id=$2 FOR UPDATE`,
+      `SELECT id, received_by FROM purchase_order_receipts WHERE id=$1::uuid AND po_id=$2::uuid FOR UPDATE`,
       [req.params.rid, req.params.id]
     );
     if (!rec.rows[0]) {
@@ -359,7 +352,7 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
       return res.status(403).json({ error: 'Solo podés anular recepciones que vos cargaste' });
     }
 
-    await client.query(`DELETE FROM purchase_order_receipts WHERE id=$1`, [req.params.rid]);
+    await client.query(`DELETE FROM purchase_order_receipts WHERE id=$1::uuid`, [req.params.rid]);
     await recalcDeliveryStatus(client, req.params.id);
 
     await client.query('COMMIT');
