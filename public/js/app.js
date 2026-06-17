@@ -5566,8 +5566,17 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   if (st === 'aprobada_compras' && (userRole === 'tesoreria' || esAdmin)) {
     acciones.push({ key: 'pagar',    label: '✓ Confirmar pago', color: 'primary' });
   }
-  // SOLICITANTES (jefe mant, paniol, contador) y admin: recibir
-  if (st === 'pagada' && ((['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador) || esAdmin)) {
+  // Recepción: la mercadería puede recibirse aunque el pago siga pendiente.
+  // Pago y entrega son circuitos separados.
+  const esMismaSucursal = userRole === 'gerente_sucursal'
+    && App?.currentUser?.sucursal
+    && oc?.sucursal
+    && String(App.currentUser.sucursal).trim().toLowerCase() === String(oc.sucursal).trim().toLowerCase();
+  if (['aprobada_compras','pagada'].includes(st) && (
+    (['jefe_mantenimiento','paniol','contador','compras'].includes(userRole) && esCreador) ||
+    esMismaSucursal ||
+    esAdmin
+  )) {
     acciones.push({ key: 'recibir',  label: '📦 Confirmar recepción', color: 'success' });
   }
   // RECHAZAR: según rol y estado
@@ -8794,7 +8803,7 @@ async function renderPurchaseOrders() {
     <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
       <div class="kpi-card"><div class="kpi-label">Pendientes de cotización</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe solicitar cotización</div></div>
       <div class="kpi-card"><div class="kpi-label">En cotización / Aprobadas</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 en proceso</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Pagadas (por recibir)</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">💰 esperando mercadería</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Aprobadas / por recibir</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">📦 esperando mercadería</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 proceso completado</div></div>
     </div>
 
@@ -10080,9 +10089,14 @@ async function openPODetail(id) {
           btns.push({ label:'✓ Confirmar pago', cls:'btn-primary', fn: () => pagarOC(id) });
         }
 
-        // 💰 Pagada → solicitante/dueño confirman recepción
-        if (po.status === 'pagada' && (
+        // 📦 Recepción: disponible desde aprobada_compras. No depende del pago.
+        const esMismaSucursalRecepcion = role === 'gerente_sucursal'
+          && App.currentUser?.sucursal
+          && po.sucursal
+          && String(App.currentUser.sucursal).trim().toLowerCase() === String(po.sucursal).trim().toLowerCase();
+        if (['aprobada_compras','pagada'].includes(po.status) && (
           (['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) ||
+          esMismaSucursalRecepcion ||
           ['dueno','gerencia'].includes(role)
         )) {
           btns.push({ label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) });
@@ -10090,7 +10104,7 @@ async function openPODetail(id) {
 
         // 📦 Recepciones parciales (disponible desde aprobada_compras en adelante, salvo rechazada)
         if (['aprobada_compras','pagada','recibida'].includes(po.status) && (
-          ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras'].includes(role)
+          ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'].includes(role)
         )) {
           btns.push({ label:'📦 Recepciones parciales', cls:'btn-secondary', fn: () => abrirModalRecepciones(id) });
         }
@@ -10594,7 +10608,7 @@ async function recibirOC(id) {
     const itemsVinculados = (po.items || []).filter(i => i.stock_item_id).length;
     const itemsTotal = (po.items || []).length;
 
-    var partes = ['Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n'];
+    var partes = ['Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nEsto no depende del pago: Tesorería seguirá viendo el pago como pendiente si corresponde.\n'];
     if (itemsVinculados > 0) {
       partes.push('📦 ' + itemsVinculados + ' de ' + itemsTotal + ' ítems se INGRESARÁN automáticamente al stock.');
     }
