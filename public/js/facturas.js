@@ -21,6 +21,14 @@
     return ROLES_CARGAR.includes(role);
   }
 
+  const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
+  const totalConIvaFactura = (f) => {
+    if (f && f.invoice_total != null) return num(f.invoice_total);
+    const neto = num(f?.invoice_monto);
+    const iva = num(f?.iva_pct);
+    return +(neto * (1 + iva / 100)).toFixed(2);
+  };
+
   // ─────────────────────────────────────────────────────────
   //  MODAL DE FACTURAS (se abre desde botón en OC)
   // ─────────────────────────────────────────────────────────
@@ -43,9 +51,12 @@
   function renderModalFacturas(poId, oc, facturas) {
     document.querySelector('.modal-facturas-overlay')?.remove();
 
-    const totalOC = parseFloat(oc.total_estimado) || 0;
-    const totalFacturado = facturas.reduce((s, f) => s + parseFloat(f.invoice_monto || 0), 0);
-    const pendienteFacturar = Math.max(0, totalOC - totalFacturado);
+    const subtotalOC = parseFloat(oc.total_estimado) || 0;
+    const ivaOC = parseFloat(oc.iva_pct) || 0;
+    const totalOC = +(subtotalOC * (1 + ivaOC / 100)).toFixed(2);
+    const totalFacturado = facturas.reduce((s, f) => s + totalConIvaFactura(f), 0);
+    const pendienteFacturar = Math.max(0, +(totalOC - totalFacturado).toFixed(2));
+    const pendienteNetoSugerido = +(pendienteFacturar / (1 + ivaOC / 100 || 1)).toFixed(2);
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-facturas-overlay';
@@ -62,7 +73,7 @@
         <div style="padding:20px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#1e293b;z-index:10">
           <div>
             <div style="font-size:18px;font-weight:700">📄 Facturas · ${oc.code || ''}</div>
-            <div style="font-size:13px;color:#94a3b8;margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Total OC: <strong>$${fmt(totalOC)}</strong> · Facturado: <strong style="color:${totalFacturado>=totalOC?'#10b981':'#f59e0b'}">$${fmt(totalFacturado)}</strong></div>
+            <div style="font-size:13px;color:#94a3b8;margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Total OC c/IVA: <strong>$${fmt(totalOC)}</strong> <span style="color:#64748b">(neto $${fmt(subtotalOC)} · IVA ${fmt(ivaOC)}%)</span> · Facturado c/IVA: <strong style="color:${totalFacturado>=totalOC?'#10b981':'#f59e0b'}">$${fmt(totalFacturado)}</strong></div>
           </div>
           <button onclick="this.closest('.modal-facturas-overlay').remove()" style="background:transparent;border:none;color:#94a3b8;font-size:28px;cursor:pointer;line-height:1">×</button>
         </div>
@@ -83,15 +94,16 @@
                 <input id="fac-fecha" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
               </div>
               <div>
-                <label style="font-size:12px;color:#94a3b8">Monto * <span style="color:#64748b">(pendiente: $${fmt(pendienteFacturar)})</span></label>
-                <input id="fac-monto" type="number" step="0.01" placeholder="${fmt(pendienteFacturar)}" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <label style="font-size:12px;color:#94a3b8">Importe neto * <span style="color:#64748b">(pendiente c/IVA: $${fmt(pendienteFacturar)})</span></label>
+                <input id="fac-monto" type="number" step="0.01" placeholder="${fmt(pendienteNetoSugerido)}" oninput="actualizarPreviewFacturaIVA()" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <div style="font-size:10px;color:#94a3b8;margin-top:3px">Tesorería pagará el total con IVA.</div>
               </div>
             </div>
 
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
                 <label style="font-size:12px;color:#94a3b8">IVA %</label>
-                <input id="fac-iva" type="number" step="0.01" value="21" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <input id="fac-iva" type="number" step="0.01" value="${ivaOC || 21}" oninput="actualizarPreviewFacturaIVA()" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
               </div>
               <div>
                 <label style="font-size:12px;color:#94a3b8">Forma de pago</label>
@@ -107,6 +119,10 @@
                 <label style="font-size:12px;color:#94a3b8">Días CC <span style="color:#64748b">(0 = contado)</span></label>
                 <input id="fac-cc" type="number" min="0" value="${ccDefault}" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
               </div>
+            </div>
+
+            <div id="fac-total-preview" style="background:#111827;border:1px solid #334155;border-radius:6px;padding:10px;margin-bottom:12px;font-size:13px;color:#cbd5e1">
+              Total con IVA: <strong>$0,00</strong>
             </div>
 
             <div style="margin-bottom:12px">
@@ -141,7 +157,8 @@
               <div style="background:#0f172a;border:1px solid ${vencida?'#ef4444':'#334155'};border-radius:8px;padding:12px;margin-bottom:8px">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
                   <div style="flex:1">
-                    <div style="font-weight:600">📄 ${f.invoice_nro} · $${fmt(f.invoice_monto)}</div>
+                    <div style="font-weight:600">📄 ${f.invoice_nro} · Total c/IVA $${fmt(totalConIvaFactura(f))}</div>
+                    <div style="font-size:11px;color:#64748b">Neto $${fmt(f.invoice_monto)} · IVA ${fmt(f.iva_pct || 0)}%</div>
                     <div style="font-size:12px;color:#94a3b8">Fecha: ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · Vence: ${venc}${vencida?' <span style="color:#ef4444;font-weight:600">VENCIDA</span>':''} · ${f.forma_pago || '—'} ${f.cc_dias?'· '+f.cc_dias+' días':''}</div>
                     <div style="font-size:12px;color:#94a3b8">Cargada por ${f.uploaded_by_name || '—'} el ${new Date(f.uploaded_at).toLocaleDateString('es-AR')}</div>
                     ${f.file_url ? `<div style="font-size:12px;margin-top:4px"><a href="${f.file_url}" target="_blank" style="color:#3b82f6">📎 Ver archivo</a></div>` : ''}
@@ -161,7 +178,16 @@
     `;
 
     document.body.appendChild(overlay);
+    setTimeout(() => { if (typeof actualizarPreviewFacturaIVA === 'function') actualizarPreviewFacturaIVA(); }, 0);
   }
+
+  window.actualizarPreviewFacturaIVA = function() {
+    const neto = parseFloat(document.getElementById('fac-monto')?.value || 0) || 0;
+    const iva = parseFloat(document.getElementById('fac-iva')?.value || 0) || 0;
+    const total = neto * (1 + iva / 100);
+    const el = document.getElementById('fac-total-preview');
+    if (el) el.innerHTML = `Total con IVA: <strong>$${fmt(total)}</strong> <span style="color:#64748b">(neto $${fmt(neto)} + IVA ${fmt(iva)}%)</span>`;
+  };
 
   // ─────────────────────────────────────────────────────────
   //  Guardar factura
@@ -261,7 +287,7 @@
                     <td style="padding:12px;font-weight:600">${o.code}</td>
                     <td style="padding:12px;font-size:13px">${new Date(o.created_at).toLocaleDateString('es-AR')}</td>
                     <td style="padding:12px;text-align:right">$${fmt(o.total_estimado)}</td>
-                    <td style="padding:12px;text-align:right;color:${parseFloat(o.total_facturado)>=parseFloat(o.total_estimado)?'#10b981':'#f59e0b'}">$${fmt(o.total_facturado)}</td>
+                    <td style="padding:12px;text-align:right;color:${parseFloat(o.total_facturado_con_iva||0)>=parseFloat(o.total_estimado||0)*(1+(parseFloat(o.iva_pct||0)/100))?'#10b981':'#f59e0b'}">$${fmt(o.total_facturado_con_iva || o.total_facturado)}</td>
                     <td style="padding:12px;text-align:center"><span style="font-size:11px;background:${badgeColor(o.delivery_status)};padding:3px 8px;border-radius:4px">${o.delivery_status || 'pendiente'}</span></td>
                     <td style="padding:12px;text-align:center"><span style="font-size:11px;background:${badgeColor(o.payment_status)};padding:3px 8px;border-radius:4px">${o.payment_status || 'pendiente'}</span></td>
                     <td style="padding:12px;text-align:center">
