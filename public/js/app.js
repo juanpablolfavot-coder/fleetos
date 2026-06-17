@@ -1328,29 +1328,38 @@ async function saveNewOT() {
 
   // Repuestos — leer directo del DOM (incluye origin + stock_id si aplica)
   const parts = [];
+  let stockSinSeleccion = false;
   document.querySelectorAll('[id^="otp-name-"]').forEach(nameEl => {
     const idx   = nameEl.id.replace('otp-name-', '');
     const name  = nameEl.value.trim();
     if (!name || name.length < 2) return;
 
-    // Leer el selector de origen (Externo / Pañol)
     const originEl = document.getElementById('otp-origin-' + idx);
     const origin = originEl?.value === 'stock' ? 'stock' : 'externo';
-    // Si es del pañol, el stock_id está en dataset del input de nombre
     const stock_id = (origin === 'stock') ? (nameEl.dataset.stockId || null) : null;
 
-    // Si eligió pañol pero no vinculó → tratar como externo (no fallar)
-    const finalOrigin = (origin === 'stock' && !stock_id) ? 'externo' : origin;
+    if (origin === 'stock' && !stock_id) {
+      stockSinSeleccion = true;
+      nameEl.style.borderColor = 'var(--danger)';
+      return;
+    }
+
+    const qty = parseFloat(document.getElementById('otp-qty-'  + idx)?.value) || 1;
+    const unitCost = parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0;
 
     parts.push({
       name,
-      qty:       parseFloat(document.getElementById('otp-qty-'  + idx)?.value) || 1,
+      qty,
       unit:      document.getElementById('otp-unit-' + idx)?.value || 'un',
-      unit_cost: parseFloat(document.getElementById('otp-cost-' + idx)?.value) || 0,
-      origin:    finalOrigin,
-      stock_id:  (finalOrigin === 'stock') ? stock_id : null,
+      unit_cost: unitCost,
+      origin,
+      stock_id:  origin === 'stock' ? stock_id : null,
     });
   });
+  if (stockSinSeleccion) {
+    showToast('error', 'Elegiste Pañol, pero falta seleccionar el artículo del listado. Hacé click en la sugerencia del stock.');
+    return;
+  }
 
   if (!target_id) {
     showToast('error', ot_tipo==='vehiculo' ? 'Seleccioná una unidad' : 'Seleccioná un activo');
@@ -4088,17 +4097,30 @@ function stockPayloadLocation(prefix) {
 function openStockEgresoModal(stockId) {
   const s = App.data.stock.find(function(x){ return String(x.id)===String(stockId); });
   if (!s) return;
+  const ots = (App.data.workOrders || []).filter(function(ot){ return String(ot.status || '').toLowerCase() !== 'cerrada'; });
+  const otOptions = ots.map(function(ot){
+    const label = (ot.code || ot.id) + ' — ' + (ot.vehicle || ot.vehicle_code || ot.unit || '') + ' ' + (ot.description || '').slice(0,60);
+    return '<option value="'+stockFormValue(ot.id)+'">'+stockFormValue(label)+'</option>';
+  }).join('');
   openModal('Registrar egreso — '+s.name, ''
     + '<div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px">'
     + '<div style="font-size:13px;font-weight:500;color:var(--text)">'+stockFormValue(s.name)+'</div>'
-    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+stockFormValue(s.sucursal||'Central')+' · '+stockFormValue(s.area||'Depósito')+' · Stock actual: <span style="font-family:var(--mono);color:var(--text)">'+s.qty+' '+stockFormValue(s.unit)+'</span></div></div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-top:2px">'+stockFormValue(s.sucursal||'Central')+' · '+stockFormValue(s.area||'Depósito')+' · Stock actual: <span style="font-family:var(--mono);color:var(--text)">'+s.qty+' '+stockFormValue(s.unit)+'</span> · Costo: <span style="font-family:var(--mono);color:var(--accent)">$'+Math.round(s.cost||s.unit_cost||0).toLocaleString('es-AR')+'/'+stockFormValue(s.unit)+'</span></div></div>'
     + '<div class="form-row"><div class="form-group"><label class="form-label">Cantidad a egresar</label><input class="form-input" type="number" id="eg-qty" value="1" min="0.01" max="'+s.qty+'" step="0.01"></div>'
-    + '<div class="form-group"><label class="form-label">Destino / uso</label><select class="form-select" id="eg-dest"><option value="ot">Orden de trabajo</option><option value="taller">Consumo taller</option><option value="administracion">Administración</option><option value="otro">Otro uso</option></select></div></div>'
-    + '<div class="form-group"><label class="form-label">Referencia (OT, observación)</label><input class="form-input" id="eg-ref" placeholder="Ej: OT-0284 o descripción del uso"></div>',
+    + '<div class="form-group"><label class="form-label">Destino / uso</label><select class="form-select" id="eg-dest" onchange="toggleStockEgresoOT()"><option value="ot">Orden de trabajo</option><option value="taller">Consumo taller</option><option value="administracion">Administración</option><option value="otro">Otro uso</option></select></div></div>'
+    + '<div class="form-group" id="eg-ot-wrap"><label class="form-label">Orden de trabajo asociada</label><select class="form-select" id="eg-wo-id"><option value="">— Seleccioná OT —</option>'+otOptions+'</select><div style="font-size:11px;color:var(--text3);margin-top:4px">Al asociar una OT, el egreso también valoriza la orden de trabajo.</div></div>'
+    + '<div class="form-group"><label class="form-label">Referencia / observación</label><input class="form-input" id="eg-ref" placeholder="Ej: entrega a mecánico, aclaración del uso"></div>',
   [
     { label:'Confirmar egreso', cls:'btn-primary', fn: function(){ saveStockEgreso(stockId); } },
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
   ]);
+}
+
+
+function toggleStockEgresoOT() {
+  const wrap = document.getElementById('eg-ot-wrap');
+  const dest = document.getElementById('eg-dest')?.value || 'otro';
+  if (wrap) wrap.style.display = dest === 'ot' ? '' : 'none';
 }
 
 async function saveStockEgreso(stockId) {
@@ -4106,11 +4128,17 @@ async function saveStockEgreso(stockId) {
   if (!s) return;
   const qty = parseFloat(document.getElementById('eg-qty')?.value) || 0;
   const reason = (document.getElementById('eg-ref')?.value || '').trim();
+  const dest = document.getElementById('eg-dest')?.value || 'otro';
+  const wo_id = dest === 'ot' ? (document.getElementById('eg-wo-id')?.value || '') : '';
   if (qty <= 0) { showToast('warn','Ingresá una cantidad'); return; }
   if (qty > s.qty){ showToast('warn','Stock insuficiente. Disponible: '+s.qty+' '+s.unit); return; }
-  const res = await apiFetch('/api/stock/'+stockId+'/egreso', { method:'POST', body: JSON.stringify({ qty, reason: reason || 'Egreso manual' }) });
+  if (dest === 'ot' && !wo_id) { showToast('warn','Seleccioná la OT asociada al egreso'); return; }
+  const payload = { qty, reason: reason || 'Egreso manual', destino: dest };
+  if (wo_id) payload.wo_id = wo_id;
+  const res = await apiFetch('/api/stock/'+stockId+'/egreso', { method:'POST', body: JSON.stringify(payload) });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al registrar egreso'); return; }
-  closeModal(); showToast('ok', 'Egreso registrado: '+qty+' '+s.unit+' de '+s.name); await afterSave({ page:'stock' });
+  const data = await res.json().catch(()=>({}));
+  closeModal(); showToast('ok', data.linked_ot_code ? ('Egreso registrado y valorizó '+data.linked_ot_code) : ('Egreso registrado: '+qty+' '+s.unit+' de '+s.name)); await afterSave({ page:'stock' });
 }
 
 function openStockIngresoModal(stockId) {
@@ -7411,7 +7439,7 @@ function onOTPartNameInput(idx, val) {
         <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost||0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
         <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
       </div>
     </div>`;
@@ -10986,15 +11014,15 @@ function searchPOStock(idx) {
   sug.innerHTML = matches.map(function(s) {
     var sucLabel = s.sucursal ? '<span style="color:var(--accent);font-size:10px;margin-left:6px">['+s.sucursal+']</span>' : '';
     var critColor = s.is_critical ? 'var(--danger)' : 'var(--text3)';
-    return '<div onclick="selectPOStockItem('+idx+',\''+s.id+'\',\''+s.name.replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\',\''+s.unit+'\','+parseFloat(s.unit_cost||0)+','+parseFloat(s.qty_current||0)+')"'
+    return '<div onclick="selectPOStockItem('+idx+',\''+s.id+'\',\''+s.name.replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\',\''+s.unit+'\','+parseFloat((s.unit_cost ?? s.cost) || 0)+','+parseFloat((s.qty_current ?? s.qty) || 0)+')"'
       +' style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"'
       +' onmouseover="this.style.background=\'var(--bg3)\'" onmouseout="this.style.background=\'\'">'
       +'<div><span style="font-weight:600">'+s.name+'</span>'
       +'<span style="color:var(--text3);margin-left:8px;font-family:monospace;font-size:11px">'+s.code+'</span>'
       +sucLabel+'</div>'
       +'<div style="text-align:right">'
-      +'<div style="font-weight:700;color:var(--accent)">$'+Math.round(s.unit_cost||0).toLocaleString('es-AR')+'/'+s.unit+'</div>'
-      +'<div style="font-size:10px;color:'+critColor+'">Stock: '+parseFloat(s.qty_current||0)+' '+s.unit+'</div>'
+      +'<div style="font-weight:700;color:var(--accent)">$'+Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')+'/'+s.unit+'</div>'
+      +'<div style="font-size:10px;color:'+critColor+'">Stock: '+parseFloat((s.qty_current ?? s.qty) || 0)+' '+s.unit+'</div>'
       +'</div></div>';
   }).join('');
   sug.style.display = 'block';
@@ -12431,7 +12459,7 @@ function _partsNameInput(val) {
         <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost||0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
         <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
       </div>
     </div>`;
