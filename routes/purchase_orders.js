@@ -65,7 +65,8 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_por UUID REFERENCES users(id)`).catch(()=>{});
 
   // Reparación defensiva: si una OC ya tiene recepción total registrada,
-  // pero quedó con estado principal 'pagada', la pasamos a 'recibida'.
+  // debe quedar recibida aunque todavía no esté pagada.
+  // La recepción y el pago son circuitos separados.
   await query(`
     WITH ult_recepcion AS (
       SELECT DISTINCT ON (po_id) po_id, received_by, received_at
@@ -81,7 +82,8 @@ async function ensureTables() {
       recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
     FROM ult_recepcion
     WHERE po.id = ult_recepcion.po_id
-      AND po.status = 'pagada'
+      AND COALESCE(po.status, '') <> 'recibida'
+      AND COALESCE(po.status, '') <> 'rechazada'
       AND COALESCE(po.delivery_status, '') = 'total'
   `).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_at TIMESTAMPTZ`).catch(()=>{});
@@ -835,14 +837,14 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 });
 
 // ─────────────────────────────────────────────────────────────
-//  POST /:id/recibir — Jefe mant confirma recepción
-//  pagada → recibida
+//  POST /:id/recibir — Confirmar recepción
+//  La mercadería puede recibirse aunque el pago siga pendiente.
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const cur = await client.query('SELECT status, requested_by FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    const cur = await client.query('SELECT status, requested_by, sucursal FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
     if (!cur.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
@@ -853,9 +855,18 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
     }
-    if (cur.rows[0].status !== 'pagada') {
+    if (!['aprobada_compras','pagada'].includes(cur.rows[0].status)) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Solo se puede recibir una OC pagada' });
+      return res.status(400).json({ error: 'Solo se puede recibir una OC aprobada por compras o pagada' });
+    }
+
+    if (req.user.role === 'gerente_sucursal') {
+      const sucUser = String(req.user.sucursal || '').trim().toLowerCase();
+      const sucOC   = String(cur.rows[0].sucursal || '').trim().toLowerCase();
+      if (!sucUser || !sucOC || sucUser !== sucOC) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Solo podés recibir OCs de tu sucursal' });
+      }
     }
     const r = await client.query(`
       UPDATE purchase_orders SET
