@@ -205,16 +205,9 @@ CREATE TABLE IF NOT EXISTS fuel_internal_dispatches (
     received_liters     NUMERIC(12,2),
     receive_notes       TEXT,
     received_at         TIMESTAMPTZ,
-    destination_tank_id UUID REFERENCES tanks(id),
-    destination_stock_applied BOOLEAN NOT NULL DEFAULT FALSE,
-    destination_stock_applied_at TIMESTAMPTZ,
     created_by          UUID REFERENCES users(id),
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
-ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_tank_id UUID REFERENCES tanks(id);
-ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_stock_applied BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE fuel_internal_dispatches ADD COLUMN IF NOT EXISTS destination_stock_applied_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_created ON fuel_internal_dispatches(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_tank    ON fuel_internal_dispatches(tank_id);
@@ -605,6 +598,10 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
     pagado_at                   TIMESTAMPTZ,
     recibido_por                UUID REFERENCES users(id),
     recibido_at                 TIMESTAMPTZ,
+    recibido_en                 TIMESTAMPTZ,
+    delivery_status             VARCHAR(20) DEFAULT 'pendiente',
+    invoice_status              VARCHAR(20) DEFAULT 'pendiente',
+    payment_status              VARCHAR(20) DEFAULT 'pendiente',
 
     -- Rechazo (estado final)
     rechazado_por               UUID REFERENCES users(id),
@@ -623,6 +620,11 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
 CREATE INDEX IF NOT EXISTS idx_po_status     ON purchase_orders(status);
 CREATE INDEX IF NOT EXISTS idx_po_requested  ON purchase_orders(requested_by);
 CREATE INDEX IF NOT EXISTS idx_po_created_at ON purchase_orders(created_at DESC);
+
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente';
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(20) DEFAULT 'pendiente';
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente';
 
 -- Artículos de cada OC
 CREATE TABLE IF NOT EXISTS purchase_order_items (
