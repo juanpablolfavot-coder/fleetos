@@ -58,7 +58,32 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS pagado_at TIMESTAMPTZ`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_por UUID REFERENCES users(id)`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_at TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_por UUID REFERENCES users(id)`).catch(()=>{});
+
+  // Reparación defensiva: si una OC ya tiene recepción total registrada,
+  // pero quedó con estado principal 'pagada', la pasamos a 'recibida'.
+  await query(`
+    WITH ult_recepcion AS (
+      SELECT DISTINCT ON (po_id) po_id, received_by, received_at
+      FROM purchase_order_receipts
+      ORDER BY po_id, received_at DESC
+    )
+    UPDATE purchase_orders po
+    SET
+      status = 'recibida',
+      delivery_status = 'total',
+      recibido_por = COALESCE(po.recibido_por, ult_recepcion.received_by),
+      recibido_at = COALESCE(po.recibido_at, ult_recepcion.received_at),
+      recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
+    FROM ult_recepcion
+    WHERE po.id = ult_recepcion.po_id
+      AND po.status = 'pagada'
+      AND COALESCE(po.delivery_status, '') = 'total'
+  `).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_at TIMESTAMPTZ`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS motivo_rechazo TEXT`).catch(()=>{});
 
@@ -837,7 +862,8 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
         status = 'recibida',
         delivery_status = 'total',
         recibido_por = $1,
-        recibido_at = NOW()
+        recibido_at = NOW(),
+        recibido_en = NOW()
       WHERE id = $2 RETURNING *`,
       [req.user.id, req.params.id]
     );
