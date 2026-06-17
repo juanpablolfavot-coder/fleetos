@@ -1,6 +1,58 @@
 const jwt     = require('jsonwebtoken');
 const { query } = require('../db/pool');
 
+// Cache corto para evitar consultar users en cada request de la misma pantalla.
+// No reemplaza la seguridad: el JWT se verifica siempre. Solo ahorra la consulta
+// repetida a PostgreSQL durante unos segundos.
+const USER_CACHE_TTL_MS = Number(process.env.USER_CACHE_TTL_MS || 30000);
+const USER_CACHE_MAX    = Number(process.env.USER_CACHE_MAX || 500);
+const userCache = new Map();
+
+// Crear índices de apoyo para auth si la base viene de versiones viejas.
+// Se ejecuta una sola vez al iniciar; no bloquea el login si falla.
+(async () => {
+  try {
+    await query('CREATE INDEX IF NOT EXISTS idx_users_active ON users(active)');
+    await query('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
+    await query('CREATE INDEX IF NOT EXISTS idx_users_sucursal_area ON users(sucursal, area)');
+  } catch (e) {
+    console.warn('[auth índices]', e.message);
+  }
+})();
+
+function getCachedUser(userId) {
+  const key = String(userId || '');
+  if (!key) return null;
+  const item = userCache.get(key);
+  if (!item) return null;
+  if (Date.now() > item.expiresAt) {
+    userCache.delete(key);
+    return null;
+  }
+  // Refresca posición LRU básica.
+  userCache.delete(key);
+  userCache.set(key, item);
+  return item.user;
+}
+
+function setCachedUser(userId, user) {
+  const key = String(userId || '');
+  if (!key || !user) return;
+  if (userCache.size >= USER_CACHE_MAX) {
+    const firstKey = userCache.keys().next().value;
+    if (firstKey) userCache.delete(firstKey);
+  }
+  userCache.set(key, {
+    user: { ...user },
+    expiresAt: Date.now() + USER_CACHE_TTL_MS,
+  });
+}
+
+function clearUserCache(userId) {
+  if (userId) userCache.delete(String(userId));
+  else userCache.clear();
+}
+
 // Verificar JWT en cada request protegido
 const authenticate = async (req, res, next) => {
   try {
@@ -12,16 +64,27 @@ const authenticate = async (req, res, next) => {
     const token = header.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    const cached = getCachedUser(decoded.id);
+    if (cached) {
+      if (!cached.active) {
+        return res.status(401).json({ error: 'Usuario no autorizado' });
+      }
+      req.user = cached;
+      return next();
+    }
+
     // Verificar que el usuario sigue activo en DB
     const result = await query(
-      'SELECT id, name, role, vehicle_code, active, supplier_id, sucursal, area FROM users WHERE id = $1',
+      'SELECT id, name, role, vehicle_code, active, supplier_id, sucursal, area FROM users WHERE id = $1::uuid',
       [decoded.id]
     );
 
     if (!result.rows[0] || !result.rows[0].active) {
+      clearUserCache(decoded.id);
       return res.status(401).json({ error: 'Usuario no autorizado' });
     }
 
+    setCachedUser(decoded.id, result.rows[0]);
     req.user = result.rows[0];
     next();
   } catch (err) {
@@ -99,4 +162,4 @@ const auditAction = (action, tableName) => async (req, res, next) => {
   next();
 };
 
-module.exports = { authenticate, requireRole, requireOwner, auditOnly, auditAction };
+module.exports = { authenticate, requireRole, requireOwner, auditOnly, auditAction, clearUserCache };
