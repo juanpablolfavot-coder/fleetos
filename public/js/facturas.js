@@ -23,7 +23,9 @@
 
   const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
   const totalConIvaFactura = (f) => {
+    if (f && f.total_a_pagar != null) return num(f.total_a_pagar);
     if (f && f.invoice_total != null) return num(f.invoice_total);
+    if (f && f.total_con_iva != null) return num(f.total_con_iva);
     const neto = num(f?.invoice_monto);
     const iva = num(f?.iva_pct);
     return +(neto * (1 + iva / 100)).toFixed(2);
