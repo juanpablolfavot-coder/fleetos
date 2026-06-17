@@ -88,13 +88,24 @@ FOR EACH ROW EXECUTE FUNCTION recalc_invoice_payment();
 CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
 DECLARE
   v_po_id UUID;
+  v_receipt_id UUID;
   v_po_status VARCHAR;
   v_payment_status VARCHAR;
   v_total_pedido NUMERIC;
   v_total_recibido NUMERIC;
   v_delivery_status VARCHAR;
 BEGIN
-  v_po_id := (SELECT po_id FROM purchase_order_receipts WHERE id = COALESCE(NEW.receipt_id, OLD.receipt_id));
+  -- NEW no existe en DELETE y OLD no existe en INSERT. Separar por operación
+  -- evita errores raros de trigger en recepciones parciales/anuladas.
+  IF TG_OP = 'DELETE' THEN
+    v_receipt_id := OLD.receipt_id;
+  ELSE
+    v_receipt_id := NEW.receipt_id;
+  END IF;
+
+  SELECT po_id INTO v_po_id
+  FROM purchase_order_receipts
+  WHERE id = v_receipt_id;
 
   IF v_po_id IS NULL THEN
     RETURN COALESCE(NEW, OLD);
