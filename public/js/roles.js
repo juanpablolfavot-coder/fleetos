@@ -612,6 +612,9 @@ function _mapFuelDispatch(d) {
     date:               d.created_at ? d.created_at.slice(0,16).replace('T',' ') : '—',
     tank_id:            d.tank_id || null,
     tank_location:      d.tank_location || 'Cisterna',
+    destination_tank_id: d.destination_tank_id || null,
+    destination_stock_applied: d.destination_stock_applied === true || d.destination_stock_applied === 'true',
+    destination_stock_applied_at: d.destination_stock_applied_at || null,
     created_by_name:    d.created_by_name || '—',
     _raw:               d,
   };
