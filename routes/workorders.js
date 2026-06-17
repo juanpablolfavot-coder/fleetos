@@ -265,13 +265,18 @@ router.post('/', authenticate, async (req, res) => {
     for (const p of parts) {
       if (p.origin === 'stock' && p.stock_id) {
         const stock = await client.query(
-          'SELECT qty_current, unit_cost FROM stock_items WHERE id = $1 FOR UPDATE',
+          'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
           [p.stock_id]
         );
         if (!stock.rows[0] || stock.rows[0].qty_current < p.qty) {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: `Stock insuficiente para: ${p.name}` });
         }
+        // La valorización de la OT debe salir del costo real del pañol,
+        // no del valor enviado por el navegador.
+        p.unit_cost = parseFloat(stock.rows[0].unit_cost) || 0;
+        p.unit = p.unit || stock.rows[0].unit || 'un';
+        p.name = (p.name && String(p.name).trim()) ? p.name : (stock.rows[0].name || 'Repuesto de pañol');
         await client.query('UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2', [p.qty, p.stock_id]);
         await client.query(
           `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
@@ -374,7 +379,7 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
       let finalCost = originClean === 'stock' ? (parseFloat(p.unit_cost) || 0) : 0;
 
       if (originClean === 'stock') {
-        const stock = await client.query('SELECT qty_current, unit_cost FROM stock_items WHERE id = $1 FOR UPDATE', [p.stock_id]);
+        const stock = await client.query('SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE', [p.stock_id]);
         if (!stock.rows[0] || parseFloat(stock.rows[0].qty_current) < qtyNum) {
           await client.query('ROLLBACK');
           return res.status(409).json({ error: `Stock insuficiente: ${nameClean}` });
@@ -652,7 +657,7 @@ router.post('/:id/parts',
       // Si es del pañol → descontar con FOR UPDATE + registrar movimiento
       if (originClean === 'stock') {
         const stock = await client.query(
-          'SELECT qty_current, unit_cost FROM stock_items WHERE id = $1 FOR UPDATE',
+          'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
           [stock_id]
         );
         if (!stock.rows[0]) {
@@ -674,10 +679,8 @@ router.post('/:id/parts',
           [stock_id, qtyNum, `OT ${otCode} (agregado después de crear)`, req.params.id, req.user.id]
         );
 
-        // Usar el precio del stock si no se envió uno explícito
-        if (!unitCostNum || unitCostNum === 0) {
-          finalUnitCost = parseFloat(stock.rows[0].unit_cost) || 0;
-        }
+        // Usar siempre el precio real del pañol para valorizar la OT.
+        finalUnitCost = parseFloat(stock.rows[0].unit_cost) || 0;
         finalStockId = stock_id;
       }
 
