@@ -621,20 +621,31 @@ function _mapFuelDispatch(d) {
 }
 
 function _mapStockItem(s) {
+  const qty = parseFloat(s.qty_current ?? s.qty ?? 0) || 0;
+  const min = parseFloat(s.qty_min ?? s.min ?? 1) || 1;
+  const reorder = parseFloat(s.qty_reorder ?? s.reorder ?? 2) || 2;
+  const cost = parseFloat(s.unit_cost ?? s.cost ?? 0) || 0;
+  const sucursal = s.base_location || s.sucursal || 'Central';
+  const area = s.area || 'Depósito';
   return {
     id:       s.id,
     code:     s.code,
     name:     s.name,
-    cat:      s.category || 'General',
+    cat:      s.category || s.cat || 'General',
     unit:     s.unit || 'un',
-    qty:      parseFloat(s.qty_current) || 0,
-    min:      parseFloat(s.qty_min) || 1,
-    reorder:  parseFloat(s.qty_reorder) || 2,
-    cost:     parseFloat(s.unit_cost) || 0,
+    qty,
+    qty_current: qty,      // alias para búsquedas/autocompletados antiguos
+    min,
+    qty_min: min,
+    reorder,
+    qty_reorder: reorder,
+    cost,
+    unit_cost: cost,       // alias para evitar que OT/OC tomen costo $0
     supplier: s.supplier || '—',
-    sucursal: s.base_location || s.sucursal || 'Central',
-    base_location: s.base_location || s.sucursal || 'Central',
-    area: s.area || 'Depósito',
+    sucursal,
+    base_location: sucursal,
+    area,
+    is_critical: s.is_critical === true || qty <= min,
   };
 }
 
