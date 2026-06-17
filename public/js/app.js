@@ -2180,7 +2180,7 @@ function openFuelLoadModal() {
   openModal(esGerenteSucursal ? `Cargar consumo interno — ${branchName}` : 'Registrar carga de combustible / urea', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Unidad</label>
-        <select class="form-select" id="fl-vehicle">
+        <select class="form-select" id="fl-vehicle" onchange="updateFuelVehicleMeasure()">
           <option value="">— Seleccioná unidad —</option>
           ${vehicleOpts}
         </select>
@@ -2202,7 +2202,7 @@ function openFuelLoadModal() {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Litros cargados</label><input class="form-input" type="number" placeholder="400" id="fl-liters"></div>
-      <div class="form-group"><label class="form-label" style="color:var(--text3)">🛰 Km tomados del GPS automáticamente</label><input class="form-input" disabled placeholder="Se toma del GPS al guardar" style="opacity:.5"></div>
+      <div class="form-group" id="fl-measure-wrap"><label class="form-label" id="fl-measure-label" style="color:var(--text3)">🛰 Km tomados del GPS automáticamente</label><input class="form-input" id="fl-km" disabled placeholder="Se toma del GPS al guardar" style="opacity:.5"></div>
     </div>
     <div class="form-row" id="fl-ppu-wrap">
       <div class="form-group"><label class="form-label" id="fl-ppu-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
@@ -2229,7 +2229,33 @@ function openFuelLoadModal() {
   if (esGerenteSucursal && !_fuelTanksForType('diesel').length && !_fuelTanksForType('urea').length) {
     setTimeout(() => showToast('warn', 'Tu sucursal todavía no tiene tanque recibido. Primero debe llegar y recibirse un despacho interno.'), 150);
   }
-  setTimeout(() => updateFuelPlaceNote(), 100);
+  setTimeout(() => { updateFuelVehicleMeasure(); updateFuelPlaceNote(); }, 100);
+}
+
+function updateFuelVehicleMeasure() {
+  const vehId = document.getElementById('fl-vehicle')?.value || '';
+  const v = (App.data.vehicles || []).find(x => String(x.id) === String(vehId));
+  const label = document.getElementById('fl-measure-label');
+  const input = document.getElementById('fl-km');
+  if (!label || !input) return;
+  const isFork = v && normalizeVehicleTypeLabel(v.type) === 'autoelevador';
+  if (isFork) {
+    label.innerHTML = 'Horas actuales del autoelevador *';
+    input.disabled = false;
+    input.type = 'number';
+    input.min = '0';
+    input.step = '1';
+    input.placeholder = 'Ej: 9450';
+    input.value = v?.km_current ? String(v.km_current) : '';
+    input.style.opacity = '1';
+  } else {
+    label.innerHTML = '🛰 Km tomados del GPS automáticamente';
+    input.disabled = true;
+    input.type = 'text';
+    input.placeholder = 'Se toma del GPS al guardar';
+    input.value = '';
+    input.style.opacity = '.5';
+  }
 }
 
 function updateFuelPlaceOpts() {
@@ -2368,6 +2394,9 @@ async function saveFuelLoad() {
 
   if (!vehicle_id) { showToast('error','Seleccioná una unidad'); return; }
   if (liters <= 0) { showToast('error','Ingresá los litros cargados'); return; }
+  const vehSel = (App.data.vehicles || []).find(x => String(x.id) === String(vehicle_id));
+  const isForkFuel = vehSel && normalizeVehicleTypeLabel(vehSel.type) === 'autoelevador';
+  if (isForkFuel && (!km || km <= 0)) { showToast('error','Ingresá las horas actuales del autoelevador'); return; }
 
   // Solo descontar de cisterna si el lugar es cisterna
   const esCisterna = _fuelIsInternalTankPlace(place, type);
@@ -2394,7 +2423,7 @@ async function saveFuelLoad() {
     body: JSON.stringify({
       vehicle_id, liters, price_per_l: ppu,
       driver, fuel_type: type,
-      location: place, tank_id, ticket_image: ticketImg
+      location: place, tank_id, ticket_image: ticketImg, odometer_km: km || null
     })
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar carga'); return; }
@@ -9854,7 +9883,7 @@ async function openPODetail(id) {
       rechazada:            { label:'RECHAZADA',            color:'#ef4444', icon:'❌' }
     };
     const st = estadoInfo[po.status] || { label:(po.status||'').toUpperCase(), color:'#6b7280', icon:'📋' };
-    const esTerminal = ['recibida','rechazada'].includes(po.status);
+    const esTerminal = ['rechazada'].includes(po.status);
     window._ocEditValues = { forma_pago: po.forma_pago, cc_dias: po.cc_dias, moneda: po.moneda };
 
     const totalReal = po.items.reduce((a,i) => a + (parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)), 0);
@@ -9892,10 +9921,15 @@ async function openPODetail(id) {
         <span style="font-size:18px">🔒</span>
         <span>${bloqueoMensaje}</span>
       </div>` : ''}
-      ${esTerminal ? `
+      ${po.status === 'rechazada' ? `
       <div style="background:rgba(107,114,128,.12);border:1px solid rgba(107,114,128,.4);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2)">
         <span style="font-size:18px">🔒</span>
-        <span>Esta OC está en estado final (${po.status === 'recibida' ? 'Recibida' : 'Rechazada'}) y ya no se puede modificar.</span>
+        <span>Esta OC está rechazada y ya no se puede modificar.</span>
+      </div>` : ''}
+      ${po.status === 'recibida' && (po.payment_status !== 'total' || po.invoice_status !== 'total') ? `
+      <div style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2)">
+        <span style="font-size:18px">📦</span>
+        <span>Mercadería recibida. La OC sigue abierta administrativamente: ${po.invoice_status !== 'total' ? 'falta cargar factura' : ''}${po.invoice_status !== 'total' && po.payment_status !== 'total' ? ' y ' : ''}${po.payment_status !== 'total' ? 'falta pagar' : ''}.</span>
       </div>` : ''}
 
       ${po.status==='rechazada' && po.rechazo_motivo ? `
@@ -10061,7 +10095,7 @@ async function openPODetail(id) {
         btns.push({ label:'Cerrar', cls:'btn-secondary', fn: closeModal });
         btns.push({ label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } });
 
-        // Si la OC está en estado final (recibida/rechazada), solo cerrar e imprimir
+        // Si la OC está rechazada, solo cerrar e imprimir. Recibida puede seguir con factura/pago pendiente.
         if (esTerminal) return btns;
 
         // Botón de guardar cambios — solo si el rol puede editar
