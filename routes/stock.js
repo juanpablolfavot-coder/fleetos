@@ -75,6 +75,7 @@ async function ensureStockSchema() {
   await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES users(id)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_stock_active ON stock_items(active)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_stock ON stock_movements(stock_id)`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_wo ON stock_movements(wo_id)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_base_area ON stock_movements(base_location, area)`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_date ON stock_movements(created_at DESC)`).catch(() => {});
   schemaReady = true;
@@ -300,26 +301,59 @@ router.post('/:id/egreso', authenticate, requireRole(...ROLES_STOCK_EGRESO), val
   try {
     const qty = positiveNumber(req.body.qty, 0);
     const reason = cleanNullable(req.body.reason) || 'Egreso manual';
+    const woId = cleanNullable(req.body.wo_id);
     if (qty <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
 
     await client.query('BEGIN');
     const item = await getScopedItemForUpdate(client, req.params.id, req);
     if (!item.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
-    const actual = toNumber(item.rows[0].qty_current, 0);
+    const stockItem = item.rows[0];
+    const actual = toNumber(stockItem.qty_current, 0);
     if (actual < qty) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Stock insuficiente. Disponible: ${actual} ${item.rows[0].unit}` });
+      return res.status(409).json({ error: `Stock insuficiente. Disponible: ${actual} ${stockItem.unit}` });
+    }
+
+    let linkedOT = null;
+    if (woId) {
+      const ot = await client.query(
+        `SELECT id, code, status FROM work_orders WHERE id = $1::uuid FOR UPDATE`,
+        [woId]
+      );
+      if (!ot.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'OT asociada no encontrada' });
+      }
+      if (String(ot.rows[0].status || '').toLowerCase() === 'cerrada') {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'No se puede asociar stock a una OT cerrada' });
+      }
+      linkedOT = ot.rows[0];
     }
 
     await client.query('UPDATE stock_items SET qty_current = qty_current - $1, updated_at=NOW() WHERE id = $2', [qty, req.params.id]);
     await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
-      [req.params.id, qty, reason, req.user.id, item.rows[0].base_location, item.rows[0].area]
+      `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id, base_location, area)
+       VALUES ($1,'Egreso',$2,$3,$4,$5,$6,$7)`,
+      [req.params.id, qty, linkedOT ? `${reason} · ${linkedOT.code}` : reason, linkedOT?.id || null, req.user.id, stockItem.base_location, stockItem.area]
     );
 
+    if (linkedOT) {
+      await client.query(
+        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
+         VALUES ($1,$2,$3,'stock',$4,$5,$6)`,
+        [linkedOT.id, stockItem.id, stockItem.name, qty, stockItem.unit || 'un', toNumber(stockItem.unit_cost, 0)]
+      );
+      await client.query(
+        `UPDATE work_orders
+         SET parts_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_parts WHERE wo_id = $1), 0)
+         WHERE id = $1`,
+        [linkedOT.id]
+      );
+    }
+
     await client.query('COMMIT');
-    res.json({ message: 'Egreso registrado', new_qty: actual - qty });
+    res.json({ message: linkedOT ? 'Egreso registrado y asociado a OT' : 'Egreso registrado', new_qty: actual - qty, linked_ot_id: linkedOT?.id || null, linked_ot_code: linkedOT?.code || null });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[stock egreso]', err.message);
