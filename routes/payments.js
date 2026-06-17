@@ -17,6 +17,71 @@ const ROLES_PAGAR = ['dueno','gerencia','tesoreria'];
 
 const METODOS = ['efectivo','transferencia','cheque','echeq','tarjeta','otro'];
 
+
+async function recalcPagoFacturaYOC(client, invoiceId) {
+  const inv = await client.query(`
+    SELECT
+      id,
+      po_id,
+      ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS invoice_total
+    FROM purchase_order_invoices
+    WHERE id=$1
+    FOR UPDATE
+  `, [invoiceId]);
+  if (!inv.rows[0]) return null;
+
+  const poId = inv.rows[0].po_id;
+  const totalFactura = parseFloat(inv.rows[0].invoice_total) || 0;
+
+  const pag = await client.query(`
+    SELECT COALESCE(SUM(monto),0) AS total_pagado
+    FROM purchase_order_payments
+    WHERE invoice_id=$1
+  `, [invoiceId]);
+  const totalPagado = parseFloat(pag.rows[0]?.total_pagado || 0);
+
+  await client.query(`
+    UPDATE purchase_order_invoices
+    SET monto_pagado=$2,
+        pagada=($2 >= $3 * 0.999)
+    WHERE id=$1
+  `, [invoiceId, totalPagado, totalFactura]);
+
+  const tot = await client.query(`
+    SELECT
+      COALESCE(SUM(ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2)),0) AS total_facturas,
+      COALESCE(SUM(LEAST(COALESCE(monto_pagado,0), ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2))),0) AS total_pagado
+    FROM purchase_order_invoices
+    WHERE po_id=$1
+  `, [poId]);
+
+  const totalFacturas = parseFloat(tot.rows[0]?.total_facturas || 0);
+  const totalPagadoOC = parseFloat(tot.rows[0]?.total_pagado || 0);
+  const paymentStatus = totalPagadoOC <= 0 ? 'pendiente' : (totalFacturas > 0 && totalPagadoOC >= totalFacturas * 0.999 ? 'total' : 'parcial');
+
+  await client.query(`
+    UPDATE purchase_orders
+    SET payment_status=$2,
+        status = CASE
+          WHEN status = 'recibida' THEN 'recibida'
+          WHEN $2 = 'total' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
+          WHEN $2 = 'total' AND status = 'aprobada_compras' THEN 'pagada'
+          ELSE status
+        END,
+        pagado_at = CASE WHEN $2='total' THEN COALESCE(pagado_at, NOW()) ELSE pagado_at END,
+        pagado_por = CASE WHEN $2='total' THEN COALESCE(pagado_por, (
+          SELECT paid_by
+          FROM purchase_order_payments
+          WHERE invoice_id IN (SELECT id FROM purchase_order_invoices WHERE po_id=$1)
+          ORDER BY paid_at DESC
+          LIMIT 1
+        )) ELSE pagado_por END
+    WHERE id=$1
+  `, [poId, paymentStatus]);
+
+  return { po_id: poId, invoice_total: totalFactura, total_pagado: totalPagado, payment_status: paymentStatus };
+}
+
 // ─────────────────────────────────────────────────────────────
 //  GET /pendientes — todas las facturas pendientes de pago
 // ─────────────────────────────────────────────────────────────
@@ -25,18 +90,19 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
     const r = await query(`
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
-        f.iva_pct, f.forma_pago, f.cc_dias, f.vencimiento, f.pagada, f.monto_pagado,
+        f.iva_pct, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+        f.forma_pago, f.cc_dias, f.vencimiento, f.pagada, f.monto_pagado,
         f.uploaded_at, f.notes,
         po.code AS po_code, po.proveedor, po.supplier_id,
         s.name AS supplier_name, s.cuit AS supplier_cuit,
         s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias, s.bank_name AS supplier_bank,
-        (f.invoice_monto - COALESCE(f.monto_pagado, 0)) AS saldo,
+        (ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - COALESCE(f.monto_pagado, 0)) AS saldo,
         CASE WHEN f.vencimiento < CURRENT_DATE AND NOT f.pagada THEN TRUE ELSE FALSE END AS vencida,
         CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND NOT f.pagada THEN TRUE ELSE FALSE END AS por_vencer
       FROM purchase_order_invoices f
       JOIN purchase_orders po ON po.id = f.po_id
       LEFT JOIN suppliers s    ON s.id = po.supplier_id
-      WHERE NOT f.pagada
+      WHERE COALESCE(f.monto_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999
       ORDER BY f.vencimiento ASC NULLS LAST, f.invoice_fecha ASC
     `);
     res.json(r.rows);
@@ -91,7 +157,9 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     // Validar que existe la factura y traer datos bancarios del proveedor
     const f = await client.query(
       `SELECT
-         f.id, f.invoice_monto, COALESCE(f.monto_pagado,0) AS monto_pagado, f.pagada,
+         f.id, f.invoice_monto, f.iva_pct,
+         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+         COALESCE(f.monto_pagado,0) AS monto_pagado, f.pagada,
          po.proveedor,
          s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
        FROM purchase_order_invoices f
@@ -110,7 +178,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
       return res.status(400).json({ error: 'La factura ya está pagada' });
     }
 
-    const saldo = parseFloat(f.rows[0].invoice_monto) - parseFloat(f.rows[0].monto_pagado);
+    const saldo = parseFloat(f.rows[0].invoice_total) - parseFloat(f.rows[0].monto_pagado);
     const monto = parseFloat(b.monto);
     if (monto > saldo + 0.01) {
       await client.query('ROLLBACK');
@@ -138,7 +206,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     if (b.metodo === 'cheque') {
       if (!b.cheque_nro)         return failPago('Falta N° de cheque');
       if (!b.cheque_banco)       return failPago('Falta banco emisor del cheque');
-      if (!b.cheque_fecha_cobro) return failPago('Falta fecha de cobro');
+      if (!b.cheque_fecha_cobro) return failPago('Falta fecha de pago del cheque');
     }
     if (b.metodo === 'echeq') {
       if (!b.echeq_nro)        return failPago('Falta N° de eCheq');
@@ -169,18 +237,19 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
       b.tarjeta_aprobacion || null, b.tarjeta_cuotas ? parseInt(b.tarjeta_cuotas) : null,
     ]);
 
-    // El trigger DB recalcula invoice.pagada y po.payment_status
+    // Recalcular con IVA incluido aunque el trigger viejo de la base todavía exista.
+    await recalcPagoFacturaYOC(client, req.params.fid);
     await client.query('COMMIT');
 
     // Releer estado actualizado
-    const fact = await query('SELECT pagada, monto_pagado, invoice_monto FROM purchase_order_invoices WHERE id=$1', [req.params.fid]);
+    const fact = await query('SELECT pagada, monto_pagado, invoice_monto, iva_pct, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS invoice_total FROM purchase_order_invoices WHERE id=$1', [req.params.fid]);
     const fact_data = fact.rows[0];
 
     res.status(201).json({
       ...ins.rows[0],
       factura_pagada: fact_data.pagada,
       monto_pagado_total: fact_data.monto_pagado,
-      saldo_restante: parseFloat(fact_data.invoice_monto) - parseFloat(fact_data.monto_pagado),
+      saldo_restante: parseFloat(fact_data.invoice_total) - parseFloat(fact_data.monto_pagado),
       message: fact_data.pagada ? 'Pago registrado. Factura cancelada totalmente.' : 'Pago parcial registrado.',
     });
   } catch (err) {
@@ -213,7 +282,7 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
     }
 
     await client.query('DELETE FROM purchase_order_payments WHERE id=$1', [req.params.pid]);
-    // El trigger recalcula
+    await recalcPagoFacturaYOC(client, req.params.fid);
     await client.query('COMMIT');
     res.json({ ok: true, message: 'Pago anulado' });
   } catch (err) {
