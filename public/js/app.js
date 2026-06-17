@@ -10563,17 +10563,19 @@ async function printPO(id) {
         <div style="font-size:13px;font-weight:700;color:#ea580c;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📄 Facturas (${facturas.length})</div>
         ${facturas.map(f => {
           const pagos = pagosByFactura[f.id] || [];
-          const monto = parseFloat(f.invoice_monto||0);
+          const neto = parseFloat(f.invoice_monto||0);
+          const ivaPctF = parseFloat(f.iva_pct||0);
+          const monto = parseFloat(f.invoice_total || f.total_a_pagar || 0) || Math.round((neto * (1 + ivaPctF / 100)) * 100) / 100;
           const pagado = parseFloat(f.monto_pagado||0);
           const saldo = monto - pagado;
           const venc = f.vencimiento ? new Date(f.vencimiento).toLocaleDateString('es-AR') : '—';
           return `
             <div style="border:1px solid #e5e7eb;border-radius:4px;padding:10px;margin-bottom:8px;font-size:11px;background:${f.pagada?'#dcfce7':'#fff'}">
               <div style="display:flex;justify-content:space-between;font-weight:600">
-                <span>N° ${f.invoice_nro} · $${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}${f.pagada?' ✓ PAGADA':''}</span>
+                <span>N° ${f.invoice_nro} · Total c/IVA $${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}${f.pagada?' ✓ PAGADA':''}</span>
                 <span style="color:#374151">Vence ${venc}</span>
               </div>
-              <div style="color:#6b7280;margin-top:4px">Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''} · Cargada por ${f.uploaded_by_name||'—'}</div>
+              <div style="color:#6b7280;margin-top:4px">Neto $${neto.toLocaleString('es-AR',{minimumFractionDigits:2})} · IVA ${ivaPctF}% · Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''} · Cargada por ${f.uploaded_by_name||'—'}</div>
               ${pagos.length ? `
                 <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb">
                   ${pagos.map(p => {
