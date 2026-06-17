@@ -108,12 +108,13 @@ BEGIN
   SELECT status, payment_status INTO v_po_status, v_payment_status
   FROM purchase_orders WHERE id = v_po_id;
 
-  -- Si delivery total + payment total + status pagada → mover a recibida
-  IF v_delivery_status = 'total' AND v_payment_status = 'total' AND v_po_status = 'pagada' THEN
+  -- La recepción de mercadería no depende del pago.
+  -- Si delivery total, la OC queda recibida aunque payment_status siga pendiente.
+  IF v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN
     UPDATE purchase_orders
     SET delivery_status = v_delivery_status,
         status = 'recibida',
-        recibido_at = NOW()
+        recibido_at = COALESCE(recibido_at, NOW())
     WHERE id = v_po_id;
   ELSE
     UPDATE purchase_orders SET delivery_status = v_delivery_status WHERE id = v_po_id;
