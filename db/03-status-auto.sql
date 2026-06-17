@@ -1,84 +1,90 @@
 -- ══════════════════════════════════════════════════════════════════════
--- MIGRACIÓN — Auto-actualizar status de OC según facturas pagadas
--- 
--- Cuando todas las facturas de una OC están pagadas (payment_status='total')
--- y la OC está en aprobada_compras, pasarla automáticamente a 'pagada'.
--- 
--- Cuando todas las recepciones están completas (delivery_status='total')
--- y la OC está en 'pagada', pasarla a 'recibida'.
+-- FleetOS — Estados automáticos OC / Facturas / Pagos / Recepción
+--
+-- Reglas:
+-- 1) La recepción de mercadería NO depende del pago.
+-- 2) El pago se calcula sobre el total de factura con IVA.
+-- 3) Una OC puede estar: recibida + pago pendiente.
 -- ══════════════════════════════════════════════════════════════════════
 
 BEGIN;
 
--- Reemplazar la función de recálculo para que también mueva OC.status
 CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
 DECLARE
   v_invoice_id UUID;
   v_po_id UUID;
-  v_invoice_monto NUMERIC;
+  v_invoice_total NUMERIC;
   v_total_pagado NUMERIC;
-  v_total_oc NUMERIC;
+  v_total_facturas NUMERIC;
   v_total_facturas_pagadas NUMERIC;
   v_po_status VARCHAR;
-  v_payment_status VARCHAR;
   v_delivery_status VARCHAR;
+  v_payment_status VARCHAR;
 BEGIN
   v_invoice_id := COALESCE(NEW.invoice_id, OLD.invoice_id);
 
-  SELECT po_id, invoice_monto INTO v_po_id, v_invoice_monto
-  FROM purchase_order_invoices WHERE id = v_invoice_id;
+  SELECT po_id, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2)
+    INTO v_po_id, v_invoice_total
+  FROM purchase_order_invoices
+  WHERE id = v_invoice_id;
+
+  IF v_po_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
 
   SELECT COALESCE(SUM(monto), 0) INTO v_total_pagado
-  FROM purchase_order_payments WHERE invoice_id = v_invoice_id;
+  FROM purchase_order_payments
+  WHERE invoice_id = v_invoice_id;
 
   UPDATE purchase_order_invoices
   SET monto_pagado = v_total_pagado,
-      pagada       = (v_total_pagado >= v_invoice_monto * 0.999)
+      pagada = (v_total_pagado >= v_invoice_total * 0.999)
   WHERE id = v_invoice_id;
 
-  -- Recalcular payment_status de la OC
   SELECT
-    COALESCE(SUM(invoice_monto), 0),
-    COALESCE(SUM(LEAST(monto_pagado, invoice_monto)), 0)
-  INTO v_total_oc, v_total_facturas_pagadas
-  FROM purchase_order_invoices WHERE po_id = v_po_id;
+    COALESCE(SUM(ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2)), 0),
+    COALESCE(SUM(LEAST(monto_pagado, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2))), 0)
+  INTO v_total_facturas, v_total_facturas_pagadas
+  FROM purchase_order_invoices
+  WHERE po_id = v_po_id;
 
   v_payment_status := CASE
     WHEN v_total_facturas_pagadas <= 0 THEN 'pendiente'
-    WHEN v_total_oc > 0 AND v_total_facturas_pagadas >= v_total_oc * 0.999 THEN 'total'
+    WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas * 0.999 THEN 'total'
     ELSE 'parcial'
   END;
 
-  -- Auto-mover status de la OC
   SELECT status, delivery_status INTO v_po_status, v_delivery_status
-  FROM purchase_orders WHERE id = v_po_id;
+  FROM purchase_orders
+  WHERE id = v_po_id;
 
-  -- Si todas las facturas están pagadas y la OC sigue en aprobada_compras → mover a 'pagada'
-  IF v_payment_status = 'total' AND v_po_status = 'aprobada_compras' THEN
-    UPDATE purchase_orders
-    SET payment_status = v_payment_status,
-        status = 'pagada',
-        pagado_at = NOW(),
-        pagado_por = (SELECT paid_by FROM purchase_order_payments WHERE invoice_id IN
-                      (SELECT id FROM purchase_order_invoices WHERE po_id = v_po_id)
-                      ORDER BY paid_at DESC LIMIT 1)
-    WHERE id = v_po_id;
-  -- Si la OC ya está en 'pagada' y delivery está total → mover a 'recibida'
-  ELSIF v_payment_status = 'total' AND v_po_status = 'pagada' AND v_delivery_status = 'total' THEN
-    UPDATE purchase_orders
-    SET payment_status = v_payment_status,
-        status = 'recibida',
-        recibido_at = NOW()
-    WHERE id = v_po_id;
-  ELSE
-    UPDATE purchase_orders SET payment_status = v_payment_status WHERE id = v_po_id;
-  END IF;
+  UPDATE purchase_orders
+  SET payment_status = v_payment_status,
+      status = CASE
+        WHEN v_po_status = 'recibida' THEN 'recibida'
+        WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
+        WHEN v_payment_status = 'total' AND v_po_status = 'aprobada_compras' THEN 'pagada'
+        ELSE status
+      END,
+      pagado_at = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_at, NOW()) ELSE pagado_at END,
+      pagado_por = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_por, (
+        SELECT paid_by
+        FROM purchase_order_payments
+        WHERE invoice_id IN (SELECT id FROM purchase_order_invoices WHERE po_id = v_po_id)
+        ORDER BY paid_at DESC
+        LIMIT 1
+      )) ELSE pagado_por END
+  WHERE id = v_po_id;
 
   RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger para el delivery_status también
+DROP TRIGGER IF EXISTS trg_recalc_invoice_payment ON purchase_order_payments;
+CREATE TRIGGER trg_recalc_invoice_payment
+AFTER INSERT OR UPDATE OR DELETE ON purchase_order_payments
+FOR EACH ROW EXECUTE FUNCTION recalc_invoice_payment();
+
 CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
 DECLARE
   v_po_id UUID;
@@ -89,14 +95,21 @@ DECLARE
   v_delivery_status VARCHAR;
 BEGIN
   v_po_id := (SELECT po_id FROM purchase_order_receipts WHERE id = COALESCE(NEW.receipt_id, OLD.receipt_id));
-  IF v_po_id IS NULL THEN RETURN COALESCE(NEW, OLD); END IF;
+
+  IF v_po_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
 
   SELECT
     COALESCE(SUM(poi.cantidad), 0),
-    COALESCE(SUM(pori.cantidad), 0)
+    COALESCE(SUM(rec.recibida), 0)
   INTO v_total_pedido, v_total_recibido
   FROM purchase_order_items poi
-  LEFT JOIN purchase_order_receipt_items pori ON pori.po_item_id = poi.id
+  LEFT JOIN (
+    SELECT po_item_id, SUM(cantidad) AS recibida
+    FROM purchase_order_receipt_items
+    GROUP BY po_item_id
+  ) rec ON rec.po_item_id = poi.id
   WHERE poi.po_id = v_po_id;
 
   v_delivery_status := CASE
@@ -108,44 +121,50 @@ BEGIN
   SELECT status, payment_status INTO v_po_status, v_payment_status
   FROM purchase_orders WHERE id = v_po_id;
 
-  -- La recepción de mercadería no depende del pago.
-  -- Si delivery total, la OC queda recibida aunque payment_status siga pendiente.
-  IF v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN
-    UPDATE purchase_orders
-    SET delivery_status = v_delivery_status,
-        status = 'recibida',
-        recibido_at = COALESCE(recibido_at, NOW())
-    WHERE id = v_po_id;
-  ELSE
-    UPDATE purchase_orders SET delivery_status = v_delivery_status WHERE id = v_po_id;
-  END IF;
+  UPDATE purchase_orders
+  SET delivery_status = v_delivery_status,
+      status = CASE
+        WHEN v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN 'recibida'
+        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' AND COALESCE(v_payment_status,'pendiente') = 'total' THEN 'pagada'
+        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' THEN 'aprobada_compras'
+        ELSE status
+      END,
+      recibido_at = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_at, NOW()) ELSE recibido_at END,
+      recibido_en = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_en, NOW()) ELSE recibido_en END
+  WHERE id = v_po_id;
 
   RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_recalc_delivery ON purchase_order_receipt_items;
-CREATE TRIGGER trg_recalc_delivery
+DROP TRIGGER IF EXISTS trg_recalc_delivery_status_ins ON purchase_order_receipt_items;
+CREATE TRIGGER trg_recalc_delivery_status_ins
 AFTER INSERT OR UPDATE OR DELETE ON purchase_order_receipt_items
 FOR EACH ROW EXECUTE FUNCTION recalc_delivery_status();
 
--- Forzar recálculo en OCs que ya tienen facturas pagadas pero status='aprobada_compras'
+-- Reparar OCs viejas que tienen recepción total pero no cabecera recibida.
+WITH ult_recepcion AS (
+  SELECT DISTINCT ON (po_id) po_id, received_by, received_at
+  FROM purchase_order_receipts
+  ORDER BY po_id, received_at DESC
+)
 UPDATE purchase_orders po
-SET status = 'pagada',
-    payment_status = 'total',
-    pagado_at = COALESCE(po.pagado_at, NOW())
-WHERE po.status = 'aprobada_compras'
-  AND EXISTS (
-    SELECT 1 FROM purchase_order_invoices f
-    WHERE f.po_id = po.id
-    GROUP BY f.po_id
-    HAVING SUM(f.invoice_monto) > 0
-       AND COALESCE(SUM(LEAST(f.monto_pagado, f.invoice_monto)), 0) >= SUM(f.invoice_monto) * 0.999
-  );
+SET status = 'recibida',
+    delivery_status = 'total',
+    recibido_por = COALESCE(po.recibido_por, ult_recepcion.received_by),
+    recibido_at = COALESCE(po.recibido_at, ult_recepcion.received_at),
+    recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
+FROM ult_recepcion
+WHERE po.id = ult_recepcion.po_id
+  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada')
+  AND COALESCE(po.delivery_status, '') = 'total';
+
+-- Reparar facturas viejas: pago total se evalúa con IVA incluido.
+UPDATE purchase_order_invoices f
+SET pagada = (COALESCE(f.monto_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999)
+WHERE TRUE;
 
 COMMIT;
 
--- Verificación: OCs que cambiaron de estado
-SELECT 'OCs ya en pagada/recibida con flujo nuevo' AS info, COUNT(*) AS total
-FROM purchase_orders po
-WHERE po.payment_status = 'total' AND po.status IN ('pagada','recibida');
+SELECT 'Estados OC/facturas actualizados con IVA y recepción independiente del pago' AS info;
