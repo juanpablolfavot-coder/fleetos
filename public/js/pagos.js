@@ -17,7 +17,11 @@
   const escAttr = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
   const totalFacturaConIva = (f) => {
+    // Tesorería siempre debe trabajar sobre el TOTAL FINAL de la factura, IVA incluido.
+    // El backend manda invoice_total / total_a_pagar calculado; si no viene, lo calculamos acá.
+    if (f && f.total_a_pagar != null) return num(f.total_a_pagar);
     if (f && f.invoice_total != null) return num(f.invoice_total);
+    if (f && f.total_con_iva != null) return num(f.total_con_iva);
     const neto = num(f?.invoice_monto);
     const iva  = num(f?.iva_pct);
     return +(neto * (1 + iva / 100)).toFixed(2);
@@ -97,7 +101,7 @@
                     <td class="td-mono">${f.invoice_nro}</td>
                     <td>${new Date(f.invoice_fecha).toLocaleDateString('es-AR')}</td>
                     <td style="${vencColor}">${vencLabel}</td>
-                    <td style="text-align:right">$${fmt(f.invoice_total || f.invoice_monto)}</td>
+                    <td style="text-align:right">$${fmt(totalFacturaConIva(f))}</td>
                     <td style="text-align:right;color:${parseFloat(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
                     <td style="text-align:right;color:var(--warn);font-weight:600">$${fmt(f.saldo)}</td>
                     <td style="text-align:center">
@@ -166,7 +170,7 @@
           <!-- Resumen factura -->
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
             <div style="background:var(--bg2);padding:10px;border-radius:6px;border:1px solid var(--border2)">
-              <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Total factura con IVA</div>
+              <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Total a pagar con IVA</div>
               <div style="font-size:18px;font-weight:600">$${fmt(totalFac)}</div>
               <div style="font-size:10px;color:var(--text3);margin-top:2px">Neto $${fmt(factura.invoice_monto)} · IVA ${fmt(factura.iva_pct || 0)}%</div>
             </div>
