@@ -116,6 +116,27 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 
+
+-- vehicle_specs: ficha técnica extendida de cada unidad/equipo.
+-- Complementa vehicles.tech_spec para datos estructurados por pantalla.
+CREATE TABLE IF NOT EXISTS vehicle_specs (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id          UUID UNIQUE REFERENCES vehicles(id) ON DELETE CASCADE,
+    capacidad_carga     TEXT,
+    tipo_combustible    TEXT,
+    capacidad_tanque    NUMERIC(12,2),
+    tipo_motor          TEXT,
+    transmision         TEXT,
+    ejes                TEXT,
+    neumaticos          TEXT,
+    observaciones       TEXT,
+    extra               JSONB DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_specs_vehicle_id ON vehicle_specs(vehicle_id);
+
 -- ══════════════════════════════════════════════════════════════════════
 -- 3.  COMBUSTIBLE (cisternas propias)
 -- ══════════════════════════════════════════════════════════════════════
@@ -641,6 +662,240 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_order_items(po_id);
+
+
+-- Recepciones de mercadería por OC.
+-- Regla: la recepción es independiente del pago. El stock entra cuando se recibe.
+CREATE TABLE IF NOT EXISTS purchase_order_receipts (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    po_id           UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    received_by     UUID REFERENCES users(id),
+    received_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    destino         VARCHAR(200),
+    remito_nro      VARCHAR(100),
+    notes           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_por_po ON purchase_order_receipts(po_id);
+
+CREATE TABLE IF NOT EXISTS purchase_order_receipt_items (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    receipt_id      UUID NOT NULL REFERENCES purchase_order_receipts(id) ON DELETE CASCADE,
+    po_item_id      UUID NOT NULL REFERENCES purchase_order_items(id),
+    cantidad        NUMERIC(10,2) NOT NULL,
+    notes           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pori_receipt ON purchase_order_receipt_items(receipt_id);
+CREATE INDEX IF NOT EXISTS idx_pori_poitem  ON purchase_order_receipt_items(po_item_id);
+
+-- Facturas asociadas a OC. Puede haber más de una factura por OC.
+CREATE TABLE IF NOT EXISTS purchase_order_invoices (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    po_id           UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    invoice_nro     VARCHAR(100) NOT NULL,
+    invoice_fecha   DATE NOT NULL,
+    invoice_monto   NUMERIC(14,2) NOT NULL,
+    iva_pct         NUMERIC(5,2) DEFAULT 21,
+    forma_pago      VARCHAR(30),
+    cc_dias         INTEGER,
+    vencimiento     DATE,
+    file_url        TEXT,
+    uploaded_by     UUID REFERENCES users(id),
+    uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    pagada          BOOLEAN DEFAULT FALSE,
+    monto_pagado    NUMERIC(14,2) DEFAULT 0,
+    notes           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_poinv_po     ON purchase_order_invoices(po_id);
+CREATE INDEX IF NOT EXISTS idx_poinv_vencim ON purchase_order_invoices(vencimiento);
+CREATE INDEX IF NOT EXISTS idx_poinv_pagada ON purchase_order_invoices(pagada);
+
+-- Pagos de facturas. Puede haber pagos parciales.
+CREATE TABLE IF NOT EXISTS purchase_order_payments (
+    id                    UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    invoice_id            UUID NOT NULL REFERENCES purchase_order_invoices(id) ON DELETE CASCADE,
+    paid_by               UUID REFERENCES users(id),
+    paid_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    monto                 NUMERIC(14,2) NOT NULL,
+    metodo                VARCHAR(30),
+    comprobante_nro       VARCHAR(100),
+    file_url              TEXT,
+    notes                 TEXT,
+    banco_origen          VARCHAR(100),
+    banco_destino         VARCHAR(100),
+    cbu_alias_destino     VARCHAR(100),
+    cheque_nro            VARCHAR(50),
+    cheque_banco          VARCHAR(100),
+    cheque_fecha_cobro    DATE,
+    cheque_a_nombre       VARCHAR(200),
+    echeq_nro             VARCHAR(50),
+    echeq_banco           VARCHAR(100),
+    echeq_fecha_pago      DATE,
+    echeq_clave           VARCHAR(100),
+    tarjeta_aprobacion    VARCHAR(50),
+    tarjeta_cuotas        INTEGER,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pop_invoice ON purchase_order_payments(invoice_id);
+
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS banco_origen VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS banco_destino VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cbu_alias_destino VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_nro VARCHAR(50);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_banco VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_fecha_cobro DATE;
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_a_nombre VARCHAR(200);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_nro VARCHAR(50);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_banco VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_fecha_pago DATE;
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_clave VARCHAR(100);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS tarjeta_aprobacion VARCHAR(50);
+ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS tarjeta_cuotas INTEGER;
+
+-- Reparación de datos: si existe recepción total, la OC debe figurar recibida aunque siga pendiente de pago.
+WITH ult_recepcion AS (
+    SELECT DISTINCT ON (po_id) po_id, received_by, received_at
+    FROM purchase_order_receipts
+    ORDER BY po_id, received_at DESC
+)
+UPDATE purchase_orders po
+SET status = 'recibida',
+    delivery_status = 'total',
+    recibido_por = COALESCE(po.recibido_por, ult_recepcion.received_by),
+    recibido_at = COALESCE(po.recibido_at, ult_recepcion.received_at),
+    recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
+FROM ult_recepcion
+WHERE po.id = ult_recepcion.po_id
+  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada')
+  AND COALESCE(po.delivery_status, '') = 'total';
+
+-- Trigger: recalcula el estado de pago sin pisar una OC ya recibida.
+CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
+DECLARE
+  v_invoice_id UUID;
+  v_po_id UUID;
+  v_invoice_monto NUMERIC;
+  v_total_pagado NUMERIC;
+  v_total_oc NUMERIC;
+  v_total_facturas_pagadas NUMERIC;
+  v_po_status VARCHAR;
+  v_delivery_status VARCHAR;
+  v_payment_status VARCHAR;
+BEGIN
+  v_invoice_id := COALESCE(NEW.invoice_id, OLD.invoice_id);
+
+  SELECT po_id, invoice_monto INTO v_po_id, v_invoice_monto
+  FROM purchase_order_invoices WHERE id = v_invoice_id;
+
+  IF v_po_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  SELECT COALESCE(SUM(monto), 0) INTO v_total_pagado
+  FROM purchase_order_payments WHERE invoice_id = v_invoice_id;
+
+  UPDATE purchase_order_invoices
+  SET monto_pagado = v_total_pagado,
+      pagada = (v_total_pagado >= v_invoice_monto * 0.999)
+  WHERE id = v_invoice_id;
+
+  SELECT
+    COALESCE(SUM(invoice_monto), 0),
+    COALESCE(SUM(LEAST(monto_pagado, invoice_monto)), 0)
+  INTO v_total_oc, v_total_facturas_pagadas
+  FROM purchase_order_invoices WHERE po_id = v_po_id;
+
+  v_payment_status := CASE
+    WHEN v_total_facturas_pagadas <= 0 THEN 'pendiente'
+    WHEN v_total_oc > 0 AND v_total_facturas_pagadas >= v_total_oc * 0.999 THEN 'total'
+    ELSE 'parcial'
+  END;
+
+  SELECT status, delivery_status INTO v_po_status, v_delivery_status
+  FROM purchase_orders WHERE id = v_po_id;
+
+  UPDATE purchase_orders
+  SET payment_status = v_payment_status,
+      status = CASE
+        WHEN v_po_status = 'recibida' THEN 'recibida'
+        WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
+        WHEN v_payment_status = 'total' AND v_po_status = 'aprobada_compras' THEN 'pagada'
+        ELSE status
+      END,
+      pagado_at = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_at, NOW()) ELSE pagado_at END
+  WHERE id = v_po_id;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_recalc_invoice_payment ON purchase_order_payments;
+CREATE TRIGGER trg_recalc_invoice_payment
+AFTER INSERT OR UPDATE OR DELETE ON purchase_order_payments
+FOR EACH ROW EXECUTE FUNCTION recalc_invoice_payment();
+
+-- Trigger: recalcula estado de entrega. La entrega no espera pago.
+CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
+DECLARE
+  v_po_id UUID;
+  v_po_status VARCHAR;
+  v_payment_status VARCHAR;
+  v_total_pedido NUMERIC;
+  v_total_recibido NUMERIC;
+  v_delivery_status VARCHAR;
+BEGIN
+  v_po_id := (SELECT po_id FROM purchase_order_receipts WHERE id = COALESCE(NEW.receipt_id, OLD.receipt_id));
+
+  IF v_po_id IS NULL THEN
+    RETURN COALESCE(NEW, OLD);
+  END IF;
+
+  SELECT
+    COALESCE(SUM(poi.cantidad), 0),
+    COALESCE(SUM(rec.recibida), 0)
+  INTO v_total_pedido, v_total_recibido
+  FROM purchase_order_items poi
+  LEFT JOIN (
+    SELECT po_item_id, SUM(cantidad) AS recibida
+    FROM purchase_order_receipt_items
+    GROUP BY po_item_id
+  ) rec ON rec.po_item_id = poi.id
+  WHERE poi.po_id = v_po_id;
+
+  v_delivery_status := CASE
+    WHEN v_total_recibido <= 0 THEN 'pendiente'
+    WHEN v_total_pedido > 0 AND v_total_recibido >= v_total_pedido * 0.999 THEN 'total'
+    ELSE 'parcial'
+  END;
+
+  SELECT status, payment_status INTO v_po_status, v_payment_status
+  FROM purchase_orders WHERE id = v_po_id;
+
+  UPDATE purchase_orders
+  SET delivery_status = v_delivery_status,
+      status = CASE
+        WHEN v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN 'recibida'
+        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' AND COALESCE(v_payment_status,'pendiente') = 'total' THEN 'pagada'
+        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' THEN 'aprobada_compras'
+        ELSE status
+      END,
+      recibido_at = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_at, NOW()) ELSE recibido_at END,
+      recibido_en = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_en, NOW()) ELSE recibido_en END
+  WHERE id = v_po_id;
+
+  RETURN COALESCE(NEW, OLD);
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_recalc_delivery_status_ins ON purchase_order_receipt_items;
+CREATE TRIGGER trg_recalc_delivery_status_ins
+AFTER INSERT OR UPDATE OR DELETE ON purchase_order_receipt_items
+FOR EACH ROW EXECUTE FUNCTION recalc_delivery_status();
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 11. SUCURSALES Y ÁREAS
