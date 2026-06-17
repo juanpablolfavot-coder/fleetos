@@ -103,7 +103,9 @@ router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), as
     const r = await query(`
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
+        f.invoice_monto AS invoice_neto,
         f.iva_pct, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+        ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS total_a_pagar,
         f.forma_pago, f.cc_dias, f.vencimiento, f.file_url,
         f.uploaded_at, f.uploaded_by, f.pagada, f.monto_pagado, f.notes,
         u.name AS uploaded_by_name,
