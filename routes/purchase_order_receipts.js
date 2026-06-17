@@ -36,9 +36,21 @@ const DESTINOS_FIJOS = [
 ];
 
 // ─────────────────────────────────────────────────────────────
+//  Helper: columnas defensivas para bases que vienen de versiones viejas
+// ─────────────────────────────────────────────────────────────
+async function ensurePOReceiptStateColumns(client) {
+  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
+  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_por UUID`).catch(()=>{});
+  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_at TIMESTAMPTZ`).catch(()=>{});
+  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ`).catch(()=>{});
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Helper: recalcular delivery_status de la OC tras una recepción
+//  y mantener sincronizado el estado principal de la OC.
 // ─────────────────────────────────────────────────────────────
 async function recalcDeliveryStatus(client, poId) {
+  await ensurePOReceiptStateColumns(client);
   const items = await client.query(`
     SELECT
       poi.id,
@@ -68,10 +80,50 @@ async function recalcDeliveryStatus(client, poId) {
 
   const status = allDone ? 'total' : (anyDone ? 'parcial' : 'pendiente');
 
-  await client.query(
-    `UPDATE purchase_orders SET delivery_status = $1 WHERE id = $2`,
-    [status, poId]
-  );
+  await client.query(`
+    UPDATE purchase_orders po
+    SET
+      delivery_status = $1,
+      status = CASE
+        WHEN $1 = 'total' AND po.status <> 'rechazada' THEN 'recibida'
+        WHEN $1 <> 'total' AND po.status = 'recibida' THEN 'pagada'
+        ELSE po.status
+      END,
+      recibido_por = CASE
+        WHEN $1 = 'total' THEN COALESCE(po.recibido_por, (
+          SELECT r.received_by
+          FROM purchase_order_receipts r
+          WHERE r.po_id = $2
+          ORDER BY r.received_at DESC
+          LIMIT 1
+        ))
+        WHEN $1 = 'pendiente' THEN NULL
+        ELSE po.recibido_por
+      END,
+      recibido_at = CASE
+        WHEN $1 = 'total' THEN COALESCE(po.recibido_at, (
+          SELECT r.received_at
+          FROM purchase_order_receipts r
+          WHERE r.po_id = $2
+          ORDER BY r.received_at DESC
+          LIMIT 1
+        ))
+        WHEN $1 = 'pendiente' THEN NULL
+        ELSE po.recibido_at
+      END,
+      recibido_en = CASE
+        WHEN $1 = 'total' THEN COALESCE(po.recibido_en, (
+          SELECT r.received_at
+          FROM purchase_order_receipts r
+          WHERE r.po_id = $2
+          ORDER BY r.received_at DESC
+          LIMIT 1
+        ))
+        WHEN $1 = 'pendiente' THEN NULL
+        ELSE po.recibido_en
+      END
+    WHERE po.id = $2
+  `, [status, poId]);
 
   return status;
 }
@@ -193,6 +245,7 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
     }
 
     await client.query('BEGIN');
+    await ensurePOReceiptStateColumns(client);
 
     // Verificar que la OC exista y esté en estado válido
     const po = await client.query(
@@ -283,6 +336,7 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await ensurePOReceiptStateColumns(client);
 
     const rec = await client.query(
       `SELECT id, received_by FROM purchase_order_receipts WHERE id=$1 AND po_id=$2 FOR UPDATE`,
