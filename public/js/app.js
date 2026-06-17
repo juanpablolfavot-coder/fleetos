@@ -1982,6 +1982,13 @@ function renderFuel() {
   const ureaClass   = ureaPct   < 20 ? 'warn' : 'info';
   const tankEntries = App.data.tankEntries || [];
   const fuelDispatches = App.data.fuelDispatches || [];
+  const esGerenteSucursal = _fuelIsGerenteSucursal();
+  const branchName = _fuelCurrentBranchName();
+  const fuelTitlePrefix = esGerenteSucursal ? `Stock ${branchName}` : 'Stock cisterna';
+  const levelTitle = esGerenteSucursal ? 'Nivel de tanque de sucursal' : 'Nivel de cisternas';
+  const dispatchHelp = esGerenteSucursal
+    ? 'Combustible recibido desde casa central para la sucursal. Al recibirse debe quedar disponible en el tanque propio.'
+    : 'Salida de cisterna sin cargar consumo a una unidad. Genera remito interno imprimible.';
 
   // ── Litros cargados HOY ──
   const today = todayISO();
@@ -2019,14 +2026,14 @@ function renderFuel() {
   }
   document.getElementById('page-fuel').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
-      <div class="kpi-card ${gasoilClass}"><div class="kpi-label">Stock cisterna gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${tankLevel<10000?' · ⚠ Pedir gasoil / cotizar compra':gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
-      <div class="kpi-card ${ureaClass}"><div class="kpi-label">Stock cisterna urea</div><div class="kpi-value ${ureaClass}">${ureaLevel.toLocaleString()} L</div><div class="kpi-trend">${ureaPct}% de capacidad (${ureaCap.toLocaleString()} L)${ureaPct<20?' · ⚠ Solicitar reposición':''}</div></div>
+      <div class="kpi-card ${gasoilClass}"><div class="kpi-label">${fuelTitlePrefix} gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${tankLevel<10000?' · ⚠ Pedir gasoil / cotizar compra':gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
+      <div class="kpi-card ${ureaClass}"><div class="kpi-label">${fuelTitlePrefix} urea</div><div class="kpi-value ${ureaClass}">${ureaLevel.toLocaleString()} L</div><div class="kpi-trend">${ureaPct}% de capacidad (${ureaCap.toLocaleString()} L)${ureaPct<20?' · ⚠ Solicitar reposición':''}</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Litros cargados hoy</div><div class="kpi-value ok">${litrosHoy.toLocaleString()}</div><div class="kpi-trend">en ${logsHoy.length} cargas · ${App.data.fuelLogs.length} total historial</div></div>
       <div class="kpi-card ${rendimiento==='—'?'':'ok'}"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value ${rendimiento==='—'?'white':'ok'}">${rendimiento}</div><div class="kpi-trend">${rendTrend}</div></div>
     </div>
     <div class="two-col" style="margin-bottom:20px">
       <div class="card">
-        <div class="card-title">Nivel de cisternas</div>
+        <div class="card-title">${levelTitle}</div>
         <div style="margin-bottom:14px">
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px"><span>Gasoil</span><span class="td-mono">${tankLevel.toLocaleString()} / ${tankCap.toLocaleString()} L</span></div>
           <div class="progress-bar"><div class="progress-fill" style="width:${gasoilPct}%;background:${gasoilPct<20?'var(--warn)':'var(--ok)'}"></div></div>
@@ -2038,6 +2045,7 @@ function renderFuel() {
         <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
           ${_fuelPuedeGestionarCisterna(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button>` : ''}
           ${_fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-secondary" onclick="openFuelDispatchModal()">🚚 Despacho interno</button>` : ''}
+          ${esGerenteSucursal ? `<button class="btn btn-primary" onclick="openFuelLoadModal()">⛽ Cargar desde tanque de sucursal</button>` : ''}
           ${_fuelPuedeVerificarTickets(App.currentUser?.role) ? `<button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button>` : ''}
         </div>
         <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
@@ -2070,7 +2078,7 @@ function renderFuel() {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
         <div>
           <div class="card-title" style="margin:0">🚚 Despachos internos a sucursales / bidones</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">Salida de cisterna sin cargar consumo a una unidad. Genera remito interno imprimible.</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">${dispatchHelp}</div>
         </div>
         ${_fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchModal()">+ Nuevo despacho</button>` : ''}
       </div>
@@ -2095,6 +2103,7 @@ function renderFuel() {
                     <div style="display:flex;gap:4px;flex-wrap:wrap">
                       <button class="btn btn-secondary btn-sm" onclick="openFuelDispatchTicket('${d.id}')">🧾 Remito</button>
                       ${d.status !== 'recibido' && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="openFuelDispatchReceiveModal('${d.id}')">✓ Recibir</button>` : ''}
+                      ${d.status === 'recibido' && !d.destination_stock_applied && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? `<button class="btn btn-primary btn-sm" onclick="applyFuelDispatchToBranchTank('${d.id}')">↪ Sumar al tanque</button>` : ''}
                     </div>
                   </td>
                 </tr>
@@ -2116,7 +2125,7 @@ function renderFuel() {
           <option value="urea">🔵 Urea</option>
         </select>
         <button class="btn btn-secondary btn-sm" onclick="exportFuelPDF()">📄 Exportar PDF</button>
-        ${_fuelPuedeRegistrarCarga(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelLoadModal()">+ Registrar carga</button>` : ''}
+        ${_fuelPuedeRegistrarCarga(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelLoadModal()">${esGerenteSucursal ? '⛽ Cargar desde tanque' : '+ Registrar carga'}</button>` : ''}
       </div>
     </div>
     <div class="card" style="padding:0">
@@ -2162,8 +2171,13 @@ function renderFuel() {
 }
 
 function openFuelLoadModal() {
+  const esGerenteSucursal = _fuelIsGerenteSucursal();
+  const branchName = _fuelCurrentBranchName();
   const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
-  openModal('Registrar carga de combustible / urea', `
+  const initialTankOptions = esGerenteSucursal
+    ? _fuelTanksForType('diesel').map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${t.location || 'Tanque sucursal'} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`).join('')
+    : `<option value="Cisterna R3">Cisterna R3 (descuenta stock)</option><option value="Estación de servicio">Estación de servicio</option><option value="Bidón / Sucursal">Bidón / Sucursal</option><option value="Otra">Otra</option>`;
+  openModal(esGerenteSucursal ? `Cargar consumo interno — ${branchName}` : 'Registrar carga de combustible / urea', `
     <div class="form-row">
       <div class="form-group"><label class="form-label">Unidad</label>
         <select class="form-select" id="fl-vehicle">
@@ -2179,13 +2193,10 @@ function openFuelLoadModal() {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Chofer</label><input class="form-input" placeholder="Nombre del chofer" id="fl-driver"></div>
+      <div class="form-group"><label class="form-label">${esGerenteSucursal ? 'Responsable / operador' : 'Chofer'}</label><input class="form-input" placeholder="${esGerenteSucursal ? 'Nombre de quien carga o usa' : 'Nombre del chofer'}" id="fl-driver"></div>
       <div class="form-group"><label class="form-label">Lugar de carga</label>
         <select class="form-select" id="fl-place" onchange="updateFuelPlaceNote()">
-          <option value="Cisterna R3">Cisterna R3 (descuenta stock)</option>
-          <option value="Estación de servicio">Estación de servicio</option>
-          <option value="Bidón / Sucursal">Bidón / Sucursal</option>
-          <option value="Otra">Otra</option>
+          ${initialTankOptions || '<option value="">— Sin tanque disponible —</option>'}
         </select>
       </div>
     </div>
@@ -2215,6 +2226,9 @@ function openFuelLoadModal() {
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
   // Autocompletar precio al abrir si ya hay cisterna seleccionada
+  if (esGerenteSucursal && !_fuelTanksForType('diesel').length && !_fuelTanksForType('urea').length) {
+    setTimeout(() => showToast('warn', 'Tu sucursal todavía no tiene tanque recibido. Primero debe llegar y recibirse un despacho interno.'), 150);
+  }
   setTimeout(() => updateFuelPlaceNote(), 100);
 }
 
@@ -2222,6 +2236,14 @@ function updateFuelPlaceOpts() {
   const tipo = document.getElementById('fl-type')?.value;
   const placeEl = document.getElementById('fl-place');
   if (!placeEl) return;
+  if (_fuelIsGerenteSucursal()) {
+    const opts = _fuelTanksForType(tipo === 'urea' ? 'urea' : 'diesel')
+      .map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${t.location || 'Tanque sucursal'} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`)
+      .join('');
+    placeEl.innerHTML = opts || '<option value="">— Sin tanque disponible —</option>';
+    updateFuelPlaceNote();
+    return;
+  }
   if (tipo === 'urea') {
     placeEl.innerHTML = `
       <option value="Cisterna urea R3">Cisterna urea R3 (descuenta stock)</option>
@@ -2247,7 +2269,7 @@ async function updateFuelPlaceNote() {
   const ppuWrap     = document.getElementById('fl-ppu-wrap');
   const ticketWrap  = document.getElementById('fl-ticket-wrap');
   if (!noteEl) return;
-  const descuenta = place.includes('Cisterna');
+  const descuenta = _fuelIsInternalTankPlace(place, type);
 
   // ── Regla de visibilidad por rol+lugar ──
   const role = App.currentUser?.role;
@@ -2273,10 +2295,7 @@ async function updateFuelPlaceNote() {
       if (tr.ok) App.data.tanks = await tr.json();
     } catch(e) {}
 
-    const tanks = App.data.tanks || [];
-    const tipoDbPrice = type === 'urea' ? 'urea' : 'fuel';
-    let tank = tanks.find(t => (t.type === tipoDbPrice || (tipoDbPrice === 'fuel' && t.type === 'gasoil')) && (t.location || '').includes('Cisterna R3'));
-    if (!tank) tank = tanks.find(t => t.type === tipoDbPrice || (tipoDbPrice === 'fuel' && t.type === 'gasoil'));
+    let tank = _fuelFindTankByPlaceAndType(place, type) || _fuelFindTankForType(type);
     const precio = tank?.price_per_l ? parseFloat(tank.price_per_l) : null;
 
     if (puedeVerPrecios && ppuEl && precio && precio > 0) {
@@ -2295,7 +2314,7 @@ async function updateFuelPlaceNote() {
       noteEl.textContent = '⚠ Sin precio configurado en cisterna — compras debe actualizarlo. Se guarda sin precio hasta entonces.';
     } else {
       // Jefe mant / chofer: solo ven el mensaje informativo (sin precio)
-      noteEl.innerHTML = `💡 Carga desde cisterna — los litros se descontarán del stock. El precio lo gestiona compras.`;
+      noteEl.innerHTML = _fuelIsGerenteSucursal() ? `💡 Carga interna desde tanque de sucursal — se descuenta stock y se genera ticket interno.` : `💡 Carga desde cisterna — los litros se descontarán del stock. El precio lo gestiona compras.`;
       // Forzar que el precio quede como 0 ó el de la cisterna (backend ignora este valor igual si hay tank_id)
       if (ppuEl) ppuEl.value = precio || 0;
     }
@@ -2351,24 +2370,21 @@ async function saveFuelLoad() {
   if (liters <= 0) { showToast('error','Ingresá los litros cargados'); return; }
 
   // Solo descontar de cisterna si el lugar es cisterna
-  const esCisterna = place.includes('Cisterna');
+  const esCisterna = _fuelIsInternalTankPlace(place, type);
   let tank_id = null;
   if (esCisterna) {
-    // Matchear el tanque por TIPO + LOCATION (no solo por tipo)
-    // Así si hay varios tanques del mismo tipo, elige el correcto según el dropdown
-    const tanks = App.data.tanks || [];
-    const tipoDb = type === 'urea' ? 'urea' : 'fuel';  // en DB se guarda 'fuel' o 'urea'
-    // Primero intento match exacto por location + tipo
-    let tank = tanks.find(t => (t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil')) && t.location === place);
-    // Si no encontró con match exacto, busca cualquier tanque del tipo correcto
-    if (!tank) {
-      tank = tanks.find(t => t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil'));
-    }
+    // Matchear el tanque por TIPO + LOCATION (no solo por tipo).
+    // Para gerente_sucursal, App.data.tanks ya viene limitado a su sucursal.
+    const tank = _fuelFindTankByPlaceAndType(place, type) || _fuelFindTankForType(type);
     tank_id = tank?.id || null;
     if (!tank_id) {
-      showToast('error','No se encontró cisterna para ' + type + ' en ' + place);
+      showToast('error','No se encontró tanque/cisterna para ' + type + ' en ' + (place || 'la sucursal'));
       return;
     }
+  }
+  if (_fuelIsGerenteSucursal() && !tank_id) {
+    showToast('error','La sucursal solo puede cargar desde su tanque interno');
+    return;
   }
 
   window._ticketImage = null;
@@ -2762,6 +2778,37 @@ async function saveFuelDispatch() {
   if (d) setTimeout(() => openFuelDispatchTicket(d.id), 150);
 }
 
+async function applyFuelDispatchToBranchTank(dispatchId) {
+  const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  const litros = Math.round(d.received_liters || d.liters || 0).toLocaleString('es-AR');
+  if (!confirm(`¿Sumar ${litros} L de ${_fuelTankTypeLabel(d.type)} al tanque de la sucursal?`)) return;
+
+  const res = await apiFetch(`/api/fuel/dispatches/${dispatchId}/apply-to-tank`, { method: 'PATCH', body: JSON.stringify({}) });
+  let data = {};
+  try { data = await res.json(); } catch(_) {}
+  if (!res.ok) { showToast('error', data.error || 'No se pudo sumar al tanque'); return; }
+
+  const idx = (App.data.fuelDispatches || []).findIndex(x => x.id === dispatchId);
+  if (idx >= 0 && data.dispatch) {
+    App.data.fuelDispatches[idx] = Object.assign(App.data.fuelDispatches[idx], {
+      destination_tank_id: data.dispatch.destination_tank_id || null,
+      destination_stock_applied: true,
+      destination_stock_applied_at: data.dispatch.destination_stock_applied_at || new Date().toISOString(),
+      _raw: data.dispatch
+    });
+  }
+  if (data.destination_tank) {
+    const tIdx = (App.data.tanks || []).findIndex(t => t.id === data.destination_tank.id);
+    if (tIdx >= 0) App.data.tanks[tIdx] = data.destination_tank;
+    else App.data.tanks = [data.destination_tank, ...(App.data.tanks || [])];
+  }
+
+  showToast('ok', 'Combustible sumado al tanque de la sucursal');
+  try { await loadInitialData(); } catch(e) {}
+  renderFuel();
+}
+
 function openFuelDispatchTicket(dispatchId) {
   const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
   if (!d) { showToast('error', 'No se encontró el despacho'); return; }
@@ -2809,6 +2856,7 @@ function openFuelDispatchTicket(dispatchId) {
   `, [
     { label:'🖨 Imprimir', cls:'btn-primary', fn: () => printFuelDispatchTicket(dispatchId) },
     ...(d.status !== 'recibido' && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? [{ label:'✓ Marcar recibido', cls:'btn-secondary', fn: () => openFuelDispatchReceiveModal(dispatchId) }] : []),
+    ...(d.status === 'recibido' && !d.destination_stock_applied && _fuelPuedeRecibirDespachos(App.currentUser?.role) ? [{ label:'↪ Sumar al tanque', cls:'btn-primary', fn: () => applyFuelDispatchToBranchTank(dispatchId) }] : []),
     { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
   ]);
 }
@@ -2887,9 +2935,17 @@ async function saveFuelDispatchReception(dispatchId) {
       received_liters: data.dispatch.received_liters === null || data.dispatch.received_liters === undefined ? received_liters : parseFloat(data.dispatch.received_liters),
       receive_notes: data.dispatch.receive_notes || receive_notes,
       received_at: data.dispatch.received_at || new Date().toISOString(),
+      destination_tank_id: data.dispatch.destination_tank_id || null,
+      destination_stock_applied: data.dispatch.destination_stock_applied === true || data.dispatch.destination_stock_applied === 'true',
+      destination_stock_applied_at: data.dispatch.destination_stock_applied_at || new Date().toISOString(),
     });
   }
-  showToast('ok', 'Despacho marcado como recibido');
+  if (data.destination_tank) {
+    const tIdx = (App.data.tanks || []).findIndex(t => t.id === data.destination_tank.id);
+    if (tIdx >= 0) App.data.tanks[tIdx] = data.destination_tank;
+    else App.data.tanks = [data.destination_tank, ...(App.data.tanks || [])];
+  }
+  showToast('ok', 'Despacho marcado como recibido y sumado al tanque de sucursal');
   try { await loadInitialData(); } catch(e) {}
   renderFuel();
   setTimeout(() => openFuelDispatchTicket(dispatchId), 150);
@@ -5555,7 +5611,7 @@ function _fuelPuedeRecibirDespachos(role) {
 }
 
 function _fuelPuedeRegistrarCarga(role) {
-  return ['dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico'].includes(role);
+  return ['dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico','gerente_sucursal'].includes(role);
 }
 
 function _fuelPuedeVerificarTickets(role) {
@@ -5582,9 +5638,47 @@ function _fuelDispatchCode(d) {
   return `DI-${ymd}-${String(d.id || '').slice(0,6).toUpperCase()}`;
 }
 
+function _fuelIsGerenteSucursal() {
+  return App.currentUser?.role === 'gerente_sucursal';
+}
+
+function _fuelCurrentBranchName() {
+  return String(App.currentUser?.sucursal || '').trim() || 'Sucursal';
+}
+
+function _fuelDbType(type) {
+  const t = String(type || '').toLowerCase();
+  return t === 'urea' ? 'urea' : 'fuel';
+}
+
+function _fuelTankMatchesType(tank, type) {
+  const tipoDb = _fuelDbType(type);
+  return tank && (tank.type === tipoDb || (tipoDb === 'fuel' && tank.type === 'gasoil'));
+}
+
+function _fuelFindTankByPlaceAndType(place, type) {
+  const p = String(place || '').trim();
+  const tanks = App.data.tanks || [];
+  if (!p) return null;
+  return tanks.find(t => _fuelTankMatchesType(t, type) && String(t.location || '').trim() === p)
+      || tanks.find(t => _fuelTankMatchesType(t, type) && p.includes(String(t.location || '').trim()))
+      || null;
+}
+
+function _fuelTanksForType(type) {
+  return (App.data.tanks || []).filter(t => _fuelTankMatchesType(t, type));
+}
+
+function _fuelIsInternalTankPlace(place, type) {
+  return !!_fuelFindTankByPlaceAndType(place, type) || String(place || '').includes('Cisterna');
+}
+
 function _fuelFindTankForType(type) {
   const tanks = App.data.tanks || [];
-  const tipoDb = type === 'urea' ? 'urea' : 'fuel';
+  const tipoDb = _fuelDbType(type);
+  if (_fuelIsGerenteSucursal()) {
+    return tanks.find(t => _fuelTankMatchesType(t, type)) || null;
+  }
   return tanks.find(t => (t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil')) && (t.location || '').includes('Cisterna R3'))
       || tanks.find(t => t.type === tipoDb || (tipoDb === 'fuel' && t.type === 'gasoil'))
       || null;
