@@ -90,7 +90,7 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
     const r = await query(`
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
-        f.iva_pct, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+        f.iva_pct, f.invoice_monto AS invoice_neto, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS total_a_pagar,
         f.forma_pago, f.cc_dias, f.vencimiento, f.pagada, f.monto_pagado,
         f.uploaded_at, f.notes,
         po.code AS po_code, po.proveedor, po.supplier_id,
@@ -157,7 +157,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     // Validar que existe la factura y traer datos bancarios del proveedor
     const f = await client.query(
       `SELECT
-         f.id, f.invoice_monto, f.iva_pct,
+         f.id, f.invoice_monto, f.invoice_monto AS invoice_neto, f.iva_pct,
          ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
          COALESCE(f.monto_pagado,0) AS monto_pagado, f.pagada,
          po.proveedor,
@@ -242,7 +242,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     await client.query('COMMIT');
 
     // Releer estado actualizado
-    const fact = await query('SELECT pagada, monto_pagado, invoice_monto, iva_pct, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS invoice_total FROM purchase_order_invoices WHERE id=$1', [req.params.fid]);
+    const fact = await query('SELECT pagada, monto_pagado, invoice_monto, invoice_monto AS invoice_neto, iva_pct, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS invoice_total, ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS total_a_pagar FROM purchase_order_invoices WHERE id=$1', [req.params.fid]);
     const fact_data = fact.rows[0];
 
     res.status(201).json({
