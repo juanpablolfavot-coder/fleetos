@@ -24,7 +24,7 @@ const router  = express.Router({ mergeParams: true });
 const { pool, query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 
-const ROLES_RECIBIR = ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras'];
+const ROLES_RECIBIR = ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'];
 
 // Destinos fijos predefinidos (el frontend les agrega las sucursales dinámicamente)
 const DESTINOS_FIJOS = [
@@ -48,6 +48,11 @@ async function ensurePOReceiptStateColumns(client) {
 // ─────────────────────────────────────────────────────────────
 //  Helper: recalcular delivery_status de la OC tras una recepción
 //  y mantener sincronizado el estado principal de la OC.
+//
+//  Regla importante:
+//  - La recepción de mercadería NO depende del pago.
+//  - Si llegó todo, la OC queda status='recibida' aunque payment_status siga pendiente.
+//  - Tesorería maneja payment_status por separado.
 // ─────────────────────────────────────────────────────────────
 async function recalcDeliveryStatus(client, poId) {
   await ensurePOReceiptStateColumns(client);
@@ -86,7 +91,8 @@ async function recalcDeliveryStatus(client, poId) {
       delivery_status = $1,
       status = CASE
         WHEN $1 = 'total' AND po.status <> 'rechazada' THEN 'recibida'
-        WHEN $1 <> 'total' AND po.status = 'recibida' THEN 'pagada'
+        WHEN $1 <> 'total' AND po.status = 'recibida' AND COALESCE(po.payment_status,'pendiente') = 'total' THEN 'pagada'
+        WHEN $1 <> 'total' AND po.status = 'recibida' THEN 'aprobada_compras'
         ELSE po.status
       END,
       recibido_por = CASE
