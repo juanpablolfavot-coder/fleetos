@@ -104,6 +104,13 @@ async function ensureTables() {
   )`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
+
+  // Índices para que el listado de OC no se vuelva lento cuando crecen las órdenes.
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_status_created ON purchase_orders(status, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_sucursal_created ON purchase_orders(sucursal, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_area_created ON purchase_orders(area, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_requested_created ON purchase_orders(requested_by, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_poi_po_fast ON purchase_order_items(po_id)`).catch(()=>{});
 }
 ensureTables();
 
@@ -189,7 +196,7 @@ router.get('/', authenticate, async (req, res) => {
         up.name as pagador_nombre,
         ur.name as receptor_nombre,
         urech.name as rechazador_nombre,
-        COALESCE((SELECT SUM(cantidad * precio_unit) FROM purchase_order_items WHERE po_id = po.id), 0) as total_real
+        COALESCE(t.total_real, 0) as total_real
       FROM purchase_orders po
       LEFT JOIN users u     ON u.id     = po.requested_by
       LEFT JOIN users uc    ON uc.id    = po.cotizado_por
@@ -197,6 +204,11 @@ router.get('/', authenticate, async (req, res) => {
       LEFT JOIN users up    ON up.id    = po.pagado_por
       LEFT JOIN users ur    ON ur.id    = po.recibido_por
       LEFT JOIN users urech ON urech.id = po.rechazado_por
+      LEFT JOIN (
+        SELECT po_id, SUM(cantidad * precio_unit) AS total_real
+        FROM purchase_order_items
+        GROUP BY po_id
+      ) t ON t.po_id = po.id
       WHERE 1=1`;
     const params = [];
 
