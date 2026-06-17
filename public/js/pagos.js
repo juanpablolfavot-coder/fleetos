@@ -15,6 +15,13 @@
 
   const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const escAttr = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
+  const totalFacturaConIva = (f) => {
+    if (f && f.invoice_total != null) return num(f.invoice_total);
+    const neto = num(f?.invoice_monto);
+    const iva  = num(f?.iva_pct);
+    return +(neto * (1 + iva / 100)).toFixed(2);
+  };
 
   function datosTransferenciaProveedor() {
     const f = window._pagoFacturaActual || {};
@@ -90,7 +97,7 @@
                     <td class="td-mono">${f.invoice_nro}</td>
                     <td>${new Date(f.invoice_fecha).toLocaleDateString('es-AR')}</td>
                     <td style="${vencColor}">${vencLabel}</td>
-                    <td style="text-align:right">$${fmt(f.invoice_monto)}</td>
+                    <td style="text-align:right">$${fmt(f.invoice_total || f.invoice_monto)}</td>
                     <td style="text-align:right;color:${parseFloat(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
                     <td style="text-align:right;color:var(--warn);font-weight:600">$${fmt(f.saldo)}</td>
                     <td style="text-align:center">
@@ -140,9 +147,9 @@
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
-    const totalFac = parseFloat(factura.invoice_monto);
-    const totalPagado = parseFloat(factura.monto_pagado || 0);
-    const saldo = totalFac - totalPagado;
+    const totalFac = totalFacturaConIva(factura);
+    const totalPagado = num(factura.monto_pagado || 0);
+    const saldo = Math.max(0, +(totalFac - totalPagado).toFixed(2));
     const pagada = saldo <= 0.01;
 
     overlay.innerHTML = `
@@ -159,8 +166,9 @@
           <!-- Resumen factura -->
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
             <div style="background:var(--bg2);padding:10px;border-radius:6px;border:1px solid var(--border2)">
-              <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Total factura</div>
+              <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Total factura con IVA</div>
               <div style="font-size:18px;font-weight:600">$${fmt(totalFac)}</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:2px">Neto $${fmt(factura.invoice_monto)} · IVA ${fmt(factura.iva_pct || 0)}%</div>
             </div>
             <div style="background:var(--bg2);padding:10px;border-radius:6px;border:1px solid var(--border2)">
               <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Pagado</div>
@@ -190,8 +198,9 @@
                 </select>
               </div>
               <div>
-                <label style="font-size:12px;color:var(--text3)">Monto * <span style="color:var(--text3)">(saldo: $${fmt(saldo)})</span></label>
-                <input id="pago-monto" type="number" step="0.01" min="0" max="${saldo}" placeholder="${fmt(saldo)}" class="form-input">
+                <label style="font-size:12px;color:var(--text3)">Monto a pagar * <span style="color:var(--text3)">(saldo con IVA: $${fmt(saldo)})</span></label>
+                <input id="pago-monto" type="number" step="0.01" min="0" max="${saldo}" value="${saldo.toFixed(2)}" placeholder="${fmt(saldo)}" class="form-input">
+                <div style="font-size:10px;color:var(--text3);margin-top:3px">El saldo se calcula con IVA incluido.</div>
               </div>
             </div>
 
@@ -253,7 +262,7 @@
     } else if (p.metodo === 'cheque') {
       if (p.cheque_nro)         detalles.push(`N° ${p.cheque_nro}`);
       if (p.cheque_banco)       detalles.push(`Banco: ${p.cheque_banco}`);
-      if (p.cheque_fecha_cobro) detalles.push(`Cobro: ${new Date(p.cheque_fecha_cobro).toLocaleDateString('es-AR')}`);
+      if (p.cheque_fecha_cobro) detalles.push(`Fecha: ${new Date(p.cheque_fecha_cobro).toLocaleDateString('es-AR')}`);
       if (p.cheque_a_nombre)    detalles.push(`A nombre de: ${p.cheque_a_nombre}`);
     } else if (p.metodo === 'echeq') {
       if (p.echeq_nro)        detalles.push(`N° ${p.echeq_nro}`);
@@ -291,23 +300,17 @@
         </div>`;
     } else if (metodo === 'cheque') {
       html = `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-cheque-banco" type="text" placeholder="Ej: Banco Nación" class="form-input"></div>
           <div><label style="font-size:12px;color:var(--text3)">N° cheque *</label><input id="pago-cheque-nro" type="text" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Banco emisor *</label><input id="pago-cheque-banco" type="text" placeholder="Ej: Banco Nación" class="form-input"></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:var(--text3)">Fecha de cobro *</label><input id="pago-cheque-fecha" type="date" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">A nombre de</label><input id="pago-cheque-nombre" type="text" placeholder="Nombre o razón social" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del cheque *</label><input id="pago-cheque-fecha" type="date" class="form-input"></div>
         </div>`;
     } else if (metodo === 'echeq') {
       html = `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-echeq-banco" type="text" class="form-input"></div>
           <div><label style="font-size:12px;color:var(--text3)">N° eCheq *</label><input id="pago-echeq-nro" type="text" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Banco emisor *</label><input id="pago-echeq-banco" type="text" class="form-input"></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago *</label><input id="pago-echeq-fecha" type="date" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Clave / código</label><input id="pago-echeq-clave" type="text" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del eCheq *</label><input id="pago-echeq-fecha" type="date" class="form-input"></div>
         </div>`;
     } else if (metodo === 'tarjeta') {
       html = `
@@ -348,12 +351,10 @@
       body.cheque_nro         = document.getElementById('pago-cheque-nro')?.value.trim();
       body.cheque_banco       = document.getElementById('pago-cheque-banco')?.value.trim();
       body.cheque_fecha_cobro = document.getElementById('pago-cheque-fecha')?.value;
-      body.cheque_a_nombre    = document.getElementById('pago-cheque-nombre')?.value.trim();
     } else if (metodo === 'echeq') {
       body.echeq_nro        = document.getElementById('pago-echeq-nro')?.value.trim();
       body.echeq_banco      = document.getElementById('pago-echeq-banco')?.value.trim();
       body.echeq_fecha_pago = document.getElementById('pago-echeq-fecha')?.value;
-      body.echeq_clave      = document.getElementById('pago-echeq-clave')?.value.trim();
     } else if (metodo === 'tarjeta') {
       body.tarjeta_aprobacion = document.getElementById('pago-tarjeta-aprob')?.value.trim();
       body.tarjeta_cuotas     = document.getElementById('pago-tarjeta-cuotas')?.value;
