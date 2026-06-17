@@ -29,13 +29,13 @@ const ROLES_CARGAR_FAC    = ['dueno','gerencia','compras','contador','proveedore
 async function recalcInvoiceStatus(client, poId) {
   const r = await client.query(`
     SELECT
-      po.total_estimado AS total_oc,
+      ROUND(po.total_estimado * (1 + COALESCE(po.iva_pct,0) / 100.0), 2) AS total_oc,
       po.factura_monto AS factura_legacy,
-      COALESCE(SUM(f.invoice_monto), 0) AS total_facturado
+      COALESCE(SUM(ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2)), 0) AS total_facturado
     FROM purchase_orders po
     LEFT JOIN purchase_order_invoices f ON f.po_id = po.id
     WHERE po.id = $1
-    GROUP BY po.id, po.total_estimado, po.factura_monto
+    GROUP BY po.id, po.total_estimado, po.iva_pct, po.factura_monto
   `, [poId]);
 
   if (!r.rows[0]) return 'pendiente';
@@ -66,19 +66,17 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
     const r = await query(`
       SELECT
         po.id, po.code, po.proveedor, po.status, po.created_at,
-        po.total_estimado, po.factura_monto,
+        po.total_estimado, po.factura_monto, po.iva_pct,
         CASE
           WHEN po.status = 'recibida' THEN 'total'
           ELSE COALESCE(NULLIF(po.delivery_status, ''), 'pendiente')
         END AS delivery_status,
         po.invoice_status,
-        CASE
-          WHEN po.status IN ('pagada','recibida') THEN COALESCE(NULLIF(po.payment_status, ''), 'total')
-          ELSE COALESCE(NULLIF(po.payment_status, ''), 'pendiente')
-        END AS payment_status,
+        COALESCE(NULLIF(po.payment_status, ''), 'pendiente') AS payment_status,
         po.forma_pago, po.cc_dias,
         s.name AS supplier_name,
         COALESCE(SUM(f.invoice_monto), 0) AS total_facturado,
+        COALESCE(SUM(ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2)), 0) AS total_facturado_con_iva,
         COUNT(f.id) AS cant_facturas
       FROM purchase_orders po
       LEFT JOIN suppliers s ON s.id = po.supplier_id
@@ -105,7 +103,8 @@ router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), as
     const r = await query(`
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
-        f.iva_pct, f.forma_pago, f.cc_dias, f.vencimiento, f.file_url,
+        f.iva_pct, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+        f.forma_pago, f.cc_dias, f.vencimiento, f.file_url,
         f.uploaded_at, f.uploaded_by, f.pagada, f.monto_pagado, f.notes,
         u.name AS uploaded_by_name,
         po.proveedor, po.supplier_id,
