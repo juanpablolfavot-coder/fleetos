@@ -51,6 +51,11 @@ ALTER TABLE users ADD CONSTRAINT users_role_check
                     'encargado_combustible','paniol','contador','auditor',
                     'compras','tesoreria','proveedores','gerente_sucursal'));
 
+-- Índices para acelerar la autenticación y filtros por rol/sucursal.
+CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_sucursal_area ON users(sucursal, area);
+
 -- refresh_tokens: tokens de sesión larga (refresh JWT)
 CREATE TABLE IF NOT EXISTS refresh_tokens (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -860,13 +865,24 @@ FOR EACH ROW EXECUTE FUNCTION recalc_invoice_payment();
 CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
 DECLARE
   v_po_id UUID;
+  v_receipt_id UUID;
   v_po_status VARCHAR;
   v_payment_status VARCHAR;
   v_total_pedido NUMERIC;
   v_total_recibido NUMERIC;
   v_delivery_status VARCHAR;
 BEGIN
-  v_po_id := (SELECT po_id FROM purchase_order_receipts WHERE id = COALESCE(NEW.receipt_id, OLD.receipt_id));
+  -- NEW no existe en DELETE y OLD no existe en INSERT. Separar por operación
+  -- evita errores raros de trigger en recepciones parciales/anuladas.
+  IF TG_OP = 'DELETE' THEN
+    v_receipt_id := OLD.receipt_id;
+  ELSE
+    v_receipt_id := NEW.receipt_id;
+  END IF;
+
+  SELECT po_id INTO v_po_id
+  FROM purchase_order_receipts
+  WHERE id = v_receipt_id;
 
   IF v_po_id IS NULL THEN
     RETURN COALESCE(NEW, OLD);
