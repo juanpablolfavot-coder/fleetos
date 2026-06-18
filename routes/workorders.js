@@ -11,6 +11,7 @@ const { validateUUID, sensitiveLimiter } = require('../middleware/security');
     await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_required BOOLEAN NOT NULL DEFAULT FALSE`).catch(()=>{});
     await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_po_id UUID`).catch(()=>{});
     await query(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID`).catch(()=>{});
+    await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
     // Backfill: las OTs viejas sin ot_tipo se marcan como 'vehiculo'
     await query(`UPDATE work_orders SET ot_tipo = 'vehiculo' WHERE ot_tipo IS NULL`).catch(()=>{});
 
@@ -76,6 +77,7 @@ async function ensureExternalPOFields(clientOrQuery = query) {
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS area VARCHAR(200)`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200)`).catch(()=>{});
   await q(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
+  await q(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
 }
 
 
@@ -99,9 +101,14 @@ async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, asse
   const poId = po.rows[0].id;
   for (const it of cleanItems) {
     await client.query(
-      `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
-       VALUES ($1,$2,$3,$4,0,$5)`,
-      [poId, String(it.descripcion || it.name).trim(), parseFloat(it.cantidad || it.qty || 1) || 1, it.unidad || it.unit || 'un', it.stock_item_id || it.stock_id || null]
+      `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id)
+       VALUES ($1,$2,$3,$4,0,$5,$6)`,
+      [poId,
+       String(it.descripcion || it.name).trim(),
+       parseFloat(it.cantidad || it.qty || 1) || 1,
+       it.unidad || it.unit || 'un',
+       it.stock_item_id || it.stock_id || null,
+       it.work_order_part_id || it.part_id || null]
     );
   }
   return po.rows[0];
@@ -289,13 +296,16 @@ router.post('/', authenticate, async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Los repuestos externos deben tener una descripción de al menos 3 caracteres' });
         }
-        externalItemsForPO.push({ descripcion: p.name, cantidad: p.qty || 1, unidad: p.unit || 'un' });
       }
       const inserted = await client.query(
         `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, subtotal`,
         [woId, originClean === 'stock' ? p.stock_id : null, p.name, originClean, p.qty, p.unit||'un', originClean === 'stock' ? (p.unit_cost||p.cost||0) : 0]
       );
-      if (originClean === 'externo') externalPartIdsForPO.push(inserted.rows[0].id);
+      if (originClean === 'externo') {
+        const partId = inserted.rows[0].id;
+        externalPartIdsForPO.push(partId);
+        externalItemsForPO.push({ descripcion: p.name, cantidad: p.qty || 1, unidad: p.unit || 'un', work_order_part_id: partId });
+      }
       partsCost += parseFloat(inserted.rows[0].subtotal);
     }
 
@@ -390,15 +400,17 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
           `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
           [p.stock_id, qtyNum, `Cierre ${wo.rows[0].code}`, req.params.id, req.user.id]
         );
-      } else {
-        externalItemsForPO.push({ descripcion: nameClean, cantidad: qtyNum, unidad: p.unit || 'un' });
       }
 
       const ins = await client.query(
         `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, subtotal`,
         [req.params.id, originClean === 'stock' ? p.stock_id : null, nameClean, originClean, qtyNum, p.unit||'un', finalCost]
       );
-      if (originClean !== 'stock') externalPartIds.push(ins.rows[0].id);
+      if (originClean !== 'stock') {
+        const partId = ins.rows[0].id;
+        externalPartIds.push(partId);
+        externalItemsForPO.push({ descripcion: nameClean, cantidad: qtyNum, unidad: p.unit || 'un', work_order_part_id: partId });
+      }
       extraCost += parseFloat(ins.rows[0].subtotal);
     }
 
@@ -704,7 +716,7 @@ router.post('/:id/parts',
           vehicleId: wo.rows[0].vehicle_id, assetId: wo.rows[0].asset_id,
           sucursal, area: 'Taller', tipo: wo.rows[0].vehicle_id ? 'flota' : 'otro',
           notes: `Solicitud generada automáticamente desde ${otCode} por repuesto externo: ${nameClean}`,
-          items: [{ descripcion: nameClean, cantidad: qtyNum, unidad: unit || 'un' }]
+          items: [{ descripcion: nameClean, cantidad: qtyNum, unidad: unit || 'un', work_order_part_id: ins.rows[0].id }]
         });
         if (externalPO) await client.query('UPDATE work_orders SET external_po_id=COALESCE(external_po_id,$1), external_required=TRUE WHERE id=$2', [externalPO.id, req.params.id]);
         await client.query('UPDATE work_order_parts SET po_id=$1 WHERE id=$2', [externalPO?.id || null, ins.rows[0].id]);
