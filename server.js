@@ -36,6 +36,12 @@ const adminRouter = require('./routes/admin');
 const assetsRouter = require('./routes/assets');
 const suppliersRouter = require('./routes/suppliers');
 const app=express();
+const BUILD_VERSION = String(
+  process.env.RENDER_GIT_COMMIT ||
+  process.env.COMMIT_SHA ||
+  process.env.SOURCE_VERSION ||
+  Date.now()
+).slice(0, 12);
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -98,6 +104,10 @@ app.get(/^(?!\/api).*/, (req, res) => {
   const fs = require('fs');
   const filePath = require('path').join(__dirname, 'public', 'index.html');
   let html = fs.readFileSync(filePath, 'utf8');
+  html = html.replace(/(src|href)=(['"])([^'"]+\.(?:js|css))(?:\?v=[^'"]*)?\2/g, (m, attr, quote, asset) => {
+    if (/^https?:/i.test(asset)) return m;
+    return `${attr}=${quote}${asset}?v=${BUILD_VERSION}${quote}`;
+  });
   
   // Forzar que el browser nunca use cache del HTML
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
