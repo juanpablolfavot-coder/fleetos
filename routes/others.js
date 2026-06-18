@@ -1007,25 +1007,40 @@ function mergeVehicleTypes(value) {
   return clean;
 }
 
+// Evita ejecutar CREATE TABLE en cada carga de configuración.
+// Se crea una sola vez por proceso y luego se reutiliza.
+let appConfigReadyPromise = null;
+function ensureAppConfigTable() {
+  if (!appConfigReadyPromise) {
+    appConfigReadyPromise = query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`)
+      .catch((err) => {
+        appConfigReadyPromise = null;
+        throw err;
+      });
+  }
+  return appConfigReadyPromise;
+}
+
 configRouter.get('/', authenticate, async (req, res) => {
   try {
-    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
-    const bases = await query(`SELECT value FROM app_config WHERE key='bases'`);
-    const vtypes = await query(`SELECT value FROM app_config WHERE key='vehicle_types'`);
-    const lrate = await query(`SELECT value FROM app_config WHERE key='labor_rate'`);
-    const areas = await query(`SELECT value FROM app_config WHERE key='areas'`);
+    await ensureAppConfigTable();
+    const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas')`);
+    const map = Object.fromEntries(cfg.rows.map(r => [r.key, r.value]));
     res.json({
-      bases:  bases.rows[0]  ? bases.rows[0].value  : DEFAULT_BASES,
-      vehicle_types: mergeVehicleTypes(vtypes.rows[0] ? vtypes.rows[0].value : DEFAULT_VTYPES),
-      labor_rate: lrate.rows[0] ? parseFloat(lrate.rows[0].value) : 0,
-      areas: areas.rows[0] ? areas.rows[0].value : {},
+      bases: Array.isArray(map.bases) ? map.bases : DEFAULT_BASES,
+      vehicle_types: mergeVehicleTypes(map.vehicle_types || DEFAULT_VTYPES),
+      labor_rate: map.labor_rate !== undefined ? parseFloat(map.labor_rate) : 0,
+      areas: map.areas && typeof map.areas === 'object' ? map.areas : {},
     });
-  } catch (err) { res.status(500).json({ error: 'Error config' }); }
+  } catch (err) {
+    console.error('[config GET]', err.message);
+    res.status(500).json({ error: 'Error config' });
+  }
 });
 
 configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   try {
-    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
+    await ensureAppConfigTable();
     const { bases, vehicle_types, labor_rate, areas } = req.body;
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
     if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(mergeVehicleTypes(vehicle_types))]);
