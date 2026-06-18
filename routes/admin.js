@@ -13,7 +13,7 @@ router.get('/backup', authenticate, requireRole('dueno'), (req, res) => {
     return res.status(500).json({ error: 'DATABASE_URL no configurada' });
   }
 
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const timestamp = new Date().toLocaleString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' }).replace(' ', '-').replace(/:/g, '-');
   const filename = `biletta-backup-${timestamp}.sql.gz`;
 
   res.setHeader('Content-Type', 'application/gzip');
@@ -52,7 +52,7 @@ router.get('/backup', authenticate, requireRole('dueno'), (req, res) => {
 router.get('/backup/status', authenticate, requireRole('dueno'), (req, res) => {
   res.json({
     ok: true,
-    timestamp: new Date().toISOString(),
+    timestamp: new Date().toLocaleString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' }),
     user: req.user?.name,
     message: 'Endpoint de backup operativo'
   });
