@@ -1395,9 +1395,14 @@ async function saveNewOT() {
 }
 
 
+function _otIsClosed(ot) {
+  return String(ot?.status || '').toLowerCase().includes('cerrad');
+}
+
 function openEditOTModal(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
+  const otClosed = _otIsClosed(ot);
   const statusOpts = ['En proceso','Pendiente','Esperando repuesto','Esperando tercerizado','Asignada'];
   const prioOpts   = ['Normal','Media','Urgente'];
   const typeOpts   = ['Correctivo','Preventivo','Predictivo'];
@@ -1406,14 +1411,15 @@ function openEditOTModal(id) {
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--text3);font-family:var(--mono)">
       Abierta: ${ot.opened} &nbsp;·&nbsp; Vehículo: ${ot.vehicle}
     </div>
+    ${otClosed ? `<div style="background:rgba(16,185,129,.10);border:1px solid rgba(16,185,129,.35);color:var(--ok);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;font-weight:600">✓ OT cerrada: queda en modo consulta. No permite agregar mano de obra ni repuestos.</div>` : ''}
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Vehículo (código)</label>
-        <input class="form-input" id="eo-vehicle" value="${ot.vehicle}">
+        <input class="form-input" id="eo-vehicle" value="${ot.vehicle}" ${otClosed ? 'disabled' : ''}>
       </div>
       <div class="form-group">
         <label class="form-label">Tipo de trabajo</label>
-        <select class="form-select" id="eo-type">
+        <select class="form-select" id="eo-type" ${otClosed ? 'disabled' : ''}>
           ${typeOpts.map(t=>`<option ${t===ot.type?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
@@ -1421,13 +1427,13 @@ function openEditOTModal(id) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Prioridad</label>
-        <select class="form-select" id="eo-priority">
+        <select class="form-select" id="eo-priority" ${otClosed ? 'disabled' : ''}>
           ${prioOpts.map(p=>`<option ${p===ot.priority?'selected':''}>${p}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
         <label class="form-label">Estado actual</label>
-        <select class="form-select" id="eo-status">
+        <select class="form-select" id="eo-status" ${otClosed ? 'disabled' : ''}>
           ${statusOpts.map(s=>`<option ${s===ot.status?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
@@ -1438,7 +1444,7 @@ function openEditOTModal(id) {
     </div>
     <div class="form-group">
       <label class="form-label">Descripción / diagnóstico</label>
-      <textarea class="form-textarea" id="eo-desc">${ot.desc||''}</textarea>
+      <textarea class="form-textarea" id="eo-desc" ${otClosed ? 'disabled' : ''}>${ot.desc||''}</textarea>
     </div>
 
     <!-- ⏱ PARTES DE TRABAJO (opción B) ──────────────────────── -->
@@ -1448,7 +1454,7 @@ function openEditOTModal(id) {
           <label class="form-label" style="margin:0;font-weight:700">⏱️ Partes de trabajo (mano de obra propia)</label>
           <div style="font-size:11px;color:var(--text3)">Quién trabajó y cuántas horas. No se valoriza la mano de obra propia.</div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="_labAddRow()">+ Agregar parte</button>
+        ${otClosed ? `<span style="font-size:11px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 10px">Solo lectura</span>` : `<button type="button" class="btn btn-secondary btn-sm" onclick="_labAddRow()">+ Agregar parte</button>`}
       </div>
       <div id="eo-labor-list" style="margin-bottom:8px">
         <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando partes...</div>
@@ -1483,7 +1489,7 @@ function openEditOTModal(id) {
           <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos de la OT</label>
           <div style="font-size:11px;color:var(--text3)">Agregá repuestos del pañol o de compras externas. Se suma automáticamente al costo.</div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button>
+        ${otClosed ? `<span style="font-size:11px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 10px">Solo lectura</span>` : `<button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button>`}
       </div>
       <div id="eo-parts-list" style="margin-bottom:8px">
         <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando repuestos...</div>
@@ -1492,13 +1498,17 @@ function openEditOTModal(id) {
         Total repuestos: <strong id="eo-parts-total-val" style="color:var(--accent)">$0</strong>
       </div>
     </div>
-  `, [
-    { label:'Guardar cambios', cls:'btn-primary',   fn: () => saveEditOT(id) },
-    { label:'Cancelar',        cls:'btn-secondary', fn: closeModal }
-  ]);
+  `, otClosed
+    ? [{ label:'Cerrar', cls:'btn-secondary', fn: closeModal }]
+    : [
+        { label:'Guardar cambios', cls:'btn-primary',   fn: () => saveEditOT(id) },
+        { label:'Cancelar',        cls:'btn-secondary', fn: closeModal }
+      ]
+  );
 
   // Guardar el ID de la OT en una variable global del modal
   window._labCurrentOtId = ot._uuid || ot.id;
+  window._labCurrentOtClosed = otClosed;
   // Cargar los partes de trabajo Y los repuestos de esta OT
   _labLoadList();
   _partsLoadList();
@@ -12098,9 +12108,9 @@ function _labRender(partes) {
         <div style="color:var(--text3);font-size:10px">${fecha}${p.notes ? ' · ' + p.notes.substring(0,50) : ''}</div>
       </div>
       <div style="text-align:center;font-family:var(--mono)">${hours} h</div>
-      <button type="button" onclick="_labDelete('${p.id}')"
+      ${window._labCurrentOtClosed ? '<span></span>' : `<button type="button" onclick="_labDelete('${p.id}')"
         title="Eliminar este parte"
-        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>
+        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>`}
     </div>`;
   }).join('');
 
@@ -12113,6 +12123,7 @@ function _labRender(partes) {
 // Modal para agregar un parte nuevo
 function _labAddRow() {
   if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
+  if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
 
   // Lista de mecánicos del sistema (users con rol mecanico, jefe_mantenimiento o el que sea)
   const mechanics = (App.data.users || []).filter(u =>
@@ -12195,6 +12206,7 @@ function _labRecalc() {
 async function _labSave() {
   const otId  = window._labCurrentOtId;
   if (!otId) { showToast('error', 'No hay OT seleccionada'); return; }
+  if (window._labCurrentOtClosed) { showToast('info', 'La OT está cerrada: no se puede modificar'); return; }
 
   const userSel = document.getElementById('lab-user');
   const userVal = userSel?.value || '';
@@ -12244,6 +12256,7 @@ async function _labSave() {
 async function _labDelete(laborId) {
   const otId = window._labCurrentOtId;
   if (!otId) return;
+  if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
   if (!confirm('¿Eliminar este parte de trabajo?')) return;
   try {
     const r = await apiFetch(`/api/workorders/${otId}/labor/${laborId}`, { method: 'DELETE' });
@@ -12320,9 +12333,9 @@ function _partsRender(parts) {
       <div style="text-align:center;font-family:var(--mono)">${qty}</div>
       <div style="text-align:right;font-family:var(--mono);color:var(--text3)">$${Math.round(cost).toLocaleString('es-AR')}</div>
       <div style="text-align:right;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(subtotal).toLocaleString('es-AR')}</div>
-      <button type="button" onclick="_partsDelete('${p.id}', ${p.origin === 'stock' ? 'true' : 'false'})"
+      ${window._labCurrentOtClosed ? '<span></span>' : `<button type="button" onclick="_partsDelete('${p.id}', ${p.origin === 'stock' ? 'true' : 'false'})"
         title="${p.origin === 'stock' ? 'Eliminar y devolver al stock' : 'Eliminar repuesto'}"
-        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>
+        style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>`}
     </div>`;
   }).join('');
 
@@ -12334,6 +12347,7 @@ function _partsRender(parts) {
 
 function _partsAddRow() {
   if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
+  if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
 
   const body = `
     <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
@@ -12520,6 +12534,7 @@ function _partsRecalc() {
 async function _partsSave() {
   const otId = window._labCurrentOtId;
   if (!otId) { showToast('error', 'No hay OT seleccionada'); return; }
+  if (window._labCurrentOtClosed) { showToast('info', 'La OT está cerrada: no se puede modificar'); return; }
 
   const origin = document.getElementById('pnew-origin')?.value || 'externo';
   const name = (document.getElementById('pnew-name')?.value || '').trim();
@@ -12554,6 +12569,7 @@ async function _partsSave() {
 async function _partsDelete(partId, wasFromStock) {
   const otId = window._labCurrentOtId;
   if (!otId) return;
+  if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
   const msg = wasFromStock
     ? '¿Eliminar este repuesto? La cantidad se devolverá al stock.'
     : '¿Eliminar este repuesto?';
