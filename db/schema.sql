@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS fuel_logs (
     location                TEXT,
     notes                   TEXT,
     ticket_image            TEXT,                        -- data:image/… o URL
-    ticket_estado           VARCHAR(20) DEFAULT 'pendiente',  -- 'pendiente'|'verificado'|'rechazado'
+    ticket_estado           VARCHAR(20),                 -- NULL|'pendiente'|'verificado'|'observado'|'rechazado'
     ticket_obs              TEXT,
     ticket_verificado_por   UUID REFERENCES users(id),
     ticket_verificado_at    TIMESTAMPTZ,
@@ -184,10 +184,11 @@ CREATE TABLE IF NOT EXISTS fuel_logs (
 );
 
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image          TEXT;
-ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado         VARCHAR(20) DEFAULT 'pendiente';
+ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado         VARCHAR(20);
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs            TEXT;
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID;
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at  TIMESTAMPTZ;
+ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS idx_fuel_logs_vehicle ON fuel_logs(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_fuel_logs_date    ON fuel_logs(logged_at DESC);
