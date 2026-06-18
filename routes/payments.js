@@ -87,28 +87,100 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
 // ─────────────────────────────────────────────────────────────
 router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req, res) => {
   try {
+    // Mantiene el endpoint histórico /pendientes, pero ahora permite filtros:
+    // todas | pendientes | no_pagadas | parciales | pagadas | vencidas | por_vencer | sin_vencimiento
+    const filtro = String(req.query.filtro || req.query.estado || 'pendientes').trim().toLowerCase();
+
+    const totalFacturaSQL = `ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2)`;
+    const saldoSQL = `(${totalFacturaSQL} - COALESCE(f.monto_pagado, 0))`;
+
+    const where = [];
+    if (filtro === 'pagadas') {
+      where.push(`(COALESCE(f.monto_pagado,0) >= ${totalFacturaSQL} * 0.999 OR f.pagada IS TRUE)`);
+    } else if (filtro === 'parciales' || filtro === 'parcial') {
+      where.push(`COALESCE(f.monto_pagado,0) > 0`);
+      where.push(`COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999`);
+    } else if (filtro === 'vencidas') {
+      where.push(`COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999`);
+      where.push(`f.vencimiento < CURRENT_DATE`);
+    } else if (filtro === 'por_vencer' || filtro === 'por-vencer') {
+      where.push(`COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999`);
+      where.push(`f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'`);
+    } else if (filtro === 'sin_vencimiento' || filtro === 'sin-vencimiento') {
+      where.push(`COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999`);
+      where.push(`f.vencimiento IS NULL`);
+    } else if (filtro === 'todas' || filtro === 'all') {
+      // sin filtro de pago
+    } else {
+      // pendientes / no_pagadas
+      where.push(`COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999`);
+    }
+
+    const whereSQL = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
     const r = await query(`
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
-        f.iva_pct, f.invoice_monto AS invoice_neto, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS total_a_pagar,
+        f.iva_pct,
+        f.invoice_monto AS invoice_neto,
+        ${totalFacturaSQL} AS invoice_total,
+        ${totalFacturaSQL} AS total_a_pagar,
         f.forma_pago, f.cc_dias, f.vencimiento, f.pagada, f.monto_pagado,
         f.uploaded_at, f.notes,
-        po.code AS po_code, po.proveedor, po.supplier_id,
-        s.name AS supplier_name, s.cuit AS supplier_cuit,
-        s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias, s.bank_name AS supplier_bank,
-        (ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - COALESCE(f.monto_pagado, 0)) AS saldo,
-        CASE WHEN f.vencimiento < CURRENT_DATE AND NOT f.pagada THEN TRUE ELSE FALSE END AS vencida,
-        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND NOT f.pagada THEN TRUE ELSE FALSE END AS por_vencer
+
+        po.code AS po_code,
+        po.proveedor,
+        po.supplier_id,
+        po.created_at AS po_created_at,
+        po.aprobado_compras_at AS po_aprobado_at,
+        po.forma_pago AS oc_forma_pago,
+        po.cc_dias AS oc_cc_dias,
+        po.moneda AS oc_moneda,
+
+        s.name AS supplier_name,
+        s.cuit AS supplier_cuit,
+        s.bank_cbu AS supplier_cbu,
+        s.bank_alias AS supplier_alias,
+        s.bank_name AS supplier_bank,
+
+        ${saldoSQL} AS saldo,
+
+        CASE
+          WHEN COALESCE(f.monto_pagado,0) >= ${totalFacturaSQL} * 0.999 OR f.pagada IS TRUE THEN 'pagada'
+          WHEN COALESCE(f.monto_pagado,0) > 0 THEN 'parcial'
+          ELSE 'pendiente'
+        END AS estado_pago_calculado,
+
+        CASE WHEN f.vencimiento < CURRENT_DATE
+               AND COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999
+             THEN TRUE ELSE FALSE END AS vencida,
+
+        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
+               AND COALESCE(f.monto_pagado,0) < ${totalFacturaSQL} * 0.999
+             THEN TRUE ELSE FALSE END AS por_vencer,
+
+        CASE
+          WHEN f.vencimiento IS NULL THEN NULL
+          ELSE (f.vencimiento - CURRENT_DATE)
+        END AS dias_vencimiento,
+
+        COALESCE(f.forma_pago, po.forma_pago) AS condicion_forma_pago,
+        COALESCE(f.cc_dias, po.cc_dias, 0) AS condicion_cc_dias
+
       FROM purchase_order_invoices f
       JOIN purchase_orders po ON po.id = f.po_id
       LEFT JOIN suppliers s    ON s.id = po.supplier_id
-      WHERE COALESCE(f.monto_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999
-      ORDER BY f.vencimiento ASC NULLS LAST, f.invoice_fecha ASC
+      ${whereSQL}
+      ORDER BY
+        CASE WHEN f.vencimiento IS NULL THEN 1 ELSE 0 END,
+        f.vencimiento ASC,
+        f.invoice_fecha ASC,
+        po.created_at DESC
     `);
     res.json(r.rows);
   } catch (err) {
     console.error('[pagos pendientes]', err.message);
-    res.status(500).json({ error: 'Error al listar pendientes' });
+    res.status(500).json({ error: 'Error al listar pagos/facturas' });
   }
 });
 
