@@ -19,7 +19,12 @@ function arTsSql(column) {
 
 // ======= COMBUSTIBLE =======
 // Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna y despachos internos.
-async function ensureFuelTankEntriesTable() {
+// Se ejecuta UNA sola vez por proceso (promise cacheado). Antes corría todos los ALTER/CREATE INDEX
+// en cada request a combustible -> esa era la causa de los SLOW QUERY.
+let _fuelTankReadyPromise = null;
+function ensureFuelTankEntriesTable() {
+  if (_fuelTankReadyPromise) return _fuelTankReadyPromise;
+  _fuelTankReadyPromise = (async () => {
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)").catch(() => {});
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE").catch(() => {});
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
@@ -79,6 +84,8 @@ async function ensureFuelTankEntriesTable() {
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_created ON fuel_internal_dispatches(created_at DESC)").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_tank ON fuel_internal_dispatches(tank_id)").catch(() => {});
   await query("CREATE INDEX IF NOT EXISTS idx_fuel_dispatches_status ON fuel_internal_dispatches(status)").catch(() => {});
+  })().catch((err) => { _fuelTankReadyPromise = null; throw err; });
+  return _fuelTankReadyPromise;
 }
 
 function _userSucursal(req) {
@@ -926,7 +933,11 @@ docRouter.put('/:id',authenticate,requireRole('dueno','gerencia','jefe_mantenimi
 });
 
 // ======= USUARIOS =======
-async function ensureUserOrgSchema() {
+// Se ejecuta UNA sola vez por proceso (promise cacheado), no en cada request a usuarios.
+let _userOrgReadyPromise = null;
+function ensureUserOrgSchema() {
+  if (_userOrgReadyPromise) return _userOrgReadyPromise;
+  _userOrgReadyPromise = (async () => {
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id)`).catch(()=>{});
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200)`).catch(()=>{});
   await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS area VARCHAR(100)`).catch(()=>{});
@@ -935,6 +946,8 @@ async function ensureUserOrgSchema() {
     CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
                     'encargado_combustible','paniol','contador','auditor',
                     'compras','tesoreria','proveedores','gerente_sucursal'))`).catch(()=>{});
+  })().catch((err) => { _userOrgReadyPromise = null; throw err; });
+  return _userOrgReadyPromise;
 }
 
 userRouter.get('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=>{
@@ -1069,7 +1082,11 @@ module.exports = { fuelRouter, tireRouter, docRouter, userRouter, configRouter }
 const checklistRouter = express.Router();
 
 // Crear tabla si no existe
-async function ensureChecklistTable() {
+// Se ejecuta UNA sola vez por proceso (promise cacheado), no en cada POST/GET de checklist.
+let _checklistReadyPromise = null;
+function ensureChecklistTable() {
+  if (_checklistReadyPromise) return _checklistReadyPromise;
+  _checklistReadyPromise = (async () => {
   await query(`CREATE TABLE IF NOT EXISTS checklists (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     vehicle_id UUID REFERENCES vehicles(id),
@@ -1082,6 +1099,10 @@ async function ensureChecklistTable() {
     all_ok BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW()
   )`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_checklists_date ON checklists(created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_checklists_vehicle ON checklists(vehicle_id)`).catch(()=>{});
+  })().catch((err) => { _checklistReadyPromise = null; throw err; });
+  return _checklistReadyPromise;
 }
 
 // POST — guardar checklist
