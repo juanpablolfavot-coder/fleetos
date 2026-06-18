@@ -106,10 +106,14 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
 
   // Índices para que el listado de OC no se vuelva lento cuando crecen las órdenes.
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_created_at ON purchase_orders(created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_po_status_created ON purchase_orders(status, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_po_sucursal_created ON purchase_orders(sucursal, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_po_area_created ON purchase_orders(area, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_po_requested_created ON purchase_orders(requested_by, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_payment_status_created ON purchase_orders(payment_status, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_invoice_status_created ON purchase_orders(invoice_status, created_at DESC)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_po_delivery_status_created ON purchase_orders(delivery_status, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_poi_po_fast ON purchase_order_items(po_id)`).catch(()=>{});
 }
 ensureTables();
@@ -175,76 +179,122 @@ function ocultarPreciosSiCorresponde(po, role) {
 // ─────────────────────────────────────────────────────────────
 router.get('/', authenticate, async (req, res) => {
   try {
-    // Nunca cachear el listado (datos cambian con cada transición de estado)
+    // Listado liviano: NO traer campos pesados como presupuesto_imagen.
+    // Ese campo puede contener base64/PDF y vuelve lentísima la solapa de OC.
+    // El archivo se trae solo al abrir el detalle de una OC.
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-    const { status, limit = 100 } = req.query;
+    const { status } = req.query;
+    const requestedLimit = parseInt(req.query.limit || '100', 10);
+    const safeLimit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : 100, 20), 200);
     const role = req.user.role;
     const userId = req.user.id;
 
-    // Roles sin acceso al módulo
     const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores','gerente_sucursal'];
     if (!rolesPermitidos.includes(role)) {
       return res.status(403).json({ error: 'No tenés permiso para ver órdenes de compra' });
     }
 
-    let sql = `
-      SELECT po.*,
-        u.name  as solicitante_nombre, u.role as solicitante_rol,
-        uc.name as cotizador_nombre,
-        ua.name as aprobador_nombre,
-        up.name as pagador_nombre,
-        ur.name as receptor_nombre,
-        urech.name as rechazador_nombre,
-        COALESCE(t.total_real, 0) as total_real
-      FROM purchase_orders po
-      LEFT JOIN users u     ON u.id     = po.requested_by
-      LEFT JOIN users uc    ON uc.id    = po.cotizado_por
-      LEFT JOIN users ua    ON ua.id    = po.aprobado_compras_por
-      LEFT JOIN users up    ON up.id    = po.pagado_por
-      LEFT JOIN users ur    ON ur.id    = po.recibido_por
-      LEFT JOIN users urech ON urech.id = po.rechazado_por
-      LEFT JOIN (
-        SELECT po_id, SUM(cantidad * precio_unit) AS total_real
-        FROM purchase_order_items
-        GROUP BY po_id
-      ) t ON t.po_id = po.id
-      WHERE 1=1`;
+    const where = ['1=1'];
     const params = [];
 
-    // Filtro de estados visibles por rol
     const estVis = estadosQueVe(role);
     if (estVis !== null) {
-      if (estVis.length === 0) {
-        return res.json([]);
-      }
+      if (estVis.length === 0) return res.json([]);
       params.push(estVis);
-      sql += ` AND po.status = ANY($${params.length})`;
+      where.push(`po.status = ANY($${params.length})`);
     }
 
-    // Solicitantes operativos: ven las OCs que pidieron ellos.
-    // Gerente de sucursal: ve TODO lo pedido para su sucursal, no toda la empresa.
     if (role === 'gerente_sucursal') {
       if (!req.user.sucursal) return res.json([]);
       params.push(req.user.sucursal);
-      sql += ` AND po.sucursal = $${params.length}`;
+      where.push(`po.sucursal = $${params.length}`);
     } else if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
       params.push(userId);
-      sql += ` AND po.requested_by = $${params.length}`;
+      where.push(`po.requested_by = $${params.length}`);
     }
 
-    // Filtro de estado específico si viene en query
     if (status) {
       params.push(status);
-      sql += ` AND po.status = $${params.length}`;
+      where.push(`po.status = $${params.length}`);
     }
 
-    sql += ` ORDER BY po.created_at DESC LIMIT $${params.length + 1}`;
-    params.push(parseInt(limit));
+    params.push(safeLimit);
+    const limitParam = `$${params.length}`;
+
+    const sql = `
+      WITH base AS (
+        SELECT
+          po.id,
+          po.code,
+          po.status,
+          po.requested_by,
+          po.created_at,
+          po.sucursal,
+          po.area,
+          po.tipo,
+          po.vehicle_id,
+          po.ot_id,
+          po.asset_id,
+          po.supplier_id,
+          po.proveedor,
+          po.forma_pago,
+          po.cc_dias,
+          po.moneda,
+          po.iva_pct,
+          po.total_estimado,
+          po.presupuesto_monto_estimado,
+          (po.presupuesto_imagen IS NOT NULL AND po.presupuesto_imagen <> '') AS tiene_presupuesto,
+          po.factura_nro,
+          po.factura_fecha,
+          po.factura_monto,
+          po.cotizado_por,
+          po.cotizado_at,
+          po.aprobado_compras_por,
+          po.aprobado_compras_at,
+          po.pagado_por,
+          po.pagado_at,
+          po.recibido_por,
+          po.recibido_at,
+          po.recibido_en,
+          po.delivery_status,
+          po.invoice_status,
+          po.payment_status,
+          po.rechazado_por,
+          po.rechazado_at,
+          po.motivo_rechazo,
+          po.motivo_devolucion,
+          po.devuelto_por,
+          po.devuelto_at,
+          po.notes
+        FROM purchase_orders po
+        WHERE ${where.join(' AND ')}
+        ORDER BY po.created_at DESC
+        LIMIT ${limitParam}
+      )
+      SELECT base.*,
+        u.name  AS solicitante_nombre, u.role AS solicitante_rol,
+        uc.name AS cotizador_nombre,
+        ua.name AS aprobador_nombre,
+        up.name AS pagador_nombre,
+        ur.name AS receptor_nombre,
+        urech.name AS rechazador_nombre,
+        COALESCE(t.total_real, 0) AS total_real
+      FROM base
+      LEFT JOIN users u     ON u.id     = base.requested_by
+      LEFT JOIN users uc    ON uc.id    = base.cotizado_por
+      LEFT JOIN users ua    ON ua.id    = base.aprobado_compras_por
+      LEFT JOIN users up    ON up.id    = base.pagado_por
+      LEFT JOIN users ur    ON ur.id    = base.recibido_por
+      LEFT JOIN users urech ON urech.id = base.rechazado_por
+      LEFT JOIN LATERAL (
+        SELECT SUM(i.cantidad * i.precio_unit) AS total_real
+        FROM purchase_order_items i
+        WHERE i.po_id = base.id
+      ) t ON true
+      ORDER BY base.created_at DESC`;
 
     const result = await query(sql, params);
-
-    // Ocultar precios si el rol no debe verlos
     const rows = result.rows.map(po => ocultarPreciosSiCorresponde(po, role));
     res.json(rows);
   } catch(err) {
