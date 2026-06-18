@@ -1415,7 +1415,8 @@ async function saveNewOT() {
     mechanic: document.getElementById('ot-mechanic')?.value?.trim() || null,
     parts,
     labor_cost,
-    external_required: !!document.getElementById('ot-external-required')?.checked
+    external_required: !!document.getElementById('ot-external-required')?.checked,
+    external_description: (document.getElementById('ot-external-description')?.value || '').trim()
   };
   if (ot_tipo === 'vehiculo') payload.vehicle_id = target_id;
   else                         payload.asset_id   = target_id;
@@ -1429,7 +1430,10 @@ async function saveNewOT() {
 
   window._otParts = [];
   closeModal();
-  showToast('ok', `OT ${ot.code} creada${ot.external_po_code ? ' · OC generada: ' + ot.external_po_code : ''}`);
+  const poCodes = Array.isArray(ot.external_po_codes) && ot.external_po_codes.length
+    ? ot.external_po_codes
+    : (ot.external_po_code ? [ot.external_po_code] : []);
+  showToast('ok', `OT ${ot.code} creada${poCodes.length ? ' · OC generada/s: ' + poCodes.join(', ') : ''}`);
   await afterSave({ page: 'workorders' });
 }
 
@@ -1526,9 +1530,9 @@ function openEditOTModal(id) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <div>
           <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos de la OT</label>
-          <div style="font-size:11px;color:var(--text3)">Pañol suma costo al instante. Compra externa queda pendiente y se valoriza en la OT cuando Compras aprueba el precio.</div>
+          <div style="font-size:11px;color:var(--text3)">Pañol suma costo al instante. Cada repuesto externo o mano de obra tercerizada genera su propia OC y se valoriza cuando Compras aprueba el precio.</div>
         </div>
-        ${otClosed ? `<span style="font-size:11px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 10px">Solo lectura</span>` : `<button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button>`}
+        ${otClosed ? `<span style="font-size:11px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 10px">Solo lectura</span>` : `<div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button><button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddExternalLabor()">+ Tercerizar MO</button></div>`}
       </div>
       <div id="eo-parts-list" style="margin-bottom:8px">
         <div style="text-align:center;padding:12px;color:var(--text3);font-size:12px">⏳ Cargando repuestos...</div>
@@ -7294,9 +7298,13 @@ function openNewOTModal(preselectedVehicle) {
     </div>
     <div style="margin-top:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);padding:10px 12px">
       <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text);cursor:pointer">
-        <input type="checkbox" id="ot-external-required" style="margin-top:2px">
-        <span><strong>Trabajo externo / tercerizado</strong><br><span style="font-size:11px;color:var(--text3)">Al crear la OT se genera una OC pendiente para que Compras cotice y negocie.</span></span>
+        <input type="checkbox" id="ot-external-required" style="margin-top:2px" onchange="document.getElementById('ot-external-desc-wrap').style.display=this.checked?'block':'none'">
+        <span><strong>Mano de obra externa / tercerizada</strong><br><span style="font-size:11px;color:var(--text3)">Si el trabajo sale a un taller externo, se genera una OC separada para Compras. Los repuestos externos también generan una OC por cada ítem.</span></span>
       </label>
+      <div id="ot-external-desc-wrap" style="display:none;margin-top:10px">
+        <label class="form-label">Descripción del trabajo tercerizado</label>
+        <input class="form-input" id="ot-external-description" placeholder="Ej: rectificación, soldadura, service externo, mano de obra de taller tercero">
+      </div>
     </div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Costo estimado de repuestos</label>
       <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
@@ -12415,16 +12423,18 @@ function _partsRender(parts) {
     const qty = parseFloat(p.qty || 0);
     const cost = parseFloat(p.unit_cost || 0);
     const subtotal = parseFloat(p.subtotal || (qty * cost));
-    const origenLabel = p.origin === 'stock' ? '📦 Pañol' : '🛒 Externo';
+    const isTerc = String(p.name || '').toLowerCase().includes('terceriz');
+    const origenLabel = p.origin === 'stock' ? '📦 Pañol' : (isTerc ? '🧰 Tercerizado' : '🛒 Externo');
     const origenColor = p.origin === 'stock' ? 'var(--ok)' : (cost > 0 ? 'var(--accent)' : 'var(--text3)');
     const stockCode = p.stock_code ? ` · <span style="font-family:var(--mono);font-size:10px">${p.stock_code}</span>` : '';
+    const poCode = p.po_code ? ` · <span style="font-family:var(--mono);font-size:10px;color:var(--accent)">${p.po_code}</span>` : '';
     const costText = p.origin === 'externo' && cost <= 0 ? 'A cotizar' : ('$' + Math.round(cost).toLocaleString('es-AR'));
     const subText  = p.origin === 'externo' && cost <= 0 ? 'Pendiente' : ('$' + Math.round(subtotal).toLocaleString('es-AR'));
     return `<div style="display:grid;grid-template-columns:70px 1fr 70px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div style="color:${origenColor};font-weight:600;font-size:11px">${origenLabel}</div>
       <div>
         <div style="font-weight:600">${p.name}</div>
-        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}${p.origin==='externo' && cost>0 ? ' · precio aprobado por Compras' : ''}</div>
+        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}${poCode}${p.origin==='externo' && cost>0 ? ' · precio aprobado por Compras' : ''}</div>
       </div>
       <div style="text-align:center;font-family:var(--mono)">${qty}</div>
       <div style="text-align:right;font-family:var(--mono);color:var(--text3)">${costText}</div>
@@ -12439,6 +12449,51 @@ function _partsRender(parts) {
   if (totalDiv) totalDiv.style.display = 'block';
   if (totalVal) totalVal.textContent = '$' + Math.round(totalM).toLocaleString('es-AR');
   if (eoParts)  eoParts.value = totalM.toFixed(2);
+}
+
+
+function _partsAddExternalLabor() {
+  if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
+  if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
+  const body = `
+    <div style="margin-bottom:14px;padding:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);font-size:12px;color:var(--text3)">
+      🧰 Esto genera una OC pendiente para Compras. El costo se verá en la OT cuando Compras apruebe proveedor y precio.
+    </div>
+    <div class="form-group">
+      <label class="form-label">Trabajo tercerizado *</label>
+      <input class="form-input" id="pnew-labor-desc" placeholder="Ej: rectificación, soldadura, mano de obra taller externo">
+    </div>
+  `;
+  openModal('🧰 Tercerizar mano de obra', body, [
+    { label: 'Cancelar', cls: 'btn-secondary', fn: () => { closeModal(); openEditOTModal(window._labCurrentOtId); } },
+    { label: 'Generar OC', cls: 'btn-primary', fn: _partsSaveExternalLabor },
+  ]);
+}
+
+async function _partsSaveExternalLabor() {
+  const otId = window._labCurrentOtId;
+  const desc = (document.getElementById('pnew-labor-desc')?.value || '').trim();
+  if (!otId) return showToast('error', 'No hay OT seleccionada');
+  if (!desc || desc.length < 3) return showToast('error', 'Ingresá una descripción del trabajo tercerizado');
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/parts`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: `Mano de obra tercerizada: ${desc}`,
+        origin: 'externo',
+        qty: 1,
+        unit: 'servicio',
+        unit_cost: 0
+      })
+    });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error'); return; }
+    closeModal();
+    showToast('ok', 'Mano de obra tercerizada agregada · OC generada para Compras');
+    try { await loadInitialData(); } catch(e) {}
+    openEditOTModal(otId);
+  } catch(err) {
+    showToast('error', err.message);
+  }
 }
 
 function _partsAddRow() {
