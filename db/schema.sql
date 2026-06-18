@@ -994,5 +994,36 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_table   ON audit_log(table_name, record
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 
 -- ══════════════════════════════════════════════════════════════════════
+-- 14. ÍNDICES DE PERFORMANCE
+-- ══════════════════════════════════════════════════════════════════════
+
+-- Órdenes de trabajo: aceleran listados por estado, vehículo, activo, tipo y prioridad,
+-- manteniendo el orden por fecha de apertura que usa la pantalla.
+CREATE INDEX IF NOT EXISTS idx_wo_status_opened   ON work_orders(status, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wo_vehicle_opened  ON work_orders(vehicle_id, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wo_asset_opened    ON work_orders(asset_id, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wo_tipo_opened     ON work_orders(ot_tipo, opened_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wo_priority_opened ON work_orders(priority, opened_at DESC);
+
+-- Documentos: acelera vencimientos, filtros por estado y documentos por entidad.
+CREATE INDEX IF NOT EXISTS idx_documents_status_expiry        ON documents(status, expiry_date);
+CREATE INDEX IF NOT EXISTS idx_documents_entity_status_expiry ON documents(entity_type, entity_id, status, expiry_date);
+
+-- Vehículos: la columna base existe en bases operativas actuales; este bloque evita romper
+-- instalaciones viejas donde todavía no exista.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'vehicles'
+      AND column_name = 'base'
+  ) THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_vehicles_base_active ON vehicles(base, active)';
+  END IF;
+END $$;
+
+-- ══════════════════════════════════════════════════════════════════════
 -- FIN DEL ESQUEMA
 -- ══════════════════════════════════════════════════════════════════════
