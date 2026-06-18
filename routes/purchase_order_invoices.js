@@ -101,28 +101,46 @@ router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), as
     // El rol proveedores es personal interno: ve todas las OCs.
 
     const r = await query(`
+      WITH pagos AS (
+        SELECT invoice_id, COALESCE(SUM(monto),0) AS total_pagado
+        FROM purchase_order_payments
+        GROUP BY invoice_id
+      )
       SELECT
         f.id, f.po_id, f.invoice_nro, f.invoice_fecha, f.invoice_monto,
         f.invoice_monto AS invoice_neto,
-        f.iva_pct, ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+        f.iva_pct,
+        ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS total_a_pagar,
         f.forma_pago, f.cc_dias, f.vencimiento, f.file_url,
-        f.uploaded_at, f.uploaded_by, f.pagada, f.monto_pagado, f.notes,
+        f.uploaded_at, f.uploaded_by,
+        COALESCE(p.total_pagado,0) AS monto_pagado,
+        COALESCE(p.total_pagado,0) AS total_pagado,
+        (COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999) AS pagada,
+        GREATEST(ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - COALESCE(p.total_pagado,0), 0) AS saldo,
+        CASE
+          WHEN COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN 'pagada'
+          WHEN COALESCE(p.total_pagado,0) > 0 THEN 'parcial'
+          ELSE 'pendiente'
+        END AS estado_pago_calculado,
+        CASE WHEN f.vencimiento < CURRENT_DATE AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN TRUE ELSE FALSE END AS vencida,
+        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN TRUE ELSE FALSE END AS por_vencer,
+        CASE WHEN f.vencimiento IS NOT NULL THEN (f.vencimiento - CURRENT_DATE) ELSE NULL END AS dias_vencimiento,
+        f.notes,
         u.name AS uploaded_by_name,
         po.proveedor, po.supplier_id,
+        po.forma_pago AS oc_forma_pago, po.cc_dias AS oc_cc_dias,
         s.name AS supplier_name, s.cuit AS supplier_cuit,
         s.forma_pago AS supplier_forma_pago,
         s.cc_dias AS supplier_cc_dias,
         s.moneda AS supplier_moneda,
-        s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias,
-        COALESCE(SUM(p.monto), 0) AS total_pagado
+        s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
       FROM purchase_order_invoices f
       JOIN purchase_orders po ON po.id = f.po_id
       LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN users u ON u.id = f.uploaded_by
-      LEFT JOIN purchase_order_payments p ON p.invoice_id = f.id
+      LEFT JOIN pagos p ON p.invoice_id = f.id
       WHERE f.po_id = $1
-      GROUP BY f.id, u.name, po.proveedor, po.supplier_id, s.name, s.cuit, s.forma_pago, s.cc_dias, s.moneda, s.bank_name, s.bank_cbu, s.bank_alias
       ORDER BY f.invoice_fecha DESC, f.uploaded_at DESC
     `, [req.params.id]);
 
