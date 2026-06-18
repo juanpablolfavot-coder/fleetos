@@ -22,6 +22,7 @@
   }
 
   const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
+  const fmt = (n) => num(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const totalConIvaFactura = (f) => {
     if (f && f.total_a_pagar != null) return num(f.total_a_pagar);
     if (f && f.invoice_total != null) return num(f.invoice_total);
@@ -64,8 +65,6 @@
     overlay.className = 'modal-facturas-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-
-    const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const fpDefault = oc.forma_pago || '';
     const ccDefault = oc.cc_dias || 0;
@@ -262,8 +261,6 @@
         return;
       }
       const ocs = await res.json();
-      const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
       root.innerHTML = `
         <div style="padding:20px">
           <h2 style="color:#e2e8f0;margin-bottom:8px">📄 Mis Órdenes de Compra</h2>
