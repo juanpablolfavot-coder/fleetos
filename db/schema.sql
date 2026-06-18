@@ -651,6 +651,7 @@ CREATE INDEX IF NOT EXISTS idx_po_status     ON purchase_orders(status);
 CREATE INDEX IF NOT EXISTS idx_po_requested  ON purchase_orders(requested_by);
 CREATE INDEX IF NOT EXISTS idx_po_created_at ON purchase_orders(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_po_status_created ON purchase_orders(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_po_ot_id ON purchase_orders(ot_id);
 CREATE INDEX IF NOT EXISTS idx_po_sucursal_created ON purchase_orders(sucursal, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_po_area_created ON purchase_orders(area, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_po_requested_created ON purchase_orders(requested_by, created_at DESC);
