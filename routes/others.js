@@ -11,6 +11,12 @@ const { authenticate, requireRole, requireOwner, auditAction } = require('../mid
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 const bcrypt     = require('bcryptjs');
 
+const AR_TZ = 'America/Argentina/Buenos_Aires';
+const AR_TS_FMT = 'YYYY-MM-DD"T"HH24:MI:SS';
+function arTsSql(column) {
+  return `to_char(${column} AT TIME ZONE '${AR_TZ}', '${AR_TS_FMT}')`;
+}
+
 // ======= COMBUSTIBLE =======
 // Migraciones livianas de combustible: columnas y tickets básicos de ingreso a cisterna y despachos internos.
 async function ensureFuelTankEntriesTable() {
@@ -236,7 +242,7 @@ fuelRouter.get('/tank-entries', authenticate, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
     const params = [];
     let sql = `
-      SELECT e.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
+      SELECT e.*, ${arTsSql('e.created_at')} AS created_at_ar, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
       FROM fuel_tank_entries e
       LEFT JOIN tanks t ON t.id = e.tank_id
       LEFT JOIN users u ON u.id = e.created_by
@@ -295,7 +301,7 @@ fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','e
       INSERT INTO fuel_tank_entries
         (tank_id, type, liters, price_per_l, supplier, remito, notes, previous_l, new_l, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      RETURNING *
+      RETURNING *, ${arTsSql('created_at')} AS created_at_ar
     `, [
       tank_id,
       (type || tank.type || 'gasoil'),
@@ -329,7 +335,7 @@ fuelRouter.get('/dispatches', authenticate, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '50', 10) || 50, 200);
     const params = [];
     let sql = `
-      SELECT d.*, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
+      SELECT d.*, ${arTsSql('d.created_at')} AS created_at_ar, ${arTsSql('d.received_at')} AS received_at_ar, ${arTsSql('d.destination_stock_applied_at')} AS destination_stock_applied_at_ar, t.location AS tank_location, t.capacity_l, u.name AS created_by_name
       FROM fuel_internal_dispatches d
       LEFT JOIN tanks t ON t.id = d.tank_id
       LEFT JOIN users u ON u.id = d.created_by
@@ -384,7 +390,7 @@ fuelRouter.post('/dispatches', authenticate, requireRole('dueno','gerencia','jef
       INSERT INTO fuel_internal_dispatches
         (tank_id, type, liters, destination, destination_detail, responsible, transport_vehicle, remito, notes, previous_l, new_l, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-      RETURNING *
+      RETURNING *, ${arTsSql('created_at')} AS created_at_ar
     `, [
       tank_id,
       (type || tank.type || 'gasoil'),
@@ -482,7 +488,7 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
              destination_stock_applied=TRUE,
              destination_stock_applied_at=NOW()
        WHERE id=$1
-       RETURNING *`,
+       RETURNING *, ${arTsSql('created_at')} AS created_at_ar, ${arTsSql('received_at')} AS received_at_ar, ${arTsSql('destination_stock_applied_at')} AS destination_stock_applied_at_ar`,
       [req.params.id, received_by || req.user.name || null, litrosFinales, receive_notes || null, destinoTank?.id || null]
     );
 
@@ -561,7 +567,7 @@ fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('due
              destination_stock_applied=TRUE,
              destination_stock_applied_at=NOW()
        WHERE id=$1
-       RETURNING *`,
+       RETURNING *, ${arTsSql('created_at')} AS created_at_ar, ${arTsSql('received_at')} AS received_at_ar, ${arTsSql('destination_stock_applied_at')} AS destination_stock_applied_at_ar`,
       [req.params.id, destinoTank?.id || null]
     );
 
