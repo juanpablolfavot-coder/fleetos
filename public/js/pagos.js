@@ -42,77 +42,181 @@
   // ─────────────────────────────────────────────────────────
   //  PANEL TESORERÍA — facturas pendientes
   // ─────────────────────────────────────────────────────────
+  function formaPagoLabel(forma, dias) {
+    const fp = String(forma || '').toLowerCase();
+    const cc = parseInt(dias || 0, 10) || 0;
+    if (!fp && cc > 0) return `Cuenta corriente ${cc} días`;
+    if (!fp) return 'Sin condición pactada';
+    if (fp === 'cuenta_corriente') return cc > 0 ? `Cuenta corriente ${cc} días` : 'Cuenta corriente';
+    if (fp === 'transferencia') return 'Transferencia';
+    if (fp === 'efectivo') return 'Efectivo';
+    if (fp === 'cheque') return 'Cheque físico';
+    if (fp === 'echeq') return 'eCheq';
+    if (fp === 'tarjeta') return 'Tarjeta';
+    if (fp === 'otro') return 'Otro';
+    return fp.replace(/_/g, ' ');
+  }
+
+  function fechaAR(v) {
+    if (!v) return '—';
+    try {
+      const s = String(v).slice(0,10);
+      const [y,m,d] = s.split('-');
+      if (y && m && d) return `${d}/${m}/${y}`;
+      return new Date(v).toLocaleDateString('es-AR');
+    } catch { return '—'; }
+  }
+
+  function estadoPagoFactura(f) {
+    const saldo = num(f.saldo);
+    const total = totalFacturaConIva(f);
+    const pagado = num(f.monto_pagado);
+    if (saldo <= 0.01 || f.pagada || f.estado_pago_calculado === 'pagada') return 'pagadas';
+    if (f.vencida) return 'vencidas';
+    if (f.por_vencer) return 'por_vencer';
+    if (pagado > 0 && pagado < total) return 'parciales';
+    return 'pendientes';
+  }
+
+  function badgeEstadoPago(f) {
+    const estado = estadoPagoFactura(f);
+    if (estado === 'pagadas') return '<span style="background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700">Pagada</span>';
+    if (estado === 'vencidas') return '<span style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700">Vencida</span>';
+    if (estado === 'por_vencer') return '<span style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700">Por vencer</span>';
+    if (estado === 'parciales') return '<span style="background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700">Pago parcial</span>';
+    return '<span style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700">Pendiente</span>';
+  }
+
+  function filtrarFacturasTesoreria(facturas, filtro) {
+    if (!filtro || filtro === 'todas') return facturas;
+    if (filtro === 'no_pagadas') return facturas.filter(f => estadoPagoFactura(f) !== 'pagadas');
+    return facturas.filter(f => estadoPagoFactura(f) === filtro);
+  }
+
+  function renderTesoreriaFiltroButton(key, label, count, active) {
+    return `<button class="btn ${active ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="window._tesFiltroPago='${key}'; renderTesoreriaPanelInline()">${label} <span style="opacity:.8">(${count})</span></button>`;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  //  PANEL TESORERÍA — facturas con filtros de pago
+  // ─────────────────────────────────────────────────────────
   window.renderTesoreriaPanelInline = async function() {
     const page = document.getElementById('page-tesoreria_panel');
     if (!page) return;
-    page.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Cargando facturas pendientes...</div>';
+    const filtro = window._tesFiltroPago || 'no_pagadas';
+    page.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Cargando tesorería...</div>';
 
     try {
-      const res = await apiFetch('/api/payments/pendientes');
+      const res = await apiFetch('/api/payments/pendientes?filtro=todas&_t=' + Date.now());
       if (!res.ok) {
         page.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Error al cargar</div>';
         return;
       }
-      const facturas = await res.json();
-      if (!facturas.length) {
-        page.innerHTML = '<div class="card"><div style="padding:60px;text-align:center;color:var(--text3)">✓ Sin facturas pendientes de pago</div></div>';
-        return;
-      }
 
-      // Resumen
-      const totalPendiente = facturas.reduce((s, f) => s + parseFloat(f.saldo || 0), 0);
-      const vencidas = facturas.filter(f => f.vencida);
-      const porVencer = facturas.filter(f => f.por_vencer);
+      const todas = await res.json();
+      const facturas = filtrarFacturasTesoreria(todas, filtro);
+
+      const noPagadas = todas.filter(f => estadoPagoFactura(f) !== 'pagadas');
+      const pagadas   = todas.filter(f => estadoPagoFactura(f) === 'pagadas');
+      const parciales = todas.filter(f => estadoPagoFactura(f) === 'parciales');
+      const vencidas  = todas.filter(f => estadoPagoFactura(f) === 'vencidas');
+      const porVencer = todas.filter(f => estadoPagoFactura(f) === 'por_vencer');
+      const pendientes = todas.filter(f => estadoPagoFactura(f) === 'pendientes');
+
+      const totalPendiente = noPagadas.reduce((s, f) => s + num(f.saldo), 0);
+      const totalVencido   = vencidas.reduce((s, f) => s + num(f.saldo), 0);
+      const totalPorVencer = porVencer.reduce((s, f) => s + num(f.saldo), 0);
 
       page.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
-          <div class="kpi-card danger"><div class="kpi-label">Vencidas</div><div class="kpi-value">${vencidas.length}</div><div class="kpi-sub">$${fmt(vencidas.reduce((s,f)=>s+parseFloat(f.saldo||0),0))}</div></div>
-          <div class="kpi-card warn"><div class="kpi-label">Por vencer (7 días)</div><div class="kpi-value">${porVencer.length}</div><div class="kpi-sub">$${fmt(porVencer.reduce((s,f)=>s+parseFloat(f.saldo||0),0))}</div></div>
-          <div class="kpi-card info"><div class="kpi-label">Total pendiente</div><div class="kpi-value">$${fmt(totalPendiente)}</div><div class="kpi-sub">${facturas.length} facturas</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+          <div>
+            <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">💳 Tesorería / Pagos</h2>
+            <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Facturas de OC con condición pactada, vencimientos, pagos parciales y saldo.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="renderTesoreriaPanelInline()">↻ Actualizar</button>
         </div>
 
-        <div class="card">
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>OC</th>
-                  <th>Proveedor</th>
-                  <th>Factura</th>
-                  <th>Fecha</th>
-                  <th>Vencimiento</th>
-                  <th style="text-align:right">Total</th>
-                  <th style="text-align:right">Pagado</th>
-                  <th style="text-align:right">Saldo</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                ${facturas.map(f => {
-                  const venc = f.vencimiento ? new Date(f.vencimiento).toLocaleDateString('es-AR') : '—';
-                  let vencColor = '';
-                  let vencLabel = venc;
-                  if (f.vencida) { vencColor = 'color:var(--danger);font-weight:600'; vencLabel = venc + ' ⚠'; }
-                  else if (f.por_vencer) { vencColor = 'color:var(--warn);font-weight:600'; }
-                  return `
-                  <tr>
-                    <td class="td-mono">${f.po_code}</td>
-                    <td>${f.supplier_name || f.proveedor || '—'}</td>
-                    <td class="td-mono">${f.invoice_nro}</td>
-                    <td>${new Date(f.invoice_fecha).toLocaleDateString('es-AR')}</td>
-                    <td style="${vencColor}">${vencLabel}</td>
-                    <td style="text-align:right">$${fmt(totalFacturaConIva(f))}</td>
-                    <td style="text-align:right;color:${parseFloat(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
-                    <td style="text-align:right;color:var(--warn);font-weight:600">$${fmt(f.saldo)}</td>
-                    <td style="text-align:center">
-                      <button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">💳 Pagar</button>
-                    </td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-            </table>
-          </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+          <div class="kpi-card danger"><div class="kpi-label">Vencidas</div><div class="kpi-value">${vencidas.length}</div><div class="kpi-sub">$${fmt(totalVencido)}</div></div>
+          <div class="kpi-card warn"><div class="kpi-label">Por vencer (7 días)</div><div class="kpi-value">${porVencer.length}</div><div class="kpi-sub">$${fmt(totalPorVencer)}</div></div>
+          <div class="kpi-card info"><div class="kpi-label">No pagadas</div><div class="kpi-value">${noPagadas.length}</div><div class="kpi-sub">$${fmt(totalPendiente)}</div></div>
+          <div class="kpi-card ok"><div class="kpi-label">Pagadas</div><div class="kpi-value">${pagadas.length}</div><div class="kpi-sub">histórico</div></div>
         </div>
+
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;color:var(--text3);font-weight:700;margin-right:4px">Filtro:</span>
+          ${renderTesoreriaFiltroButton('no_pagadas', 'No pagadas', noPagadas.length, filtro === 'no_pagadas')}
+          ${renderTesoreriaFiltroButton('vencidas', 'Vencidas', vencidas.length, filtro === 'vencidas')}
+          ${renderTesoreriaFiltroButton('por_vencer', 'Por vencer', porVencer.length, filtro === 'por_vencer')}
+          ${renderTesoreriaFiltroButton('parciales', 'Pago parcial', parciales.length, filtro === 'parciales')}
+          ${renderTesoreriaFiltroButton('pendientes', 'Sin pagar', pendientes.length, filtro === 'pendientes')}
+          ${renderTesoreriaFiltroButton('pagadas', 'Pagadas', pagadas.length, filtro === 'pagadas')}
+          ${renderTesoreriaFiltroButton('todas', 'Todas', todas.length, filtro === 'todas')}
+        </div>
+
+        ${facturas.length === 0 ? `
+          <div class="card"><div style="padding:60px;text-align:center;color:var(--text3)">No hay facturas para el filtro seleccionado.</div></div>
+        ` : `
+          <div class="card">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Estado</th>
+                    <th>OC</th>
+                    <th>Proveedor</th>
+                    <th>Factura</th>
+                    <th>Condición OC</th>
+                    <th>Factura / vencimiento</th>
+                    <th style="text-align:right">Total</th>
+                    <th style="text-align:right">Pagado</th>
+                    <th style="text-align:right">Saldo</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${facturas.map(f => {
+                    const venc = fechaAR(f.vencimiento);
+                    let vencColor = '';
+                    let vencLabel = venc;
+                    if (f.vencida) { vencColor = 'color:var(--danger);font-weight:700'; vencLabel = venc + ' ⚠'; }
+                    else if (f.por_vencer) { vencColor = 'color:var(--warn);font-weight:700'; }
+                    const condicionOC = formaPagoLabel(f.oc_forma_pago || f.condicion_forma_pago || f.forma_pago, f.oc_cc_dias ?? f.condicion_cc_dias ?? f.cc_dias);
+                    const condicionFactura = formaPagoLabel(f.forma_pago || f.oc_forma_pago, f.cc_dias ?? f.oc_cc_dias);
+                    const accion = estadoPagoFactura(f) === 'pagadas' ? 'Ver pagos' : '💳 Pagar';
+                    return `
+                    <tr>
+                      <td>${badgeEstadoPago(f)}</td>
+                      <td class="td-mono">${f.po_code || '—'}</td>
+                      <td>
+                        <div style="font-weight:600">${f.supplier_name || f.proveedor || '—'}</div>
+                        ${f.supplier_cuit ? `<div style="font-size:10px;color:var(--text3)">CUIT ${f.supplier_cuit}</div>` : ''}
+                      </td>
+                      <td>
+                        <div class="td-mono">${f.invoice_nro || '—'}</div>
+                        <div style="font-size:10px;color:var(--text3)">${fechaAR(f.invoice_fecha)}</div>
+                      </td>
+                      <td>
+                        <div style="font-weight:600">${condicionOC}</div>
+                        <div style="font-size:10px;color:var(--text3)">Pactada por Compras en la OC</div>
+                      </td>
+                      <td>
+                        <div style="${vencColor}">${vencLabel}</div>
+                        <div style="font-size:10px;color:var(--text3)">Factura: ${condicionFactura}</div>
+                      </td>
+                      <td style="text-align:right">$${fmt(totalFacturaConIva(f))}</td>
+                      <td style="text-align:right;color:${num(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
+                      <td style="text-align:right;color:${num(f.saldo)>0.01?'var(--warn)':'var(--ok)'};font-weight:700">$${fmt(Math.max(0, num(f.saldo)))}</td>
+                      <td style="text-align:center">
+                        <button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">${accion}</button>
+                      </td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `}
       `;
     } catch (err) {
       console.error(err);
@@ -155,6 +259,14 @@
     const totalPagado = num(factura.monto_pagado || 0);
     const saldo = Math.max(0, +(totalFac - totalPagado).toFixed(2));
     const pagada = saldo <= 0.01;
+    const condicionOC = formaPagoLabel(oc.forma_pago || factura.oc_forma_pago || factura.forma_pago, oc.cc_dias ?? factura.oc_cc_dias ?? factura.cc_dias);
+    const condicionFactura = formaPagoLabel(factura.forma_pago || oc.forma_pago, factura.cc_dias ?? oc.cc_dias);
+    const vencimientoFactura = factura.vencimiento ? fechaAR(factura.vencimiento) : '—';
+    const diasVenc = factura.dias_vencimiento;
+    let vencimientoDetalle = vencimientoFactura;
+    if (factura.vencida) vencimientoDetalle += ' · VENCIDA';
+    else if (factura.por_vencer) vencimientoDetalle += ' · por vencer';
+    else if (diasVenc != null && !Number.isNaN(parseInt(diasVenc,10))) vencimientoDetalle += ` · faltan ${parseInt(diasVenc,10)} días`;
 
     overlay.innerHTML = `
       <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;color:var(--text);border:1px solid var(--border2);box-shadow:0 20px 60px rgba(0,0,0,.3)">
@@ -182,6 +294,25 @@
               <div style="font-size:11px;color:var(--text3);text-transform:uppercase">Saldo</div>
               <div style="font-size:18px;font-weight:600;color:${pagada?'var(--ok)':'var(--warn)'}">$${fmt(saldo)}</div>
             </div>
+          </div>
+
+          <div style="background:#f8fafc;border:1px solid var(--border2);border-radius:8px;padding:14px;margin-bottom:16px">
+            <div style="font-weight:700;margin-bottom:8px;color:var(--text)">📌 Condición pactada y vencimiento</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;font-size:12px">
+              <div>
+                <div style="color:var(--text3);text-transform:uppercase;font-size:10px">Condición pactada en OC</div>
+                <div style="font-weight:700">${condicionOC}</div>
+              </div>
+              <div>
+                <div style="color:var(--text3);text-transform:uppercase;font-size:10px">Condición de esta factura</div>
+                <div style="font-weight:700">${condicionFactura}</div>
+              </div>
+              <div>
+                <div style="color:var(--text3);text-transform:uppercase;font-size:10px">Vencimiento</div>
+                <div style="font-weight:700;color:${factura.vencida ? 'var(--danger)' : factura.por_vencer ? 'var(--warn)' : 'var(--text)'}">${vencimientoDetalle}</div>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:8px">Tesorería registra el pago según la condición que Compras dejó pactada en la OC. Si la factura trae otros días, se muestra separado para control.</div>
           </div>
 
           ${!pagada ? `
