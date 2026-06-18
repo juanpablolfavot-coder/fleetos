@@ -139,6 +139,9 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
 
         s.name AS supplier_name,
         s.cuit AS supplier_cuit,
+        s.forma_pago AS supplier_forma_pago,
+        s.cc_dias AS supplier_cc_dias,
+        s.moneda AS supplier_moneda,
         s.bank_cbu AS supplier_cbu,
         s.bank_alias AS supplier_alias,
         s.bank_name AS supplier_bank,
@@ -164,8 +167,10 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
           ELSE (f.vencimiento - CURRENT_DATE)
         END AS dias_vencimiento,
 
-        COALESCE(f.forma_pago, po.forma_pago) AS condicion_forma_pago,
-        COALESCE(f.cc_dias, po.cc_dias, 0) AS condicion_cc_dias
+        COALESCE(f.forma_pago, po.forma_pago, s.forma_pago) AS condicion_forma_pago,
+        COALESCE(f.cc_dias, po.cc_dias, s.cc_dias, 0) AS condicion_cc_dias,
+        COALESCE(po.forma_pago, s.forma_pago) AS condicion_oc_o_proveedor,
+        COALESCE(po.cc_dias, s.cc_dias, 0) AS condicion_dias_oc_o_proveedor
 
       FROM purchase_order_invoices f
       JOIN purchase_orders po ON po.id = f.po_id
@@ -233,7 +238,13 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
          ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
          COALESCE(f.monto_pagado,0) AS monto_pagado, f.pagada,
          po.proveedor,
-         s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
+         s.name AS supplier_name,
+         s.forma_pago AS supplier_forma_pago,
+         s.cc_dias AS supplier_cc_dias,
+         s.moneda AS supplier_moneda,
+         s.bank_name AS supplier_bank,
+         s.bank_cbu AS supplier_cbu,
+         s.bank_alias AS supplier_alias
        FROM purchase_order_invoices f
        JOIN purchase_orders po ON po.id = f.po_id
        LEFT JOIN suppliers s ON s.id = po.supplier_id
