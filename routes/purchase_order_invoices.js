@@ -169,17 +169,21 @@ router.post('/:id/facturas', authenticate, requireRole(...ROLES_CARGAR_FAC), asy
       return res.status(409).json({ error: `Ya existe una factura ${invoice_nro} para esta OC` });
     }
 
-    // Calcular vencimiento: fecha + cc_dias
+    // Calcular vencimiento: fecha + cc_dias.
+    // No usar toISOString() porque trabaja en UTC y puede mover el día/hora en Argentina.
     const fp = forma_pago || poRow.rows[0].oc_forma_pago || null;
     const cc = parseInt(cc_dias ?? poRow.rows[0].oc_cc_dias) || 0;
-    let vencimiento = null;
-    if (cc > 0) {
-      const f = new Date(invoice_fecha);
-      f.setDate(f.getDate() + cc);
-      vencimiento = f.toISOString().slice(0,10);
-    } else {
-      vencimiento = invoice_fecha;
-    }
+    const addDaysYMD = (ymd, days) => {
+      const [y, m, d] = String(ymd || '').slice(0,10).split('-').map(Number);
+      if (!y || !m || !d) return ymd;
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + days);
+      const yy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    };
+    let vencimiento = cc > 0 ? addDaysYMD(invoice_fecha, cc) : invoice_fecha;
 
     const ins = await client.query(`
       INSERT INTO purchase_order_invoices
