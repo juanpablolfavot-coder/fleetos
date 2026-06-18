@@ -17,14 +17,20 @@
   const escAttr = (v) => String(v ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const num = (v) => Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0;
   const totalFacturaConIva = (f) => {
-    // Tesorería siempre debe trabajar sobre el TOTAL FINAL de la factura, IVA incluido.
-    // El backend manda invoice_total / total_a_pagar calculado; si no viene, lo calculamos acá.
+    // Tesorería siempre trabaja sobre el TOTAL FINAL de la factura: neto + IVA.
     if (f && f.total_a_pagar != null) return num(f.total_a_pagar);
     if (f && f.invoice_total != null) return num(f.invoice_total);
     if (f && f.total_con_iva != null) return num(f.total_con_iva);
     const neto = num(f?.invoice_monto);
     const iva  = num(f?.iva_pct);
     return +(neto * (1 + iva / 100)).toFixed(2);
+  };
+
+  const pagadoFactura = (f) => num(f?.total_pagado != null ? f.total_pagado : f?.monto_pagado);
+
+  const saldoFactura = (f) => {
+    const saldo = +(totalFacturaConIva(f) - pagadoFactura(f)).toFixed(2);
+    return Math.max(0, saldo);
   };
 
   function datosTransferenciaProveedor() {
@@ -112,10 +118,10 @@
   }
 
   function estadoPagoFactura(f) {
-    const saldo = num(f.saldo);
+    const saldo = saldoFactura(f);
     const total = totalFacturaConIva(f);
-    const pagado = num(f.monto_pagado);
-    if (saldo <= 0.01 || f.pagada || f.estado_pago_calculado === 'pagada') return 'pagadas';
+    const pagado = pagadoFactura(f);
+    if (saldo <= 0.01 || f.estado_pago_calculado === 'pagada') return 'pagadas';
     if (f.vencida) return 'vencidas';
     if (f.por_vencer) return 'por_vencer';
     if (pagado > 0 && pagado < total) return 'parciales';
@@ -167,15 +173,15 @@
       const porVencer = todas.filter(f => estadoPagoFactura(f) === 'por_vencer');
       const pendientes = todas.filter(f => estadoPagoFactura(f) === 'pendientes');
 
-      const totalPendiente = noPagadas.reduce((s, f) => s + num(f.saldo), 0);
-      const totalVencido   = vencidas.reduce((s, f) => s + num(f.saldo), 0);
-      const totalPorVencer = porVencer.reduce((s, f) => s + num(f.saldo), 0);
+      const totalPendiente = noPagadas.reduce((s, f) => s + saldoFactura(f), 0);
+      const totalVencido   = vencidas.reduce((s, f) => s + saldoFactura(f), 0);
+      const totalPorVencer = porVencer.reduce((s, f) => s + saldoFactura(f), 0);
 
       page.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;flex-wrap:wrap">
           <div>
             <h2 style="font-size:20px;font-weight:700;margin:0;color:var(--text)">💳 Tesorería / Pagos</h2>
-            <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Facturas de OC con condición pactada, vencimientos, pagos parciales y saldo.</p>
+            <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Facturas de OC con condición pactada, vencimientos, pagos parciales e historial de pagos. Los importes son con IVA incluido.</p>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="renderTesoreriaPanelInline()">↻ Actualizar</button>
         </div>
@@ -249,8 +255,8 @@
                         <div style="font-size:10px;color:var(--text3)">Factura: ${condicionFactura}</div>
                       </td>
                       <td style="text-align:right">$${fmt(totalFacturaConIva(f))}</td>
-                      <td style="text-align:right;color:${num(f.monto_pagado)>0?'var(--ok)':'var(--text3)'}">$${fmt(f.monto_pagado)}</td>
-                      <td style="text-align:right;color:${num(f.saldo)>0.01?'var(--warn)':'var(--ok)'};font-weight:700">$${fmt(Math.max(0, num(f.saldo)))}</td>
+                      <td style="text-align:right;color:${pagadoFactura(f)>0?'var(--ok)':'var(--text3)'}">$${fmt(pagadoFactura(f))}</td>
+                      <td style="text-align:right;color:${saldoFactura(f)>0.01?'var(--warn)':'var(--ok)'};font-weight:700">$${fmt(saldoFactura(f))}</td>
                       <td style="text-align:center">
                         <button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">${accion}</button>
                       </td>
@@ -300,8 +306,8 @@
     overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
     const totalFac = totalFacturaConIva(factura);
-    const totalPagado = num(factura.monto_pagado || 0);
-    const saldo = Math.max(0, +(totalFac - totalPagado).toFixed(2));
+    const totalPagado = pagadoFactura(factura);
+    const saldo = saldoFactura(factura);
     const pagada = saldo <= 0.01;
     const metodoDefault = metodoPagoPorDefecto(factura, oc);
     const fuenteMetodoDefault = metodoPagoFuenteTexto(factura, oc);
