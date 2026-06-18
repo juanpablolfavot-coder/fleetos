@@ -477,9 +477,8 @@ function _mapTire(t) {
 function _mapTireMovement(m) {
   // Formato esperado por renderTireHistory en app.js:
   // { date, serial, fromPos, toPos, type, vehicle, km, user, obs }
-  const d = m.created_at ? new Date(m.created_at) : null;
-  const dateStr = d
-    ? d.toISOString().slice(0,16).replace('T',' ')
+  const dateStr = m.created_at
+    ? (window.FleetTime?.displayAR(m.created_at) || String(m.created_at).slice(0,16).replace('T',' '))
     : '—';
   return {
     id:      m.id,
@@ -535,8 +534,8 @@ function _mapWorkOrder(o) {
     priority:   o.priority || 'Normal',
     desc:       o.description || '—',
     mechanic:   o.mechanic_name || '—',
-    opened:     o.opened_at ? o.opened_at.slice(0,16).replace('T',' ') : '—',
-    closed:     o.closed_at ? o.closed_at.slice(0,16).replace('T',' ') : null,
+    opened:     o.opened_at ? (window.FleetTime?.displayAR(o.opened_at) || String(o.opened_at).slice(0,16).replace('T',' ')) : '—',
+    closed:     o.closed_at ? (window.FleetTime?.displayAR(o.closed_at) || String(o.closed_at).slice(0,16).replace('T',' ')) : null,
     causa_raiz: o.root_cause || '',
     parts:      [],
     parts_cost: parseFloat(o.parts_cost) || 0,
@@ -558,7 +557,7 @@ function _mapFuelLog(f) {
     km:           f.odometer_km || 0,
     ppu:          parseFloat(f.price_per_l) || 0,
     total:        parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
-    date:         f.logged_at ? f.logged_at.slice(0,16).replace('T',' ') : '—',
+    date:         f.logged_at ? (window.FleetTime?.displayAR(f.logged_at) || String(f.logged_at).slice(0,16).replace('T',' ')) : '—',
     place:        f.location || 'Cisterna',
     tank_id:      f.tank_id || null,
     notes:        f.notes || '',
@@ -582,7 +581,7 @@ function _mapTankEntry(e) {
     previous_l:      parseFloat(e.previous_l) || 0,
     new_l:           parseFloat(e.new_l) || 0,
     created_at:      e.created_at || null,
-    date:            e.created_at ? e.created_at.slice(0,16).replace('T',' ') : '—',
+    date:            e.created_at ? (window.FleetTime?.displayAR(e.created_at) || String(e.created_at).slice(0,16).replace('T',' ')) : '—',
     tank_id:         e.tank_id || null,
     tank_location:   e.tank_location || 'Cisterna',
     created_by_name: e.created_by_name || '—',
@@ -609,7 +608,7 @@ function _mapFuelDispatch(d) {
     receive_notes:      d.receive_notes || '',
     received_at:        d.received_at || null,
     created_at:         d.created_at || null,
-    date:               d.created_at ? d.created_at.slice(0,16).replace('T',' ') : '—',
+    date:               d.created_at ? (window.FleetTime?.displayAR(d.created_at) || String(d.created_at).slice(0,16).replace('T',' ')) : '—',
     tank_id:            d.tank_id || null,
     tank_location:      d.tank_location || 'Cisterna',
     destination_tank_id: d.destination_tank_id || null,
@@ -653,9 +652,8 @@ function _mapStockItem(s) {
 // Backend devuelve: sm.*, si.item_name, si.unit, u.user_name
 // Render espera:    { date, name, type, qty, unit, motivo, user }
 function _mapStockMovement(m) {
-  const d = m.created_at ? new Date(m.created_at) : null;
-  const dateStr = d
-    ? d.toISOString().slice(0,16).replace('T',' ')
+  const dateStr = m.created_at
+    ? (window.FleetTime?.displayAR(m.created_at) || String(m.created_at).slice(0,16).replace('T',' '))
     : '—';
   return {
     id:     m.id,
