@@ -666,8 +666,13 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       }
     }
     await client.query('BEGIN');
-    // Asegurar que existe la columna ticket_image
+    // Asegurar columnas de ticket sin dejar pendientes falsos.
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20)`).catch(()=>{});
+    await client.query(`ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT`).catch(()=>{});
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT`).catch(()=>{});
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID`).catch(()=>{});
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ`).catch(()=>{});
 
     // ── PRECIO FINAL:
     //    * Cisterna propia (tank_id presente): SIEMPRE el precio del tanque (ignoramos frontend)
@@ -693,11 +698,18 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
       );
       console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L (precio cisterna: $${ppuFinal || 'sin definir'})`);
     }
-    // Tomar km del GPS (km_current del vehículo) si no viene odómetro manual
-    const vehKm = await client.query('SELECT km_current FROM vehicles WHERE id=$1',[vehicle_id]);
-    const kmToSave = odometer_km || vehKm.rows[0]?.km_current || null;
-    const r = await client.query(`INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null]);
-    if (odometer_km) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[odometer_km,vehicle_id]);
+    // Odómetro manual: no copiamos más km_current/GPS automáticamente.
+    // Si no se informa, queda NULL para no guardar un dato falso.
+    const kmParsed = parseInt(odometer_km, 10);
+    const kmToSave = Number.isFinite(kmParsed) && kmParsed > 0 ? kmParsed : null;
+    const ticketEstado = ticket_image ? 'pendiente' : null;
+    const r = await client.query(
+      `INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image,ticket_estado)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING *`,
+      [vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null,ticketEstado]
+    );
+    if (kmToSave) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND COALESCE(km_current,0)<$1',[kmToSave,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK').catch(()=>{});
@@ -1214,7 +1226,8 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
     if (!['aprobar','observar'].includes(accion)) return res.status(400).json({ error: 'accion debe ser aprobar u observar' });
 
     // Asegurar columnas
-    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20)").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT").catch(()=>{});
     await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT').catch(()=>{});
     await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID').catch(()=>{});
     await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ').catch(()=>{});
@@ -1265,7 +1278,8 @@ fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
 
 fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico','gerente_sucursal'), async (req, res) => {
   try {
-    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20) DEFAULT 'pendiente'").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20)").catch(()=>{});
+    await query("ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID").catch(()=>{});
     await query("ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ").catch(()=>{});
