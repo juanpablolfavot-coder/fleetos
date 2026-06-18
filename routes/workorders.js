@@ -367,7 +367,7 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
 
     const wo = await client.query('SELECT * FROM work_orders WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!wo.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT no encontrada' }); }
-    if (wo.rows[0].status === 'Cerrada') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'OT ya está cerrada' }); }
+    if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'OT ya está cerrada' }); }
 
     let extraCost = 0;
     const externalItemsForPO = [];
@@ -510,7 +510,7 @@ router.post('/:id/labor',
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'OT no encontrada' });
       }
-      if (wo.rows[0].status === 'Cerrada') {
+      if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'No se pueden agregar partes a una OT cerrada' });
       }
@@ -561,7 +561,7 @@ router.delete('/:id/labor/:laborId',
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'OT no encontrada' });
       }
-      if (wo.rows[0].status === 'Cerrada') {
+      if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'No se pueden eliminar partes de una OT cerrada' });
       }
@@ -645,7 +645,7 @@ router.post('/:id/parts',
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'OT no encontrada' });
       }
-      if (wo.rows[0].status === 'Cerrada') {
+      if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'No se pueden agregar repuestos a una OT cerrada' });
       }
@@ -747,7 +747,7 @@ router.delete('/:id/parts/:partId',
         await client.query('ROLLBACK');
         return res.status(404).json({ error: 'OT no encontrada' });
       }
-      if (wo.rows[0].status === 'Cerrada') {
+      if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) {
         await client.query('ROLLBACK');
         return res.status(409).json({ error: 'No se pueden eliminar repuestos de una OT cerrada' });
       }
