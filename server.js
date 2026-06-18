@@ -1,3 +1,4 @@
+process.env.TZ = process.env.TZ || 'America/Argentina/Buenos_Aires';
 // Manejo global de errores: loguea pero NO mata el proceso
 // (matar el proceso hacía que Render reiniciara el server ante CUALQUIER error, interrumpiendo a todos)
 process.on('uncaughtException', (e) => {
