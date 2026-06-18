@@ -226,7 +226,7 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
       po_id,
       ROUND(invoice_monto * (1 + COALESCE(iva_pct,0) / 100.0), 2) AS invoice_total
     FROM purchase_order_invoices
-    WHERE id=$1
+    WHERE id=$1::uuid
     FOR UPDATE
   `, [invoiceId]);
   if (!inv.rows[0]) return null;
@@ -237,15 +237,15 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
   const pag = await client.query(`
     SELECT COALESCE(SUM(monto),0) AS total_pagado
     FROM purchase_order_payments
-    WHERE invoice_id=$1
+    WHERE invoice_id=$1::uuid
   `, [invoiceId]);
   const totalPagado = parseFloat(pag.rows[0]?.total_pagado || 0);
 
   await client.query(`
     UPDATE purchase_order_invoices
-    SET monto_pagado=$2,
-        pagada=($2 >= $3 * 0.999)
-    WHERE id=$1
+    SET monto_pagado=$2::numeric,
+        pagada=($2::numeric >= $3::numeric * 0.999)
+    WHERE id=$1::uuid
   `, [invoiceId, totalPagado, totalFactura]);
 
   const tot = await client.query(`
@@ -258,7 +258,7 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
       FROM purchase_order_payments
       GROUP BY invoice_id
     ) pay ON pay.invoice_id = f.id
-    WHERE f.po_id=$1
+    WHERE f.po_id=$1::uuid
   `, [poId]);
 
   const totalFacturas = parseFloat(tot.rows[0]?.total_facturas || 0);
@@ -267,24 +267,24 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
 
   await client.query(`
     UPDATE purchase_orders
-    SET payment_status=$2,
+    SET payment_status=$2::varchar,
         status = CASE
           WHEN status = 'recibida' THEN 'recibida'
-          WHEN $2 = 'total' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN $2 = 'total' AND status IN ('aprobada_compras','pagada') THEN 'pagada'
-          WHEN $2 <> 'total' AND status = 'pagada' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN $2 <> 'total' AND status = 'pagada' THEN 'aprobada_compras'
+          WHEN $2::varchar = 'total' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
+          WHEN $2::varchar = 'total' AND status IN ('aprobada_compras','pagada') THEN 'pagada'
+          WHEN $2::varchar <> 'total' AND status = 'pagada' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
+          WHEN $2::varchar <> 'total' AND status = 'pagada' THEN 'aprobada_compras'
           ELSE status
         END,
-        pagado_at = CASE WHEN $2='total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
-        pagado_por = CASE WHEN $2='total' THEN COALESCE(pagado_por, (
+        pagado_at = CASE WHEN $2::varchar='total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
+        pagado_por = CASE WHEN $2::varchar='total' THEN COALESCE(pagado_por, (
           SELECT paid_by
           FROM purchase_order_payments
-          WHERE invoice_id IN (SELECT id FROM purchase_order_invoices WHERE po_id=$1)
+          WHERE invoice_id IN (SELECT id FROM purchase_order_invoices WHERE po_id=$1::uuid)
           ORDER BY paid_at DESC
           LIMIT 1
         )) ELSE NULL END
-    WHERE id=$1
+    WHERE id=$1::uuid
   `, [poId, paymentStatus]);
 
   return { po_id: poId, invoice_total: totalFactura, total_pagado: totalPagado, payment_status: paymentStatus };
@@ -363,7 +363,7 @@ router.get('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR,
         u.name AS paid_by_name
       FROM purchase_order_payments p
       LEFT JOIN users u ON u.id = p.paid_by
-      WHERE p.invoice_id = $1
+      WHERE p.invoice_id = $1::uuid
       ORDER BY p.paid_at DESC
     `, [req.params.fid]);
     res.json(r.rows);
@@ -401,7 +401,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
        FROM purchase_order_invoices f
        JOIN purchase_orders po ON po.id = f.po_id
        LEFT JOIN suppliers s ON s.id = po.supplier_id
-       WHERE f.id=$1 AND f.po_id=$2
+       WHERE f.id=$1::uuid AND f.po_id=$2::uuid
        FOR UPDATE OF f`,
       [req.params.fid, req.params.id]
     );
@@ -458,7 +458,13 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
          cheque_nro, cheque_banco, cheque_fecha_cobro, cheque_a_nombre,
          echeq_nro, echeq_banco, echeq_fecha_pago, echeq_clave,
          tarjeta_aprobacion, tarjeta_cuotas)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+      VALUES (
+        $1::uuid,$2::uuid,$3::numeric,$4::varchar,$5::varchar,$6::text,$7::text,
+        $8::varchar,$9::varchar,$10::varchar,
+        $11::varchar,$12::varchar,$13::date,$14::varchar,
+        $15::varchar,$16::varchar,$17::date,$18::varchar,
+        $19::varchar,$20::integer
+      )
       RETURNING *
     `, [
       req.params.fid, req.user.id, monto, b.metodo,
@@ -484,7 +490,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS total_a_pagar
       FROM purchase_order_invoices f
-      WHERE f.id=$1
+      WHERE f.id=$1::uuid
     `, [req.params.fid]);
     const factData = fact.rows[0];
     const total = parseFloat(factData.invoice_total) || 0;
@@ -517,7 +523,7 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
     await ensurePaymentEngine();
     await client.query('BEGIN');
     const p = await client.query(
-      'SELECT id, paid_by FROM purchase_order_payments WHERE id=$1 AND invoice_id=$2 FOR UPDATE',
+      'SELECT id, paid_by FROM purchase_order_payments WHERE id=$1::uuid AND invoice_id=$2::uuid FOR UPDATE',
       [req.params.pid, req.params.fid]
     );
     if (!p.rows[0]) {
@@ -529,7 +535,7 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
       return res.status(403).json({ error: 'Solo podés anular pagos que vos cargaste' });
     }
 
-    await client.query('DELETE FROM purchase_order_payments WHERE id=$1', [req.params.pid]);
+    await client.query('DELETE FROM purchase_order_payments WHERE id=$1::uuid', [req.params.pid]);
     await recalcPagoFacturaYOC(client, req.params.fid);
     await client.query('COMMIT');
     res.json({ ok: true, message: 'Pago anulado' });
