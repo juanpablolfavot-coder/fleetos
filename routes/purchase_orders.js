@@ -103,6 +103,7 @@ async function ensureTables() {
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
+  await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
 
   // Índices para que el listado de OC no se vuelva lento cuando crecen las órdenes.
@@ -115,6 +116,120 @@ async function ensureTables() {
   await query(`CREATE INDEX IF NOT EXISTS idx_po_invoice_status_created ON purchase_orders(invoice_status, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_po_delivery_status_created ON purchase_orders(delivery_status, created_at DESC)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_poi_po_fast ON purchase_order_items(po_id)`).catch(()=>{});
+  await query(`CREATE INDEX IF NOT EXISTS idx_poi_work_order_part ON purchase_order_items(work_order_part_id)`).catch(()=>{});
+
+  // Backfill seguro: si ya hay OCs aprobadas desde OT, reflejar sus precios en la OT.
+  // No toca OCs pendientes de cotización ni en cotización.
+  await query(`
+    UPDATE work_order_parts wop
+    SET unit_cost = poi.precio_unit,
+        unit = COALESCE(NULLIF(wop.unit,''), poi.unidad)
+    FROM purchase_order_items poi
+    JOIN purchase_orders po ON po.id = poi.po_id
+    WHERE poi.work_order_part_id = wop.id
+      AND wop.origin = 'externo'
+      AND po.status IN ('aprobada_compras','pagada','recibida')
+      AND COALESCE(poi.precio_unit,0) > 0
+  `).catch(()=>{});
+
+  await query(`
+    WITH priced_items AS (
+      SELECT
+        poi.po_id,
+        lower(trim(poi.descripcion)) AS descripcion_key,
+        COALESCE(poi.cantidad,1) AS cantidad_key,
+        poi.unidad,
+        poi.precio_unit,
+        ROW_NUMBER() OVER (
+          PARTITION BY poi.po_id, lower(trim(poi.descripcion)), COALESCE(poi.cantidad,1)
+          ORDER BY poi.created_at, poi.id
+        ) AS rn
+      FROM purchase_order_items poi
+      JOIN purchase_orders po ON po.id = poi.po_id
+      WHERE po.status IN ('aprobada_compras','pagada','recibida')
+        AND poi.work_order_part_id IS NULL
+        AND COALESCE(poi.precio_unit,0) > 0
+    ), ext_parts AS (
+      SELECT
+        wop.id,
+        wop.po_id,
+        lower(trim(wop.name)) AS name_key,
+        COALESCE(wop.qty,1) AS qty_key,
+        ROW_NUMBER() OVER (
+          PARTITION BY wop.po_id, lower(trim(wop.name)), COALESCE(wop.qty,1)
+          ORDER BY wop.added_at, wop.id
+        ) AS rn
+      FROM work_order_parts wop
+      WHERE wop.origin = 'externo'
+        AND wop.po_id IS NOT NULL
+    ), matched AS (
+      SELECT ep.id, pi.precio_unit, pi.unidad
+      FROM ext_parts ep
+      JOIN priced_items pi
+        ON ep.po_id = pi.po_id
+       AND ep.name_key = pi.descripcion_key
+       AND ABS(ep.qty_key - pi.cantidad_key) < 0.0001
+       AND ep.rn = pi.rn
+    )
+    UPDATE work_order_parts wop
+    SET unit_cost = matched.precio_unit,
+        unit = COALESCE(NULLIF(wop.unit,''), matched.unidad)
+    FROM matched
+    WHERE wop.id = matched.id
+      AND COALESCE(wop.unit_cost,0) <> matched.precio_unit
+  `).catch(()=>{});
+
+  await query(`
+    WITH candidates AS (
+      SELECT id AS po_id
+      FROM purchase_orders
+      WHERE ot_id IS NOT NULL
+        AND status IN ('aprobada_compras','pagada','recibida')
+    ), ext_parts AS (
+      SELECT
+        wop.id,
+        wop.po_id,
+        ROW_NUMBER() OVER (PARTITION BY wop.po_id ORDER BY wop.added_at, wop.id) AS rn
+      FROM work_order_parts wop
+      JOIN candidates c ON c.po_id = wop.po_id
+      WHERE wop.origin = 'externo'
+        AND COALESCE(wop.unit_cost,0) = 0
+    ), priced_items AS (
+      SELECT
+        poi.po_id,
+        poi.precio_unit,
+        poi.unidad,
+        ROW_NUMBER() OVER (PARTITION BY poi.po_id ORDER BY poi.created_at, poi.id) AS rn
+      FROM purchase_order_items poi
+      JOIN candidates c ON c.po_id = poi.po_id
+      WHERE COALESCE(poi.precio_unit,0) > 0
+    ), matched AS (
+      SELECT ep.id, pi.precio_unit, pi.unidad
+      FROM ext_parts ep
+      JOIN priced_items pi ON pi.po_id = ep.po_id AND pi.rn = ep.rn
+    )
+    UPDATE work_order_parts wop
+    SET unit_cost = matched.precio_unit,
+        unit = COALESCE(NULLIF(wop.unit,''), matched.unidad)
+    FROM matched
+    WHERE wop.id = matched.id
+  `).catch(()=>{});
+
+  await query(`
+    UPDATE work_orders wo
+    SET parts_cost = COALESCE((
+      SELECT SUM(COALESCE(wop.subtotal,0))
+      FROM work_order_parts wop
+      WHERE wop.wo_id = wo.id
+    ),0)
+    WHERE EXISTS (
+      SELECT 1
+      FROM work_order_parts wop
+      WHERE wop.wo_id = wo.id
+        AND wop.origin = 'externo'
+        AND COALESCE(wop.unit_cost,0) > 0
+    )
+  `).catch(()=>{});
 }
 ensureTables();
 
@@ -122,6 +237,127 @@ async function nextOCCode() {
   await query(`CREATE SEQUENCE IF NOT EXISTS oc_seq START 1 INCREMENT 1`).catch(()=>{});
   const r = await query("SELECT nextval('oc_seq') as num");
   return 'OC-' + String(parseInt(r.rows[0].num)).padStart(4, '0');
+}
+
+// Cuando Compras aprueba una OC generada desde una OT, el costo del repuesto
+// externo debe verse en la OT aunque Tesorería todavía no haya pagado.
+// Regla: el costo técnico del trabajo nace cuando Compras aprueba precio/proveedor.
+async function syncApprovedPOCostsToWorkOrder(client, poId) {
+  const poRes = await client.query(
+    `SELECT id, ot_id, status
+     FROM purchase_orders
+     WHERE id = $1`,
+    [poId]
+  );
+  const po = poRes.rows[0];
+  if (!po || !po.ot_id || !['aprobada_compras','pagada','recibida'].includes(po.status)) {
+    return { updated_parts: 0, ot_id: po?.ot_id || null };
+  }
+
+  // Primero sincroniza por vínculo directo item OC -> repuesto OT.
+  const direct = await client.query(
+    `UPDATE work_order_parts wop
+     SET unit_cost = poi.precio_unit,
+         unit = COALESCE(NULLIF(wop.unit,''), poi.unidad)
+     FROM purchase_order_items poi
+     WHERE poi.po_id = $1
+       AND poi.work_order_part_id = wop.id
+       AND wop.origin = 'externo'
+       AND COALESCE(poi.precio_unit,0) > 0
+     RETURNING wop.id`,
+    [poId]
+  );
+
+  // Compatibilidad con OCs viejas: si no tenían work_order_part_id,
+  // empareja por descripción + cantidad.
+  const fallback = await client.query(
+    `WITH priced_items AS (
+       SELECT
+         id,
+         lower(trim(descripcion)) AS descripcion_key,
+         COALESCE(cantidad,1) AS cantidad_key,
+         unidad,
+         precio_unit,
+         ROW_NUMBER() OVER (
+           PARTITION BY lower(trim(descripcion)), COALESCE(cantidad,1)
+           ORDER BY created_at, id
+         ) AS rn
+       FROM purchase_order_items
+       WHERE po_id = $1
+         AND work_order_part_id IS NULL
+         AND COALESCE(precio_unit,0) > 0
+     ), ext_parts AS (
+       SELECT
+         id,
+         lower(trim(name)) AS name_key,
+         COALESCE(qty,1) AS qty_key,
+         ROW_NUMBER() OVER (
+           PARTITION BY lower(trim(name)), COALESCE(qty,1)
+           ORDER BY added_at, id
+         ) AS rn
+       FROM work_order_parts
+       WHERE po_id = $1
+         AND origin = 'externo'
+     ), matched AS (
+       SELECT ep.id, pi.precio_unit, pi.unidad
+       FROM ext_parts ep
+       JOIN priced_items pi
+         ON ep.name_key = pi.descripcion_key
+        AND ABS(ep.qty_key - pi.cantidad_key) < 0.0001
+        AND ep.rn = pi.rn
+     )
+     UPDATE work_order_parts wop
+     SET unit_cost = matched.precio_unit,
+         unit = COALESCE(NULLIF(wop.unit,''), matched.unidad)
+     FROM matched
+     WHERE wop.id = matched.id
+       AND COALESCE(wop.unit_cost,0) <> matched.precio_unit
+     RETURNING wop.id`,
+    [poId]
+  );
+
+  // Último respaldo para casos viejos donde Compras modificó la descripción del item:
+  // empareja por orden dentro de la OC. Se usa solo en partes externas que siguen sin costo.
+  const orderFallback = await client.query(
+    `WITH ext_parts AS (
+       SELECT id,
+              ROW_NUMBER() OVER (ORDER BY added_at, id) AS rn
+       FROM work_order_parts
+       WHERE po_id = $1
+         AND origin = 'externo'
+         AND COALESCE(unit_cost,0) = 0
+     ), priced_items AS (
+       SELECT precio_unit, unidad,
+              ROW_NUMBER() OVER (ORDER BY created_at, id) AS rn
+       FROM purchase_order_items
+       WHERE po_id = $1
+         AND COALESCE(precio_unit,0) > 0
+     ), matched AS (
+       SELECT ep.id, pi.precio_unit, pi.unidad
+       FROM ext_parts ep
+       JOIN priced_items pi ON pi.rn = ep.rn
+     )
+     UPDATE work_order_parts wop
+     SET unit_cost = matched.precio_unit,
+         unit = COALESCE(NULLIF(wop.unit,''), matched.unidad)
+     FROM matched
+     WHERE wop.id = matched.id
+     RETURNING wop.id`,
+    [poId]
+  );
+
+  await client.query(
+    `UPDATE work_orders wo
+     SET parts_cost = COALESCE((
+       SELECT SUM(COALESCE(wop.subtotal,0))
+       FROM work_order_parts wop
+       WHERE wop.wo_id = wo.id
+     ), 0)
+     WHERE wo.id = $1`,
+    [po.ot_id]
+  );
+
+  return { updated_parts: direct.rowCount + fallback.rowCount + orderFallback.rowCount, ot_id: po.ot_id };
 }
 
 const FORMAS_PAGO_OC = ['contado','cuenta_corriente','transferencia','cheque'];
@@ -485,9 +721,15 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
       if (!item.descripcion?.trim()) continue;
       const precioItem = creadorEsCompras ? (parseFloat(item.precio_unit||0) || 0) : 0;
       await client.query(
-        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [poId, item.descripcion.trim(), parseFloat(item.cantidad||1), item.unidad||'un', precioItem, item.stock_item_id||null]
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [poId,
+         item.descripcion.trim(),
+         parseFloat(item.cantidad||1),
+         item.unidad||'un',
+         precioItem,
+         item.stock_item_id||null,
+         item.work_order_part_id || item.part_id || null]
       );
     }
 
@@ -495,6 +737,11 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     if (creadorEsCompras && traePreciosCargados) {
       const t = await client.query('SELECT COALESCE(SUM(cantidad * precio_unit),0) as total FROM purchase_order_items WHERE po_id = $1', [poId]);
       await client.query('UPDATE purchase_orders SET total_estimado = $1 WHERE id = $2', [t.rows[0].total, poId]);
+    }
+
+    // Si nació aprobada y viene de una OT, reflejar costo externo en la OT al instante.
+    if (autoAprobado) {
+      await syncApprovedPOCostsToWorkOrder(client, poId);
     }
 
     await client.query('COMMIT');
@@ -655,16 +902,37 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
       return res.status(400).json({ error: 'Solo se pueden editar items mientras la OC está pendiente o en cotización' });
     }
 
+    // Antes de reemplazar, conservar el vínculo con repuestos externos de OT.
+    // Si Compras cambia la descripción/precio de un item, el vínculo no se pierde.
+    const oldItems = await client.query(
+      `SELECT id, work_order_part_id
+       FROM purchase_order_items
+       WHERE po_id = $1
+       ORDER BY created_at, id`,
+      [req.params.id]
+    );
+    const oldParts = await client.query(
+      `SELECT id
+       FROM work_order_parts
+       WHERE po_id = $1 AND origin = 'externo'
+       ORDER BY added_at, id`,
+      [req.params.id]
+    );
+
     // Reemplazar todos los items
     await client.query('DELETE FROM purchase_order_items WHERE po_id = $1', [req.params.id]);
+    let itemIdx = 0;
     for (const item of items) {
       if (!item.descripcion?.trim()) continue;
+      const linkedPartId = item.work_order_part_id || item.part_id || oldItems.rows[itemIdx]?.work_order_part_id || oldParts.rows[itemIdx]?.id || null;
       await client.query(
-        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [req.params.id, item.descripcion.trim(), parseFloat(item.cantidad||1),
-         item.unidad||'un', parseFloat(item.precio_unit||0), item.stock_item_id||null]
+         item.unidad||'un', parseFloat(item.precio_unit||0), item.stock_item_id||null,
+         linkedPartId]
       );
+      itemIdx += 1;
     }
 
     // Recalcular total_estimado
@@ -845,6 +1113,8 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
        factura_monto != null && factura_monto !== '' ? parseFloat(factura_monto) : null,
        req.user.id, req.params.id]
     );
+    await syncApprovedPOCostsToWorkOrder(client, req.params.id);
+
     await client.query('COMMIT');
     res.json(r.rows[0]);
   } catch(err) {
@@ -887,6 +1157,8 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
        factura_monto != null ? parseFloat(factura_monto) : null,
        req.user.id, req.params.id]
     );
+    await syncApprovedPOCostsToWorkOrder(client, req.params.id);
+
     await client.query('COMMIT');
     res.json(r.rows[0]);
   } catch(err) {
