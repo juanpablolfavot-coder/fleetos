@@ -15,11 +15,9 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
-pool.on('connect', (client) => {
-  client.query("SET TIME ZONE 'America/Argentina/Buenos_Aires'").catch((err) => {
-    console.error('No se pudo fijar timezone PostgreSQL:', err.message);
-  });
-});
+// La timezone ya se fija en la conexión con options.
+// Evitamos ejecutar client.query() dentro de pool.on('connect') porque pg advierte
+// que esa práctica queda deprecada y puede generar warnings en Render.
 
 pool.on('error', (err) => {
   console.error('PostgreSQL pool error:', err.message);
