@@ -8922,8 +8922,8 @@ async function renderPurchaseOrders() {
 
     <div id="po-kpi-row" class="kpi-row" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
       <div class="kpi-card"><div class="kpi-label">Pendientes de cotización</div><div class="kpi-value" style="color:#f59e0b" id="po-kpi-pend">—</div><div class="kpi-trend">📝 Compras debe solicitar cotización</div></div>
-      <div class="kpi-card"><div class="kpi-label">En cotización / Aprobadas</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 en proceso</div></div>
-      <div class="kpi-card ok"><div class="kpi-label">Aprobadas / por recibir</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">📦 esperando mercadería</div></div>
+      <div class="kpi-card"><div class="kpi-label">En cotización</div><div class="kpi-value" style="color:#38bdf8" id="po-kpi-curso">—</div><div class="kpi-trend">🔎 pendiente de aprobar</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Aprobadas / por recibir</div><div class="kpi-value ok" id="po-kpi-pag">—</div><div class="kpi-trend">📦 mercadería pendiente</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 mercadería recibida</div></div>
     </div>
 
@@ -9002,10 +9002,22 @@ function _poRenderKPIs() {
     const el = document.getElementById(id);
     if (el) { el.textContent = val; if (color) el.style.color = color; }
   };
-  set('po-kpi-pend',  data.filter(p => p.status === 'pendiente_cotizacion').length);
-  set('po-kpi-curso', data.filter(p => p.status === 'en_cotizacion' || p.status === 'aprobada_compras').length);
-  set('po-kpi-pag',   data.filter(p => p.status === 'pagada').length);
-  set('po-kpi-rec',   data.filter(p => p.status === 'recibida').length);
+
+  const isPendienteCotizacion = (p) => p.status === 'pendiente_cotizacion';
+  const isEnCotizacion = (p) => p.status === 'en_cotizacion';
+  const isAprobadaPorRecibir = (p) => (
+    p.status === 'aprobada_compras' &&
+    String(p.delivery_status || 'pendiente').toLowerCase() !== 'total'
+  );
+  const isRecibida = (p) => (
+    p.status === 'recibida' ||
+    String(p.delivery_status || '').toLowerCase() === 'total'
+  );
+
+  set('po-kpi-pend',  data.filter(isPendienteCotizacion).length);
+  set('po-kpi-curso', data.filter(isEnCotizacion).length);
+  set('po-kpi-pag',   data.filter(isAprobadaPorRecibir).length);
+  set('po-kpi-rec',   data.filter(isRecibida).length);
 }
 
 function _poRenderRows() {
