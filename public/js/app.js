@@ -1526,7 +1526,7 @@ function openEditOTModal(id) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <div>
           <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos de la OT</label>
-          <div style="font-size:11px;color:var(--text3)">Agregá repuestos del pañol o de compras externas. Se suma automáticamente al costo.</div>
+          <div style="font-size:11px;color:var(--text3)">Pañol suma costo al instante. Compra externa queda pendiente y se valoriza en la OT cuando Compras aprueba el precio.</div>
         </div>
         ${otClosed ? `<span style="font-size:11px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);border-radius:999px;padding:6px 10px">Solo lectura</span>` : `<button type="button" class="btn btn-secondary btn-sm" onclick="_partsAddRow()">+ Agregar repuesto</button>`}
       </div>
@@ -7290,7 +7290,7 @@ function openNewOTModal(preselectedVehicle) {
     </div>
 
     <div style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text3)">
-      La mano de obra propia se registra por horas/partes de trabajo, sin precio. Si el trabajo debe salir a un externo, marcá la opción de abajo para generar una OC a Compras.
+      La mano de obra propia se registra por horas/partes de trabajo, sin precio. Las compras externas se valorizan en la OT cuando Compras aprueba el precio, aunque Tesorería todavía no haya pagado.
     </div>
     <div style="margin-top:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);padding:10px 12px">
       <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text);cursor:pointer">
@@ -10018,6 +10018,9 @@ async function openPODetail(id) {
     };
     const st = estadoInfo[po.status] || { label:(po.status||'').toUpperCase(), color:'#6b7280', icon:'📋' };
     const esTerminal = ['rechazada'].includes(po.status);
+    const canEditItems = canEdit && !esTerminal && puedeVerPrecios && ['pendiente_cotizacion','en_cotizacion'].includes(po.status);
+    // Los artículos quedan congelados al aprobar Compras: desde ese momento el precio ya impacta la OT vinculada.
+    window._poItemsEditable = canEditItems;
     window._ocEditValues = { forma_pago: po.forma_pago, cc_dias: po.cc_dias, moneda: po.moneda };
 
     const totalReal = po.items.reduce((a,i) => a + (parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)), 0);
@@ -10155,12 +10158,12 @@ async function openPODetail(id) {
       <div class="card" style="padding:0;margin-bottom:16px">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
           <span style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</span>
-          ${canEdit && !esTerminal && puedeVerPrecios ? `
+          ${canEditItems ? `
             <button class="btn btn-secondary btn-sm" onclick="addPODetailItem()" style="font-size:11px;padding:4px 10px">+ Agregar</button>
           ` : ''}
         </div>
 
-        ${canEdit && !esTerminal && puedeVerPrecios ? `
+        ${canEditItems ? `
           <!-- MODO EDITABLE INLINE -->
           <div style="padding:10px 16px">
             <div style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.5px">
@@ -10366,7 +10369,7 @@ async function savePODetail(id) {
 
     // ── Leer artículos si están en modo editable inline ──
     let itemsEditados = null;
-    if (document.querySelector('[id^="podi-desc-"]')) {
+    if (window._poItemsEditable && document.querySelector('[id^="podi-desc-"]')) {
       itemsEditados = readPODetailItems();
       if (itemsEditados.length === 0) {
         showToast('warn', 'Debe haber al menos un artículo con descripción');
@@ -10897,7 +10900,9 @@ function buildPODetailItemRow(idx, item) {
   const sub   = Math.round(qty * price);
   // Actualizar contador
   if (idx >= (window._podItemNextIdx || 0)) window._podItemNextIdx = idx + 1;
-  return `<div id="podi-row-${idx}" style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;align-items:center">
+  const stockItemId = (item.stock_item_id || '').replace(/"/g, '&quot;');
+  const woPartId = (item.work_order_part_id || '').replace(/"/g, '&quot;');
+  return `<div id="podi-row-${idx}" data-stock-item-id="${stockItemId}" data-work-order-part-id="${woPartId}" style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;align-items:center">
     <input class="form-input" id="podi-desc-${idx}" value="${desc}" placeholder="Descripción" style="font-size:12px" oninput="updatePODetailItemsTotal()">
     <input class="form-input" type="number" id="podi-qty-${idx}" value="${qty}" min="0.01" step="0.01" style="font-size:12px;text-align:center" oninput="updatePODetailItemsTotal()">
     <input class="form-input" id="podi-unit-${idx}" value="${unit}" style="font-size:12px;text-align:center" oninput="updatePODetailItemsTotal()">
@@ -10943,11 +10948,14 @@ function readPODetailItems() {
     const idx = descEl.id.replace('podi-desc-', '');
     const desc = (descEl.value || '').trim();
     if (!desc) return; // descartar items sin descripción
+    const rowEl = document.getElementById('podi-row-' + idx);
     items.push({
       descripcion: desc,
       cantidad:    parseFloat(document.getElementById('podi-qty-'   + idx)?.value) || 1,
       unidad:                 document.getElementById('podi-unit-'  + idx)?.value || 'un',
-      precio_unit: parseFloat(document.getElementById('podi-price-' + idx)?.value) || 0
+      precio_unit: parseFloat(document.getElementById('podi-price-' + idx)?.value) || 0,
+      stock_item_id: rowEl?.dataset?.stockItemId || null,
+      work_order_part_id: rowEl?.dataset?.workOrderPartId || null
     });
   });
   return items;
@@ -11451,6 +11459,29 @@ async function aprobarOC(id) {
   } catch (err) {
     console.error('[aprobarOC]', err);
     showToast('error', 'Error al aprobar la OC');
+  }
+}
+
+
+// TESORERÍA confirma pago de una OC aprobada por Compras
+async function pagarOC(id) {
+  if (!confirm('¿Confirmar el pago de esta OC?')) return;
+  try {
+    const res = await apiFetch(`/api/purchase-orders/${id}/pagar`, {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast('error', err.error || 'Error al confirmar el pago');
+      return;
+    }
+    showToast('ok', '💰 Pago confirmado');
+    closeModal();
+    await renderPurchaseOrders();
+  } catch (err) {
+    console.error('[pagarOC]', err);
+    showToast('error', 'Error al confirmar el pago');
   }
 }
 
@@ -12385,17 +12416,19 @@ function _partsRender(parts) {
     const cost = parseFloat(p.unit_cost || 0);
     const subtotal = parseFloat(p.subtotal || (qty * cost));
     const origenLabel = p.origin === 'stock' ? '📦 Pañol' : '🛒 Externo';
-    const origenColor = p.origin === 'stock' ? 'var(--ok)' : 'var(--text3)';
+    const origenColor = p.origin === 'stock' ? 'var(--ok)' : (cost > 0 ? 'var(--accent)' : 'var(--text3)');
     const stockCode = p.stock_code ? ` · <span style="font-family:var(--mono);font-size:10px">${p.stock_code}</span>` : '';
+    const costText = p.origin === 'externo' && cost <= 0 ? 'A cotizar' : ('$' + Math.round(cost).toLocaleString('es-AR'));
+    const subText  = p.origin === 'externo' && cost <= 0 ? 'Pendiente' : ('$' + Math.round(subtotal).toLocaleString('es-AR'));
     return `<div style="display:grid;grid-template-columns:70px 1fr 70px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div style="color:${origenColor};font-weight:600;font-size:11px">${origenLabel}</div>
       <div>
         <div style="font-weight:600">${p.name}</div>
-        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}</div>
+        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}${p.origin==='externo' && cost>0 ? ' · precio aprobado por Compras' : ''}</div>
       </div>
       <div style="text-align:center;font-family:var(--mono)">${qty}</div>
-      <div style="text-align:right;font-family:var(--mono);color:var(--text3)">$${Math.round(cost).toLocaleString('es-AR')}</div>
-      <div style="text-align:right;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(subtotal).toLocaleString('es-AR')}</div>
+      <div style="text-align:right;font-family:var(--mono);color:var(--text3)">${costText}</div>
+      <div style="text-align:right;font-weight:700;color:${cost > 0 ? 'var(--accent)' : 'var(--text3)'};font-family:var(--mono)">${subText}</div>
       ${window._labCurrentOtClosed ? '<span></span>' : `<button type="button" onclick="_partsDelete('${p.id}', ${p.origin === 'stock' ? 'true' : 'false'})"
         title="${p.origin === 'stock' ? 'Eliminar y devolver al stock' : 'Eliminar repuesto'}"
         style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>`}
