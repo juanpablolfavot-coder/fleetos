@@ -6,28 +6,64 @@
 // Resuelve el bug de que toISOString() devuelve UTC (3h adelante).
 // Todos los inputs type=date y los timestamps visibles deben usar estos helpers.
 
-// YYYY-MM-DD en zona horaria local (Argentina)
+// YYYY-MM-DD en zona horaria Argentina
 function todayISO() {
-  const d = new Date();
-  const offset = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - offset).toISOString().slice(0, 10);
+  if (window.FleetTime?.dateInputAR) return window.FleetTime.dateInputAR();
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Argentina/Buenos_Aires', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
 }
 
-// YYYY-MM-DDTHH:MM para inputs datetime-local
+// YYYY-MM-DDTHH:MM para inputs datetime-local en Argentina
 function nowDatetimeLocal() {
-  const d = new Date();
-  const offset = d.getTimezoneOffset() * 60000;
-  return new Date(d.getTime() - offset).toISOString().slice(0, 16);
+  if (window.FleetTime?.datetimeLocalAR) return window.FleetTime.datetimeLocalAR();
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Argentina/Buenos_Aires', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false, hourCycle:'h23' }).formatToParts(new Date()).reduce((a,x)=>(a[x.type]=x.value,a),{});
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
 }
 
 // Hora "HH:MM" en formato argentino
 function nowTimeAR() {
+  if (window.FleetTime?.timeAR) return window.FleetTime.timeAR();
   return new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 // Fecha "DD/MM/YYYY" en formato argentino
 function nowDateAR() {
+  if (window.FleetTime?.dateDisplayAR) return window.FleetTime.dateDisplayAR();
   return new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+function fleetNowIsoAR() {
+  return window.FleetTime?.isoAR ? window.FleetTime.isoAR() : new Date().toISOString();
+}
+
+function fleetDateTimeAR(value) {
+  if (!value) return '—';
+  const txt = String(value).trim();
+  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  // Si el backend ya manda hora argentina sin offset en *_ar, no la volvemos a convertir.
+  if (m && !/[zZ]|[+-]\d{2}:?\d{2}/.test(txt.slice(10))) {
+    return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+  }
+  if (window.FleetTime?.dateTimeDisplayAR) return window.FleetTime.dateTimeDisplayAR(value);
+  const d = new Date(txt.includes(' ') ? txt.replace(' ', 'T') : txt);
+  if (isNaN(d.getTime())) return txt.slice(0,16).replace('T',' ');
+  return new Intl.DateTimeFormat('es-AR', { timeZone:'America/Argentina/Buenos_Aires', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }).format(d).replace(',', '');
+}
+
+function fleetDisplayAR(value) {
+  if (!value) return '—';
+  const txt = String(value).trim();
+  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (m && !/[zZ]|[+-]\d{2}:?\d{2}/.test(txt.slice(10))) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+  if (window.FleetTime?.displayAR) return window.FleetTime.displayAR(value);
+  return fleetDateTimeAR(value);
+}
+
+function fleetYmdCompactAR(value) {
+  if (window.FleetTime?.ymdCompactAR) return window.FleetTime.ymdCompactAR(value);
+  const txt = String(value || fleetNowIsoAR()).trim();
+  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}${m[2]}${m[3]}`;
+  return todayISO().replace(/-/g,'');
 }
 
 // Exponer globalmente por si otros archivos las necesitan
@@ -35,6 +71,9 @@ window.todayISO = todayISO;
 window.nowDatetimeLocal = nowDatetimeLocal;
 window.nowTimeAR = nowTimeAR;
 window.nowDateAR = nowDateAR;
+window.fleetDateTimeAR = window.fleetDateTimeAR || fleetDateTimeAR;
+window.fleetDisplayAR = window.fleetDisplayAR || fleetDisplayAR;
+window.fleetNowIsoAR = window.fleetNowIsoAR || fleetNowIsoAR;
 
 // ═══════════════════════════════════════════════════════════
 //  BRANDING PDF — Identidad visual Expreso Biletta
@@ -2570,8 +2609,9 @@ async function saveFuelEntry() {
       notes: entry.notes || '',
       previous_l: parseFloat(entry.previous_l) || nivelActual,
       new_l: parseFloat(entry.new_l) || nuevoNivel,
-      created_at: entry.created_at || new Date().toISOString(),
-      date: entry.created_at ? entry.created_at.slice(0,16).replace('T',' ') : new Date().toISOString().slice(0,16).replace('T',' '),
+      created_at: entry.created_at_ar || entry.created_at || fleetNowIsoAR(),
+      created_at_ar: entry.created_at_ar || null,
+      date: fleetDisplayAR(entry.created_at_ar || entry.created_at || fleetNowIsoAR()),
       tank_id: entry.tank_id || tank.id,
       tank_location: tank.location || 'Cisterna',
       created_by_name: App.currentUser?.name || '—',
@@ -2604,7 +2644,7 @@ function openFuelTankEntryTicket(entryOrId) {
   const total = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l))
     ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR')
     : '—';
-  const fecha = entry.created_at ? new Date(entry.created_at).toLocaleString('es-AR') : (entry.date || '—');
+  const fecha = fleetDateTimeAR(entry.created_at_ar || entry.created_at || entry.date);
 
   openModal(`🧾 Ticket ${ticketCode}`, `
     <div id="fuel-tank-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
@@ -2650,7 +2690,7 @@ function printFuelTankEntryTicket(entryId) {
   const ppuVal = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l));
   const ppu = ppuVal ? '$' + Math.round(parseFloat(entry.price_per_l)).toLocaleString('es-AR') : '—';
   const total = ppuVal ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR') : '—';
-  const fecha = entry.created_at ? new Date(entry.created_at).toLocaleString('es-AR') : (entry.date || '—');
+  const fecha = fleetDateTimeAR(entry.created_at_ar || entry.created_at || entry.date);
 
   const win = window.open('', '_blank');
   win.document.write(`
@@ -2808,9 +2848,11 @@ async function saveFuelDispatch() {
       received_by: d.received_by || '',
       received_liters: d.received_liters === null || d.received_liters === undefined ? null : parseFloat(d.received_liters),
       receive_notes: d.receive_notes || '',
-      received_at: d.received_at || null,
-      created_at: d.created_at || new Date().toISOString(),
-      date: d.created_at ? d.created_at.slice(0,16).replace('T',' ') : new Date().toISOString().slice(0,16).replace('T',' '),
+      received_at: d.received_at_ar || d.received_at || null,
+      received_at_ar: d.received_at_ar || null,
+      created_at: d.created_at_ar || d.created_at || fleetNowIsoAR(),
+      created_at_ar: d.created_at_ar || null,
+      date: fleetDisplayAR(d.created_at_ar || d.created_at || fleetNowIsoAR()),
       tank_id: d.tank_id || tank.id,
       tank_location: tank.location || 'Cisterna',
       created_by_name: App.currentUser?.name || '—',
@@ -2842,7 +2884,7 @@ async function applyFuelDispatchToBranchTank(dispatchId) {
     App.data.fuelDispatches[idx] = Object.assign(App.data.fuelDispatches[idx], {
       destination_tank_id: data.dispatch.destination_tank_id || null,
       destination_stock_applied: true,
-      destination_stock_applied_at: data.dispatch.destination_stock_applied_at || new Date().toISOString(),
+      destination_stock_applied_at: data.dispatch.destination_stock_applied_at_ar || data.dispatch.destination_stock_applied_at || fleetNowIsoAR(),
       _raw: data.dispatch
     });
   }
@@ -2861,7 +2903,7 @@ function openFuelDispatchTicket(dispatchId) {
   const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
   if (!d) { showToast('error', 'No se encontró el despacho'); return; }
   const code = _fuelDispatchCode(d);
-  const fecha = d.created_at ? new Date(d.created_at).toLocaleString('es-AR') : (d.date || '—');
+  const fecha = fleetDateTimeAR(d.created_at_ar || d.created_at || d.date);
   const recibido = d.status === 'recibido';
   openModal(`🧾 Remito ${code}`, `
     <div id="fuel-dispatch-ticket-print" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
@@ -2893,7 +2935,7 @@ function openFuelDispatchTicket(dispatchId) {
       </div>
       ${recibido ? `<div style="margin-top:12px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.25);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--ok)">
         Recibió: <b>${d.received_by || '—'}</b> · Litros recibidos: <b>${d.received_liters !== null && d.received_liters !== undefined ? Math.round(d.received_liters).toLocaleString('es-AR') + ' L' : '—'}</b>
-        ${d.received_at ? ` · ${new Date(d.received_at).toLocaleString('es-AR')}` : ''}
+        ${(d.received_at_ar || d.received_at) ? ` · ${fleetDateTimeAR(d.received_at_ar || d.received_at)}` : ''}
         ${d.receive_notes ? `<br>Observación recepción: ${d.receive_notes}` : ''}
       </div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px;font-size:12px;color:var(--text3)">
@@ -2913,10 +2955,10 @@ function printFuelDispatchTicket(dispatchId) {
   const d = (App.data.fuelDispatches || []).find(x => x.id === dispatchId);
   if (!d) { showToast('error', 'No se encontró el despacho'); return; }
   const code = _fuelDispatchCode(d);
-  const fecha = d.created_at ? new Date(d.created_at).toLocaleString('es-AR') : (d.date || '—');
+  const fecha = fleetDateTimeAR(d.created_at_ar || d.created_at || d.date);
   const recibido = d.status === 'recibido';
   const receivedHtml = recibido ? `
-    <div class="box ok">Recibió: <b style="display:inline">${d.received_by || '—'}</b> · Litros recibidos: <b style="display:inline">${d.received_liters !== null && d.received_liters !== undefined ? Math.round(d.received_liters).toLocaleString('es-AR') + ' L' : '—'}</b>${d.received_at ? ' · ' + new Date(d.received_at).toLocaleString('es-AR') : ''}${d.receive_notes ? '<br>Obs.: '+d.receive_notes : ''}</div>
+    <div class="box ok">Recibió: <b style="display:inline">${d.received_by || '—'}</b> · Litros recibidos: <b style="display:inline">${d.received_liters !== null && d.received_liters !== undefined ? Math.round(d.received_liters).toLocaleString('es-AR') + ' L' : '—'}</b>${(d.received_at_ar || d.received_at) ? ' · ' + fleetDateTimeAR(d.received_at_ar || d.received_at) : ''}${d.receive_notes ? '<br>Obs.: '+d.receive_notes : ''}</div>
   ` : '';
   const win = window.open('', '_blank');
   win.document.write(`
@@ -2982,10 +3024,11 @@ async function saveFuelDispatchReception(dispatchId) {
       received_by: data.dispatch.received_by || received_by,
       received_liters: data.dispatch.received_liters === null || data.dispatch.received_liters === undefined ? received_liters : parseFloat(data.dispatch.received_liters),
       receive_notes: data.dispatch.receive_notes || receive_notes,
-      received_at: data.dispatch.received_at || new Date().toISOString(),
+      received_at: data.dispatch.received_at_ar || data.dispatch.received_at || fleetNowIsoAR(),
+      received_at_ar: data.dispatch.received_at_ar || null,
       destination_tank_id: data.dispatch.destination_tank_id || null,
       destination_stock_applied: data.dispatch.destination_stock_applied === true || data.dispatch.destination_stock_applied === 'true',
-      destination_stock_applied_at: data.dispatch.destination_stock_applied_at || new Date().toISOString(),
+      destination_stock_applied_at: data.dispatch.destination_stock_applied_at_ar || data.dispatch.destination_stock_applied_at || fleetNowIsoAR(),
     });
   }
   if (data.destination_tank) {
@@ -5709,8 +5752,7 @@ function _fuelPuedeVerificarTickets(role) {
 
 function _fuelTankEntryCode(entry) {
   if (!entry) return 'TC-0000';
-  const d = entry.created_at ? new Date(entry.created_at) : new Date();
-  const ymd = d.toISOString().slice(0,10).replace(/-/g,'');
+  const ymd = fleetYmdCompactAR(entry.created_at_ar || entry.created_at || entry.date);
   return `TC-${ymd}-${String(entry.id || '').slice(0,6).toUpperCase()}`;
 }
 
@@ -5721,9 +5763,7 @@ function _fuelTankTypeLabel(type) {
 
 function _fuelDispatchCode(d) {
   if (!d) return 'DI-0000';
-  const raw = d.created_at || new Date().toISOString();
-  const dt = new Date(raw);
-  const ymd = isNaN(dt.getTime()) ? todayISO().replace(/-/g,'') : dt.toISOString().slice(0,10).replace(/-/g,'');
+  const ymd = fleetYmdCompactAR(d.created_at_ar || d.created_at || d.date);
   return `DI-${ymd}-${String(d.id || '').slice(0,6).toUpperCase()}`;
 }
 
