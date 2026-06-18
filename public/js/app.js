@@ -2260,7 +2260,7 @@ function openFuelLoadModal() {
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Litros cargados</label><input class="form-input" type="number" placeholder="400" id="fl-liters"></div>
-      <div class="form-group" id="fl-measure-wrap"><label class="form-label" id="fl-measure-label" style="color:var(--text3)">🛰 Km tomados del GPS automáticamente</label><input class="form-input" id="fl-km" disabled placeholder="Se toma del GPS al guardar" style="opacity:.5"></div>
+      <div class="form-group" id="fl-measure-wrap"><label class="form-label" id="fl-measure-label">Km actual del odómetro *</label><input class="form-input" id="fl-km" type="number" min="0" step="1" placeholder="Ej: 263958"></div>
     </div>
     <div class="form-row" id="fl-ppu-wrap">
       <div class="form-group"><label class="form-label" id="fl-ppu-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1250" id="fl-ppu" value="1250"></div>
@@ -2307,12 +2307,14 @@ function updateFuelVehicleMeasure() {
     input.value = v?.km_current ? String(v.km_current) : '';
     input.style.opacity = '1';
   } else {
-    label.innerHTML = '🛰 Km tomados del GPS automáticamente';
-    input.disabled = true;
-    input.type = 'text';
-    input.placeholder = 'Se toma del GPS al guardar';
+    label.innerHTML = 'Km actual del odómetro *';
+    input.disabled = false;
+    input.type = 'number';
+    input.min = '0';
+    input.step = '1';
+    input.placeholder = 'Ej: 263958';
     input.value = '';
-    input.style.opacity = '.5';
+    input.style.opacity = '1';
   }
 }
 
@@ -2455,6 +2457,7 @@ async function saveFuelLoad() {
   const vehSel = (App.data.vehicles || []).find(x => String(x.id) === String(vehicle_id));
   const isForkFuel = vehSel && normalizeVehicleTypeLabel(vehSel.type) === 'autoelevador';
   if (isForkFuel && (!km || km <= 0)) { showToast('error','Ingresá las horas actuales del autoelevador'); return; }
+  if (!isForkFuel && type !== 'urea' && (!km || km <= 0)) { showToast('error','Ingresá el km actual del odómetro'); return; }
 
   // Solo descontar de cisterna si el lugar es cisterna
   const esCisterna = _fuelIsInternalTankPlace(place, type);
