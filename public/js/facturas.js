@@ -92,7 +92,7 @@
               </div>
               <div>
                 <label style="font-size:12px;color:#94a3b8">Fecha *</label>
-                <input id="fac-fecha" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <input id="fac-fecha" type="date" value="${window.FleetTime?.dateInputAR() || todayISO()}" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
               </div>
               <div>
                 <label style="font-size:12px;color:#94a3b8">Importe neto * <span style="color:#64748b">(pendiente c/IVA: $${fmt(pendienteFacturar)})</span></label>
