@@ -30,13 +30,57 @@
   function datosTransferenciaProveedor() {
     const f = window._pagoFacturaActual || {};
     const oc = window._pagoOcActual || {};
-    const bancoDestino = f.supplier_bank || f.supplier_name || oc.proveedor || '';
-    const cbuAlias = f.supplier_alias || f.supplier_cbu || '';
+    const bancoDestino = f.supplier_bank || oc.supplier_bank || f.supplier_name || oc.supplier_name || oc.proveedor || '';
+    const cbuAlias = f.supplier_alias || oc.supplier_alias || f.supplier_cbu || oc.supplier_cbu || '';
     return {
       bancoDestino,
       cbuAlias,
-      tieneDatos: !!(f.supplier_bank || f.supplier_alias || f.supplier_cbu)
+      tieneDatos: !!(f.supplier_bank || oc.supplier_bank || f.supplier_alias || oc.supplier_alias || f.supplier_cbu || oc.supplier_cbu)
     };
+  }
+
+  function formaPagoRaw(factura={}, oc={}) {
+    return String(
+      factura.forma_pago ||
+      factura.oc_forma_pago ||
+      oc.forma_pago ||
+      factura.condicion_forma_pago ||
+      factura.supplier_forma_pago ||
+      oc.supplier_forma_pago ||
+      ''
+    ).trim().toLowerCase();
+  }
+
+  function normalizarMetodoPagoParaTesoreria(forma, factura={}, oc={}) {
+    const fp = String(forma || '').trim().toLowerCase();
+    if (!fp) return '';
+    if (['transferencia','cheque','echeq','tarjeta','efectivo','otro'].includes(fp)) return fp;
+    if (['contado','cash'].includes(fp)) return 'efectivo';
+    if (['cuenta_corriente','cc','cta_cte','cta cte','cuenta corriente'].includes(fp)) {
+      const t = datosTransferenciaProveedor();
+      return t.tieneDatos ? 'transferencia' : '';
+    }
+    return '';
+  }
+
+  function metodoPagoPorDefecto(factura={}, oc={}) {
+    return normalizarMetodoPagoParaTesoreria(formaPagoRaw(factura, oc), factura, oc);
+  }
+
+  function metodoPagoFuenteTexto(factura={}, oc={}) {
+    const tieneFactura = !!factura.forma_pago;
+    const tieneOC = !!(factura.oc_forma_pago || oc.forma_pago || factura.condicion_forma_pago);
+    const tieneProveedor = !!(factura.supplier_forma_pago || oc.supplier_forma_pago);
+    if (tieneFactura) return 'tomado de la factura';
+    if (tieneOC) return 'tomado de la OC';
+    if (tieneProveedor) return 'tomado del proveedor';
+    return '';
+  }
+
+  function fechaInput(v) {
+    if (!v) return '';
+    const s = String(v).slice(0,10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
   }
 
   // ─────────────────────────────────────────────────────────
@@ -259,8 +303,16 @@
     const totalPagado = num(factura.monto_pagado || 0);
     const saldo = Math.max(0, +(totalFac - totalPagado).toFixed(2));
     const pagada = saldo <= 0.01;
-    const condicionOC = formaPagoLabel(oc.forma_pago || factura.oc_forma_pago || factura.forma_pago, oc.cc_dias ?? factura.oc_cc_dias ?? factura.cc_dias);
-    const condicionFactura = formaPagoLabel(factura.forma_pago || oc.forma_pago, factura.cc_dias ?? oc.cc_dias);
+    const metodoDefault = metodoPagoPorDefecto(factura, oc);
+    const fuenteMetodoDefault = metodoPagoFuenteTexto(factura, oc);
+    const condicionOC = formaPagoLabel(
+      oc.forma_pago || factura.oc_forma_pago || factura.condicion_forma_pago || factura.supplier_forma_pago || oc.supplier_forma_pago || factura.forma_pago,
+      oc.cc_dias ?? factura.oc_cc_dias ?? factura.condicion_cc_dias ?? factura.supplier_cc_dias ?? oc.supplier_cc_dias ?? factura.cc_dias
+    );
+    const condicionFactura = formaPagoLabel(
+      factura.forma_pago || oc.forma_pago || factura.supplier_forma_pago || oc.supplier_forma_pago,
+      factura.cc_dias ?? oc.cc_dias ?? factura.supplier_cc_dias ?? oc.supplier_cc_dias
+    );
     const vencimientoFactura = factura.vencimiento ? fechaAR(factura.vencimiento) : '—';
     const diasVenc = factura.dias_vencimiento;
     let vencimientoDetalle = vencimientoFactura;
@@ -323,14 +375,15 @@
               <div>
                 <label style="font-size:12px;color:var(--text3)">Método de pago *</label>
                 <select id="pago-metodo" class="form-select" onchange="cambiarMetodoPago()">
-                  <option value="">— Seleccionar —</option>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia" ${factura.forma_pago==='transferencia'?'selected':''}>Transferencia</option>
-                  <option value="cheque">Cheque físico</option>
-                  <option value="echeq">eCheq</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="otro">Otro</option>
+                  <option value="" ${!metodoDefault ? 'selected' : ''}>— Seleccionar —</option>
+                  <option value="efectivo" ${metodoDefault==='efectivo'?'selected':''}>Efectivo</option>
+                  <option value="transferencia" ${metodoDefault==='transferencia'?'selected':''}>Transferencia</option>
+                  <option value="cheque" ${metodoDefault==='cheque'?'selected':''}>Cheque físico</option>
+                  <option value="echeq" ${metodoDefault==='echeq'?'selected':''}>eCheq</option>
+                  <option value="tarjeta" ${metodoDefault==='tarjeta'?'selected':''}>Tarjeta</option>
+                  <option value="otro" ${metodoDefault==='otro'?'selected':''}>Otro</option>
                 </select>
+                ${metodoDefault && fuenteMetodoDefault ? `<div style="font-size:10px;color:var(--ok);margin-top:3px">Método sugerido ${fuenteMetodoDefault}. Podés cambiarlo si Tesorería paga de otra forma.</div>` : `<div style="font-size:10px;color:var(--text3);margin-top:3px">No hay método claro en proveedor/OC. Seleccionalo manualmente.</div>`}
               </div>
               <div>
                 <label style="font-size:12px;color:var(--text3)">Monto a pagar * <span style="color:var(--text3)">(saldo con IVA: $${fmt(saldo)})</span></label>
@@ -436,16 +489,16 @@
     } else if (metodo === 'cheque') {
       html = `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-cheque-banco" type="text" placeholder="Ej: Banco Nación" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-cheque-banco" type="text" value="${escAttr((window._pagoFacturaActual||{}).supplier_bank || (window._pagoOcActual||{}).supplier_bank || '')}" placeholder="Ej: Banco Nación" class="form-input"></div>
           <div><label style="font-size:12px;color:var(--text3)">N° cheque *</label><input id="pago-cheque-nro" type="text" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del cheque *</label><input id="pago-cheque-fecha" type="date" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del cheque *</label><input id="pago-cheque-fecha" type="date" value="${fechaInput((window._pagoFacturaActual||{}).vencimiento)}" class="form-input"></div>
         </div>`;
     } else if (metodo === 'echeq') {
       html = `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-echeq-banco" type="text" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Banco *</label><input id="pago-echeq-banco" type="text" value="${escAttr((window._pagoFacturaActual||{}).supplier_bank || (window._pagoOcActual||{}).supplier_bank || '')}" class="form-input"></div>
           <div><label style="font-size:12px;color:var(--text3)">N° eCheq *</label><input id="pago-echeq-nro" type="text" class="form-input"></div>
-          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del eCheq *</label><input id="pago-echeq-fecha" type="date" class="form-input"></div>
+          <div><label style="font-size:12px;color:var(--text3)">Fecha de pago del eCheq *</label><input id="pago-echeq-fecha" type="date" value="${fechaInput((window._pagoFacturaActual||{}).vencimiento)}" class="form-input"></div>
         </div>`;
     } else if (metodo === 'tarjeta') {
       html = `
