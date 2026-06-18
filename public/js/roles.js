@@ -569,6 +569,14 @@ function _mapFuelLog(f) {
   };
 }
 
+function _rolesFleetDisplayAR(value) {
+  if (!value) return '—';
+  const txt = String(value).trim();
+  const m = txt.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+  if (m && !/[zZ]|[+-]\d{2}:?\d{2}/.test(txt.slice(10))) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+  return window.FleetTime?.displayAR ? window.FleetTime.displayAR(value) : txt.slice(0,16).replace('T',' ');
+}
+
 function _mapTankEntry(e) {
   return {
     id:              e.id,
@@ -580,8 +588,9 @@ function _mapTankEntry(e) {
     notes:           e.notes || '',
     previous_l:      parseFloat(e.previous_l) || 0,
     new_l:           parseFloat(e.new_l) || 0,
-    created_at:      e.created_at || null,
-    date:            e.created_at ? (window.FleetTime?.displayAR(e.created_at) || String(e.created_at).slice(0,16).replace('T',' ')) : '—',
+    created_at:      e.created_at_ar || e.created_at || null,
+    created_at_ar:   e.created_at_ar || null,
+    date:            _rolesFleetDisplayAR(e.created_at_ar || e.created_at),
     tank_id:         e.tank_id || null,
     tank_location:   e.tank_location || 'Cisterna',
     created_by_name: e.created_by_name || '—',
@@ -606,14 +615,17 @@ function _mapFuelDispatch(d) {
     received_by:        d.received_by || '',
     received_liters:    d.received_liters === null || d.received_liters === undefined ? null : parseFloat(d.received_liters),
     receive_notes:      d.receive_notes || '',
-    received_at:        d.received_at || null,
-    created_at:         d.created_at || null,
-    date:               d.created_at ? (window.FleetTime?.displayAR(d.created_at) || String(d.created_at).slice(0,16).replace('T',' ')) : '—',
+    received_at:        d.received_at_ar || d.received_at || null,
+    received_at_ar:     d.received_at_ar || null,
+    created_at:         d.created_at_ar || d.created_at || null,
+    created_at_ar:      d.created_at_ar || null,
+    date:               _rolesFleetDisplayAR(d.created_at_ar || d.created_at),
     tank_id:            d.tank_id || null,
     tank_location:      d.tank_location || 'Cisterna',
     destination_tank_id: d.destination_tank_id || null,
     destination_stock_applied: d.destination_stock_applied === true || d.destination_stock_applied === 'true',
-    destination_stock_applied_at: d.destination_stock_applied_at || null,
+    destination_stock_applied_at: d.destination_stock_applied_at_ar || d.destination_stock_applied_at || null,
+    destination_stock_applied_at_ar: d.destination_stock_applied_at_ar || null,
     created_by_name:    d.created_by_name || '—',
     _raw:               d,
   };
