@@ -473,7 +473,7 @@ auditorRouter.get('/gps-hoy', authenticate, canAudit, async (req, res) => {
       ORDER BY km_current DESC`);
     
     // Calcular km totales aproximados de hoy basándose en diferencias de odómetro
-    const hoy = new Date().toISOString().slice(0,10);
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
     
     // Cargas de combustible hoy para cruzar con km
     const fuelHoy = await query(`
