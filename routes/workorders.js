@@ -32,6 +32,13 @@ const { validateUUID, sensitiveLimiter } = require('../middleware/security');
     await query(`CREATE INDEX IF NOT EXISTS idx_wol_wo ON work_order_labor(wo_id)`).catch(()=>{});
     await query(`CREATE INDEX IF NOT EXISTS idx_wol_user ON work_order_labor(user_id)`).catch(()=>{});
     await query(`CREATE INDEX IF NOT EXISTS idx_wol_date ON work_order_labor(work_date)`).catch(()=>{});
+
+    // Índices del listado principal de OTs. El listado siempre ordena por opened_at DESC
+    // y filtra muy seguido por status; el compuesto cubre ese caso. asset_id y reporter_id
+    // se filtran (OTs de un activo/edificio, y "el chofer ve solo las suyas") y no tenían índice.
+    await query(`CREATE INDEX IF NOT EXISTS idx_wo_status_opened ON work_orders(status, opened_at DESC)`).catch(()=>{});
+    await query(`CREATE INDEX IF NOT EXISTS idx_wo_asset ON work_orders(asset_id)`).catch(()=>{});
+    await query(`CREATE INDEX IF NOT EXISTS idx_wo_reporter ON work_orders(reporter_id)`).catch(()=>{});
   } catch(e) { /* silent */ }
 })();
 
