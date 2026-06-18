@@ -8932,7 +8932,7 @@ async function loadPOList() {
   try {
     // Cache-busting para que el navegador siempre traiga datos frescos del server
     const ts = Date.now();
-    const res = await apiFetch('/api/purchase-orders?_t=' + ts);
+    const res = await apiFetch('/api/purchase-orders?limit=100&_t=' + ts);
     if (!res.ok) {
       const tbody = document.getElementById('po-tbody');
       if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar OCs</td></tr>`;
@@ -11137,10 +11137,17 @@ async function saveAreasConfig() {
    OC EXTRAS v1 — forma de pago, cc_dias, moneda + sucursales API
    ═══════════════════════════════════════════════════════════ */
 
-async function loadSucursalesFromAPI() {
+async function loadSucursalesFromAPI(force) {
   try {
+    // Evita pedir sucursales cada vez que se abre la solapa de OC.
+    // Las sucursales/áreas cambian poco y este cache mejora la apertura de la pantalla.
+    const now = Date.now();
+    if (!force && App._sucursalesCacheAt && (now - App._sucursalesCacheAt) < 5 * 60 * 1000 && App.config?.bases?.length) {
+      return;
+    }
+
     const res = await apiFetch('/api/sucursales');
-    if (res.ok === false) return;
+    if (!res || res.ok === false) return;
     const rows = await res.json();
     if (Array.isArray(rows) === false) return;
     App.config = App.config || {};
@@ -11149,6 +11156,7 @@ async function loadSucursalesFromAPI() {
     rows.forEach(function(r){
       App.config.areas[r.nombre] = Array.isArray(r.areas) ? r.areas : [];
     });
+    App._sucursalesCacheAt = now;
   } catch(e) { console.warn('loadSucursalesFromAPI', e); }
 }
 
