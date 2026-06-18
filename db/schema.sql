@@ -672,6 +672,10 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_order_items(po_id);
+CREATE INDEX IF NOT EXISTS idx_poi_po_fast ON purchase_order_items(po_id);
+CREATE INDEX IF NOT EXISTS idx_po_payment_status_created ON purchase_orders(payment_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_po_invoice_status_created ON purchase_orders(invoice_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_po_delivery_status_created ON purchase_orders(delivery_status, created_at DESC);
 
 
 -- Recepciones de mercadería por OC.
