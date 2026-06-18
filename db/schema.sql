@@ -432,6 +432,8 @@ CREATE TABLE IF NOT EXISTS work_order_parts (
 ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID;
 CREATE INDEX IF NOT EXISTS idx_wop_wo ON work_order_parts(wo_id);
 CREATE INDEX IF NOT EXISTS idx_wop_po ON work_order_parts(po_id);
+CREATE INDEX IF NOT EXISTS idx_wop_po_origin ON work_order_parts(po_id, origin);
+CREATE INDEX IF NOT EXISTS idx_wop_po_origin ON work_order_parts(po_id, origin);
 CREATE INDEX IF NOT EXISTS idx_wo_external_po ON work_orders(external_po_id);
 
 -- Mano de obra cargada en cada OT
@@ -663,6 +665,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     po_id               UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
     stock_item_id       UUID,
+    work_order_part_id UUID,
     descripcion         TEXT NOT NULL,
     cantidad            NUMERIC(10,2) DEFAULT 1,
     unidad              VARCHAR(20) DEFAULT 'un',
@@ -672,8 +675,10 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID;
 CREATE INDEX IF NOT EXISTS idx_poi_po ON purchase_order_items(po_id);
 CREATE INDEX IF NOT EXISTS idx_poi_po_fast ON purchase_order_items(po_id);
+CREATE INDEX IF NOT EXISTS idx_poi_work_order_part ON purchase_order_items(work_order_part_id);
 CREATE INDEX IF NOT EXISTS idx_po_payment_status_created ON purchase_orders(payment_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_po_invoice_status_created ON purchase_orders(invoice_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_po_delivery_status_created ON purchase_orders(delivery_status, created_at DESC);
@@ -992,37 +997,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_user    ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_table   ON audit_log(table_name, record_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
-
--- ══════════════════════════════════════════════════════════════════════
--- 14. ÍNDICES DE PERFORMANCE
--- ══════════════════════════════════════════════════════════════════════
-
--- Órdenes de trabajo: aceleran listados por estado, vehículo, activo, tipo y prioridad,
--- manteniendo el orden por fecha de apertura que usa la pantalla.
-CREATE INDEX IF NOT EXISTS idx_wo_status_opened   ON work_orders(status, opened_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wo_vehicle_opened  ON work_orders(vehicle_id, opened_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wo_asset_opened    ON work_orders(asset_id, opened_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wo_tipo_opened     ON work_orders(ot_tipo, opened_at DESC);
-CREATE INDEX IF NOT EXISTS idx_wo_priority_opened ON work_orders(priority, opened_at DESC);
-
--- Documentos: acelera vencimientos, filtros por estado y documentos por entidad.
-CREATE INDEX IF NOT EXISTS idx_documents_status_expiry        ON documents(status, expiry_date);
-CREATE INDEX IF NOT EXISTS idx_documents_entity_status_expiry ON documents(entity_type, entity_id, status, expiry_date);
-
--- Vehículos: la columna base existe en bases operativas actuales; este bloque evita romper
--- instalaciones viejas donde todavía no exista.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'vehicles'
-      AND column_name = 'base'
-  ) THEN
-    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_vehicles_base_active ON vehicles(base, active)';
-  END IF;
-END $$;
 
 -- ══════════════════════════════════════════════════════════════════════
 -- FIN DEL ESQUEMA
