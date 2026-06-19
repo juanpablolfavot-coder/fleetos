@@ -10009,8 +10009,8 @@ function _poOnSupplierChange(value) {
     if (ccdiasEl && ccdias) ccdiasEl.value = ccdias;
     if (monedaEl && moneda) monedaEl.value = moneda;
 
-    if (fpagoEl && fpago && typeof updatePOCCVisibility === 'function') {
-      updatePOCCVisibility();
+    if (fpagoEl && fpago && typeof _ocToggleCC === 'function') {
+      _ocToggleCC('po');
     }
   }, 50);
 
@@ -10774,7 +10774,7 @@ function getPODetailExtraFields() {
   var monEl = document.getElementById('pod-moneda');
   if (fpEl) {
     out.forma_pago = fpEl.value || null;
-    if (out.forma_pago === 'cuenta_corriente') {
+    if (out.forma_pago === 'cuenta_corriente' || out.forma_pago === 'cheque' || out.forma_pago === 'echeq') {
       out.cc_dias = (ccEl && ccEl.value !== '') ? parseInt(ccEl.value, 10) : null;
     } else {
       out.cc_dias = null;
@@ -11338,7 +11338,8 @@ function _ocFormaPagoLabel(fp, ccDias) {
   if (fp === 'contado') return 'Contado';
   if (fp === 'cuenta_corriente') return 'Cuenta corriente a ' + (ccDias || 0) + ' días';
   if (fp === 'transferencia') return 'Transferencia';
-  if (fp === 'cheque') return 'Cheque';
+  if (fp === 'cheque') return ccDias ? 'Cheque a ' + ccDias + ' días' : 'Cheque';
+  if (fp === 'echeq')  return ccDias ? 'E-cheq a ' + ccDias + ' días' : 'E-cheq';
   return '—';
 }
 
@@ -11346,7 +11347,15 @@ function _ocToggleCC(prefix) {
   var sel = document.getElementById(prefix + '-forma-pago');
   var fld = document.getElementById(prefix + '-cc-dias-field');
   if (sel == null || fld == null) return;
-  fld.style.display = (sel.value === 'cuenta_corriente') ? '' : 'none';
+  // El plazo en días aplica a cuenta corriente, cheque y e-cheq.
+  var conPlazo = (sel.value === 'cuenta_corriente' || sel.value === 'cheque' || sel.value === 'echeq');
+  fld.style.display = conPlazo ? '' : 'none';
+  var lbl = document.getElementById(prefix + '-cc-dias-label');
+  if (lbl != null) {
+    lbl.textContent = (sel.value === 'cheque') ? 'Días del cheque'
+                    : (sel.value === 'echeq')  ? 'Días del e-cheq'
+                    : 'Días CC';
+  }
 }
 
 function _ocExtrasHTML(prefix, values) {
@@ -11354,7 +11363,8 @@ function _ocExtrasHTML(prefix, values) {
   var fp  = values.forma_pago || '';
   var ccd = (values.cc_dias == null) ? '' : values.cc_dias;
   var mon = values.moneda || 'ARS';
-  var ccDisplay = (fp === 'cuenta_corriente') ? '' : 'display:none';
+  var ccDisplay = (fp === 'cuenta_corriente' || fp === 'cheque' || fp === 'echeq') ? '' : 'display:none';
+  var ccLabel   = (fp === 'cheque') ? 'Días del cheque' : (fp === 'echeq') ? 'Días del e-cheq' : 'Días CC';
   var html = ''
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
     +   '<div class="form-group">'
@@ -11365,10 +11375,11 @@ function _ocExtrasHTML(prefix, values) {
     +       '<option value="cuenta_corriente">Cuenta corriente</option>'
     +       '<option value="transferencia">Transferencia</option>'
     +       '<option value="cheque">Cheque</option>'
+    +       '<option value="echeq">E-cheq</option>'
     +     '</select>'
     +   '</div>'
     +   '<div class="form-group" id="' + prefix + '-cc-dias-field" style="' + ccDisplay + '">'
-    +     '<label class="form-label">Dias CC</label>'
+    +     '<label class="form-label" id="' + prefix + '-cc-dias-label">' + ccLabel + '</label>'
     +     '<input class="form-input" type="number" min="0" step="1" id="' + prefix + '-cc-dias" value="' + ccd + '" placeholder="30">'
     +   '</div>'
     +   '<div class="form-group">'
@@ -11406,7 +11417,7 @@ function getPOExtraFields() {
     forma_pago: fp ? (fp.value || null) : null,
     moneda:     mon ? (mon.value || 'ARS') : 'ARS'
   };
-  if (out.forma_pago === 'cuenta_corriente') {
+  if (out.forma_pago === 'cuenta_corriente' || out.forma_pago === 'cheque' || out.forma_pago === 'echeq') {
     out.cc_dias = (ccd && ccd.value !== '') ? parseInt(ccd.value, 10) : null;
   } else {
     out.cc_dias = null;
@@ -11737,7 +11748,7 @@ function _supRenderRow(s) {
 
   const rating = s.rating ? `<span style="font-family:var(--mono);color:var(--warn);font-weight:700">${parseFloat(s.rating).toFixed(1)}</span>` : '<span style="color:var(--text3)">—</span>';
 
-  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC ${s.cc_dias||'—'}d`, cheque: 'Cheque', transferencia: 'Transf.' }[s.forma_pago] || '—';
+  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC ${s.cc_dias||'—'}d`, cheque: 'Cheque', echeq: 'E-cheq', transferencia: 'Transf.' }[s.forma_pago] || '—';
 
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
@@ -11929,6 +11940,7 @@ function _openSupplierModal(existing) {
             <option value="contado" ${s.forma_pago==='contado'?'selected':''}>Contado</option>
             <option value="cuenta_corriente" ${s.forma_pago==='cuenta_corriente'?'selected':''}>Cuenta corriente</option>
             <option value="cheque" ${s.forma_pago==='cheque'?'selected':''}>Cheque</option>
+            <option value="echeq" ${s.forma_pago==='echeq'?'selected':''}>E-cheq</option>
             <option value="transferencia" ${s.forma_pago==='transferencia'?'selected':''}>Transferencia</option>
           </select>
         </div>
@@ -12081,7 +12093,7 @@ async function openSupplierDetail(id) {
   const sup = (App.supTable.rawData || []).find(s => s.id === id);
   if (!sup) { showToast('error', 'Proveedor no encontrado'); return; }
 
-  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC a ${sup.cc_dias||'—'} días`, cheque: 'Cheque', transferencia: 'Transferencia' }[sup.forma_pago] || '—';
+  const formaPagoLabel = { contado: 'Contado', cuenta_corriente: `CC a ${sup.cc_dias||'—'} días`, cheque: 'Cheque', echeq: 'E-cheq', transferencia: 'Transferencia' }[sup.forma_pago] || '—';
   const ivaLabel = { responsable_inscripto: 'Responsable Inscripto', monotributo: 'Monotributo', exento: 'Exento', consumidor_final: 'Consumidor final' }[sup.iva_condition] || '—';
   const statusBadge = { activo: '✅ Activo', suspendido: '⏸ Suspendido', blacklist: '🚫 Blacklist' }[sup.status] || sup.status;
 
