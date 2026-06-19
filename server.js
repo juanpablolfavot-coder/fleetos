@@ -140,7 +140,15 @@ app.get(/^(?!\/api).*/, (req, res) => {
   res.send(html);
 });
 
-app.use((err,req,res,next)=>{console.error('ERR:',err.message);res.status(err.status||500).json({error:err.message});});
+app.use((err,req,res,next)=>{
+  // Log interno completo (queda en los logs del server), pero al cliente NO le
+  // exponemos detalles internos: errores 5xx (incluidos los de PostgreSQL) se
+  // devuelven con mensaje genérico. Los 4xx conservan su texto porque son
+  // validaciones pensadas para el usuario.
+  console.error('ERR:',err.message);
+  const status = err.status || 500;
+  res.status(status).json({ error: status >= 500 ? 'Error del servidor' : err.message });
+});
 
 // ── Endpoints GPS ──
 // Importar middleware de autenticación
