@@ -199,14 +199,43 @@ router.get('/movements', authenticate, async (req, res) => {
 router.post('/', authenticate, requireRole(...ROLES_STOCK_ADMIN), async (req, res) => {
   try {
     const p = normalizeStockPayload(req.body, req);
-    if (!p.code || !p.name) return res.status(400).json({ error: 'Código y descripción son requeridos' });
+    if (!p.name) return res.status(400).json({ error: 'La descripción es requerida' });
 
-    const result = await query(
-      `INSERT INTO stock_items (code, name, category, unit, qty_current, qty_min, qty_reorder, unit_cost, supplier, base_location, area)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING *`,
-      [p.code, p.name, p.category, p.unit, p.qty_current, p.qty_min, p.qty_reorder, p.unit_cost, p.supplier, p.base_location, p.area]
-    );
+    const autoCode = !p.code; // si no vino código, lo genera el sistema
+    // Próximo código numérico libre en esa sucursal + área (ej: 01, 02, 03…)
+    async function nextCode() {
+      const r = await query(
+        `SELECT COALESCE(MAX(code::int),0)+1 AS next
+           FROM stock_items
+          WHERE base_location=$1 AND area=$2 AND active=TRUE AND code ~ '^[0-9]+$'`,
+        [p.base_location, p.area]
+      );
+      return String(parseInt(r.rows[0]?.next || 1, 10) || 1).padStart(2, '0');
+    }
+
+    let code = p.code || await nextCode();
+    let result = null;
+    for (let intento = 0; intento < 6; intento++) {
+      try {
+        result = await query(
+          `INSERT INTO stock_items (code, name, category, unit, qty_current, qty_min, qty_reorder, unit_cost, supplier, base_location, area)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           RETURNING *`,
+          [code, p.name, p.category, p.unit, p.qty_current, p.qty_min, p.qty_reorder, p.unit_cost, p.supplier, p.base_location, p.area]
+        );
+        break;
+      } catch (e) {
+        // Código repetido: si lo escribió el usuario avisamos; si es automático, reintentamos con el siguiente
+        if (e.code === '23505') {
+          if (!autoCode) return res.status(409).json({ error: 'Ya existe ese código en la misma sucursal y área' });
+          code = await nextCode();
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (!result) return res.status(409).json({ error: 'No se pudo generar un código libre, probá de nuevo' });
+
     if (p.qty_current > 0) {
       await query(
         `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
