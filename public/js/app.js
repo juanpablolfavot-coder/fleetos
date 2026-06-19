@@ -9184,9 +9184,9 @@ function _poSort(key) {
 }
 
 function _ocPrioridadBadge(po) {
-  const p = String(po.prioridad || 'Normal');
-  if (p === 'Urgente') return `<span title="Prioridad Urgente — indicada por el área solicitante" style="background:rgba(239,68,68,.18);color:#ef4444;border:1px solid rgba(239,68,68,.45);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🔴 URGENTE</span>`;
-  if (p === 'Media')   return `<span title="Prioridad Media" style="background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.4);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🟡 MEDIA</span>`;
+  const p = String(po.prioridad || 'Normal').trim().toLowerCase();
+  if (p === 'urgente' || p === 'critica' || p === 'crítica') return `<span title="Prioridad Urgente — indicada por el área solicitante" style="background:rgba(239,68,68,.18);color:#ef4444;border:1px solid rgba(239,68,68,.45);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🔴 URGENTE</span>`;
+  if (p === 'media' || p === 'medio')   return `<span title="Prioridad Media" style="background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.4);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🟡 MEDIA</span>`;
   return `<span title="Prioridad Normal" style="background:var(--bg4);color:var(--text3);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:600;font-family:var(--mono);white-space:nowrap">NORMAL</span>`;
 }
 
