@@ -4004,10 +4004,15 @@ function stockSelectHTML(id, opts, selected, allLabel, key, disabled) {
 function stockCatInputHTML(id, value) {
   const managed = (App.config && Array.isArray(App.config.stock_categories)) ? App.config.stock_categories : [];
   const fallback = ['Filtros','Lubricantes','Mecánico','Frenos','Eléctrico','Tornillería','Administración','Herramientas'];
-  const cats = managed.length ? managed : fallback;
-  const dlId = id + '-list';
-  return '<input class="form-input" id="' + id + '" list="' + dlId + '" value="' + stockFormValue(value || '') + '" placeholder="Elegí o escribí una categoría">'
-       + '<datalist id="' + dlId + '">' + cats.map(c => '<option value="' + stockFormValue(c) + '">').join('') + '</datalist>';
+  const cats = (managed.length ? managed : fallback).slice();
+  const cur = String(value || '').trim();
+  // Incluir el valor actual si no está en la lista (ítems viejos con categoría libre)
+  if (cur && !cats.some(c => String(c).toLowerCase() === cur.toLowerCase())) cats.unshift(cur);
+  const opts = cats.map(c => '<option value="' + stockFormValue(c) + '"' + (c === cur ? ' selected' : '') + '>' + stockFormValue(c) + '</option>').join('');
+  return '<select class="form-select" id="' + id + '">'
+       + (cur ? '' : '<option value="">— Elegí categoría —</option>')
+       + opts
+       + '</select>';
 }
 
 function openStockCategoriasModal() {
@@ -4413,7 +4418,7 @@ function openNewStockModal() {
   const defaultArea = stockCurrentFilters().area !== 'all' ? stockCurrentFilters().area : 'Depósito';
   openModal('Registrar nuevo ítem de stock', ''
     + stockLocationControls('ns', defaultSucursal === 'all' ? null : defaultSucursal, defaultArea)
-    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="FLT-ACE-003" id="ns-code"></div><div class="form-group"><label class="form-label">Categoría</label>'+stockCatInputHTML('ns-cat')+'</div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno <span style="color:var(--text3);font-weight:400">(opcional)</span></label><input class="form-input" placeholder="Automático si lo dejás vacío" id="ns-code"></div><div class="form-group"><label class="form-label">Categoría</label>'+stockCatInputHTML('ns-cat')+'</div></div>'
     + '<div class="form-group"><label class="form-label">Descripción completa</label><input class="form-input" placeholder="Nombre completo del repuesto o insumo" id="ns-name"></div>'
     + '<div class="form-row form-row-3"><div class="form-group"><label class="form-label">Stock inicial</label><input class="form-input" type="number" placeholder="0" id="ns-qty" step="0.01"></div><div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min" step="0.01"></div><div class="form-group"><label class="form-label">Unidad</label><select class="form-select" id="ns-unit"><option>un</option><option>L</option><option>kg</option><option>jgo</option><option>m</option></select></div></div>'
     + '<div class="form-row"><div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="0" id="ns-cost" step="0.01"></div><div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="ns-supplier"></div></div>',
@@ -4432,7 +4437,6 @@ async function saveNewStockItem() {
   const min_qty = parseFloat(document.getElementById('ns-min')?.value) || 0;
   const cost = parseFloat(document.getElementById('ns-cost')?.value) || 0;
   const supplier = (document.getElementById('ns-supplier')?.value || '').trim();
-  if (!code) { showToast('error','Ingresá el código del ítem'); return; }
   if (!name) { showToast('error','Ingresá el nombre / descripción del ítem'); return; }
   const loc = stockPayloadLocation('ns');
   const res = await apiFetch('/api/stock', { method:'POST', body: JSON.stringify({ code, name, category, unit, qty_current: qty, qty_min: min_qty, qty_reorder: Math.max(min_qty * 2, 1), unit_cost: cost, supplier: supplier || null, ...loc }) });
