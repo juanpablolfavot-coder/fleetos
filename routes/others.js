@@ -1052,13 +1052,14 @@ function ensureAppConfigTable() {
 configRouter.get('/', authenticate, async (req, res) => {
   try {
     await ensureAppConfigTable();
-    const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas')`);
+    const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas','stock_categories')`);
     const map = Object.fromEntries(cfg.rows.map(r => [r.key, r.value]));
     res.json({
       bases: Array.isArray(map.bases) ? map.bases : DEFAULT_BASES,
       vehicle_types: mergeVehicleTypes(map.vehicle_types || DEFAULT_VTYPES),
       labor_rate: map.labor_rate !== undefined ? parseFloat(map.labor_rate) : 0,
       areas: map.areas && typeof map.areas === 'object' ? map.areas : {},
+      stock_categories: Array.isArray(map.stock_categories) ? map.stock_categories : [],
     });
   } catch (err) {
     console.error('[config GET]', err.message);
@@ -1069,8 +1070,16 @@ configRouter.get('/', authenticate, async (req, res) => {
 configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   try {
     await ensureAppConfigTable();
-    const { bases, vehicle_types, labor_rate, areas } = req.body;
+    const { bases, vehicle_types, labor_rate, areas, stock_categories } = req.body;
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
+    if (Array.isArray(stock_categories)) {
+      // Lista de categorías de stock (definida por dueño/gerencia). Limpia, sin vacíos ni duplicados.
+      const seen = {};
+      const cats = stock_categories
+        .map(c => String(c || '').trim())
+        .filter(c => c && !seen[c.toLowerCase()] && (seen[c.toLowerCase()] = true));
+      await query(`INSERT INTO app_config(key,value) VALUES('stock_categories',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(cats)]);
+    }
     if (vehicle_types) await query(`INSERT INTO app_config(key,value) VALUES('vehicle_types',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(mergeVehicleTypes(vehicle_types))]);
     if (areas && typeof areas === 'object') {
       // Validación básica: debe ser objeto con arrays de strings
