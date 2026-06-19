@@ -8659,6 +8659,7 @@ async function renderAuditorComparativo(el) {
             <th>Período</th>
             <th style="color:#3b82f6">Combustible</th>
             <th style="color:#3b82f6">Litros</th>
+            <th style="color:#06b6d4">Urea</th>
             <th style="color:#f59e0b">Mantenimiento</th>
             <th style="color:#f59e0b">OTs</th>
             <th style="font-weight:700">Total</th>
@@ -8672,6 +8673,7 @@ async function renderAuditorComparativo(el) {
               <td class="td-mono" style="font-weight:600">${m.label.toUpperCase()}</td>
               <td class="td-mono" style="color:#3b82f6">${m.costo_combustible>0?'$'+Math.round(m.costo_combustible).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono" style="color:#3b82f6">${m.litros>0?Math.round(m.litros).toLocaleString()+' L':'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${m.costo_urea>0?'$'+Math.round(m.costo_urea).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono" style="color:#f59e0b">${m.costo_mantenimiento>0?'$'+Math.round(m.costo_mantenimiento).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono">${m.ots||'—'}</td>
               <td class="td-mono" style="font-weight:700">${m.total>0?'$'+Math.round(m.total).toLocaleString('es-AR'):'—'}</td>
