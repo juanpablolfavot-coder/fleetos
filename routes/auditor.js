@@ -31,7 +31,7 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
     await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, driver_name VARCHAR(100), vehicle_code VARCHAR(20), km_at_check INTEGER, items JSONB DEFAULT '[]', observations TEXT, all_ok BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
 
-    const [fuel, ots, stock, checklists, vehiculos, accesos] = await Promise.all([
+    const [fuel, ots, stock, checklists, vehiculos, accesos, ocsMes, facturadoMes, pagadoMes, deuda] = await Promise.all([
       // Combustible del mes
       query(`SELECT 
         COUNT(*) as cargas,
@@ -62,6 +62,35 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
       // Accesos del mes
       query(`SELECT COUNT(DISTINCT u.id) as usuarios_activos
         FROM users u WHERE u.last_login BETWEEN $1 AND $2`, [desde, hasta + ' 23:59:59']),
+      // OCs creadas en el mes, por estado
+      query(`SELECT COUNT(*) AS total,
+        COUNT(CASE WHEN status IN ('pendiente_cotizacion','en_cotizacion') THEN 1 END) AS pendientes,
+        COUNT(CASE WHEN status='aprobada_compras' THEN 1 END) AS aprobadas,
+        COUNT(CASE WHEN status='recibida' THEN 1 END) AS recibidas
+        FROM purchase_orders WHERE created_at BETWEEN $1 AND $2`, [desde, hasta + ' 23:59:59']).catch(()=>({rows:[{}]})),
+      // Facturado del mes (con IVA) según fecha de factura
+      query(`SELECT COUNT(*) AS facturas,
+        COALESCE(SUM(ROUND(invoice_monto * (1 + COALESCE(iva_pct,0)/100.0), 2)),0) AS facturado_con_iva
+        FROM purchase_order_invoices WHERE invoice_fecha BETWEEN $1 AND $2`, [desde, hasta]).catch(()=>({rows:[{}]})),
+      // Pagado del mes
+      query(`SELECT COUNT(*) AS pagos, COALESCE(SUM(monto),0) AS pagado
+        FROM purchase_order_payments WHERE paid_at BETWEEN $1 AND $2`, [desde, hasta + ' 23:59:59']).catch(()=>({rows:[{}]})),
+      // Deuda total y vencimientos (todas las facturas no saldadas, no solo del mes)
+      query(`
+        WITH fac AS (
+          SELECT
+            ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0)/100.0), 2) AS total,
+            COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p WHERE p.invoice_id=f.id),0) AS pagado,
+            f.vencimiento
+          FROM purchase_order_invoices f
+        )
+        SELECT
+          COALESCE(SUM(GREATEST(total-pagado,0)),0) AS deuda_total,
+          COALESCE(SUM(CASE WHEN total-pagado > 0.01 AND vencimiento < CURRENT_DATE THEN total-pagado ELSE 0 END),0) AS deuda_vencida,
+          COUNT(CASE WHEN total-pagado > 0.01 AND vencimiento < CURRENT_DATE THEN 1 END) AS facturas_vencidas,
+          COALESCE(SUM(CASE WHEN total-pagado > 0.01 AND vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' THEN total-pagado ELSE 0 END),0) AS deuda_por_vencer,
+          COUNT(CASE WHEN total-pagado > 0.01 AND vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' THEN 1 END) AS facturas_por_vencer
+        FROM fac`).catch(()=>({rows:[{}]})),
     ]);
 
     const flota = {};
@@ -75,6 +104,21 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
       stock:       stock.rows[0],
       checklists:  checklists.rows[0],
       usuarios_activos: parseInt(accesos.rows[0]?.usuarios_activos || 0),
+      compras: {
+        ocs_total:      parseInt(ocsMes.rows[0]?.total || 0),
+        ocs_pendientes: parseInt(ocsMes.rows[0]?.pendientes || 0),
+        ocs_aprobadas:  parseInt(ocsMes.rows[0]?.aprobadas || 0),
+        ocs_recibidas:  parseInt(ocsMes.rows[0]?.recibidas || 0),
+        facturado_mes:  parseFloat(facturadoMes.rows[0]?.facturado_con_iva || 0),
+        facturas_mes:   parseInt(facturadoMes.rows[0]?.facturas || 0),
+        pagado_mes:     parseFloat(pagadoMes.rows[0]?.pagado || 0),
+        pagos_mes:      parseInt(pagadoMes.rows[0]?.pagos || 0),
+        deuda_total:    parseFloat(deuda.rows[0]?.deuda_total || 0),
+        deuda_vencida:  parseFloat(deuda.rows[0]?.deuda_vencida || 0),
+        facturas_vencidas:  parseInt(deuda.rows[0]?.facturas_vencidas || 0),
+        deuda_por_vencer:   parseFloat(deuda.rows[0]?.deuda_por_vencer || 0),
+        facturas_por_vencer: parseInt(deuda.rows[0]?.facturas_por_vencer || 0),
+      },
     });
   } catch(err) { console.error('auditor resumen:', err.message); res.status(500).json({ error: err.message }); }
 });
