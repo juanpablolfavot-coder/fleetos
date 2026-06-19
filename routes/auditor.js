@@ -377,7 +377,13 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
       const [fuel, ots] = await Promise.all([
-        query(`SELECT COALESCE(SUM(liters*price_per_l),0) as costo_fuel, COALESCE(SUM(liters),0) as litros, COUNT(*) as cargas FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
+        query(`SELECT
+                 COALESCE(SUM(liters*price_per_l) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as costo_fuel,
+                 COALESCE(SUM(liters)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as litros,
+                 COUNT(*)                         FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea')    as cargas,
+                 COALESCE(SUM(liters*price_per_l) FILTER (WHERE LOWER(fuel_type) = 'urea'),0)              as costo_urea,
+                 COALESCE(SUM(liters)             FILTER (WHERE LOWER(fuel_type) = 'urea'),0)              as litros_urea
+               FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
         query(`SELECT COALESCE(SUM(labor_cost+parts_cost),0) as costo_mant, COUNT(*) as ots FROM work_orders WHERE opened_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
       ]);
 
@@ -387,9 +393,11 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         costo_combustible: parseFloat(fuel.rows[0].costo_fuel),
         litros:            parseFloat(fuel.rows[0].litros),
         cargas:            parseInt(fuel.rows[0].cargas),
+        costo_urea:        parseFloat(fuel.rows[0].costo_urea),
+        litros_urea:       parseFloat(fuel.rows[0].litros_urea),
         costo_mantenimiento: parseFloat(ots.rows[0].costo_mant),
         ots:               parseInt(ots.rows[0].ots),
-        total:             parseFloat(fuel.rows[0].costo_fuel) + parseFloat(ots.rows[0].costo_mant),
+        total:             parseFloat(fuel.rows[0].costo_fuel) + parseFloat(fuel.rows[0].costo_urea) + parseFloat(ots.rows[0].costo_mant),
       });
     }
     res.json({ meses });
