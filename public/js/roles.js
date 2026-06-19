@@ -808,6 +808,7 @@ async function loadInitialData() {
       App.config.vehicle_types = _rolesMergeVehicleTypes(cfg.vehicle_types || DEFAULT_VEHICLE_TYPES_ROLES);
       App.config.labor_rate    = parseFloat(cfg.labor_rate) || 0;
       App.config.areas         = cfg.areas         || {};
+      App.config.stock_categories = Array.isArray(cfg.stock_categories) ? cfg.stock_categories : [];
     }
 
     // Inicializar arrays si alguna API falló
