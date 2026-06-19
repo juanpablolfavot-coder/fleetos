@@ -45,6 +45,7 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(30)`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS cc_dias INTEGER`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS prioridad VARCHAR(20) DEFAULT 'Normal'`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS moneda VARCHAR(10)`).catch(()=>{});
 
   // ── NUEVAS COLUMNAS DEL WORKFLOW ──
@@ -502,7 +503,8 @@ router.get('/', authenticate, async (req, res) => {
           po.motivo_devolucion,
           po.devuelto_por,
           po.devuelto_at,
-          po.notes
+          po.notes,
+          po.prioridad
         FROM purchase_orders po
         WHERE ${where.join(' AND ')}
         ORDER BY po.created_at DESC
@@ -620,7 +622,8 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
       items=[],
       presupuesto_imagen, presupuesto_monto_estimado,
       // Campos opcionales si la crea compras con precios/proveedor ya definidos
-      proveedor, forma_pago, cc_dias, moneda, iva_pct
+      proveedor, forma_pago, cc_dias, moneda, iva_pct,
+      prioridad
     } = req.body;
 
     if (!items.length) return res.status(400).json({ error: 'La OC debe tener al menos un artículo' });
@@ -687,6 +690,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     // ── TRANSACCIÓN: header + items + total_estimado deben persistir juntos o nada ──
     await client.query('BEGIN');
 
+    const _prio = ['Normal','Media','Urgente'].includes(prioridad) ? prioridad : 'Normal';
     const po = await client.query(`
       INSERT INTO purchase_orders (
         code, status, requested_by, sucursal, area, tipo,
@@ -694,12 +698,13 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         presupuesto_imagen, presupuesto_monto_estimado,
         proveedor, forma_pago, cc_dias, moneda, iva_pct,
         cotizado_por, cotizado_at,
-        aprobado_compras_por, aprobado_compras_at
+        aprobado_compras_por, aprobado_compras_at,
+        prioridad
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
               $14, $15, $16, $17, $18,
               $19, $20,
-              $21, $22)
+              $21, $22, $23)
       RETURNING *`,
       [
         code, estadoInicial, req.user.id, poSucursal, poArea, tipo||'flota',
@@ -711,7 +716,8 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         autoCotizado ? req.user.id : null,
         autoCotizado ? new Date() : null,
         autoAprobado ? req.user.id : null,
-        autoAprobado ? new Date() : null
+        autoAprobado ? new Date() : null,
+        _prio
       ]
     );
 
@@ -790,11 +796,11 @@ router.patch('/:id', authenticate, async (req, res) => {
           return ['notes'];
         }
         return ['notes','sucursal','area','tipo','vehicle_id','presupuesto_imagen','presupuesto_monto_estimado',
-                'proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda',
+                'proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','prioridad',
                 'factura_nro','factura_fecha','factura_monto'];
       }
       if (role === 'compras' && ['pendiente_cotizacion','en_cotizacion'].includes(estado)) {
-        return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','notes',
+        return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','prioridad','notes',
                 'factura_nro','factura_fecha','factura_monto'];
       }
       if (role === 'tesoreria' && estado === 'aprobada_compras') {
@@ -834,6 +840,7 @@ router.patch('/:id', authenticate, async (req, res) => {
       proveedor:     () => (req.body.proveedor !== undefined ? (req.body.proveedor || null) : undefined),
       supplier_id:   () => (req.body.supplier_id !== undefined ? (req.body.supplier_id || null) : undefined),
       iva_pct:       () => (req.body.iva_pct !== undefined ? parseFloat(req.body.iva_pct) || 0 : undefined),
+      prioridad:     () => (req.body.prioridad !== undefined ? (['Normal','Media','Urgente'].includes(req.body.prioridad) ? req.body.prioridad : 'Normal') : undefined),
       forma_pago:    () => {
         if (req.body.forma_pago === undefined) return undefined;
         const v = req.body.forma_pago;
