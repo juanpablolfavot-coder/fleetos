@@ -89,6 +89,29 @@ app.use('/api/sucursales',sucursalesRouter);
 app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
+
+// ── Endpoints GPS ──
+// Importar middleware de autenticación
+const { authenticate, requireRole } = require('./middleware/auth');
+
+app.get('/api/gps/status', authenticate, async (req, res) => {
+  res.json(getGPSStatus());
+});
+
+// Debug: forzar sync y esperar resultado (SOLO dueño/gerencia)
+app.post('/api/gps/force-sync', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
+  const { syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
+  syncGPSData();
+  // Esperar 20s y devolver el resultado
+  await new Promise(r => setTimeout(r, 20000));
+  res.json(getGPSStatus());
+});
+
+app.post('/api/gps/sync', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
+  syncGPSData();
+  res.json({ ok: true, message: 'Sync iniciado' });
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     const { pool } = require('./db/pool');
@@ -154,29 +177,6 @@ app.use((err,req,res,next)=>{
   const status = err.status || 500;
   res.status(status).json({ error: status >= 500 ? 'Error del servidor' : err.message });
 });
-
-// ── Endpoints GPS ──
-// Importar middleware de autenticación
-const { authenticate, requireRole } = require('./middleware/auth');
-
-app.get('/api/gps/status', authenticate, async (req, res) => {
-  res.json(getGPSStatus());
-});
-
-// Debug: forzar sync y esperar resultado (SOLO dueño/gerencia)
-app.post('/api/gps/force-sync', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
-  const { syncGPSData, getGPSStatus } = require('./services/gps-powerfleet');
-  syncGPSData();
-  // Esperar 20s y devolver el resultado
-  await new Promise(r => setTimeout(r, 20000));
-  res.json(getGPSStatus());
-});
-
-app.post('/api/gps/sync', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento'), async (req, res) => {
-  syncGPSData();
-  res.json({ ok: true, message: 'Sync iniciado' });
-});
-
 
 const PORT=process.env.PORT||3000;
 app.listen(PORT, () => {
