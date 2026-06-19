@@ -365,6 +365,14 @@ const FORMAS_PAGO_OC = ['contado','cuenta_corriente','transferencia','cheque','e
 function normalizarFormaPago(v) {
   return FORMAS_PAGO_OC.includes(v) ? v : null;
 }
+// Normaliza la prioridad a los 3 niveles canónicos. Acepta cualquier mayúscula/minúscula
+// y "crítica" (tratada como Urgente), para que la urgencia que viene de la OT se marque bien.
+function normalizarPrioridad(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (s === 'urgente' || s === 'critica' || s === 'crítica') return 'Urgente';
+  if (s === 'media' || s === 'medio') return 'Media';
+  return 'Normal';
+}
 
 // ─────────────────────────────────────────────────────────────
 //  HELPERS DE PERMISOS
@@ -690,7 +698,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     // ── TRANSACCIÓN: header + items + total_estimado deben persistir juntos o nada ──
     await client.query('BEGIN');
 
-    const _prio = ['Normal','Media','Urgente'].includes(prioridad) ? prioridad : 'Normal';
+    const _prio = normalizarPrioridad(prioridad);
     const po = await client.query(`
       INSERT INTO purchase_orders (
         code, status, requested_by, sucursal, area, tipo,
@@ -840,7 +848,7 @@ router.patch('/:id', authenticate, async (req, res) => {
       proveedor:     () => (req.body.proveedor !== undefined ? (req.body.proveedor || null) : undefined),
       supplier_id:   () => (req.body.supplier_id !== undefined ? (req.body.supplier_id || null) : undefined),
       iva_pct:       () => (req.body.iva_pct !== undefined ? parseFloat(req.body.iva_pct) || 0 : undefined),
-      prioridad:     () => (req.body.prioridad !== undefined ? (['Normal','Media','Urgente'].includes(req.body.prioridad) ? req.body.prioridad : 'Normal') : undefined),
+      prioridad:     () => (req.body.prioridad !== undefined ? normalizarPrioridad(req.body.prioridad) : undefined),
       forma_pago:    () => {
         if (req.body.forma_pago === undefined) return undefined;
         const v = req.body.forma_pago;
