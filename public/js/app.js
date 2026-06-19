@@ -4806,8 +4806,23 @@ function getCostDetail(vehicleCode, mesStr) {
   const totalMes = fuelTotal + prevTotal + corrTotal;
   const costKmReal = kmMes > 0 && totalMes > 0 ? totalMes / kmMes : 0;
 
+  // ── Rendimiento del mes (mismo método que el panel de Combustible: tramo a tramo entre cargas) ──
+  const litrosMes = fuelMes.reduce((a, f) => a + (f.liters || 0), 0);
+  let kmPorLitro = 0;
+  const logsKm = fuelMes.filter(f => f.km > 0 && f.liters > 0).sort((a, b) => a.km - b.km);
+  if (logsKm.length >= 2) {
+    let acum = 0, tramos = 0;
+    for (let i = 1; i < logsKm.length; i++) {
+      const kmDiff = logsKm[i].km - logsKm[i - 1].km;
+      const lts = logsKm[i].liters;
+      if (kmDiff > 0 && kmDiff < 5000 && lts > 0) { acum += kmDiff / lts; tramos++; }
+    }
+    if (tramos > 0) kmPorLitro = acum / tramos;
+  }
+
   return {
     v, kmMes, totalMes, costKmReal,
+    litrosMes, kmPorLitro, measureUnit,
     manoTotal, repTotal,
     rubros: [
       {
@@ -5133,9 +5148,21 @@ function buildCostRankChart(sorted) {
 }
 
 // ── DRILL-DOWN: desglose completo de una unidad ──
+// Formatea montos grandes de forma legible: millones con "M", el resto con separador de miles AR.
+// Evita el "4145K" que se lee mal; muestra "$4,1 M".
+function fmtMontoCorto(n) {
+  n = Number(n) || 0;
+  if (n >= 1000000) return '$' + (n / 1000000).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' M';
+  return '$' + Math.round(n).toLocaleString('es-AR');
+}
 function openCostDrillDown(vehicleCode) {
   const d = getCostDetail(vehicleCode);
   if (!d) return;
+
+  const unidad = d.measureUnit || 'km';
+  const rendStr = d.kmPorLitro > 0
+    ? d.kmPorLitro.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' ' + unidad + '/L'
+    : '—';
 
   openModal(`Desglose de costos — ${vehicleCode}`, `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)">
@@ -5144,9 +5171,10 @@ function openCostDrillDown(vehicleCode) {
         <div style="font-size:12px;color:var(--text3);margin-top:2px">${d.v.driver} · Base ${d.v.base} · ${d.kmMes.toLocaleString()} km este mes</div>
       </div>
       <div style="margin-left:auto;text-align:right">
-        <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'})">${d.costKmReal>0?'$'+d.costKmReal.toFixed(3):'Sin datos'}</div>
-        <div style="font-size:11px;color:var(--text3)">por kilómetro</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px">$${d.totalMes.toLocaleString()} / mes</div>
+        <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'})">${d.costKmReal>0?'$'+d.costKmReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'Sin datos'}</div>
+        <div style="font-size:11px;color:var(--text3)">por ${unidad === 'km' ? 'kilómetro' : unidad}</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px">$${Math.round(d.totalMes).toLocaleString('es-AR')} / mes</div>
+        <div style="font-size:13px;font-weight:600;color:var(--${d.kmPorLitro>0?'ok':'text3'});margin-top:4px" title="Rendimiento del mes, tramo a tramo entre cargas">⛽ ${rendStr}${d.kmPorLitro>0?' · '+Math.round(d.litrosMes).toLocaleString('es-AR')+' L':''}</div>
       </div>
     </div>
 
@@ -5178,12 +5206,13 @@ function openCostDrillDown(vehicleCode) {
 
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
       <div style="font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Proyección anual estimada</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px">
         ${[
-          ['Costo anual total',    '$'+(d.totalMes*12/1000).toFixed(0)+'K', 'text'],
-          ['Costo/km real mes',    d.costKmReal>0?'$'+d.costKmReal.toFixed(3):'—', d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'],
-          ['Km proyectados año',   (d.kmMes*12).toLocaleString(), 'text'],
-          ['Combustible año',      '$'+(d.rubros[0].total*12/1000).toFixed(0)+'K', 'text'],
+          ['Costo anual total',    fmtMontoCorto(d.totalMes*12), 'text'],
+          ['Costo/km real',        d.costKmReal>0?'$'+d.costKmReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—', d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'],
+          ['Rendimiento (mes)',    rendStr, d.kmPorLitro>0?'ok':'text3'],
+          ['Km proyectados año',   (d.kmMes*12).toLocaleString('es-AR')+' '+unidad, 'text'],
+          ['Combustible año',      fmtMontoCorto(d.rubros[0].total*12), 'text'],
         ].map(([l,val,c])=>`
           <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 12px;border:1px solid var(--border)">
             <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">${l}</div>
