@@ -360,7 +360,7 @@ async function syncApprovedPOCostsToWorkOrder(client, poId) {
   return { updated_parts: direct.rowCount + fallback.rowCount + orderFallback.rowCount, ot_id: po.ot_id };
 }
 
-const FORMAS_PAGO_OC = ['contado','cuenta_corriente','transferencia','cheque'];
+const FORMAS_PAGO_OC = ['contado','cuenta_corriente','transferencia','cheque','echeq'];
 function normalizarFormaPago(v) {
   return FORMAS_PAGO_OC.includes(v) ? v : null;
 }
@@ -680,7 +680,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 
     // Armar INSERT con columnas según estado inicial
     const _fp  = normalizarFormaPago(forma_pago);
-    const _cc  = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
+    const _cc  = ((_fp === 'cuenta_corriente' || _fp === 'cheque' || _fp === 'echeq') && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
     const _iva = iva_pct != null ? parseFloat(iva_pct) : 0;
 
@@ -1065,7 +1065,7 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
 
     // Validar forma_pago
     const _fp = normalizarFormaPago(forma_pago);
-    const _cc = (_fp === 'cuenta_corriente' && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
+    const _cc = ((_fp === 'cuenta_corriente' || _fp === 'cheque' || _fp === 'echeq') && cc_dias != null && cc_dias !== '') ? parseInt(cc_dias, 10) : null;
     const _mon = (moneda === 'USD' || moneda === 'ARS') ? moneda : 'ARS';
 
     // Resolver supplier_id: si vino, usarlo. Sino buscar/crear automáticamente desde "proveedor" (texto)
