@@ -375,8 +375,15 @@
 
           ${!pagada ? `
           <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:16px;margin-bottom:16px">
-            <div style="font-weight:600;margin-bottom:12px">+ Registrar nuevo pago</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+              <div style="font-weight:600">+ Registrar nuevo pago</div>
+              <div style="display:flex;gap:4px">
+                <button type="button" id="pago-tab-simple" class="btn btn-sm btn-primary" onclick="togglePagoModo('simple')">Simple</button>
+                <button type="button" id="pago-tab-combinado" class="btn btn-sm btn-secondary" onclick="togglePagoModo('combinado')">Combinado (varios cheques/efectivo)</button>
+              </div>
+            </div>
 
+            <div id="pago-simple-wrap">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
                 <label style="font-size:12px;color:var(--text3)">Método de pago *</label>
@@ -412,6 +419,25 @@
             </div>
 
             <button class="btn btn-primary" onclick="guardarPago('${poId}','${facId}')">✓ Registrar pago</button>
+            </div><!-- /pago-simple-wrap -->
+
+            <div id="pago-combinado-wrap" style="display:none">
+              <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Cargá varios instrumentos (cheques, e-cheqs, efectivo…). El total no puede superar el saldo. Cada cheque/e-cheq queda registrado individualmente.</div>
+              <div id="pci-list"></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="pciAgregar('cheque')">+ Cheque</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="pciAgregar('echeq')">+ eCheq</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="pciAgregar('efectivo')">+ Efectivo</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="pciAgregar('transferencia')">+ Transferencia</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="pciCompletarEfectivo()" title="Agrega una línea de efectivo por lo que falta para llegar al saldo">⚡ Completar con efectivo</button>
+              </div>
+              <div id="pci-resumen" style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:10px;font-size:13px;margin-bottom:10px"></div>
+              <div style="margin-bottom:12px">
+                <label style="font-size:12px;color:var(--text3)">Observaciones (opcional)</label>
+                <textarea id="pci-notes" rows="2" class="form-input" style="resize:vertical"></textarea>
+              </div>
+              <button class="btn btn-primary" onclick="guardarPagoCombinado('${poId}','${facId}')">✓ Registrar pago combinado</button>
+            </div>
           </div>
           ` : (pagada ? '<div style="background:#dcfce7;color:#166534;padding:12px;border-radius:6px;margin-bottom:16px;text-align:center;font-weight:600">✓ Factura cancelada totalmente</div>' : '')}
 
@@ -594,6 +620,168 @@
       }
     } catch (err) {
       showToast('error', 'Error al anular');
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  PAGO COMBINADO — varios instrumentos (cheques/echeqs/efectivo) juntos
+  // ─────────────────────────────────────────────────────────────
+  let _pciSeq = 0;
+
+  window.togglePagoModo = function(modo) {
+    const sw = document.getElementById('pago-simple-wrap');
+    const cw = document.getElementById('pago-combinado-wrap');
+    const ts = document.getElementById('pago-tab-simple');
+    const tc = document.getElementById('pago-tab-combinado');
+    if (!sw || !cw) return;
+    const comb = modo === 'combinado';
+    sw.style.display = comb ? 'none' : '';
+    cw.style.display = comb ? '' : 'none';
+    if (ts) ts.className = 'btn btn-sm ' + (comb ? 'btn-secondary' : 'btn-primary');
+    if (tc) tc.className = 'btn btn-sm ' + (comb ? 'btn-primary' : 'btn-secondary');
+    if (comb && !document.querySelector('#pci-list .pci-row')) pciAgregar('cheque');
+    pciRecalcular();
+  };
+
+  function pciCamposHTML(idx, metodo) {
+    const supplierBank = escAttr((window._pagoFacturaActual||{}).supplier_bank || (window._pagoOcActual||{}).supplier_bank || '');
+    const vencInput = fechaInput((window._pagoFacturaActual||{}).vencimiento);
+    if (metodo === 'cheque') {
+      return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+          <div><label style="font-size:11px;color:var(--text3)">Banco *</label><input id="pci-cheque-banco-${idx}" type="text" value="${supplierBank}" placeholder="Ej: Banco Nación" class="form-input"></div>
+          <div><label style="font-size:11px;color:var(--text3)">N° cheque *</label><input id="pci-cheque-nro-${idx}" type="text" class="form-input"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Fecha de pago *</label><input id="pci-cheque-fecha-${idx}" type="date" value="${vencInput}" class="form-input"></div>
+        </div>`;
+    }
+    if (metodo === 'echeq') {
+      return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:6px">
+          <div><label style="font-size:11px;color:var(--text3)">Banco *</label><input id="pci-echeq-banco-${idx}" type="text" value="${supplierBank}" class="form-input"></div>
+          <div><label style="font-size:11px;color:var(--text3)">N° eCheq *</label><input id="pci-echeq-nro-${idx}" type="text" class="form-input"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Fecha de pago *</label><input id="pci-echeq-fecha-${idx}" type="date" value="${vencInput}" class="form-input"></div>
+        </div>`;
+    }
+    if (metodo === 'transferencia') {
+      const t = datosTransferenciaProveedor();
+      return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          <div><label style="font-size:11px;color:var(--text3)">Banco origen *</label><input id="pci-banco-origen-${idx}" type="text" class="form-input"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Banco destino</label><input id="pci-banco-destino-${idx}" type="text" value="${escAttr(t.bancoDestino)}" class="form-input"></div>
+        </div>`;
+    }
+    return '';
+  }
+
+  window.pciMetodoCampos = function(idx) {
+    const sel = document.getElementById('pci-metodo-' + idx);
+    const cont = document.getElementById('pci-campos-' + idx);
+    if (sel && cont) cont.innerHTML = pciCamposHTML(idx, sel.value);
+    pciRecalcular();
+  };
+
+  window.pciAgregar = function(metodo, montoSugerido) {
+    const list = document.getElementById('pci-list');
+    if (!list) return;
+    const idx = ++_pciSeq;
+    const row = document.createElement('div');
+    row.className = 'pci-row';
+    row.id = 'pci-row-' + idx;
+    row.style.cssText = 'border:1px solid var(--border2);border-radius:8px;padding:10px;margin-bottom:8px;background:#fff';
+    row.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+        <div>
+          <label style="font-size:11px;color:var(--text3)">Método</label>
+          <select id="pci-metodo-${idx}" class="form-select" onchange="pciMetodoCampos(${idx})">
+            <option value="cheque" ${metodo==='cheque'?'selected':''}>Cheque físico</option>
+            <option value="echeq" ${metodo==='echeq'?'selected':''}>eCheq</option>
+            <option value="efectivo" ${metodo==='efectivo'?'selected':''}>Efectivo</option>
+            <option value="transferencia" ${metodo==='transferencia'?'selected':''}>Transferencia</option>
+            <option value="otro" ${metodo==='otro'?'selected':''}>Otro</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text3)">Monto *</label>
+          <input id="pci-monto-${idx}" type="number" step="0.01" min="0" value="${montoSugerido != null ? Number(montoSugerido).toFixed(2) : ''}" class="form-input" oninput="pciRecalcular()">
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="pciQuitar(${idx})" style="color:var(--danger)" title="Quitar">✕</button>
+      </div>
+      <div id="pci-campos-${idx}"></div>`;
+    list.appendChild(row);
+    pciMetodoCampos(idx);
+  };
+
+  window.pciQuitar = function(idx) {
+    document.getElementById('pci-row-' + idx)?.remove();
+    pciRecalcular();
+  };
+
+  function pciLeerInstrumentos() {
+    const items = [];
+    document.querySelectorAll('#pci-list .pci-row').forEach(r => {
+      const idx = r.id.replace('pci-row-', '');
+      const metodo = document.getElementById('pci-metodo-' + idx)?.value;
+      const it = { metodo, monto: parseFloat(document.getElementById('pci-monto-' + idx)?.value) };
+      if (metodo === 'cheque') {
+        it.cheque_banco = document.getElementById('pci-cheque-banco-' + idx)?.value.trim();
+        it.cheque_nro = document.getElementById('pci-cheque-nro-' + idx)?.value.trim();
+        it.cheque_fecha_cobro = document.getElementById('pci-cheque-fecha-' + idx)?.value;
+      } else if (metodo === 'echeq') {
+        it.echeq_banco = document.getElementById('pci-echeq-banco-' + idx)?.value.trim();
+        it.echeq_nro = document.getElementById('pci-echeq-nro-' + idx)?.value.trim();
+        it.echeq_fecha_pago = document.getElementById('pci-echeq-fecha-' + idx)?.value;
+      } else if (metodo === 'transferencia') {
+        it.banco_origen = document.getElementById('pci-banco-origen-' + idx)?.value.trim();
+        it.banco_destino = document.getElementById('pci-banco-destino-' + idx)?.value.trim();
+      }
+      items.push(it);
+    });
+    return items;
+  }
+
+  window.pciRecalcular = function() {
+    const resumen = document.getElementById('pci-resumen');
+    if (!resumen) return;
+    const saldo = saldoFactura(window._pagoFacturaActual || {});
+    const items = pciLeerInstrumentos();
+    const total = +(items.reduce((s, it) => s + (parseFloat(it.monto) || 0), 0)).toFixed(2);
+    const dif = +(saldo - total).toFixed(2);
+    const difColor = Math.abs(dif) <= 0.01 ? 'var(--ok)' : (dif < 0 ? 'var(--danger)' : 'var(--warn)');
+    const difLabel = Math.abs(dif) <= 0.01 ? 'Cubre el saldo exacto ✓' : (dif < 0 ? `Excede el saldo en $${fmt(Math.abs(dif))}` : `Falta $${fmt(dif)} para cubrir el saldo`);
+    resumen.innerHTML = `
+      <div style="display:flex;justify-content:space-between"><span>Saldo de la factura:</span><b>$${fmt(saldo)}</b></div>
+      <div style="display:flex;justify-content:space-between"><span>Total instrumentos (${items.length}):</span><b>$${fmt(total)}</b></div>
+      <div style="display:flex;justify-content:space-between;color:${difColor}"><span>Diferencia:</span><b>${difLabel}</b></div>`;
+  };
+
+  window.pciCompletarEfectivo = function() {
+    const saldo = saldoFactura(window._pagoFacturaActual || {});
+    const items = pciLeerInstrumentos();
+    const total = items.reduce((s, it) => s + (parseFloat(it.monto) || 0), 0);
+    const falta = +(saldo - total).toFixed(2);
+    if (falta <= 0.01) { showToast('ok', 'El saldo ya está cubierto'); return; }
+    pciAgregar('efectivo', falta);
+  };
+
+  window.guardarPagoCombinado = async function(poId, facId) {
+    const items = pciLeerInstrumentos();
+    if (!items.length) { showToast('error', 'Agregá al menos un instrumento'); return; }
+    for (let i = 0; i < items.length; i++) {
+      if (!(parseFloat(items[i].monto) > 0)) { showToast('error', `Instrumento ${i+1}: monto inválido`); return; }
+    }
+    const saldo = saldoFactura(window._pagoFacturaActual || {});
+    const total = +(items.reduce((s, it) => s + parseFloat(it.monto), 0)).toFixed(2);
+    if (total > saldo + 0.01) { showToast('error', `El total ($${fmt(total)}) supera el saldo ($${fmt(saldo)})`); return; }
+    const body = { instrumentos: items, notes: document.getElementById('pci-notes')?.value.trim() };
+    try {
+      const res = await apiFetch(`/api/purchase-orders/${poId}/facturas/${facId}/pagos-multiple`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      if (!res.ok) { const err = await res.json(); showToast('error', err.error || 'Error al registrar el pago combinado'); return; }
+      const data = await res.json();
+      showToast('ok', data.message || 'Pago combinado registrado');
+      document.querySelector('.modal-pago-overlay')?.remove();
+      if (typeof renderTesoreriaPanelInline === 'function' && App.currentPage === 'tesoreria_panel') renderTesoreriaPanelInline();
+    } catch (err) {
+      console.error(err);
+      showToast('error', 'Error al registrar el pago combinado');
     }
   };
 
