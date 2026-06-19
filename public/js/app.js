@@ -5712,7 +5712,7 @@ function showToast(type, msg) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span>${type==='ok'?'✓':type==='danger'?'✗':'!'}</span><span>${msg}</span>`;
+  el.innerHTML = `<span>${type==='ok'?'✓':(type==='danger'||type==='error')?'✗':'!'}</span><span>${msg}</span>`;
   container.appendChild(el);
   setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(10px)'; el.style.transition='all .3s'; setTimeout(()=>el.remove(),300); }, 3500);
 }
@@ -10134,6 +10134,8 @@ function _poOnSupplierChange(value) {
 // ── Ver detalle de OC ────────────────────────────────────
 async function openPODetail(id) {
   try {
+    // Guardar el id de la OC abierta para que el timeline pueda enriquecerse
+    window.App.currentPODetailId = id;
     // Resetear el contador de ids para los artículos editables inline
     window._podItemNextIdx = 0;
     // Cache-busting: siempre datos frescos al abrir el detalle
