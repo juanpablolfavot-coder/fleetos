@@ -98,13 +98,23 @@ async function nextOCCodeTx(client) {
   return 'OC-' + String(parseInt(r.rows[0].num, 10)).padStart(4, '0');
 }
 
+// Normaliza la prioridad a los 3 niveles canónicos (Normal/Media/Urgente).
+// Acepta cualquier mayúscula/minúscula y "crítica" (del form de reporte de fallas),
+// que se trata como Urgente. Así la prioridad queda consistente en OT y OC.
+function normPrioridad(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (s === 'urgente' || s === 'critica' || s === 'crítica') return 'Urgente';
+  if (s === 'media' || s === 'medio') return 'Media';
+  return 'Normal';
+}
+
 async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, assetId, sucursal, area, tipo, notes, items, prioridad }) {
   await ensureExternalPOFields(client);
   const cleanItems = (items || []).filter(i => String(i.descripcion || i.name || '').trim());
   if (!cleanItems.length) return null;
   const poCode = await nextOCCodeTx(client);
   // La urgencia de la OT viaja a la OC para que Compras priorice según indicó el área.
-  const _prio = ['Normal','Media','Urgente'].includes(prioridad) ? prioridad : 'Normal';
+  const _prio = normPrioridad(prioridad);
   const po = await client.query(
     `INSERT INTO purchase_orders (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id, notes, prioridad)
      VALUES ($1,'pendiente_cotizacion',$2,$3,$4,$5,$6,$7,$8,$9,$10)
@@ -311,7 +321,7 @@ router.post('/', authenticate, async (req, res) => {
       [code,
        ot_tipo === 'vehiculo' ? vehicle_id : null,
        ot_tipo !== 'vehiculo' ? asset_id   : null,
-       ot_tipo, woType, priority||'Normal', description, mechanic_id||null, req.user.id, km, !!external_required]
+       ot_tipo, woType, normPrioridad(priority), description, mechanic_id||null, req.user.id, km, !!external_required]
     );
     const woId = wo.rows[0].id;
 
@@ -424,7 +434,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
       `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=0, priority=$4,
          parts_cost = COALESCE($6, parts_cost)
        WHERE id = $5 RETURNING *, parts_cost AS total_cost`,
-      [status, mechanic_id||null, description, priority, req.params.id, newPartsCost]
+      [status, mechanic_id||null, description, normPrioridad(priority), req.params.id, newPartsCost]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'OT no encontrada' });
     res.json(result.rows[0]);
