@@ -8130,7 +8130,36 @@ async function renderAuditorResumen(el) {
         <div style="font-size:32px;font-weight:700;color:var(--text)">${d.usuarios_activos}</div>
         <div style="font-size:13px;color:var(--text3)">usuarios con actividad en el mes</div>
       </div>
-    </div>`;
+    </div>
+    ${(() => {
+      const c = d.compras || {};
+      const fmtAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+      const deudaColor = (c.deuda_vencida||0) > 0 ? 'danger' : (c.deuda_total||0) > 0 ? 'warn' : 'ok';
+      return `
+      <div style="margin-top:22px;font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🛒 Compras y pagos</div>
+      <div class="kpi-row">
+        <div class="kpi-card" style="border-color:rgba(99,102,241,.4)">
+          <div class="kpi-label">🛒 Compras del mes</div>
+          <div class="kpi-value white">${c.ocs_total||0}</div>
+          <div class="kpi-trend">${c.ocs_pendientes||0} pend. · ${c.ocs_aprobadas||0} aprob. · ${c.ocs_recibidas||0} recibidas</div>
+        </div>
+        <div class="kpi-card" style="border-color:rgba(6,182,212,.4)">
+          <div class="kpi-label">🧾 Facturado (mes, c/IVA)</div>
+          <div class="kpi-value" style="color:#06b6d4">${fmtAr(c.facturado_mes)}</div>
+          <div class="kpi-trend">${c.facturas_mes||0} facturas cargadas</div>
+        </div>
+        <div class="kpi-card ok">
+          <div class="kpi-label">✅ Pagado en el mes</div>
+          <div class="kpi-value ok">${fmtAr(c.pagado_mes)}</div>
+          <div class="kpi-trend">${c.pagos_mes||0} pagos registrados</div>
+        </div>
+        <div class="kpi-card ${deudaColor}">
+          <div class="kpi-label">📌 Deuda pendiente</div>
+          <div class="kpi-value ${deudaColor}">${fmtAr(c.deuda_total)}</div>
+          <div class="kpi-trend">${(c.deuda_vencida||0)>0 ? '⚠ '+fmtAr(c.deuda_vencida)+' vencido ('+(c.facturas_vencidas||0)+')' : 'sin deuda vencida'}${(c.deuda_por_vencer||0)>0 ? ' · '+fmtAr(c.deuda_por_vencer)+' por vencer' : ''}</div>
+        </div>
+      </div>`;
+    })()}`;
 }
 
 // ═══════════════════════════════════════════════════════════
