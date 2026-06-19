@@ -4986,8 +4986,11 @@ function renderCosts() {
   });
   const sorted = [...withCost].sort((a,b) => b._totalMes - a._totalMes);
   const conDatos = sorted.filter(v => v._costReal > 0);
+  const avgNum = conDatos.length > 0
+    ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length)
+    : 0;
   const avg = conDatos.length > 0
-    ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length).toFixed(3)
+    ? avgNum.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : '—';
 
   // ═══ TOTALES DEL MES (de Panel contable) ═══
@@ -5039,7 +5042,7 @@ function renderCosts() {
         <div class="kpi-value" style="color:#f59e0b">$${Math.round(totalOTs).toLocaleString('es-AR')}</div>
         <div class="kpi-trend">mano $${Math.round(totalMano).toLocaleString()} · rep $${Math.round(totalRepuestos).toLocaleString()}</div>
       </div>
-      <div class="kpi-card ${parseFloat(avg)>0.22?'warn':'ok'}">
+      <div class="kpi-card info">
         <div class="kpi-label">📐 Costo/km promedio</div>
         <div class="kpi-value white">$${avg}</div>
         <div class="kpi-trend">${conDatos.length} unidades con movimiento · ${otsMes.length} OTs cerradas</div>
@@ -5092,7 +5095,9 @@ function renderCosts() {
             const d = v._detail;
             if (!d || d.totalMes === 0) return '';
             const ck = d.costKmReal;
-            const ev = ck>0.25?['danger','Alto']:ck>0.20?['warn','Revisar']:['ok','Eficiente'];
+            // Evaluación relativa al promedio de la flota (se auto-ajusta con inflación):
+            // Alto = más de 25% sobre el promedio; Revisar = sobre el promedio; Eficiente = en o bajo el promedio.
+            const ev = (avgNum>0 && ck>avgNum*1.25)?['danger','Alto']:(avgNum>0 && ck>avgNum)?['warn','Revisar']:['ok','Eficiente'];
             const litros = litrosByVeh[v.code] || 0;
             const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
             return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
@@ -5100,11 +5105,11 @@ function renderCosts() {
               <td>${v.brand || ''} ${v.model || ''}</td>
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
-              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total/1000)+'K':'—'}</td>
-              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total/1000)+'K':'—'}</td>
-              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total/1000)+'K':'—'}</td>
-              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total/1000)+'K':'—'}</td>
-              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
+              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
@@ -5118,10 +5123,10 @@ function renderCosts() {
     </div>
   `;
 
-  setTimeout(() => buildCostRankChart(sorted), 100);
+  setTimeout(() => buildCostRankChart(sorted, avgNum), 100);
 }
 
-function buildCostRankChart(sorted) {
+function buildCostRankChart(sorted, avgNum) {
   const ctx = document.getElementById('costRankChart');
   if (!ctx) return;
   if (window._costChart) window._costChart.destroy();
@@ -5133,14 +5138,14 @@ function buildCostRankChart(sorted) {
         label:'$/km',
         data: sorted.slice(0,12).map(v=>v._costReal||0),
         backgroundColor: sorted.slice(0,12).map(v=>
-          v._costReal>0.25?'rgba(239,68,68,.75)':
-          v._costReal>0.20?'rgba(245,158,11,.75)':
+          (avgNum>0 && v._costReal>avgNum*1.25)?'rgba(239,68,68,.75)':
+          (avgNum>0 && v._costReal>avgNum)?'rgba(245,158,11,.75)':
           v._costReal>0?'rgba(34,197,94,.75)':'rgba(100,116,139,.4)'
         ),
         borderRadius:4, borderColor:'transparent',
         hoverBackgroundColor: sorted.slice(0,12).map(v=>
-          v._costReal>0.25?'rgba(239,68,68,1)':
-          v._costReal>0.20?'rgba(245,158,11,1)':
+          (avgNum>0 && v._costReal>avgNum*1.25)?'rgba(239,68,68,1)':
+          (avgNum>0 && v._costReal>avgNum)?'rgba(245,158,11,1)':
           v._costReal>0?'rgba(34,197,94,1)':'rgba(100,116,139,.6)'
         ),
       }]
@@ -5156,10 +5161,10 @@ function buildCostRankChart(sorted) {
       },
       plugins:{
         legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>'  $'+ctx.parsed.x.toFixed(3)+'/km'}}
+        tooltip:{callbacks:{label:ctx=>'  $'+ctx.parsed.x.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})+'/km'}}
       },
       scales:{
-        x:{ticks:{color:'#9ba3be',callback:v=>'$'+v.toFixed(2)}, grid:{color:'rgba(128,128,128,.1)'}},
+        x:{ticks:{color:'#9ba3be',callback:v=>'$'+v.toLocaleString('es-AR')}, grid:{color:'rgba(128,128,128,.1)'}},
         y:{ticks:{color:'#9ba3be',font:{size:11}}, grid:{display:false}}
       }
     }
