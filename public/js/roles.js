@@ -727,7 +727,7 @@ async function loadInitialData() {
     const usersFetch     = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
     const suppliersFetch = canLoadSuppliers ? apiFetch('/api/suppliers') : Promise.resolve({ ok: false, json: async () => [] });
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes, purchaseOrdersRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -743,6 +743,7 @@ async function loadInitialData() {
       apiFetch('/api/stock/movements?limit=50'),
       apiFetch('/api/fuel/tank-entries?limit=50'),
       apiFetch('/api/fuel/dispatches?limit=50'),
+      apiFetch('/api/purchase-orders?limit=100'),
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -800,7 +801,8 @@ async function loadInitialData() {
 
     // Alias usado por algunos renders
     App.data.fuel = App.data.fuelLogs;
-    App.data.purchaseOrders = App.data.purchaseOrders || [];
+    if (purchaseOrdersRes?.ok) App.data.purchaseOrders = await purchaseOrdersRes.json();
+    else App.data.purchaseOrders = App.data.purchaseOrders || [];
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};
