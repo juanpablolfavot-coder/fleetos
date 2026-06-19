@@ -83,6 +83,7 @@ async function ensureExternalPOFields(clientOrQuery = query) {
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS tipo VARCHAR(30) DEFAULT 'flota'`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS area VARCHAR(200)`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200)`).catch(()=>{});
+  await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS prioridad VARCHAR(20) DEFAULT 'Normal'`).catch(()=>{});
   await q(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
   await q(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
   await q(`CREATE INDEX IF NOT EXISTS idx_po_ot_id ON purchase_orders(ot_id)`).catch(()=>{});
@@ -97,16 +98,18 @@ async function nextOCCodeTx(client) {
   return 'OC-' + String(parseInt(r.rows[0].num, 10)).padStart(4, '0');
 }
 
-async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, assetId, sucursal, area, tipo, notes, items }) {
+async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, assetId, sucursal, area, tipo, notes, items, prioridad }) {
   await ensureExternalPOFields(client);
   const cleanItems = (items || []).filter(i => String(i.descripcion || i.name || '').trim());
   if (!cleanItems.length) return null;
   const poCode = await nextOCCodeTx(client);
+  // La urgencia de la OT viaja a la OC para que Compras priorice según indicó el área.
+  const _prio = ['Normal','Media','Urgente'].includes(prioridad) ? prioridad : 'Normal';
   const po = await client.query(
-    `INSERT INTO purchase_orders (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id, notes)
-     VALUES ($1,'pendiente_cotizacion',$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO purchase_orders (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id, notes, prioridad)
+     VALUES ($1,'pendiente_cotizacion',$2,$3,$4,$5,$6,$7,$8,$9,$10)
      RETURNING *`,
-    [poCode, reqUserId, sucursal || null, area || 'Taller', tipo || 'flota', vehicleId || null, woId, assetId || null, notes || `Solicitud generada desde ${woCode}`]
+    [poCode, reqUserId, sucursal || null, area || 'Taller', tipo || 'flota', vehicleId || null, woId, assetId || null, notes || `Solicitud generada desde ${woCode}`, _prio]
   );
   const poId = po.rows[0].id;
   for (const it of cleanItems) {
@@ -382,7 +385,8 @@ router.post('/', authenticate, async (req, res) => {
         vehicleId: ot_tipo === 'vehiculo' ? vehicle_id : null,
         assetId: ot_tipo !== 'vehiculo' ? asset_id : null,
         sucursal, area: 'Taller', tipo: ot_tipo === 'vehiculo' ? 'flota' : 'otro',
-        notes: `Solicitud generada automáticamente desde ${code}. ${description || ''}`
+        notes: `Solicitud generada automáticamente desde ${code}. ${description || ''}`,
+        prioridad: priority || 'Normal'
       }, externalItemsForPO);
     }
 
@@ -486,7 +490,8 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
         woId: req.params.id, woCode: wo.rows[0].code, reqUserId: req.user.id,
         vehicleId: wo.rows[0].vehicle_id, assetId: wo.rows[0].asset_id,
         sucursal, area: 'Taller', tipo: wo.rows[0].vehicle_id ? 'flota' : 'otro',
-        notes: `Solicitud generada automáticamente al cerrar ${wo.rows[0].code}`
+        notes: `Solicitud generada automáticamente al cerrar ${wo.rows[0].code}`,
+        prioridad: priority || wo.rows[0].priority || 'Normal'
       }, externalItemsForPO);
     }
 
