@@ -101,12 +101,17 @@ app.get('/api/health', async (req, res) => {
   }
 });
 // Cache de assets JS/CSS según el cache-busting por versión:
-//  - Con ?v=<versión> (lo que inyecta el HTML en cada <script>/<link>): es seguro
-//    cachear el archivo "para siempre". Al hacer deploy cambia BUILD_VERSION → cambia
-//    la URL → el browser baja la versión nueva. Resultado: recargas mucho más rápidas
-//    sin riesgo de servir código viejo.
-//  - Sin ?v= (acceso directo, caso borde): se fuerza no-cache para no servir código viejo.
+//  - Con ?v=<versión> (lo que inyecta el catch-all de abajo en cada <script>/<link>):
+//    es seguro cachear el archivo "para siempre". Al hacer deploy cambia BUILD_VERSION →
+//    cambia la URL → el browser baja la versión nueva. Recargas más rápidas sin servir
+//    código viejo.
+//  - Sin ?v= (acceso directo, caso borde): se fuerza no-cache.
+// IMPORTANTE: index:false para que express.static NO sirva el index.html directamente.
+// Así la raíz "/" cae en el catch-all de abajo, que reescribe los ?v= con BUILD_VERSION
+// (dinámico por deploy). Sin esto, se servía el index.html con un ?v= fijo escrito a mano
+// y, combinado con el cache immutable, el navegador quedaba pegado a la versión vieja.
 app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
   etag: false,
   lastModified: false,
   setHeaders: (res, filePath) => {
