@@ -973,8 +973,23 @@ userRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id')
     if (!check.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
     if (check.rows[0].email === 'admin@fleetos.com') return res.status(400).json({ error: 'No se puede eliminar el usuario administrador' });
     await query('DELETE FROM refresh_tokens WHERE user_id=$1', [req.params.id]);
-    await query('DELETE FROM users WHERE id=$1', [req.params.id]);
-    res.json({ ok: true });
+    try {
+      await query('DELETE FROM users WHERE id=$1', [req.params.id]);
+      res.json({ ok: true, deleted: true });
+    } catch (e) {
+      // 23503 = foreign_key_violation: el usuario tiene historial (OCs, combustible, OTs,
+      // movimientos de stock, etc.) que referencia su id. No se puede borrar sin romper
+      // esos registros, así que lo desactivamos: ya no puede ingresar y sale de la lista
+      // de usuarios activos, pero se conserva la trazabilidad de lo que hizo.
+      if (e.code === '23503') {
+        await query('UPDATE users SET active=FALSE, updated_at=NOW() WHERE id=$1', [req.params.id]);
+        return res.json({
+          ok: true, deleted: false, deactivated: true,
+          message: 'El usuario tiene historial en el sistema, por eso no se puede borrar definitivamente. Se desactivó: ya no puede ingresar y sale de la lista, pero se conserva el registro de lo que hizo.'
+        });
+      }
+      throw e;
+    }
   } catch(err) { console.error('DELETE user:', err.message); res.status(500).json({ error: 'Error al eliminar usuario' }); }
 });
 
