@@ -76,7 +76,17 @@ app.use('/api/tires',tireRouter);
 app.use('/api/documents',docRouter);
 app.use('/api/users',userRouter);
 app.use('/api/config',configRouter);
-app.use('/api/auditor',auditorRouter); app.use('/api/purchase-orders',purchaseOrderReceiptsRouter); app.use('/api/payments',paymentsRouter); app.use('/api/purchase-orders',paymentsRouter); app.use('/api/purchase-orders',purchaseOrderInvoicesRouter); app.use('/api/purchase-orders',purchaseOrdersRouter); app.use('/api/sucursales',sucursalesRouter); app.use('/api/admin',adminRouter);
+app.use('/api/auditor',auditorRouter);
+// /api/purchase-orders se compone de varios routers montados en orden:
+// recepciones → pagos → facturas → órdenes. El orden importa (Express prueba
+// cada router en secuencia), por eso se respeta tal cual estaba.
+app.use('/api/purchase-orders',purchaseOrderReceiptsRouter);
+app.use('/api/payments',paymentsRouter);
+app.use('/api/purchase-orders',paymentsRouter);
+app.use('/api/purchase-orders',purchaseOrderInvoicesRouter);
+app.use('/api/purchase-orders',purchaseOrdersRouter);
+app.use('/api/sucursales',sucursalesRouter);
+app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.get('/api/health', async (req, res) => {
@@ -90,16 +100,27 @@ app.get('/api/health', async (req, res) => {
     res.status(503).json({ status: 'error', db: 'disconnected' });
   }
 });
-// Forzar no-cache en archivos JS y CSS
-app.use((req, res, next) => {
-  if (req.path.match(/\.(js|css)$/)) {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+// Cache de assets JS/CSS según el cache-busting por versión:
+//  - Con ?v=<versión> (lo que inyecta el HTML en cada <script>/<link>): es seguro
+//    cachear el archivo "para siempre". Al hacer deploy cambia BUILD_VERSION → cambia
+//    la URL → el browser baja la versión nueva. Resultado: recargas mucho más rápidas
+//    sin riesgo de servir código viejo.
+//  - Sin ?v= (acceso directo, caso borde): se fuerza no-cache para no servir código viejo.
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, filePath) => {
+    if (/\.(js|css)$/.test(filePath)) {
+      if (res.req && res.req.query && res.req.query.v) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      } else {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      }
+    }
   }
-  next();
-});
-app.use(express.static(path.join(__dirname,'public'),{maxAge:'0', etag:false, lastModified:false}));
+}));
 app.get(/^(?!\/api).*/, (req, res) => {
   const fs = require('fs');
   const filePath = require('path').join(__dirname, 'public', 'index.html');
