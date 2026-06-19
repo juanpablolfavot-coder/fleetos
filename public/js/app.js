@@ -6043,10 +6043,15 @@ async function renderUsers() {
 }
 
 async function confirmDeleteUser(id, name) {
-  if (!confirm(`⚠ ¿Estás seguro que querés eliminar al usuario "${name}"?\n\nEsta acción no se puede deshacer.`)) return;
+  if (!confirm(`⚠ ¿Estás seguro que querés eliminar al usuario "${name}"?\n\nSi el usuario tiene historial en el sistema, se desactivará en vez de borrarse (para no perder el registro de lo que hizo).`)) return;
   const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al eliminar'); return; }
-  showToast('ok', `Usuario "${name}" eliminado`);
+  const data = await res.json().catch(() => ({}));
+  if (data.deactivated) {
+    showToast('ok', data.message || `Usuario "${name}" desactivado (tiene historial).`);
+  } else {
+    showToast('ok', `Usuario "${name}" eliminado`);
+  }
   renderUsers();
 }
 
