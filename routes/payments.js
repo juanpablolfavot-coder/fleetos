@@ -508,7 +508,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[pagos POST]', err.stack || err.message);
-    res.status(500).json({ error: `Error al registrar pago: ${err.message}` });
+    res.status(500).json({ error: 'Error al registrar el pago' });
   } finally {
     client.release();
   }
