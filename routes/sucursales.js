@@ -139,3 +139,41 @@ router.post('/migrar', authenticate, canManage, async (req, res) => {
 });
 
 module.exports = router;
+
+// ════════════════════════════════════════════════════════════════
+//  Limpieza ÚNICA de sucursales (se ejecuta una sola vez por base).
+//  Saca 'Central' y la 'Río Tercero' duplicada, migrando todos sus
+//  registros a 'Río Tercero (Casa Central)'. Idempotente: usa un flag
+//  en app_config para no volver a correr. No borra datos.
+// ════════════════════════════════════════════════════════════════
+async function runSucursalCleanupOnce() {
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(()=>{});
+    const flag = await query(`SELECT 1 FROM app_config WHERE key='sucursal_cleanup_v1'`);
+    if (flag.rows[0]) return; // ya se aplicó
+
+    const CASA = 'Río Tercero (Casa Central)';
+    const BAD  = ['Central', 'Río Tercero'];
+
+    await query(`UPDATE users           SET sucursal=$1      WHERE sucursal      = ANY($2)`, [CASA, BAD]).catch(()=>{});
+    await query(`UPDATE purchase_orders SET sucursal=$1      WHERE sucursal      = ANY($2)`, [CASA, BAD]).catch(()=>{});
+    await query(`UPDATE stock_movements SET base_location=$1 WHERE base_location = ANY($2)`, [CASA, BAD]).catch(()=>{});
+    await query(`UPDATE tanks           SET location=$1      WHERE location      = ANY($2)`, [CASA, BAD]).catch(()=>{});
+    // Stock: solo los códigos que no choquen con uno ya existente en la Casa Central
+    await query(`
+      UPDATE stock_items s SET base_location=$1
+       WHERE s.base_location = ANY($2)
+         AND NOT EXISTS (
+           SELECT 1 FROM stock_items d
+            WHERE d.active=TRUE AND d.base_location=$1 AND d.area=s.area AND UPPER(d.code)=UPPER(s.code)
+         )`, [CASA, BAD]).catch(()=>{});
+    // Desactivar las sucursales que se sacan (no se borran)
+    await query(`UPDATE sucursales SET activo=false WHERE nombre = ANY($1)`, [BAD]).catch(()=>{});
+
+    await query(`INSERT INTO app_config(key,value) VALUES('sucursal_cleanup_v1','true') ON CONFLICT(key) DO NOTHING`);
+    console.log('[sucursales] limpieza única aplicada: Central / Río Tercero → Río Tercero (Casa Central)');
+  } catch (e) {
+    console.error('[sucursales cleanup]', e.message);
+  }
+}
+ensureSucursalSchema().then(runSucursalCleanupOnce).catch(()=>{});
