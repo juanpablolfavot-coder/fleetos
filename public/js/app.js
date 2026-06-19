@@ -5005,9 +5005,12 @@ function renderCosts() {
   const totalOTs         = totalMano + totalRepuestos;
   const totalGeneral     = totalCombustible + totalOTs;
 
-  // Litros por vehículo (para la columna nueva)
+  // Litros por vehículo (para la columna nueva) — solo gasoil/nafta, sin urea
   const litrosByVeh = {};
-  fuelMes.forEach(f => { litrosByVeh[f.vehicle] = (litrosByVeh[f.vehicle]||0) + (f.liters||0); });
+  fuelMes.forEach(f => {
+    if (String(f.fuel_type||'').toLowerCase() === 'urea') return;
+    litrosByVeh[f.vehicle] = (litrosByVeh[f.vehicle]||0) + (f.liters||0);
+  });
 
   document.getElementById('page-costs').innerHTML = `
     <!-- Header con selector de mes -->
@@ -5066,7 +5069,7 @@ function renderCosts() {
             </div>
             ${conDatos.length>0 ? `<div style="display:flex;justify-content:space-between">
               <span>Más eficiente ($/km):</span>
-              <span style="cursor:pointer;color:var(--ok)">${conDatos[conDatos.length-1].code} · $${conDatos[conDatos.length-1]._costReal.toFixed(3)}</span>
+              <span style="cursor:pointer;color:var(--ok)">${conDatos[conDatos.length-1].code} · $${conDatos[conDatos.length-1]._costReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
             </div>` : ''}
           </div>
         ` : ''}
@@ -5082,7 +5085,7 @@ function renderCosts() {
         <table id="costs-table">
           <thead><tr>
             <th>Código</th><th>Marca / Modelo</th><th>Km</th><th>Litros</th>
-            <th style="color:#3b82f6">Combustible</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
+            <th style="color:#3b82f6">Combustible</th><th style="color:#06b6d4">Urea</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
             <th>Total</th><th>$/km</th><th>% mes</th><th>Eval.</th><th></th>
           </tr></thead>
           <tbody>${sorted.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
@@ -5098,10 +5101,11 @@ function renderCosts() {
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total/1000)+'K':'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total/1000)+'K':'—'}</td>
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes/1000)}K</td>
-              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toFixed(3):'—'}</td>
+              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Ver</button></td>
