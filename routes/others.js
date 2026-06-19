@@ -703,7 +703,7 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         'UPDATE tanks SET current_l = current_l - $1, updated_at = NOW() WHERE id = $2 RETURNING current_l, location',
         [liters, tank_id]
       );
-      console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L (precio cisterna: $${ppuFinal || 'sin definir'})`);
+      console.log(`[FUEL] Carga ${liters}L de "${upd.rows[0].location}" — queda ${parseFloat(upd.rows[0].current_l).toFixed(0)}L`);
     }
     // Odómetro manual: no copiamos más km_current/GPS automáticamente.
     // Si no se informa, queda NULL para no guardar un dato falso.
