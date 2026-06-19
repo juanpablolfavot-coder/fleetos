@@ -5305,9 +5305,9 @@ function toggleCostRubro(vehicleCode, rubroId) {
               <td style="padding:7px 8px;color:var(--text3);font-size:11px;max-width:200px">${item.detalle}</td>
               <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:600;color:${rubro.color}">$${item.monto.toLocaleString()}</td>
               <td style="padding:7px 8px;text-align:right;font-family:var(--mono);color:var(--text3)">
-                ${Math.round(item.monto/rubro.total*100)}%
+                ${rubro.total>0?Math.round(item.monto/rubro.total*100):0}%
                 <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:3px;overflow:hidden">
-                  <div style="height:3px;width:${Math.round(item.monto/rubro.total*100)}%;background:${rubro.color};border-radius:2px"></div>
+                  <div style="height:3px;width:${rubro.total>0?Math.round(item.monto/rubro.total*100):0}%;background:${rubro.color};border-radius:2px"></div>
                 </div>
               </td>
             </tr>`).join('')}
