@@ -210,7 +210,7 @@ router.post('/register', loginLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Nombre, email y contraseña son requeridos' });
     }
     if (password.length < 8) {
-      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
     }
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
