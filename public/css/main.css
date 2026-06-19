@@ -349,6 +349,7 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 @keyframes toastIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 .toast.ok     { border-left: 3px solid var(--ok); }
 .toast.danger { border-left: 3px solid var(--danger); }
+.toast.error  { border-left: 3px solid var(--danger); }
 .toast.warn   { border-left: 3px solid var(--warn); }
 .toast.info   { border-left: 3px solid var(--info); }
 
