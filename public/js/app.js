@@ -3999,6 +3999,43 @@ function stockSelectHTML(id, opts, selected, allLabel, key, disabled) {
     + '</select>';
 }
 
+// Campo de categoría con sugerencias administradas (dueño/gerencia definen la lista
+// en 🏷 Categorías). Permite elegir de la lista o escribir una nueva.
+function stockCatInputHTML(id, value) {
+  const managed = (App.config && Array.isArray(App.config.stock_categories)) ? App.config.stock_categories : [];
+  const fallback = ['Filtros','Lubricantes','Mecánico','Frenos','Eléctrico','Tornillería','Administración','Herramientas'];
+  const cats = managed.length ? managed : fallback;
+  const dlId = id + '-list';
+  return '<input class="form-input" id="' + id + '" list="' + dlId + '" value="' + stockFormValue(value || '') + '" placeholder="Elegí o escribí una categoría">'
+       + '<datalist id="' + dlId + '">' + cats.map(c => '<option value="' + stockFormValue(c) + '">').join('') + '</datalist>';
+}
+
+function openStockCategoriasModal() {
+  if (!userHasRole('dueno','gerencia')) { showToast('warn', 'Solo dueño/gerencia pueden editar categorías'); return; }
+  const cats = (App.config?.stock_categories) || [];
+  openModal('🏷 Categorías de stock', ''
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px">Definí las categorías que aparecerán para elegir al cargar o pedir stock (ej: Palet, Film, Ribbon, Filtros…). Una por línea.</div>'
+    + '<textarea class="form-input" id="stock-cats-text" rows="10" style="resize:vertical;font-family:var(--mono)" placeholder="Palet&#10;Film&#10;Ribbon">' + stockFormValue(cats.join('\n')) + '</textarea>',
+  [
+    { label:'Guardar categorías', cls:'btn-primary', fn: saveStockCategorias },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
+  ]);
+}
+
+async function saveStockCategorias() {
+  const raw = document.getElementById('stock-cats-text')?.value || '';
+  const cats = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  try {
+    const res = await apiFetch('/api/config', { method:'PUT', body: JSON.stringify({ stock_categories: cats }) });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); showToast('error', e.error || 'Error al guardar'); return; }
+    App.config = App.config || {};
+    App.config.stock_categories = cats;
+    closeModal();
+    showToast('ok', 'Categorías de stock actualizadas');
+    renderStock();
+  } catch(e) { showToast('error', 'Error al guardar categorías'); }
+}
+
 function renderStock() {
   const allItems = App.data.stock || [];
   const filters = stockCurrentFilters();
@@ -4089,7 +4126,7 @@ function renderStock() {
 
   const bajaBtnHeader = canManage ? '<button class="btn btn-danger btn-sm" onclick="openStockBajaModal()">✕ Baja auditada</button>' : '';
   const adminButtons = canManage
-    ? bajaBtnHeader + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockTransferModal()">↔ Traslado interno</button>' + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
+    ? bajaBtnHeader + '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>' + (userHasRole('dueno','gerencia') ? '<button class="btn btn-secondary btn-sm" onclick="openStockCategoriasModal()">🏷 Categorías</button>' : '') + '<button class="btn btn-secondary btn-sm" onclick="openStockAjusteModal()">± Ajuste inventario</button>' + '<button class="btn btn-secondary btn-sm" onclick="openStockTransferModal()">↔ Traslado interno</button>' + '<button class="btn btn-primary btn-sm" onclick="openNewStockModal()">+ Registrar ítem</button>'
     : '<button class="btn btn-secondary btn-sm" onclick="exportStockPDF()">📄 PDF</button>';
 
   document.getElementById('page-stock').innerHTML =
@@ -4232,7 +4269,7 @@ function openEditStockModal(stockId) {
   openModal('Editar artículo — '+s.name, ''
     + '<div style="font-size:12px;color:var(--text3);margin-bottom:14px">Editá la ficha del artículo. La cantidad física se modifica con Ingreso, Egreso, Baja o Ajuste.</div>'
     + stockLocationControls('es', s.sucursal || s.base_location || 'Central', s.area || 'Depósito')
-    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="es-code" value="'+stockFormValue(s.code)+'"></div><div class="form-group"><label class="form-label">Categoría</label><input class="form-input" id="es-cat" value="'+stockFormValue(s.cat)+'" placeholder="Filtros, Lubricantes, Frenos..."></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="es-code" value="'+stockFormValue(s.code)+'"></div><div class="form-group"><label class="form-label">Categoría</label>'+stockCatInputHTML('es-cat', s.cat)+'</div></div>'
     + '<div class="form-group"><label class="form-label">Descripción completa</label><input class="form-input" id="es-name" value="'+stockFormValue(s.name)+'"></div>'
     + '<div class="form-row form-row-3"><div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" id="es-min" value="'+stockFormValue(s.min)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Punto de pedido</label><input class="form-input" type="number" id="es-reorder" value="'+stockFormValue(s.reorder)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Unidad</label><select class="form-select" id="es-unit">'+['un','L','kg','jgo','m'].map(function(u){ return '<option '+(s.unit===u?'selected':'')+'>'+u+'</option>'; }).join('')+'</select></div></div>'
     + '<div class="form-row"><div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" id="es-cost" value="'+stockFormValue(s.cost)+'" min="0" step="0.01"></div><div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" id="es-supplier" value="'+stockFormValue(s.supplier==='—'?'':s.supplier)+'"></div></div>',
@@ -4376,7 +4413,7 @@ function openNewStockModal() {
   const defaultArea = stockCurrentFilters().area !== 'all' ? stockCurrentFilters().area : 'Depósito';
   openModal('Registrar nuevo ítem de stock', ''
     + stockLocationControls('ns', defaultSucursal === 'all' ? null : defaultSucursal, defaultArea)
-    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="FLT-ACE-003" id="ns-code"></div><div class="form-group"><label class="form-label">Categoría</label><select class="form-select" id="ns-cat"><option>Filtros</option><option>Lubricantes</option><option>Mecánico</option><option>Frenos</option><option>Eléctrico</option><option>Tornillería</option><option>Administración</option><option>Herramientas</option></select></div></div>'
+    + '<div class="form-row"><div class="form-group"><label class="form-label">Código interno</label><input class="form-input" placeholder="FLT-ACE-003" id="ns-code"></div><div class="form-group"><label class="form-label">Categoría</label>'+stockCatInputHTML('ns-cat')+'</div></div>'
     + '<div class="form-group"><label class="form-label">Descripción completa</label><input class="form-input" placeholder="Nombre completo del repuesto o insumo" id="ns-name"></div>'
     + '<div class="form-row form-row-3"><div class="form-group"><label class="form-label">Stock inicial</label><input class="form-input" type="number" placeholder="0" id="ns-qty" step="0.01"></div><div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" type="number" placeholder="2" id="ns-min" step="0.01"></div><div class="form-group"><label class="form-label">Unidad</label><select class="form-select" id="ns-unit"><option>un</option><option>L</option><option>kg</option><option>jgo</option><option>m</option></select></div></div>'
     + '<div class="form-row"><div class="form-group"><label class="form-label">Costo unitario ($)</label><input class="form-input" type="number" placeholder="0" id="ns-cost" step="0.01"></div><div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="ns-supplier"></div></div>',
@@ -9017,7 +9054,7 @@ async function renderPurchaseOrders() {
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Proceso de compra: pendiente de cotizar → en cotización → aprobada → pagada → recibida</p>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
+        ${userHasRole('dueno','gerencia') ? `<button class="btn btn-secondary btn-sm" onclick="openSucursalesConfigModal()">🏢 Sucursales</button><button class="btn btn-secondary btn-sm" onclick="openAreasConfigModal()">⚙ Áreas</button>` : ''}
         <button class="btn btn-secondary btn-sm" onclick="_poExportPDF()" title="Descargar PDF con las OCs visibles">📄 PDF</button>
         ${canCreate ? `<button class="btn btn-primary" onclick="openNewPOModal()">+ Nueva OC</button>` : ''}
       </div>
@@ -11261,6 +11298,77 @@ function selectPOStockItem(idx, stockId, name, unit, unitCost, qtyCurrent) {
   if (typeof showToast === 'function') {
     showToast('ok', `Vinculado al stock: ${name}`);
   }
+}
+
+async function openSucursalesConfigModal() {
+  // Refrescar lista de sucursales desde la API
+  try { await loadSucursalesFromAPI(true); } catch(e) {}
+  window._sucList = (App.config?.bases || []).slice();
+  renderSucursalesModalBody();
+  openModal('🏢 Sucursales', '<div id="suc-modal-body"></div>', [
+    { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
+  ]);
+  setTimeout(renderSucursalesModalBody, 0);
+}
+
+function renderSucursalesModalBody() {
+  const body = document.getElementById('suc-modal-body');
+  if (!body) return;
+  const bases = window._sucList || [];
+  const optsDest = (i) => bases.map((b, j) => j === i ? '' : `<option value="${j}">${stockFormValue(b)}</option>`).join('');
+  const rows = bases.map((n, i) => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;background:var(--bg3);padding:8px 10px;border-radius:8px;flex-wrap:wrap">
+      <div style="flex:1;min-width:140px;font-weight:600">${stockFormValue(n)}</div>
+      <select class="form-select" id="suc-dest-${i}" style="max-width:220px;font-size:12px">
+        <option value="">— mover registros a… —</option>${optsDest(i)}
+      </select>
+      <button class="btn btn-danger btn-sm" onclick="quitarSucursal(${i})">✕ Quitar y migrar</button>
+    </div>`).join('') || '<div style="color:var(--text3);padding:10px">No hay sucursales cargadas.</div>';
+
+  body.innerHTML = `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Al quitar una sucursal, sus registros (stock, OCs, usuarios, etc.) se mueven a la sucursal destino que elijas. No se borra nada: la sucursal queda desactivada.</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <input class="form-input" id="suc-nueva" placeholder="Nombre de nueva sucursal" style="flex:1">
+      <button class="btn btn-primary" onclick="nuevaSucursal()">+ Agregar</button>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Sucursales actuales</div>
+    ${rows}`;
+}
+
+async function nuevaSucursal() {
+  const input = document.getElementById('suc-nueva');
+  const nombre = (input?.value || '').trim();
+  if (!nombre) { showToast('warn', 'Escribí el nombre de la sucursal'); return; }
+  try {
+    const res = await apiFetch('/api/sucursales', { method: 'POST', body: JSON.stringify({ nombre }) });
+    if (!res.ok) { const e = await res.json().catch(()=>({})); showToast('error', e.error || 'Error al crear'); return; }
+    showToast('ok', `Sucursal "${nombre}" agregada`);
+    await loadSucursalesFromAPI(true);
+    window._sucList = (App.config?.bases || []).slice();
+    renderSucursalesModalBody();
+  } catch(e) { showToast('error', 'Error al crear sucursal'); }
+}
+
+async function quitarSucursal(i) {
+  const bases = window._sucList || [];
+  const de = bases[i];
+  const destSel = document.getElementById('suc-dest-' + i);
+  const destIdx = destSel?.value;
+  if (destIdx === '' || destIdx == null) { showToast('warn', 'Elegí a qué sucursal mover los registros'); return; }
+  const a = bases[parseInt(destIdx, 10)];
+  if (!a || a === de) { showToast('warn', 'El destino debe ser distinto'); return; }
+  if (!confirm(`¿Quitar "${de}" y mover todos sus registros a "${a}"?\n\nLa sucursal "${de}" quedará desactivada.`)) return;
+  try {
+    const res = await apiFetch('/api/sucursales/migrar', { method: 'POST', body: JSON.stringify({ de, a }) });
+    const data = await res.json().catch(()=>({}));
+    if (!res.ok) { showToast('error', data.error || 'Error al migrar'); return; }
+    const m = data.movidos || {};
+    showToast('ok', `"${de}" migrada a "${a}" (${(m.items_stock||0)} ítems, ${(m.ordenes_compra||0)} OCs, ${(m.usuarios||0)} usuarios)`);
+    await loadSucursalesFromAPI(true);
+    window._sucList = (App.config?.bases || []).slice();
+    renderSucursalesModalBody();
+    if (typeof loadInitialData === 'function') loadInitialData();
+  } catch(e) { showToast('error', 'Error al migrar la sucursal'); }
 }
 
 async function openAreasConfigModal() {
