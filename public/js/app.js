@@ -5964,6 +5964,7 @@ async function renderUsers() {
     const res = await apiFetch('/api/users');
     if (!res || !res.ok) { document.getElementById('users-table-wrap').innerHTML = '<div style="color:var(--danger);padding:20px">Error cargando usuarios</div>'; return; }
     const users = await res.json();
+    App.data.users = users;
 
     // Separar pendientes de aprobación
     const pending = users.filter(u => !u.active && u.role === 'chofer');
@@ -6032,7 +6033,7 @@ async function renderUsers() {
                 </td>
                 <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
                 <td style="padding:12px 16px">
-                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal(${JSON.stringify(u.id)},${JSON.stringify(u.name)},${JSON.stringify(u.email)},${JSON.stringify(u.role)},${JSON.stringify(u.vehicle_code||'')},${u.active},${JSON.stringify(u.sucursal||'')},${JSON.stringify(u.area||'')})">Editar</button>
+                  <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}')">Editar</button>
                   ${userHasRole('dueno') && u.email !== 'admin@fleetos.com' ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);margin-left:6px" onclick="confirmDeleteUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">🗑 Eliminar</button>` : ''}
                 </td>
               </tr>
@@ -6186,7 +6187,11 @@ async function saveNewUser() {
 }
 
 
-function openEditUserModal(id, name, email, role, vehicle, active, sucursal, area) {
+function openEditUserModal(id) {
+  const u = (App.data.users || []).find(x => String(x.id) === String(id));
+  if (!u) { showToast('error', 'Usuario no encontrado — recargá la lista'); return; }
+  const name = u.name, email = u.email, role = u.role;
+  const vehicle = u.vehicle_code || '', active = !!u.active, sucursal = u.sucursal || '', area = u.area || '';
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');
   const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate}</option>`).join('');
 
