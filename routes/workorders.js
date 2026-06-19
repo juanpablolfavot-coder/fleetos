@@ -501,7 +501,7 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
         vehicleId: wo.rows[0].vehicle_id, assetId: wo.rows[0].asset_id,
         sucursal, area: 'Taller', tipo: wo.rows[0].vehicle_id ? 'flota' : 'otro',
         notes: `Solicitud generada automáticamente al cerrar ${wo.rows[0].code}`,
-        prioridad: priority || wo.rows[0].priority || 'Normal'
+        prioridad: wo.rows[0].priority || 'Normal'
       }, externalItemsForPO);
     }
 
