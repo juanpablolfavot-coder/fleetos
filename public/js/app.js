@@ -162,6 +162,9 @@ const App = {
   currentUser: null,
   data: {}
 };
+// Exponer App en window para que los módulos en archivos aparte
+// (timeline.js, facturas.js, pagos.js, recepciones.js) accedan al estado global.
+window.App = App;
 // Helper para verificar rol del usuario actual
 function userHasRole(...roles) {
   const role = App.currentUser?.role;
