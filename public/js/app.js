@@ -9178,6 +9178,13 @@ function _poSort(key) {
   _poRenderRows();
 }
 
+function _ocPrioridadBadge(po) {
+  const p = String(po.prioridad || 'Normal');
+  if (p === 'Urgente') return `<span title="Prioridad Urgente — indicada por el área solicitante" style="background:rgba(239,68,68,.18);color:#ef4444;border:1px solid rgba(239,68,68,.45);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🔴 URGENTE</span>`;
+  if (p === 'Media')   return `<span title="Prioridad Media" style="background:rgba(245,158,11,.18);color:#f59e0b;border:1px solid rgba(245,158,11,.4);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:700;font-family:var(--mono);white-space:nowrap">🟡 MEDIA</span>`;
+  return `<span title="Prioridad Normal" style="background:var(--bg4);color:var(--text3);padding:1px 7px;border-radius:10px;font-size:9px;font-weight:600;font-family:var(--mono);white-space:nowrap">NORMAL</span>`;
+}
+
 function _poRenderRow(po) {
   const role = App.currentUser?.role;
   const puedeVerPrecios = _ocPuedeVerPrecios(role);
@@ -9219,7 +9226,7 @@ function _poRenderRow(po) {
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${po.code||'—'}</td>
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${po.code||'—'}<div style="margin-top:4px">${_ocPrioridadBadge(po)}</div></td>
 
     <td style="padding:10px 12px">
       ${_ocEstadoBadge(po)}
@@ -9442,6 +9449,15 @@ async function openNewPOModal() {
             ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
           </select>
         </div>
+      </div>
+      <div class="form-group" style="margin:0 0 10px 0">
+        <label class="form-label">Prioridad / Urgencia</label>
+        <select class="form-select" id="po-prioridad">
+          <option value="Normal">⚪ Normal</option>
+          <option value="Media">🟡 Media</option>
+          <option value="Urgente">🔴 Urgente</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:3px">Indicá la urgencia para que Compras la priorice</div>
       </div>
       <div class="form-group" style="margin:0">
         <label class="form-label">Proveedor <span style="color:var(--danger)">*</span></label>
@@ -9698,6 +9714,17 @@ async function openNewPOModalJefe() {
       </div>
     </div>
 
+    <!-- PRIORIDAD -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🚦 Prioridad</div>
+      <select class="form-select" id="poj-prioridad" style="max-width:260px">
+        <option value="Normal">⚪ Normal</option>
+        <option value="Media">🟡 Media</option>
+        <option value="Urgente">🔴 Urgente</option>
+      </select>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">Indicá la urgencia para que Compras priorice tu pedido</div>
+    </div>
+
     <!-- NOTAS -->
     <div class="card" style="padding:12px 16px;margin-bottom:6px">
       <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🗒️ Notas / problema</div>
@@ -9855,6 +9882,7 @@ async function saveNewPOJefe() {
   const tipo     = window._poTipoJefe || 'flota';
   const vehicle_id = document.getElementById('poj-vehicle')?.value || null;
   const notes    = document.getElementById('poj-notes')?.value?.trim() || '';
+  const prioridad = document.getElementById('poj-prioridad')?.value || 'Normal';
 
   // Validaciones básicas
   if (!sucursal) { showToast('error','Elegí una sucursal'); return; }
@@ -9894,7 +9922,7 @@ async function saveNewPOJefe() {
   }
 
   const body = {
-    sucursal, area, notes,
+    sucursal, area, notes, prioridad,
     vehicle_id: vehicle_id || null,
     items,
     presupuesto_imagen: window._presupuestoArchivo || null,
@@ -9926,6 +9954,7 @@ async function saveNewPO() {
     const notes    = document.getElementById('po-notes')?.value?.trim() || '';
     const sucursal = document.getElementById('po-sucursal')?.value || '';
     const area     = document.getElementById('po-area')?.value || '';
+    const prioridad = document.getElementById('po-prioridad')?.value || 'Normal';
 
     // Proveedor: puede venir del catálogo (supplier_id) o manual (texto)
     let proveedor = '';
@@ -9966,7 +9995,7 @@ async function saveNewPO() {
     const ivaPct = window._poIvaPct || 0;
     const res = await apiFetch('/api/purchase-orders', {
       method: 'POST',
-      body: JSON.stringify({ notes, sucursal, area, proveedor, supplier_id, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
+      body: JSON.stringify({ notes, sucursal, area, prioridad, proveedor, supplier_id, tipo, vehicle_id: vehicle_id||null, ...extra, iva_pct: ivaPct, items })
     });
     window._poIvaPct = 0;
     window._poSupplierId = null;
@@ -10609,6 +10638,7 @@ async function printPO(id) {
         <div class="grid3">
           <div class="field"><div class="field-label">Sucursal</div><div class="field-value">${po.sucursal||'—'}</div></div>
           <div class="field"><div class="field-label">Área</div><div class="field-value">${po.area||'—'}</div></div>
+          <div class="field"><div class="field-label">Prioridad</div><div class="field-value">${(()=>{const p=po.prioridad||'Normal';const c=p==='Urgente'?'#ef4444':p==='Media'?'#f59e0b':'var(--text)';const ic=p==='Urgente'?'🔴 ':p==='Media'?'🟡 ':'';return `<span style="color:${c};font-weight:${p==='Normal'?'400':'700'}">${ic}${p}</span>`;})()}</div></div>
           <div class="field"><div class="field-label">Solicitado por</div><div class="field-value">${po.solicitante_nombre||'—'}</div></div>
           <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${po.proveedor||'—'}</div></div>
           <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${vehInfo.code || '—'}${vehInfo.plate ? ' ('+vehInfo.plate+')' : ''}</div></div>
