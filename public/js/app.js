@@ -560,7 +560,7 @@ function renderDashboard() {
       ${ultimasCargas.map(f=>`<tr>
         <td class="td-main">${f.vehicle}</td>
         <td class="td-mono">${f.liters} L</td>
-        <td class="td-mono">${(()=>{const logs=(App.data.fuelLogs||[]).filter(x=>x.vehicle===f.vehicle&&x.km>0).sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
+        <td class="td-mono">${(()=>{const logs=(App.data.fuelLogs||[]).filter(x=>x.vehicle===f.vehicle&&x.km>0&&String(x.fuel_type||'').toLowerCase()!=='urea').sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
         <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -2059,7 +2059,7 @@ function renderFuel() {
 
   // ── Rendimiento promedio real ──
   // Necesita logs con km y litros. Calcular km/litro por vehiculo en últimos 30 días
-  const logsConKm = App.data.fuelLogs.filter(f => f.km > 0 && f.liters > 0);
+  const logsConKm = App.data.fuelLogs.filter(f => f.km > 0 && f.liters > 0 && String(f.fuel_type||'').toLowerCase() !== 'urea');
   let rendimiento = '—';
   let rendTrend = 'sin datos suficientes aún';
   if (logsConKm.length >= 2) {
@@ -4755,15 +4755,25 @@ function getCostDetail(vehicleCode, mesStr) {
 
   const inMes = d => { const x = new Date(d); return x.getFullYear()===yr && x.getMonth()+1===mo; };
 
-  // ── Combustible real ──
+  // ── Combustible real (gasoil/nafta) SEPARADO de urea/AdBlue ──
+  const esUrea = f => String(f.fuel_type || '').toLowerCase() === 'urea';
   const fuelLogs = App.data.fuelLogs.filter(f => f.vehicle === vehicleCode);
-  const fuelMes  = fuelLogs.filter(f => inMes(f.date));
+  const fuelMesAll = fuelLogs.filter(f => inMes(f.date));
+  const fuelMes  = fuelMesAll.filter(f => !esUrea(f));   // solo gasoil/nafta → propulsión
+  const ureaMes  = fuelMesAll.filter(f => esUrea(f));    // AdBlue → insumo aparte
   const fuelTotal = fuelMes.reduce((a,f) => a + (f.liters * f.ppu), 0);
+  const ureaTotal = ureaMes.reduce((a,f) => a + (f.liters * f.ppu), 0);
   const fuelItems = fuelMes.map(f => ({
     fecha:   f.date.split(' ')[0],
     desc:    `Carga ${f.liters}L · ${f.place}`,
     monto:   Math.round(f.liters * f.ppu),
     detalle: `${f.liters}L × $${f.ppu}/L · ${f.km ? f.km.toLocaleString('es-AR')+' '+measureUnit : measureFallback}`,
+  }));
+  const ureaItems = ureaMes.map(f => ({
+    fecha:   f.date.split(' ')[0],
+    desc:    `AdBlue ${f.liters}L · ${f.place}`,
+    monto:   Math.round(f.liters * f.ppu),
+    detalle: `${f.liters}L × $${f.ppu}/L`,
   }));
 
   // ── OTs reales del mes ──
@@ -4803,7 +4813,7 @@ function getCostDetail(vehicleCode, mesStr) {
   // Sin datos de km GPS en cargas del mes → no estimamos, mostramos sin datos
 
   // ── Costo/km real ──
-  const totalMes = fuelTotal + prevTotal + corrTotal;
+  const totalMes = fuelTotal + ureaTotal + prevTotal + corrTotal;
   const costKmReal = kmMes > 0 && totalMes > 0 ? totalMes / kmMes : 0;
 
   // ── Rendimiento del mes (mismo método que el panel de Combustible: tramo a tramo entre cargas) ──
@@ -4839,6 +4849,11 @@ function getCostDetail(vehicleCode, mesStr) {
         id:'corr', label:'Mantenimiento correctivo', color:'#ef4444',
         total: corrTotal, pct: totalMes>0 ? Math.round(corrTotal/totalMes*100) : 0,
         items: corrItems.length ? corrItems : [{ fecha:'—', desc:'Sin OTs correctivas este mes', monto:0, detalle:'—' }],
+      },
+      {
+        id:'urea', label:'Urea / AdBlue', color:'#06b6d4',
+        total: ureaTotal, pct: totalMes>0 ? Math.round(ureaTotal/totalMes*100) : 0,
+        items: ureaItems.length ? ureaItems : [{ fecha:'—', desc:'Sin cargas de urea este mes', monto:0, detalle:'—' }],
       },
     ]
   };
