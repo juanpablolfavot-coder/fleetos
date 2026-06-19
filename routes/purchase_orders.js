@@ -1087,7 +1087,7 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
           [nombre, _fp, _cc, _mon]
         );
         _supplier_id = ins.rows[0].id;
-        console.log('[OC aprobar-compras] supplier creado automáticamente:', nombre, _supplier_id);
+        console.log('[OC aprobar-compras] supplier creado automáticamente:', _supplier_id);
       }
     }
 
