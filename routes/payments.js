@@ -419,6 +419,13 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     }
 
     const monto = parseFloat(b.monto);
+    // Rechazar montos inválidos (no numéricos, NaN, cero o negativos) antes de
+    // cualquier cálculo. Sin esto, un monto NaN saltea el chequeo de saldo de
+    // abajo (NaN > saldo === false) y podría guardarse un pago corrupto.
+    if (!Number.isFinite(monto) || monto <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'El monto del pago debe ser un número mayor a cero' });
+    }
     if (monto > saldo + 0.01) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `El pago supera el saldo pendiente con IVA ($${saldo.toFixed(2)})` });
@@ -509,6 +516,128 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     await client.query('ROLLBACK').catch(() => {});
     console.error('[pagos POST]', err.stack || err.message);
     res.status(500).json({ error: 'Error al registrar el pago' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/facturas/:fid/pagos-multiple — pago combinado
+//  Registra varios instrumentos juntos (p.ej. 2 cheques + efectivo).
+//  Cada instrumento queda como un pago individual; se validan en conjunto
+//  contra el saldo y se insertan en una sola transacción (todo o nada).
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/facturas/:fid/pagos-multiple', authenticate, requireRole(...ROLES_PAGAR), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensurePaymentEngine();
+    const clean = (v) => (v == null ? '' : String(v).trim());
+    const instrumentos = Array.isArray(req.body.instrumentos) ? req.body.instrumentos : [];
+    if (!instrumentos.length) return res.status(400).json({ error: 'Agregá al menos un instrumento de pago' });
+
+    // Validación previa de cada instrumento (antes de tocar la base)
+    for (let i = 0; i < instrumentos.length; i++) {
+      const it = instrumentos[i]; const n = i + 1;
+      if (!METODOS.includes(it.metodo)) return res.status(400).json({ error: `Instrumento ${n}: método inválido` });
+      const m = parseFloat(it.monto);
+      if (!Number.isFinite(m) || m <= 0) return res.status(400).json({ error: `Instrumento ${n}: el monto debe ser un número mayor a cero` });
+      if (it.metodo === 'cheque') {
+        if (!clean(it.cheque_nro))         return res.status(400).json({ error: `Instrumento ${n} (cheque): falta N° de cheque` });
+        if (!clean(it.cheque_banco))       return res.status(400).json({ error: `Instrumento ${n} (cheque): falta banco emisor` });
+        if (!it.cheque_fecha_cobro)        return res.status(400).json({ error: `Instrumento ${n} (cheque): falta fecha de pago` });
+      }
+      if (it.metodo === 'echeq') {
+        if (!clean(it.echeq_nro))    return res.status(400).json({ error: `Instrumento ${n} (eCheq): falta N° de eCheq` });
+        if (!clean(it.echeq_banco))  return res.status(400).json({ error: `Instrumento ${n} (eCheq): falta banco emisor` });
+        if (!it.echeq_fecha_pago)    return res.status(400).json({ error: `Instrumento ${n} (eCheq): falta fecha de pago` });
+      }
+      if (it.metodo === 'transferencia' && !clean(it.banco_origen)) {
+        return res.status(400).json({ error: `Instrumento ${n} (transferencia): falta banco origen` });
+      }
+      if (it.metodo === 'tarjeta' && !clean(it.tarjeta_aprobacion)) {
+        return res.status(400).json({ error: `Instrumento ${n} (tarjeta): falta N° de aprobación` });
+      }
+    }
+
+    const totalInstrumentos = +(instrumentos.reduce((s, it) => s + parseFloat(it.monto), 0)).toFixed(2);
+
+    await client.query('BEGIN');
+
+    const f = await client.query(
+      `SELECT
+         f.id, f.invoice_monto, f.iva_pct,
+         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+         COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p WHERE p.invoice_id=f.id),0) AS monto_pagado,
+         po.proveedor,
+         s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
+       FROM purchase_order_invoices f
+       JOIN purchase_orders po ON po.id = f.po_id
+       LEFT JOIN suppliers s ON s.id = po.supplier_id
+       WHERE f.id=$1::uuid AND f.po_id=$2::uuid
+       FOR UPDATE OF f`,
+      [req.params.fid, req.params.id]
+    );
+    if (!f.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Factura no encontrada' }); }
+
+    const totalFactura = parseFloat(f.rows[0].invoice_total) || 0;
+    const pagadoActual = parseFloat(f.rows[0].monto_pagado) || 0;
+    const saldo = Math.max(0, +(totalFactura - pagadoActual).toFixed(2));
+    if (saldo <= 0.01) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'La factura ya está pagada con IVA incluido' }); }
+    if (totalInstrumentos > saldo + 0.01) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `El total de los instrumentos ($${totalInstrumentos.toFixed(2)}) supera el saldo pendiente ($${saldo.toFixed(2)})` });
+    }
+
+    const notesComun = clean(req.body.notes) || null;
+    const fileComun  = clean(req.body.file_url) || null;
+
+    for (const it of instrumentos) {
+      const monto = parseFloat(it.monto);
+      const bancoOrigen   = clean(it.banco_origen) || null;
+      const bancoDestino  = clean(it.banco_destino) || clean(f.rows[0].supplier_bank) || clean(f.rows[0].supplier_name) || clean(f.rows[0].proveedor) || null;
+      const cbuAliasDest  = clean(it.cbu_alias_destino) || clean(f.rows[0].supplier_alias) || clean(f.rows[0].supplier_cbu) || null;
+      await client.query(`
+        INSERT INTO purchase_order_payments
+          (invoice_id, paid_by, monto, metodo, comprobante_nro, file_url, notes,
+           banco_origen, banco_destino, cbu_alias_destino,
+           cheque_nro, cheque_banco, cheque_fecha_cobro, cheque_a_nombre,
+           echeq_nro, echeq_banco, echeq_fecha_pago, echeq_clave,
+           tarjeta_aprobacion, tarjeta_cuotas)
+        VALUES (
+          $1::uuid,$2::uuid,$3::numeric,$4::varchar,$5::varchar,$6::text,$7::text,
+          $8::varchar,$9::varchar,$10::varchar,
+          $11::varchar,$12::varchar,$13::date,$14::varchar,
+          $15::varchar,$16::varchar,$17::date,$18::varchar,
+          $19::varchar,$20::integer
+        )`, [
+        req.params.fid, req.user.id, monto, it.metodo,
+        clean(it.comprobante_nro) || null, fileComun, notesComun,
+        bancoOrigen, bancoDestino, cbuAliasDest,
+        clean(it.cheque_nro) || null, clean(it.cheque_banco) || null, it.cheque_fecha_cobro || null, clean(it.cheque_a_nombre) || null,
+        clean(it.echeq_nro) || null, clean(it.echeq_banco) || null, it.echeq_fecha_pago || null, clean(it.echeq_clave) || null,
+        clean(it.tarjeta_aprobacion) || null, it.tarjeta_cuotas ? parseInt(it.tarjeta_cuotas) : null,
+      ]);
+    }
+
+    await recalcPagoFacturaYOC(client, req.params.fid);
+    await client.query('COMMIT');
+
+    const pagado = +(pagadoActual + totalInstrumentos).toFixed(2);
+    const saldoRestante = Math.max(0, +(totalFactura - pagado).toFixed(2));
+    res.status(201).json({
+      factura_pagada: saldoRestante <= 0.01,
+      instrumentos_registrados: instrumentos.length,
+      monto_pagado_total: pagado,
+      total_factura_con_iva: totalFactura,
+      saldo_restante: saldoRestante,
+      message: saldoRestante <= 0.01
+        ? `Pago combinado registrado (${instrumentos.length} instrumentos). Factura cancelada totalmente.`
+        : `Pago combinado parcial registrado (${instrumentos.length} instrumentos).`,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[pagos-multiple POST]', err.stack || err.message);
+    res.status(500).json({ error: 'Error al registrar el pago combinado' });
   } finally {
     client.release();
   }
