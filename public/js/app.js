@@ -4836,22 +4836,22 @@ function getCostDetail(vehicleCode, mesStr) {
     manoTotal, repTotal,
     rubros: [
       {
-        id:'fuel', label:'Combustible', color:'#3b82f6',
+        id:'fuel', label:'Combustible', short:'Combustible', color:'#3b82f6',
         total: fuelTotal, pct: totalMes>0 ? Math.round(fuelTotal/totalMes*100) : 0,
         items: fuelItems.length ? fuelItems : [{ fecha:'—', desc:'Sin cargas registradas este mes', monto:0, detalle:'—' }],
       },
       {
-        id:'prev', label:'Mantenimiento preventivo', color:'#22c55e',
+        id:'prev', label:'Mantenimiento preventivo', short:'Preventivo', color:'#22c55e',
         total: prevTotal, pct: totalMes>0 ? Math.round(prevTotal/totalMes*100) : 0,
         items: prevItems.length ? prevItems : [{ fecha:'—', desc:'Sin OTs preventivas este mes', monto:0, detalle:'—' }],
       },
       {
-        id:'corr', label:'Mantenimiento correctivo', color:'#ef4444',
+        id:'corr', label:'Mantenimiento correctivo', short:'Correctivo', color:'#ef4444',
         total: corrTotal, pct: totalMes>0 ? Math.round(corrTotal/totalMes*100) : 0,
         items: corrItems.length ? corrItems : [{ fecha:'—', desc:'Sin OTs correctivas este mes', monto:0, detalle:'—' }],
       },
       {
-        id:'urea', label:'Urea / AdBlue', color:'#06b6d4',
+        id:'urea', label:'Urea / AdBlue', short:'Urea', color:'#06b6d4',
         total: ureaTotal, pct: totalMes>0 ? Math.round(ureaTotal/totalMes*100) : 0,
         items: ureaItems.length ? ureaItems : [{ fecha:'—', desc:'Sin cargas de urea este mes', monto:0, detalle:'—' }],
       },
@@ -5203,8 +5203,8 @@ function openCostDrillDown(vehicleCode) {
           onclick="toggleCostRubro('${vehicleCode}','${r.id}')"
           id="rubro-card-${r.id}">
           <div style="width:8px;height:8px;border-radius:50%;background:${r.color};margin:0 auto 5px"></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:3px;line-height:1.3">${r.label.split(' ')[0]}</div>
-          <div style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">$${Math.round(r.total/1000)}K</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:3px;line-height:1.3">${r.short || r.label.split(' ')[0]}</div>
+          <div style="font-size:15px;font-weight:700;font-family:var(--mono);color:var(--text)">${fmtMontoCorto(r.total)}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${r.pct}% del total</div>
           <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;overflow:hidden">
             <div style="height:3px;width:${r.pct}%;background:${r.color};border-radius:2px"></div>
