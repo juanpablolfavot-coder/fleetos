@@ -162,9 +162,6 @@ const App = {
   currentUser: null,
   data: {}
 };
-// Exponer App en window para que los módulos en archivos aparte
-// (timeline.js, facturas.js, pagos.js, recepciones.js) accedan al estado global.
-window.App = App;
 // Helper para verificar rol del usuario actual
 function userHasRole(...roles) {
   const role = App.currentUser?.role;
@@ -5715,7 +5712,7 @@ function showToast(type, msg) {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.innerHTML = `<span>${type==='ok'?'✓':(type==='danger'||type==='error')?'✗':'!'}</span><span>${msg}</span>`;
+  el.innerHTML = `<span>${type==='ok'?'✓':type==='danger'?'✗':'!'}</span><span>${msg}</span>`;
   container.appendChild(el);
   setTimeout(() => { el.style.opacity='0'; el.style.transform='translateX(10px)'; el.style.transition='all .3s'; setTimeout(()=>el.remove(),300); }, 3500);
 }
@@ -8202,7 +8199,22 @@ async function renderAuditorResumen(el) {
           <div class="kpi-value ${deudaColor}">${fmtAr(c.deuda_total)}</div>
           <div class="kpi-trend">${(c.deuda_vencida||0)>0 ? '⚠ '+fmtAr(c.deuda_vencida)+' vencido ('+(c.facturas_vencidas||0)+')' : 'sin deuda vencida'}${(c.deuda_por_vencer||0)>0 ? ' · '+fmtAr(c.deuda_por_vencer)+' por vencer' : ''}</div>
         </div>
-      </div>`;
+      </div>
+      ${(() => {
+        const cats = (c.por_categoria || []);
+        if (!cats.length) return '';
+        const totalCat = cats.reduce((s,x)=>s+(x.monto||0),0);
+        return `
+          <div style="margin-top:18px;font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📦 Compras del mes por categoría</div>
+          <div class="card" style="padding:0"><div class="table-wrap"><table>
+            <thead><tr><th>Categoría</th><th style="text-align:center">OCs</th><th style="text-align:right">Monto</th><th style="text-align:right">% del total</th></tr></thead>
+            <tbody>${cats.map(x => {
+              const pct = totalCat>0 ? (x.monto/totalCat*100) : 0;
+              return '<tr><td>'+(x.categoria||'—')+'</td><td class="td-mono" style="text-align:center">'+x.ocs+'</td><td class="td-mono" style="text-align:right">'+fmtAr(x.monto)+'</td><td class="td-mono" style="text-align:right;color:var(--text3)">'+pct.toFixed(1)+'%</td></tr>';
+            }).join('')}</tbody>
+          </table></div></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:6px">El monto sale de los artículos cotizados de cada OC. Los ítems de texto libre (sin vínculo al stock) aparecen como "Sin categoría".</div>`;
+      })()}`;
     })()}`;
 }
 
@@ -10137,8 +10149,6 @@ function _poOnSupplierChange(value) {
 // ── Ver detalle de OC ────────────────────────────────────
 async function openPODetail(id) {
   try {
-    // Guardar el id de la OC abierta para que el timeline pueda enriquecerse
-    window.App.currentPODetailId = id;
     // Resetear el contador de ids para los artículos editables inline
     window._podItemNextIdx = 0;
     // Cache-busting: siempre datos frescos al abrir el detalle
