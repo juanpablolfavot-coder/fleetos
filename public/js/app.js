@@ -7322,102 +7322,130 @@ function openNewOTModal(preselectedVehicle) {
   // Cargar activos si no están cargados aún
   if (!App.data.assets) loadAssetsIntoData();
 
-  openModal('Nueva orden de trabajo', `
-    <!-- Selector de tipo arriba, estilo pills -->
-    <div style="margin-bottom:16px">
-      <label class="form-label" style="font-weight:700;margin-bottom:8px">¿Qué estás manteniendo?</label>
-      <div id="ot-tipo-pills" style="display:flex;gap:6px;flex-wrap:wrap">
-        ${[
-          ['vehiculo',    '🚛 Vehículo'],
-          ['edilicio',    '🏢 Edificio'],
-          ['herramienta', '🧰 Herramienta'],
-          ['equipo',      '⚙️ Equipo'],
-          ['informatica', '💻 Informática'],
-          ['instalacion', '🔌 Instalación'],
-          ['otro',        '📌 Otro'],
-        ].map(([v,label]) => `
-          <button type="button" class="ot-tipo-pill" data-tipo="${v}" onclick="_otSelectTipo('${v}')"
-            style="padding:7px 14px;border:1px solid var(--border2);border-radius:20px;background:${v==='vehiculo'?'var(--accent)':'var(--bg)'};color:${v==='vehiculo'?'white':'var(--text2)'};cursor:pointer;font-size:12px;font-weight:600;transition:.15s">
-            ${label}
-          </button>
-        `).join('')}
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:6px">La OT quedará vinculada al objeto que elijas abajo</div>
-    </div>
+  openModal('🛠️ Nueva orden de trabajo', `
+    <style>
+      .otv-step{margin-bottom:18px}
+      .otv-sh{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+      .otv-num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .otv-t{font-size:14px;font-weight:700;color:var(--text)}
+      .otv-opt{font-weight:500;color:var(--text3);font-size:12px}
+      .otv-body{margin-left:34px}
+      .otv-div{height:1px;background:var(--border);margin:0 0 16px 34px}
+    </style>
 
-    <!-- Dropdown dinámico: cambia según el tipo -->
-    <div class="form-group" id="ot-target-group">
-      <label class="form-label" id="ot-target-label">Unidad</label>
-      <select class="form-select" id="ot-target-select">
-        <option value="">— Cargando... —</option>
-      </select>
-      <div style="font-size:11px;margin-top:4px" id="ot-target-hint"></div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Tipo de trabajo</label>
-        <select class="form-select" id="ot-type">
-          <option value="Correctivo">Correctivo</option>
-          <option value="Preventivo">Preventivo</option>
-          <option value="Predictivo">Predictivo</option>
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Prioridad</label>
-        <select class="form-select" id="ot-priority">
-          <option value="Normal">Normal</option>
-          <option value="Media">Media</option>
-          <option value="Urgente">Urgente</option>
-        </select>
+    <!-- PASO 1 -->
+    <div class="otv-step">
+      <div class="otv-sh"><div class="otv-num">1</div><div class="otv-t">¿Qué hay que arreglar?</div></div>
+      <div class="otv-body">
+        <div id="ot-tipo-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          ${[
+            ['vehiculo',    '🚛 Vehículo'],
+            ['edilicio',    '🏢 Edificio'],
+            ['herramienta', '🧰 Herramienta'],
+            ['equipo',      '⚙️ Equipo'],
+            ['informatica', '💻 Informática'],
+            ['instalacion', '🔌 Instalación'],
+            ['otro',        '📌 Otro'],
+          ].map(([v,label]) => `
+            <button type="button" class="ot-tipo-pill" data-tipo="${v}" onclick="_otSelectTipo('${v}')"
+              style="padding:8px 15px;border:1.5px solid var(--border2);border-radius:20px;background:${v==='vehiculo'?'var(--accent)':'var(--bg)'};color:${v==='vehiculo'?'white':'var(--text2)'};cursor:pointer;font-size:12.5px;font-weight:600;transition:.15s">
+              ${label}
+            </button>
+          `).join('')}
+        </div>
+        <div class="form-group" id="ot-target-group" style="margin:0">
+          <label class="form-label" id="ot-target-label">¿Cuál? <span style="color:var(--danger)">*</span></label>
+          <select class="form-select" id="ot-target-select">
+            <option value="">— Cargando... —</option>
+          </select>
+          <div style="font-size:11px;margin-top:4px" id="ot-target-hint"></div>
+        </div>
       </div>
     </div>
+    <div class="otv-div"></div>
 
-    <div class="form-group"><label class="form-label">Título / Descripción del trabajo</label>
-      <input class="form-input" placeholder="Ej: Cambio de aceite y filtros" id="ot-title">
-    </div>
-
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Mecánico / Responsable asignado</label>
-        <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del responsable">
-        <datalist id="ot-mecanicos-list">
-          ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${u.name}">`).join('')}
-        </datalist>
-      </div>
-      <div class="form-group"><label class="form-label">Fecha límite</label>
-        <input class="form-input" type="date" id="ot-due">
-      </div>
-    </div>
-
-    <!-- Repuestos -->
-    <div style="margin:12px 0 8px;display:flex;align-items:center;justify-content:space-between">
-      <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos</label>
-      <button class="btn btn-secondary btn-sm" type="button" onclick="addOTPart()">+ Agregar repuesto</button>
-    </div>
-    <div id="ot-parts-list" style="margin-bottom:8px"></div>
-    <div id="ot-parts-total" style="font-size:13px;color:var(--text3);text-align:right;display:none">
-      Total repuestos: <strong id="ot-parts-total-val">$0</strong>
-    </div>
-
-    <div style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text3)">
-      La mano de obra propia se registra por horas/partes de trabajo, sin precio. Las compras externas se valorizan en la OT cuando Compras aprueba el precio, aunque Tesorería todavía no haya pagado.
-    </div>
-    <div style="margin-top:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);padding:10px 12px">
-      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text);cursor:pointer">
-        <input type="checkbox" id="ot-external-required" style="margin-top:2px" onchange="document.getElementById('ot-external-desc-wrap').style.display=this.checked?'block':'none'">
-        <span><strong>Mano de obra externa / tercerizada</strong><br><span style="font-size:11px;color:var(--text3)">Si el trabajo sale a un taller externo, se genera una OC separada para Compras. Los repuestos externos también generan una OC por cada ítem.</span></span>
-      </label>
-      <div id="ot-external-desc-wrap" style="display:none;margin-top:10px">
-        <label class="form-label">Descripción del trabajo tercerizado</label>
-        <input class="form-input" id="ot-external-description" placeholder="Ej: rectificación, soldadura, service externo, mano de obra de taller tercero">
+    <!-- PASO 2 -->
+    <div class="otv-step">
+      <div class="otv-sh"><div class="otv-num">2</div><div class="otv-t">¿Qué pasa y qué urgencia tiene?</div></div>
+      <div class="otv-body">
+        <div class="form-group"><label class="form-label">Contanos el problema <span style="color:var(--danger)">*</span></label>
+          <input class="form-input" placeholder="Ej: Pierde aceite / Cambio de aceite y filtros" id="ot-title">
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Tipo de trabajo</label>
+            <select class="form-select" id="ot-type">
+              <option value="Correctivo">🔧 Correctivo (se rompió)</option>
+              <option value="Preventivo">🗓️ Preventivo (mantenimiento)</option>
+              <option value="Predictivo">📊 Predictivo</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Prioridad</label>
+            <select class="form-select" id="ot-priority">
+              <option value="Normal">⚪ Normal — sin apuro</option>
+              <option value="Media">🟡 Media — esta semana</option>
+              <option value="Urgente">🔴 Urgente — ya</option>
+            </select>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="form-group" style="margin-top:10px"><label class="form-label">Costo estimado de repuestos</label>
-      <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
+    <div class="otv-div"></div>
+
+    <!-- PASO 3 -->
+    <div class="otv-step">
+      <div class="otv-sh"><div class="otv-num">3</div><div class="otv-t">¿Quién lo hace y para cuándo?</div><span class="otv-opt">(opcional)</span></div>
+      <div class="otv-body">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">Responsable / mecánico</label>
+            <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del responsable">
+            <datalist id="ot-mecanicos-list">
+              ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${u.name}">`).join('')}
+            </datalist>
+          </div>
+          <div class="form-group"><label class="form-label">Fecha límite</label>
+            <input class="form-input" type="date" id="ot-due">
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="form-group"><label class="form-label">Notas adicionales</label>
-      <textarea class="form-input" rows="2" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
+    <div class="otv-div"></div>
+
+    <!-- PASO 4 -->
+    <div class="otv-step">
+      <div class="otv-sh"><div class="otv-num">4</div><div class="otv-t">Repuestos y costos</div><span class="otv-opt">(opcional)</span></div>
+      <div class="otv-body">
+        <div style="margin:0 0 8px;display:flex;align-items:center;justify-content:space-between">
+          <label class="form-label" style="margin:0;font-weight:700">🔧 Repuestos</label>
+          <button class="btn btn-secondary btn-sm" type="button" onclick="addOTPart()">+ Agregar repuesto</button>
+        </div>
+        <div id="ot-parts-list" style="margin-bottom:8px"></div>
+        <div id="ot-parts-total" style="font-size:13px;color:var(--text3);text-align:right;display:none">
+          Total repuestos: <strong id="ot-parts-total-val">$0</strong>
+        </div>
+
+        <div style="margin-top:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text3)">
+          La mano de obra propia se registra por horas/partes de trabajo, sin precio. Las compras externas se valorizan en la OT cuando Compras aprueba el precio, aunque Tesorería todavía no haya pagado.
+        </div>
+        <div style="margin-top:10px;background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);border-radius:var(--radius);padding:10px 12px">
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;color:var(--text);cursor:pointer">
+            <input type="checkbox" id="ot-external-required" style="margin-top:2px" onchange="document.getElementById('ot-external-desc-wrap').style.display=this.checked?'block':'none'">
+            <span><strong>Mano de obra externa / tercerizada</strong><br><span style="font-size:11px;color:var(--text3)">Si el trabajo sale a un taller externo, se genera una OC separada para Compras. Los repuestos externos también generan una OC por cada ítem.</span></span>
+          </label>
+          <div id="ot-external-desc-wrap" style="display:none;margin-top:10px">
+            <label class="form-label">Descripción del trabajo tercerizado</label>
+            <input class="form-input" id="ot-external-description" placeholder="Ej: rectificación, soldadura, service externo, mano de obra de taller tercero">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px"><label class="form-label">Costo estimado de repuestos</label>
+          <input class="form-input" type="text" id="ot-total-display" readonly style="background:var(--bg3);font-weight:700;color:var(--accent)" value="$0">
+        </div>
+        <div class="form-group"><label class="form-label">Notas adicionales</label>
+          <textarea class="form-input" rows="2" placeholder="Observaciones, síntomas, instrucciones..." id="ot-notes" style="resize:vertical"></textarea>
+        </div>
+      </div>
     </div>
   `, [
-    { label: 'Crear OT', cls: 'btn-primary',   fn: saveNewOT },
+    { label: '✓ Crear OT', cls: 'btn-primary',   fn: saveNewOT },
     { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal }
   ]);
 
@@ -9496,128 +9524,147 @@ async function openNewPOModal() {
 
   var solicitante = App.currentUser?.name || App.currentUser?.email || '—';
 
-  openModal('📋 Nueva Orden de Compra', `
-    <!-- ORIGEN -->
-    <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🏢 Origen</div>
-        <div style="font-size:11px;color:var(--text3)">👤 Solicita: <span style="font-weight:700;color:var(--accent)">${solicitante}</span></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
-          <select class="form-select" id="po-sucursal" onchange="updatePOAreaSelect()">
-            <option value="">— Seleccionar sucursal —</option>
-            ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Área <span style="color:var(--danger)">*</span></label>
-          <select class="form-select" id="po-area">
-            <option value="">— Primero seleccioná la sucursal —</option>
-          </select>
+  openModal('📋 Nueva orden de compra', `
+    <style>
+      .ocv-step{margin-bottom:18px}
+      .ocv-sh{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+      .ocv-num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+      .ocv-t{font-size:14px;font-weight:700;color:var(--text)}
+      .ocv-opt{font-weight:500;color:var(--text3);font-size:12px}
+      .ocv-body{margin-left:34px}
+      .ocv-div{height:1px;background:var(--border);margin:0 0 16px 34px}
+    </style>
+
+    <!-- PASO 1 -->
+    <div class="ocv-step">
+      <div class="ocv-sh"><div class="ocv-num">1</div><div class="ocv-t">¿De dónde sale el pedido?</div><span style="margin-left:auto;font-size:11.5px;color:var(--text3)">👤 Solicita: <b style="color:var(--accent)">${solicitante}</b></span></div>
+      <div class="ocv-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Sucursal <span style="color:var(--danger)">*</span></label>
+            <select class="form-select" id="po-sucursal" onchange="updatePOAreaSelect()">
+              <option value="">— Seleccionar sucursal —</option>
+              ${(App.config?.bases||[]).map(b => `<option value="${b}">${b}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Área <span style="color:var(--danger)">*</span></label>
+            <select class="form-select" id="po-area">
+              <option value="">— Primero seleccioná la sucursal —</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>
+    <div class="ocv-div"></div>
 
-    <!-- DESTINO -->
-    <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🚛 Destino</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+    <!-- PASO 2 -->
+    <div class="ocv-step">
+      <div class="ocv-sh"><div class="ocv-num">2</div><div class="ocv-t">¿Qué tipo de compra y qué urgencia?</div></div>
+      <div class="ocv-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Tipo de orden</label>
+            <select class="form-select" id="po-tipo-select" onchange="setPOTipo(this.value)">
+              <option value="flota">🚛 Flota</option>
+              <option value="mantenimiento">🏢 Mantenimiento edilicio</option>
+              <option value="otro">📦 Otro</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0" id="po-vehicle-field">
+            <label class="form-label">Vehículo <span class="ocv-opt">(opcional)</span></label>
+            <select class="form-select" id="po-vehicle">
+              <option value="">— Sin vehículo asignado —</option>
+              ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+            </select>
+          </div>
+        </div>
         <div class="form-group" style="margin:0">
-          <label class="form-label">Tipo de orden</label>
-          <select class="form-select" id="po-tipo-select" onchange="setPOTipo(this.value)">
-            <option value="flota">🚛 Flota</option>
-            <option value="mantenimiento">🏪 Mantenimiento edilicio</option>
-            <option value="otro">📋 Otro</option>
+          <label class="form-label">Prioridad / Urgencia</label>
+          <select class="form-select" id="po-prioridad">
+            <option value="Normal">⚪ Normal — sin apuro</option>
+            <option value="Media">🟡 Media — esta semana</option>
+            <option value="Urgente">🔴 Urgente — ya</option>
           </select>
-        </div>
-        <div class="form-group" style="margin:0" id="po-vehicle-field">
-          <label class="form-label">Vehículo (opcional)</label>
-          <select class="form-select" id="po-vehicle">
-            <option value="">— Sin vehículo asignado —</option>
-            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
-          </select>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Indicá la urgencia para que Compras la priorice</div>
         </div>
       </div>
-      <div class="form-group" style="margin:0 0 10px 0">
-        <label class="form-label">Prioridad / Urgencia</label>
-        <select class="form-select" id="po-prioridad">
-          <option value="Normal">⚪ Normal</option>
-          <option value="Media">🟡 Media</option>
-          <option value="Urgente">🔴 Urgente</option>
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:3px">Indicá la urgencia para que Compras la priorice</div>
-      </div>
-      <div class="form-group" style="margin:0">
-        <label class="form-label">Proveedor <span style="color:var(--danger)">*</span></label>
-        ${catalogoProveedores.length > 0 ? `
-          <select class="form-select" id="po-supplier-select" onchange="_poOnSupplierChange(this.value)">
-            <option value="">— Seleccioná del catálogo —</option>
-            ${catalogoProveedores.map(s => `<option value="${s.id}" data-name="${s.name}" data-fpago="${s.forma_pago||''}" data-ccdias="${s.cc_dias||''}" data-moneda="${s.moneda||'ARS'}">${s.name}${s.cuit ? ' · ' + s.cuit : ''}</option>`).join('')}
-            <option value="__manual__">✍️ Escribir uno manualmente (no está en el catálogo)</option>
-          </select>
-          <div id="po-supplier-manual" style="display:none;margin-top:6px">
-            <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor (se creará en el catálogo luego)" autocomplete="off">
+    </div>
+    <div class="ocv-div"></div>
+
+    <!-- PASO 3 -->
+    <div class="ocv-step">
+      <div class="ocv-sh"><div class="ocv-num">3</div><div class="ocv-t">¿A quién le compramos y cómo se paga?</div><span style="color:var(--danger)">*</span></div>
+      <div class="ocv-body">
+        <div class="form-group" style="margin:0 0 14px 0">
+          <label class="form-label">Proveedor <span style="color:var(--danger)">*</span></label>
+          ${catalogoProveedores.length > 0 ? `
+            <select class="form-select" id="po-supplier-select" onchange="_poOnSupplierChange(this.value)">
+              <option value="">— Seleccioná del catálogo —</option>
+              ${catalogoProveedores.map(s => `<option value="${s.id}" data-name="${s.name}" data-fpago="${s.forma_pago||''}" data-ccdias="${s.cc_dias||''}" data-moneda="${s.moneda||'ARS'}">${s.name}${s.cuit ? ' · ' + s.cuit : ''}</option>`).join('')}
+              <option value="__manual__">✍️ Escribir uno manualmente (no está en el catálogo)</option>
+            </select>
+            <div id="po-supplier-manual" style="display:none;margin-top:6px">
+              <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor (se creará en el catálogo luego)" autocomplete="off">
+              <datalist id="po-proveedores-datalist">
+                ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
+              </datalist>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Elegí del catálogo para autocompletar forma de pago y condiciones</div>
+          ` : `
+            <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor" autocomplete="off">
             <datalist id="po-proveedores-datalist">
               ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
             </datalist>
+            <div style="font-size:11px;color:var(--warn);margin-top:3px">⚠️ No hay proveedores en el catálogo. Cargalos en el módulo "🏢 Proveedores" para autocompletar.</div>
+          `}
+        </div>
+        <div class="form-label" style="font-weight:700;margin-bottom:8px">💳 Pago y moneda</div>
+        <div id="po-extra-fields"></div>
+      </div>
+    </div>
+    <div class="ocv-div"></div>
+
+    <!-- PASO 4 -->
+    <div class="ocv-step">
+      <div class="ocv-sh"><div class="ocv-num">4</div><div class="ocv-t">¿Qué se compra?</div><span style="color:var(--danger)">*</span><button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="addPOItem()">+ Agregar artículo</button></div>
+      <div class="ocv-body">
+        <div id="po-items">
+          ${buildPOItemRow(0)}
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border2)">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <span style="color:var(--text3);font-weight:600;font-size:12px">IVA:</span>
+            <button type="button" id="po-iva-btn-Sin IVA" onclick="setPOIva('Sin IVA')"
+              style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:white;transition:.15s">Sin IVA</button>
+            <button type="button" id="po-iva-btn-10.5%" onclick="setPOIva('10.5%')"
+              style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">10.5%</button>
+            <button type="button" id="po-iva-btn-21%" onclick="setPOIva('21%')"
+              style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">21%</button>
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Elegí del catálogo para autocompletar forma de pago y condiciones</div>
-        ` : `
-          <input class="form-input" id="po-proveedor" list="po-proveedores-datalist" placeholder="Nombre del proveedor" autocomplete="off">
-          <datalist id="po-proveedores-datalist">
-            ${proveedoresPrev.map(pr => `<option value="${pr}"></option>`).join('')}
-          </datalist>
-          <div style="font-size:11px;color:var(--warn);margin-top:3px">⚠️ No hay proveedores en el catálogo. Cargalos en el módulo "🏢 Proveedores" para autocompletar.</div>
-        `}
-      </div>
-    </div>
-
-    <!-- PAGO Y MONEDA -->
-    <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💳 Pago y moneda</div>
-      <div id="po-extra-fields"></div>
-    </div>
-
-    <!-- ARTÍCULOS -->
-    <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px">🛒 Artículos</div>
-        <button class="btn btn-secondary btn-sm" onclick="addPOItem()">+ Agregar artículo</button>
-      </div>
-      <div id="po-items">
-        ${buildPOItemRow(0)}
-      </div>
-      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border2)">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <span style="color:var(--text3);font-weight:600;font-size:12px">IVA:</span>
-          <button type="button" id="po-iva-btn-Sin IVA" onclick="setPOIva('Sin IVA')"
-            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:white;transition:.15s">Sin IVA</button>
-          <button type="button" id="po-iva-btn-10.5%" onclick="setPOIva('10.5%')"
-            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">10.5%</button>
-          <button type="button" id="po-iva-btn-21%" onclick="setPOIva('21%')"
-            style="padding:4px 12px;border-radius:20px;border:1px solid var(--border2);cursor:pointer;font-size:12px;font-weight:600;background:transparent;color:var(--text3);transition:.15s">21%</button>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;font-size:13px">
-          <span style="color:var(--text3)">Subtotal</span>
-          <span id="po-subtotal" style="font-family:monospace">$0</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:13px">
-          <span style="color:var(--text3)" id="po-iva-label">IVA (0%)</span>
-          <span id="po-iva-monto" style="font-family:monospace">$0</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:2px solid var(--border2)">
-          <span style="font-weight:700;font-size:14px">TOTAL</span>
-          <span id="po-total" style="font-weight:700;font-size:18px;font-family:monospace;color:var(--accent)">$0</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:6px;font-size:13px">
+            <span style="color:var(--text3)">Subtotal</span>
+            <span id="po-subtotal" style="font-family:monospace">$0</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:13px">
+            <span style="color:var(--text3)" id="po-iva-label">IVA (0%)</span>
+            <span id="po-iva-monto" style="font-family:monospace">$0</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:2px solid var(--border2)">
+            <span style="font-weight:700;font-size:14px">TOTAL</span>
+            <span id="po-total" style="font-weight:700;font-size:18px;font-family:monospace;color:var(--accent)">$0</span>
+          </div>
         </div>
       </div>
     </div>
+    <div class="ocv-div"></div>
 
-    <!-- OBSERVACIONES -->
-    <div class="card" style="padding:12px 16px;margin-bottom:4px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones (opcional)</div>
-      <textarea class="form-textarea" id="po-notes" rows="2" placeholder="Ej: Repuestos para preventivo INT-08"></textarea>
+    <!-- PASO 5 -->
+    <div class="ocv-step">
+      <div class="ocv-sh"><div class="ocv-num">5</div><div class="ocv-t">Observaciones</div><span class="ocv-opt">(opcional)</span></div>
+      <div class="ocv-body">
+        <textarea class="form-textarea" id="po-notes" rows="2" placeholder="Ej: Repuestos para preventivo INT-08"></textarea>
+      </div>
     </div>`,
     [
       { label:'Cancelar', cls:'btn-secondary', fn: closeModal },
