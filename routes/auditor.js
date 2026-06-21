@@ -31,7 +31,7 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
     await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, driver_name VARCHAR(100), vehicle_code VARCHAR(20), km_at_check INTEGER, items JSONB DEFAULT '[]', observations TEXT, all_ok BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
 
-    const [fuel, ots, stock, checklists, vehiculos, accesos, ocsMes, facturadoMes, pagadoMes, deuda] = await Promise.all([
+    const [fuel, ots, stock, checklists, vehiculos, accesos, ocsMes, facturadoMes, pagadoMes, deuda, comprasCat] = await Promise.all([
       // Combustible del mes
       query(`SELECT 
         COUNT(*) as cargas,
@@ -91,6 +91,17 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
           COALESCE(SUM(CASE WHEN total-pagado > 0.01 AND vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' THEN total-pagado ELSE 0 END),0) AS deuda_por_vencer,
           COUNT(CASE WHEN total-pagado > 0.01 AND vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' THEN 1 END) AS facturas_por_vencer
         FROM fac`).catch(()=>({rows:[{}]})),
+      // Compras del mes desglosadas por categoría del artículo (vía stock vinculado)
+      query(`
+        SELECT COALESCE(si.category,'Sin categoría') AS categoria,
+               COUNT(DISTINCT poi.po_id) AS ocs,
+               COALESCE(SUM(poi.subtotal),0) AS monto
+          FROM purchase_order_items poi
+          JOIN purchase_orders po ON po.id = poi.po_id
+          LEFT JOIN stock_items si ON si.id = poi.stock_item_id
+         WHERE po.created_at BETWEEN $1 AND $2
+         GROUP BY COALESCE(si.category,'Sin categoría')
+         ORDER BY monto DESC`, [desde, hasta + ' 23:59:59']).catch(()=>({rows:[]})),
     ]);
 
     const flota = {};
@@ -118,6 +129,11 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
         facturas_vencidas:  parseInt(deuda.rows[0]?.facturas_vencidas || 0),
         deuda_por_vencer:   parseFloat(deuda.rows[0]?.deuda_por_vencer || 0),
         facturas_por_vencer: parseInt(deuda.rows[0]?.facturas_por_vencer || 0),
+        por_categoria: (comprasCat.rows || []).map(r => ({
+          categoria: r.categoria,
+          ocs: parseInt(r.ocs || 0),
+          monto: parseFloat(r.monto || 0),
+        })),
       },
     });
   } catch(err) { console.error('auditor resumen:', err.message); res.status(500).json({ error: err.message }); }
