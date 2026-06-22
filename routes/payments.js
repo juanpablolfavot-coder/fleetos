@@ -271,6 +271,13 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
     UPDATE purchase_orders
     SET payment_status=$2::varchar,
         status = CASE
+          -- Terminales: no se tocan desde acá (rechazada/cerrada solo cambian por endpoint).
+          WHEN status IN ('rechazada','cerrada') THEN status
+          -- Pago total + entrega total (y OC no abierta) → cierre directo. Antes esto
+          -- pasaba por 'recibida' y un UPDATE correctivo aparte; ahora lo resuelve el CASE.
+          WHEN $2::varchar = 'total' AND COALESCE(delivery_status,'pendiente') = 'total'
+               AND COALESCE(is_open,FALSE) = FALSE THEN 'cerrada'
+          -- Entrega total ya registrada (o pago total con entrega total en OC abierta) → recibida.
           WHEN status = 'recibida' THEN 'recibida'
           WHEN $2::varchar = 'total' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
           WHEN $2::varchar = 'total' AND status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
@@ -288,17 +295,6 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
         )) ELSE NULL END
     WHERE id=$1::uuid
   `, [poId, paymentStatus]);
-
-  // Auto-cierre: si pago Y entrega están en total, la OC pasa a 'cerrada' (estado terminal).
-  await client.query(
-    `UPDATE purchase_orders
-        SET status = 'cerrada'
-      WHERE id = $1::uuid
-        AND status NOT IN ('rechazada','cerrada')
-        AND COALESCE(payment_status,'pendiente') = 'total'
-        AND COALESCE(delivery_status,'pendiente') = 'total'`,
-    [poId]
-  );
 
   return { po_id: poId, invoice_total: totalFactura, total_pagado: totalPagado, payment_status: paymentStatus };
 }
@@ -426,6 +422,13 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     if (['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(f.rows[0].po_status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No se puede pagar: la OC todavía no fue enviada al proveedor' });
+    }
+    // Gate: una OC terminal no admite pagos. Para corregir hay que reabrirla.
+    if (['cerrada','rechazada'].includes(f.rows[0].po_status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: f.rows[0].po_status === 'cerrada'
+        ? 'La OC está cerrada. Reabrila para registrar o corregir pagos.'
+        : 'La OC está rechazada: no admite pagos.' });
     }
 
     const totalFactura = parseFloat(f.rows[0].invoice_total) || 0;
@@ -600,6 +603,13 @@ router.post('/:id/facturas/:fid/pagos-multiple', authenticate, requireRole(...RO
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'No se puede pagar: la OC todavía no fue enviada al proveedor' });
     }
+    // Gate: una OC terminal no admite pagos. Para corregir hay que reabrirla.
+    if (['cerrada','rechazada'].includes(f.rows[0].po_status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: f.rows[0].po_status === 'cerrada'
+        ? 'La OC está cerrada. Reabrila para registrar o corregir pagos.'
+        : 'La OC está rechazada: no admite pagos.' });
+    }
 
     const totalFactura = parseFloat(f.rows[0].invoice_total) || 0;
     const pagadoActual = parseFloat(f.rows[0].monto_pagado) || 0;
@@ -684,6 +694,17 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
     if (!['dueno','gerencia'].includes(req.user.role) && p.rows[0].paid_by !== req.user.id) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Solo podés anular pagos que vos cargaste' });
+    }
+    // Gate: una OC terminal no admite anular pagos. Para corregir hay que reabrirla.
+    const oc = await client.query(
+      `SELECT po.status FROM purchase_order_invoices f JOIN purchase_orders po ON po.id=f.po_id WHERE f.id=$1::uuid`,
+      [req.params.fid]
+    );
+    if (oc.rows[0] && ['cerrada','rechazada'].includes(oc.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: oc.rows[0].status === 'cerrada'
+        ? 'La OC está cerrada. Reabrila para anular pagos.'
+        : 'La OC está rechazada: no admite cambios de pago.' });
     }
 
     await client.query('DELETE FROM purchase_order_payments WHERE id=$1::uuid', [req.params.pid]);
