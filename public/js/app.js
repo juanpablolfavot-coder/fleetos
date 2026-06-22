@@ -202,7 +202,6 @@ async function afterSave(options) {
 window.FleetRoles = {
   dueno:         { code:'dueno',         label:'Dueño / Dirección', modules:['all'] },
   gerencia:      { code:'gerencia',      label:'Gerencia',          modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents','costs','encargado_panel','contador_panel'] },
-  mantenimiento: { code:'mantenimiento', label:'Mantenimiento',     modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','documents'] },
   mecanico:      { code:'mecanico',      label:'Mecánico',          modules:['dashboard','fleet','workorders','maintenance','stock','fuel','tires'] },
   contador:      { code:'contador',      label:'Administración',    modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel'] },
   gerente_sucursal: { code:'gerente_sucursal', label:'Gerente de sucursal', modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'] },
@@ -10484,13 +10483,16 @@ async function openPODetail(id) {
         // crea historial detallado, respeta OC abierta e impacta el stock.
         // Visible en enviada_proveedor/pagada; en 'recibida' solo si la OC es abierta
         // (servicios fraccionados); nunca en 'cerrada'.
-        void esMismaSucursalRecepcion;
         const puedeRecibirMercaderia =
           ['enviada_proveedor','pagada'].includes(po.status) ||
           (po.status === 'recibida' && po.is_open === true);
-        if (puedeRecibirMercaderia && (
+        // El gerente de sucursal solo recibe mercadería de OCs de SU sucursal. El backend
+        // ya lo bloquea (checkSucursalScope); acá ocultamos el botón para no ofrecer una
+        // acción que va a fallar. Para el resto de los roles no aplica el filtro de sucursal.
+        const rolPuedeRecibir =
           ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'].includes(role)
-        )) {
+          && (role !== 'gerente_sucursal' || esMismaSucursalRecepcion);
+        if (puedeRecibirMercaderia && rolPuedeRecibir) {
           btns.push({ label:'📦 Recibir mercadería', cls:'btn-primary', fn: () => abrirModalRecepciones(id) });
         }
 
@@ -11603,7 +11605,7 @@ async function cerrarOC(id) {
 
 // Reabrir una OC cerrada (dueño/gerencia) para poder corregir.
 async function reabrirOC(id) {
-  if (!confirm('¿Reabrir esta OC cerrada? Vuelve a "recibida" para poder corregir (ej. anular una recepción). Si pago y entrega siguen completos, se volverá a cerrar sola.')) return;
+  if (!confirm('¿Reabrir esta OC cerrada? Se habilitará para corregir recepciones, facturas o pagos según corresponda. Si pago y entrega siguen completos, se volverá a cerrar sola.')) return;
   try {
     const r = await apiFetch('/api/purchase-orders/' + id + '/reabrir', { method: 'POST' });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al reabrir OC'); return; }
