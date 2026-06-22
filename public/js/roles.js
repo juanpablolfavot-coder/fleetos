@@ -175,8 +175,8 @@ async function doRegister() {
     if (errDiv) errDiv.textContent = 'Completá todos los campos obligatorios';
     return;
   }
-  if (password.length < 6) {
-    if (errDiv) errDiv.textContent = 'La contraseña debe tener al menos 6 caracteres';
+  if (password.length < 8) {
+    if (errDiv) errDiv.textContent = 'La contraseña debe tener al menos 8 caracteres';
     return;
   }
 
