@@ -1428,7 +1428,7 @@ router.post('/:id/toggle-open', authenticate, requireRole('dueno','gerencia','co
   try {
     const { is_open } = req.body;
     const r = await query(
-      'UPDATE purchase_orders SET is_open = $1 WHERE id = $2 AND status IN (\'aprobada_compras\',\'pagada\',\'recibida\') RETURNING id, code, is_open',
+      'UPDATE purchase_orders SET is_open = $1 WHERE id = $2 AND status IN (\'aprobada_compras\',\'enviada_proveedor\',\'pagada\',\'recibida\') RETURNING id, code, is_open',
       [!!is_open, req.params.id]
     );
     if (!r.rows[0]) {
