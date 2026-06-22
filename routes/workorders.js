@@ -542,7 +542,7 @@ router.delete('/preventivas-hoy', authenticate, requireRole('dueno'), async (req
     );
     res.json({ deleted: r.rowCount, codes: r.rows.map(x=>x.code) });
   } catch(err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -565,7 +565,7 @@ router.get('/:id/labor', authenticate, validateUUID('id'), async (req, res) => {
       [req.params.id]
     );
     res.json(r.rows);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // POST /api/workorders/:id/labor — Agregar parte de trabajo
@@ -624,7 +624,7 @@ router.post('/:id/labor',
       res.status(201).json(ins.rows[0]);
     } catch(err) {
       await client.query('ROLLBACK');
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Error del servidor' });
     } finally { client.release(); }
   }
 );
@@ -676,7 +676,7 @@ router.delete('/:id/labor/:laborId',
       res.json({ ok: true });
     } catch(err) {
       await client.query('ROLLBACK');
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Error del servidor' });
     } finally { client.release(); }
   }
 );
@@ -700,7 +700,7 @@ router.get('/:id/parts', authenticate, validateUUID('id'), async (req, res) => {
       [req.params.id]
     );
     res.json(r.rows);
-  } catch(err) { console.error('[GET /parts]', err.message); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[GET /parts]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // POST /api/workorders/:id/parts — AGREGAR repuesto a OT existente
@@ -809,7 +809,7 @@ router.post('/:id/parts',
       res.status(201).json(ins.rows[0]);
     } catch(err) {
       await client.query('ROLLBACK');
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Error del servidor' });
     } finally { client.release(); }
   }
 );
@@ -887,7 +887,7 @@ router.delete('/:id/parts/:partId',
       res.json({ ok: true, restored_to_stock: p.origin === 'stock' });
     } catch(err) {
       await client.query('ROLLBACK');
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: 'Error del servidor' });
     } finally { client.release(); }
   }
 );

@@ -17,17 +17,26 @@ async function migrate() {
     await client.query(schema);
     console.log('✓ Esquema creado');
 
-    // Crear usuario dueño inicial
+    // Crear usuario dueño inicial.
+    // La contraseña NO se hardcodea: se toma de ADMIN_PASSWORD o, si no está,
+    // se genera una aleatoria de un solo uso que se imprime una vez en consola.
     const existing = await client.query("SELECT id FROM users WHERE email = $1", ['admin@fleetos.com']);
     if (existing.rows.length === 0) {
-      const hash = await bcrypt.hash('FleetOS2024!', 12);
+      const adminPassword = process.env.ADMIN_PASSWORD
+        || require('crypto').randomBytes(12).toString('base64url');
+      const hash = await bcrypt.hash(adminPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
       await client.query(`
-        INSERT INTO users (name, email, password_hash, role) 
+        INSERT INTO users (name, email, password_hash, role)
         VALUES ($1, $2, $3, $4)`,
         ['Administrador', 'admin@fleetos.com', hash, 'dueno']
       );
-      console.log('✓ Usuario admin creado: admin@fleetos.com / FleetOS2024!');
-      console.log('  ⚠ CAMBIAR LA CONTRASEÑA INMEDIATAMENTE');
+      console.log('✓ Usuario admin creado: admin@fleetos.com');
+      if (process.env.ADMIN_PASSWORD) {
+        console.log('  Contraseña: la definida en ADMIN_PASSWORD');
+      } else {
+        console.log('  Contraseña generada (anotala, no se vuelve a mostrar): ' + adminPassword);
+      }
+      console.log('  ⚠ CAMBIAR LA CONTRASEÑA TRAS EL PRIMER INGRESO');
     } else {
       console.log('✓ Usuario admin ya existe');
     }

@@ -52,6 +52,9 @@ const checkAccountLock = async (req, res, next) => {
 };
 
 // ── SANITIZACIÓN DE INPUT ──────────────────────────────────
+// Campos que NO se deben mutar: las contraseñas pueden contener legítimamente
+// secuencias como "onX=" o "<...>"; alterarlas en silencio rompería el login.
+const SANITIZE_SKIP_KEYS = new Set(['password', 'currentPassword', 'newPassword', 'password_hash']);
 const sanitize = (req, res, next) => {
     const clean = (obj) => {
           if (typeof obj === 'string') {
@@ -63,6 +66,7 @@ const sanitize = (req, res, next) => {
           }
           if (typeof obj === 'object' && obj !== null) {
                   for (const key of Object.keys(obj)) {
+                            if (SANITIZE_SKIP_KEYS.has(key)) continue; // no tocar contraseñas
                             obj[key] = clean(obj[key]);
                   }
           }
