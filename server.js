@@ -97,6 +97,9 @@ app.use(compression());
 if(process.env.NODE_ENV!=='production')app.use(morgan('dev'));
 app.set('trust proxy',1);
 app.use('/api/',apiLimiter);
+// Auditoría global: registra toda mutación exitosa (POST/PUT/PATCH/DELETE) en audit_log.
+const {auditMutations}=require('./middleware/audit');
+app.use('/api/',auditMutations);
 app.use('/api/auth',authRoutes);
 app.use('/api/vehicles',vehicleRoutes);
 app.use('/api/workorders',woRoutes);
