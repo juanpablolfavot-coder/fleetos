@@ -251,6 +251,24 @@ function renderPage(page) {
 }
 
 // ── DASHBOARD ──
+// Accesos rápidos por rol: tira de botones grandes arriba del dashboard, para que
+// los roles operativos (mecánico, pañol, jefe mant.) tengan a mano lo que más usan.
+// Solo presentación: reusa navigate(). Dueño/gerencia ya tienen el centro de comando.
+function _dashQuickAccess() {
+  const role = App.currentUser?.role;
+  const map = {
+    mecanico: [['🔧','Órdenes de trabajo','workorders'],['📦','Stock / Repuestos','stock'],['🚛','Flota','fleet']],
+    jefe_mantenimiento: [['🔧','Órdenes de trabajo','workorders'],['🛒','Órdenes de compra','purchase_orders'],['📦','Stock','stock'],['🚛','Flota','fleet']],
+    paniol: [['📦','Stock / Depósito','stock'],['🛒','Órdenes de compra','purchase_orders']],
+    gerente_sucursal: [['📦','Stock','stock'],['🛒','Órdenes de compra','purchase_orders'],['🚛','Flota','fleet']],
+  };
+  const items = map[role];
+  if (!items) return '';
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+    ${items.map(([icon,label,nav]) => `<button onclick="navigate('${nav}')" style="display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:18px 12px;cursor:pointer;transition:transform .12s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'"><span style="font-size:26px">${icon}</span><span style="font-size:13px;font-weight:600;color:var(--text)">${label}</span></button>`).join('')}
+  </div>`;
+}
+
 function renderDashboard() {
   const v = App.data.vehicles || [];
   const ok = v.filter(x=>x.status==='ok').length;
@@ -377,6 +395,7 @@ function renderDashboard() {
 
   // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
+    ${_dashQuickAccess()}
     <!-- KPIs superiores -->
     <div class="kpi-row" style="margin-bottom:16px">
       <div class="kpi-card ${ok>=v.length?'ok':'warn'}">
