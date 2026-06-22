@@ -129,7 +129,7 @@ async function ensureTables() {
     JOIN purchase_orders po ON po.id = poi.po_id
     WHERE poi.work_order_part_id = wop.id
       AND wop.origin = 'externo'
-      AND po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
+      AND po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida','cerrada')
       AND COALESCE(poi.precio_unit,0) > 0
   `).catch(()=>{});
 
@@ -147,7 +147,7 @@ async function ensureTables() {
         ) AS rn
       FROM purchase_order_items poi
       JOIN purchase_orders po ON po.id = poi.po_id
-      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
+      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida','cerrada')
         AND poi.work_order_part_id IS NULL
         AND COALESCE(poi.precio_unit,0) > 0
     ), ext_parts AS (
@@ -185,7 +185,7 @@ async function ensureTables() {
       SELECT id AS po_id
       FROM purchase_orders
       WHERE ot_id IS NOT NULL
-        AND status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
+        AND status IN ('aprobada_compras','enviada_proveedor','pagada','recibida','cerrada')
     ), ext_parts AS (
       SELECT
         wop.id,
@@ -251,7 +251,7 @@ async function syncApprovedPOCostsToWorkOrder(client, poId) {
     [poId]
   );
   const po = poRes.rows[0];
-  if (!po || !po.ot_id || !['aprobada_compras','enviada_proveedor','pagada','recibida'].includes(po.status)) {
+  if (!po || !po.ot_id || !['aprobada_compras','enviada_proveedor','pagada','recibida','cerrada'].includes(po.status)) {
     return { updated_parts: 0, ot_id: po?.ot_id || null };
   }
 
@@ -382,16 +382,16 @@ function normalizarPrioridad(v) {
 function estadosQueVe(role) {
   if (role === 'dueno' || role === 'gerencia') return null; // null = todos
   if (role === 'compras') {
-    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','enviada_proveedor','pagada','recibida','rechazada'];
+    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','enviada_proveedor','pagada','recibida','cerrada','rechazada'];
   }
   if (role === 'tesoreria') {
-    return ['aprobada_compras','enviada_proveedor','pagada','recibida','rechazada'];
+    return ['aprobada_compras','enviada_proveedor','pagada','recibida','cerrada','rechazada'];
   }
   if (role === 'auditor') {
-    return ['pagada','recibida'];
+    return ['pagada','recibida','cerrada'];
   }
   if (role === 'proveedores') {
-    return ['aprobada_compras','enviada_proveedor','pagada','recibida'];
+    return ['aprobada_compras','enviada_proveedor','pagada','recibida','cerrada'];
   }
   if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role)) {
     return null; // ve todos los estados, pero filtramos por requested_by abajo (solo las propias)
@@ -799,7 +799,7 @@ router.patch('/:id', authenticate, async (req, res) => {
     function camposPermitidos() {
       if (esAdmin) {
         // Admin puede modificar todo siempre (salvo estados finales)
-        if (['recibida','rechazada'].includes(estado)) {
+        if (['recibida','cerrada','rechazada'].includes(estado)) {
           // En estados finales solo notas/motivos
           return ['notes'];
         }
@@ -1311,6 +1311,43 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
 });
 
 // ─────────────────────────────────────────────────────────────
+//  POST /:id/cerrar — Cierre manual de la OC (estado terminal 'cerrada')
+//  Pensado sobre todo para OC abiertas / servicios fraccionados donde el cierre
+//  no se da automático. El cierre automático (pago + entrega total) ocurre solo.
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/cerrar', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT status FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!cur.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'OC no encontrada' });
+    }
+    if (['rechazada','cerrada'].includes(cur.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `La OC ya está ${cur.rows[0].status}` });
+    }
+    if (!['enviada_proveedor','pagada','recibida'].includes(cur.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Solo se puede cerrar una OC ya enviada al proveedor en adelante' });
+    }
+    const r = await client.query(
+      `UPDATE purchase_orders SET status = 'cerrada' WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json(r.rows[0]);
+  } catch(err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[OC cerrar]', err.message);
+    res.status(500).json({ error: 'Error al cerrar OC' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 //  POST /:id/rechazar — Cualquier actor puede rechazar en su etapa
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','tesoreria','paniol','contador','gerente_sucursal'), async (req, res) => {
@@ -1327,7 +1364,7 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
     }
-    if (cur.rows[0].status === 'rechazada' || cur.rows[0].status === 'recibida') {
+    if (['rechazada','recibida','cerrada'].includes(cur.rows[0].status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'Esta OC ya está en estado final' });
     }

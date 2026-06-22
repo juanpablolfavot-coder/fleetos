@@ -287,6 +287,17 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
     WHERE id=$1::uuid
   `, [poId, paymentStatus]);
 
+  // Auto-cierre: si pago Y entrega están en total, la OC pasa a 'cerrada' (estado terminal).
+  await client.query(
+    `UPDATE purchase_orders
+        SET status = 'cerrada'
+      WHERE id = $1::uuid
+        AND status NOT IN ('rechazada','cerrada')
+        AND COALESCE(payment_status,'pendiente') = 'total'
+        AND COALESCE(delivery_status,'pendiente') = 'total'`,
+    [poId]
+  );
+
   return { po_id: poId, invoice_total: totalFactura, total_pagado: totalPagado, payment_status: paymentStatus };
 }
 
