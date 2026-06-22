@@ -113,6 +113,8 @@ BEGIN
   UPDATE purchase_orders
   SET payment_status = v_payment_status,
       status = CASE
+        WHEN v_po_status IN ('rechazada','cerrada') THEN v_po_status
+        WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'cerrada'
         WHEN v_po_status = 'recibida' THEN 'recibida'
         WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
         WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'

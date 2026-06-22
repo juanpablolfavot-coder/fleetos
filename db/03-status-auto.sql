@@ -68,6 +68,8 @@ BEGIN
   UPDATE purchase_orders
   SET payment_status = v_payment_status,
       status = CASE
+        WHEN v_po_status IN ('rechazada','cerrada') THEN v_po_status
+        WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'cerrada'
         WHEN v_po_status = 'recibida' THEN 'recibida'
         WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
         WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
@@ -155,6 +157,7 @@ DECLARE
   v_total_pedido NUMERIC;
   v_total_recibido NUMERIC;
   v_delivery_status VARCHAR;
+  v_is_open BOOLEAN;
 BEGIN
   -- NEW no existe en DELETE y OLD no existe en INSERT. Separar por operación
   -- evita errores raros de trigger en recepciones parciales/anuladas.
@@ -190,13 +193,21 @@ BEGIN
     ELSE 'parcial'
   END;
 
-  SELECT status, payment_status INTO v_po_status, v_payment_status
+  SELECT status, payment_status, COALESCE(is_open, FALSE)
+    INTO v_po_status, v_payment_status, v_is_open
   FROM purchase_orders WHERE id = v_po_id;
+
+  -- OC abierta: nunca marca entrega 'total' automáticamente (se cierra a mano).
+  IF v_is_open AND v_delivery_status = 'total' THEN
+    v_delivery_status := 'parcial';
+  END IF;
 
   UPDATE purchase_orders
   SET delivery_status = v_delivery_status,
       status = CASE
-        WHEN v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN 'recibida'
+        WHEN v_po_status IN ('rechazada','cerrada') THEN v_po_status
+        WHEN v_delivery_status = 'total' AND COALESCE(v_payment_status,'pendiente') = 'total' THEN 'cerrada'
+        WHEN v_delivery_status = 'total' THEN 'recibida'
         WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' AND COALESCE(v_payment_status,'pendiente') = 'total' THEN 'pagada'
         WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' THEN 'enviada_proveedor'
         ELSE status
