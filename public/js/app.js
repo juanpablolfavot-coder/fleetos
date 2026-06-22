@@ -6126,6 +6126,41 @@ function refreshUserOrgArea(prefix) {
 }
 
 
+// Descarga el backup completo de la base (gzip) desde /api/admin/backup.
+// El endpoint exige JWT en el header Authorization, así que NO sirve un link plano:
+// hay que pedirlo con apiFetch (que agrega el token) y bajar el blob a un archivo.
+async function downloadBackupDB() {
+  try {
+    showToast('info', 'Generando backup… puede tardar unos segundos');
+    const res = await apiFetch('/api/admin/backup');
+    if (!res || !res.ok) {
+      let msg = 'No se pudo generar el backup';
+      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      showToast('error', msg);
+      return;
+    }
+    // Nombre del archivo desde el header Content-Disposition (o uno por defecto).
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const filename = m ? m[1] : `fleetos-backup-${stamp}.sql.gz`;
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('ok', 'Backup descargado');
+  } catch (err) {
+    console.error('[downloadBackupDB]', err);
+    showToast('error', 'Error al descargar el backup');
+  }
+}
+
 function openNewUserModal() {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
   const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${escapeHtml(v.code)}">${escapeHtml(v.code)} · ${escapeHtml(v.plate)}</option>`).join('');
