@@ -136,6 +136,9 @@ const auditOnly = (req, res, next) => {
 
 // Registrar acción en audit_log
 const auditAction = (action, tableName) => async (req, res, next) => {
+  // Marca sincrónica para que el logger global (middleware/audit.js) NO duplique:
+  // este endpoint ya registra una versión detallada (con record_id y new_value).
+  res.locals._audited = true;
   res.on('finish', async () => {
     if (res.statusCode < 400) {
       try {
