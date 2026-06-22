@@ -124,6 +124,17 @@ async function recalcDeliveryStatus(client, poId) {
     WHERE po.id = p.po_id
   `, [status, poId]);
 
+  // Auto-cierre: si pago Y entrega están en total, la OC pasa a 'cerrada' (terminal).
+  await client.query(
+    `UPDATE purchase_orders
+        SET status = 'cerrada'
+      WHERE id = $1::uuid
+        AND status NOT IN ('rechazada','cerrada')
+        AND COALESCE(payment_status,'pendiente') = 'total'
+        AND COALESCE(delivery_status,'pendiente') = 'total'`,
+    [poId]
+  );
+
   return status;
 }
 

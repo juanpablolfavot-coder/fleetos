@@ -10262,7 +10262,7 @@ async function openPODetail(id) {
       rechazada:            { label:'RECHAZADA',            color:'#ef4444', icon:'❌' }
     };
     const st = estadoInfo[po.status] || { label:(po.status||'').toUpperCase(), color:'#6b7280', icon:'📋' };
-    const esTerminal = ['rechazada'].includes(po.status);
+    const esTerminal = ['rechazada','cerrada'].includes(po.status);
     const canEditItems = canEdit && !esTerminal && puedeVerPrecios && ['pendiente_cotizacion','en_cotizacion'].includes(po.status);
     // Los artículos quedan congelados al aprobar Compras: desde ese momento el precio ya impacta la OT vinculada.
     window._poItemsEditable = canEditItems;
@@ -10535,6 +10535,13 @@ async function openPODetail(id) {
           ['dueno','gerencia','compras','tesoreria','contador','proveedores'].includes(role)
         )) {
           btns.push({ label:'📄 Facturas', cls:'btn-secondary', fn: () => abrirModalFacturas(id) });
+        }
+
+        // 🔒 Cerrar OC manualmente (sobre todo para OC abiertas/servicios).
+        // El cierre automático (pago + entrega total) ocurre solo; este botón es para
+        // cerrar a mano cuando el circuito no se completa por cantidad.
+        if (['enviada_proveedor','pagada','recibida'].includes(po.status) && ['dueno','gerencia','compras'].includes(role)) {
+          btns.push({ label:'🔒 Cerrar OC', cls:'btn-secondary', fn: () => cerrarOC(id) });
         }
 
         // ══════════════════════════════════════════════
@@ -11713,6 +11720,18 @@ async function marcarEnviadaOC(id) {
     const r = await apiFetch('/api/purchase-orders/' + id + '/marcar-enviada', { method: 'POST' });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al marcar enviada'); return; }
     showToast('ok', '📤 OC marcada como enviada al proveedor');
+    closeModal();
+    await loadPOList();
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+// Cierre manual de la OC (terminal). Sobre todo para OC abiertas / servicios.
+async function cerrarOC(id) {
+  if (!confirm('¿Cerrar esta OC? Queda en estado final "cerrada" y no se podrá seguir operando sobre ella.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/cerrar', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al cerrar OC'); return; }
+    showToast('ok', '🔒 OC cerrada');
     closeModal();
     await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }
