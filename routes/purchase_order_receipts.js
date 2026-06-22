@@ -83,7 +83,14 @@ async function recalcDeliveryStatus(client, poId) {
     }
   }
 
-  const status = allDone ? 'total' : (anyDone ? 'parcial' : 'pendiente');
+  let status = allDone ? 'total' : (anyDone ? 'parcial' : 'pendiente');
+
+  // OC abierta (servicios/entregas fraccionadas): nunca se marca 'total' de forma
+  // automática — se cierra a mano. Así no salta a 'recibida'/'cerrada' sola.
+  const oc = await client.query(`SELECT COALESCE(is_open, FALSE) AS is_open FROM purchase_orders WHERE id=$1::uuid`, [poId]);
+  if (oc.rows[0]?.is_open === true && status === 'total') {
+    status = 'parcial';
+  }
 
   await client.query(`
     WITH params AS (
@@ -326,14 +333,18 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
 
     // Verificar que la OC exista y esté en estado válido
     const po = await client.query(
-      `SELECT id, status FROM purchase_orders WHERE id=$1::uuid FOR UPDATE`,
+      `SELECT id, status, COALESCE(is_open, FALSE) AS is_open FROM purchase_orders WHERE id=$1::uuid FOR UPDATE`,
       [req.params.id]
     );
     if (!po.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
     }
-    if (['rechazada','recibida'].includes(po.rows[0].status)) {
+    const ocAbierta = po.rows[0].is_open === true;
+    // Estados finales: nunca se recibe. 'recibida' bloquea SALVO que la OC sea abierta
+    // (servicios/entregas fraccionadas que se descuentan progresivamente).
+    if (['rechazada','cerrada'].includes(po.rows[0].status) ||
+        (po.rows[0].status === 'recibida' && !ocAbierta)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `No se puede recibir una OC ${po.rows[0].status}` });
     }
@@ -364,7 +375,9 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
         await client.query('ROLLBACK');
         return res.status(400).json({ error: `El ítem ${it.po_item_id} no pertenece a esta OC` });
       }
-      if (parseFloat(it.cantidad) > pendByItem[it.po_item_id] + 0.001) {
+      // En OC abiertas (servicios fraccionados) se permiten cantidades libres,
+      // incluso por encima de lo "pendiente". En OC normales se respeta el tope.
+      if (!ocAbierta && parseFloat(it.cantidad) > pendByItem[it.po_item_id] + 0.001) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           error: `Estás recibiendo más cantidad de la pendiente para uno de los ítems (pendiente: ${pendByItem[it.po_item_id]})`
