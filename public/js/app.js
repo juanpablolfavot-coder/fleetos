@@ -9150,23 +9150,12 @@ async function renderPurchaseOrders() {
       <div class="kpi-card ok"><div class="kpi-label">Recibidas</div><div class="kpi-value" style="color:#10b981" id="po-kpi-rec">—</div><div class="kpi-trend">📦 mercadería recibida</div></div>
     </div>
 
+    <div id="po-status-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${_poStatusChipsHTML()}</div>
+
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <input id="po-search" type="text" placeholder="🔍 Buscar código, proveedor, factura..." value="${App.poTable.search}"
         oninput="App.poTable.search=this.value;_poRenderRows()"
         style="flex:1;min-width:200px;max-width:320px;padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:13px">
-
-      <select id="po-f-status" onchange="App.poTable.status=this.value;_poRenderRows()"
-        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
-        <option value="all">Estado: Todos</option>
-        <option value="pendiente_cotizacion">📝 Pendiente cotización</option>
-        <option value="en_cotizacion">🔎 En cotización</option>
-        <option value="aprobada_compras">✅ Aprobada por compras</option>
-        <option value="enviada_proveedor">📤 Enviada al proveedor</option>
-        <option value="pagada">💰 Pagada</option>
-        <option value="recibida">📦 Recibida</option>
-        <option value="cerrada">🔒 Cerrada</option>
-        <option value="rechazada">❌ Rechazada</option>
-      </select>
 
       <select id="po-f-sucursal" onchange="App.poTable.sucursal=this.value;_poRenderRows()"
         style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);background:var(--bg);color:var(--text);font-family:inherit;font-size:12px">
@@ -9243,6 +9232,33 @@ function _poRenderKPIs() {
   set('po-kpi-curso', data.filter(isEnCotizacion).length);
   set('po-kpi-pag',   data.filter(isAprobadaPorRecibir).length);
   set('po-kpi-rec',   data.filter(isRecibida).length);
+}
+
+// Chips de filtro de estado: mismo filtro que el dropdown anterior, pero visible
+// y de un solo click. Solo presentación — usa el mismo App.poTable.status.
+function _poStatusChipsHTML() {
+  const cur = App.poTable.status || 'all';
+  const chips = [
+    ['all','Todos','📋'],
+    ['pendiente_cotizacion','Pendiente','📝'],
+    ['en_cotizacion','Cotizando','🔎'],
+    ['aprobada_compras','Aprobada','✅'],
+    ['enviada_proveedor','Enviada','📤'],
+    ['pagada','Pagada','💰'],
+    ['recibida','Recibida','📦'],
+    ['cerrada','Cerrada','🔒'],
+    ['rechazada','Rechazada','❌'],
+  ];
+  return chips.map(([val,label,icon]) => {
+    const a = cur === val;
+    return `<button onclick="_poSetStatus('${val}')" style="display:inline-flex;align-items:center;gap:4px;padding:5px 11px;border-radius:16px;border:1px solid ${a?'var(--accent)':'var(--border2)'};background:${a?'var(--accent)':'var(--bg)'};color:${a?'#fff':'var(--text2)'};font-size:12px;font-weight:${a?'600':'500'};cursor:pointer;transition:all .12s;font-family:inherit;white-space:nowrap">${icon} ${label}</button>`;
+  }).join('');
+}
+function _poSetStatus(s) {
+  App.poTable.status = s;
+  const bar = document.getElementById('po-status-chips');
+  if (bar) bar.innerHTML = _poStatusChipsHTML();
+  _poRenderRows();
 }
 
 function _poRenderRows() {
