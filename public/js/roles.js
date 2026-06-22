@@ -552,6 +552,7 @@ function _mapFuelLog(f) {
     vehicle:      f.vehicle_code || '—',
     plate:        f.plate || '—',
     driver:       f.driver_name || '—',
+    cargado_por:  f.cargado_por || '—',
     fuel_type:    f.fuel_type || 'diesel',
     liters:       parseFloat(f.liters) || 0,
     km:           f.odometer_km || 0,
