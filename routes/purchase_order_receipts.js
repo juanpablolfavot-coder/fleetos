@@ -128,6 +128,73 @@ async function recalcDeliveryStatus(client, poId) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Ingreso a stock al recibir: SOLO ítems de la OC vinculados a un
+//  artículo de stock (stock_item_id). Los de texto libre no tocan inventario.
+//  Devuelve { ingresos: [...], warnings: [...] } para mostrar al usuario.
+// ─────────────────────────────────────────────────────────────
+async function ingresarStockDeRecepcion(client, items, destino, userId) {
+  const ingresos = [];
+  const warnings = [];
+  for (const it of items) {
+    const qty = parseFloat(it.cantidad);
+    if (!(qty > 0)) continue;
+    const poi = await client.query(
+      `SELECT id, stock_item_id, descripcion FROM purchase_order_items WHERE id=$1::uuid`,
+      [it.po_item_id]
+    );
+    const row = poi.rows[0];
+    if (!row || !row.stock_item_id) continue; // ítem no vinculado a stock: no toca inventario
+    const upd = await client.query(
+      `UPDATE stock_items SET qty_current = qty_current + $1, updated_at = NOW()
+       WHERE id = $2::uuid AND active = TRUE
+       RETURNING id, name, qty_current, base_location, area, unit`,
+      [qty, row.stock_item_id]
+    );
+    if (!upd.rows[0]) {
+      warnings.push(`"${row.descripcion}": el artículo de stock vinculado no existe o está inactivo — no se ingresó.`);
+      continue;
+    }
+    const si = upd.rows[0];
+    await client.query(
+      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
+       VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
+      [si.id, qty, `Recepción OC${destino ? ' · ' + destino : ''}`, userId, si.base_location, si.area]
+    );
+    ingresos.push({ stock_id: si.id, name: si.name, qty, new_qty: parseFloat(si.qty_current), unit: si.unit });
+  }
+  return { ingresos, warnings };
+}
+
+// Reversa del stock al anular una recepción: descuenta lo ingresado y deja
+// un movimiento 'Egreso' de trazabilidad.
+async function revertirStockDeRecepcion(client, receiptId, userId) {
+  const its = await client.query(
+    `SELECT pori.cantidad, poi.stock_item_id
+     FROM purchase_order_receipt_items pori
+     JOIN purchase_order_items poi ON poi.id = pori.po_item_id
+     WHERE pori.receipt_id = $1::uuid AND poi.stock_item_id IS NOT NULL`,
+    [receiptId]
+  );
+  for (const r of its.rows) {
+    const qty = parseFloat(r.cantidad);
+    if (!(qty > 0)) continue;
+    const upd = await client.query(
+      `UPDATE stock_items SET qty_current = GREATEST(qty_current - $1, 0), updated_at = NOW()
+       WHERE id = $2::uuid
+       RETURNING id, base_location, area`,
+      [qty, r.stock_item_id]
+    );
+    if (!upd.rows[0]) continue;
+    const si = upd.rows[0];
+    await client.query(
+      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
+       VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
+      [si.id, qty, 'Anulación de recepción de OC', userId, si.base_location, si.area]
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 //  GET /api/purchase_orders/:id/recepciones
 //  Listar todas las recepciones de una OC con sus ítems
 // ─────────────────────────────────────────────────────────────
@@ -311,17 +378,25 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
       `, [receiptId, it.po_item_id, parseFloat(it.cantidad), (it.notes || '').trim() || null]);
     }
 
+    // Ingreso a stock (solo ítems vinculados a un artículo de stock)
+    const { ingresos: stock_ingresos, warnings: stock_warnings } =
+      await ingresarStockDeRecepcion(client, items, destino.trim(), req.user.id);
+
     // Recalcular delivery_status
     const newStatus = await recalcDeliveryStatus(client, req.params.id);
 
     await client.query('COMMIT');
 
+    const baseMsg = newStatus === 'total'
+      ? 'Recepción registrada. Mercadería recibida en su totalidad.'
+      : 'Recepción registrada (parcial).';
+    const stockMsg = stock_ingresos.length ? ` ${stock_ingresos.length} ítem(s) ingresado(s) a stock.` : '';
     res.status(201).json({
       ...recCab.rows[0],
       delivery_status: newStatus,
-      message: newStatus === 'total'
-        ? 'Recepción registrada. Mercadería recibida en su totalidad.'
-        : 'Recepción registrada (parcial).'
+      stock_ingresos,
+      stock_warnings,
+      message: baseMsg + stockMsg
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -357,11 +432,13 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
       return res.status(403).json({ error: 'Solo podés anular recepciones que vos cargaste' });
     }
 
+    // Revertir el stock que esta recepción había ingresado (antes de borrar sus ítems)
+    await revertirStockDeRecepcion(client, req.params.rid, req.user.id);
     await client.query(`DELETE FROM purchase_order_receipts WHERE id=$1::uuid`, [req.params.rid]);
     await recalcDeliveryStatus(client, req.params.id);
 
     await client.query('COMMIT');
-    res.json({ ok: true, message: 'Recepción anulada' });
+    res.json({ ok: true, message: 'Recepción anulada (stock revertido)' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[recepciones DELETE]', err.message);

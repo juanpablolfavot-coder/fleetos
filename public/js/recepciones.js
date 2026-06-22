@@ -209,6 +209,9 @@
       }
       const data = await res.json();
       showToast('ok', data.message || 'Recepción registrada');
+      if (Array.isArray(data.stock_warnings) && data.stock_warnings.length) {
+        showToast('warn', '⚠ Stock: ' + data.stock_warnings.join(' '));
+      }
       document.querySelector('.modal-recepciones-overlay')?.remove();
       abrirModalRecepciones(poId);
     } catch (err) {

@@ -1264,8 +1264,43 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       WHERE id = $2 RETURNING *`,
       [req.user.id, req.params.id]
     );
+
+    // Ingreso a stock de las cantidades pendientes (solo ítems vinculados a stock).
+    // Si hubo recepciones parciales previas, esas ya ingresaron su parte; acá solo
+    // entra lo que quedaba pendiente, así no se duplica.
+    const stock_ingresos = [];
+    const stock_warnings = [];
+    const pend = await client.query(
+      `SELECT poi.id, poi.stock_item_id, poi.descripcion, poi.cantidad AS pedida,
+              COALESCE((SELECT SUM(pori.cantidad) FROM purchase_order_receipt_items pori WHERE pori.po_item_id = poi.id),0) AS recibida
+       FROM purchase_order_items poi
+       WHERE poi.po_id = $1::uuid AND poi.stock_item_id IS NOT NULL`,
+      [req.params.id]
+    );
+    for (const p of pend.rows) {
+      const pendiente = parseFloat(p.pedida) - parseFloat(p.recibida);
+      if (!(pendiente > 0.0001)) continue;
+      const upd = await client.query(
+        `UPDATE stock_items SET qty_current = qty_current + $1, updated_at = NOW()
+         WHERE id = $2::uuid AND active = TRUE
+         RETURNING id, name, qty_current, base_location, area, unit`,
+        [pendiente, p.stock_item_id]
+      );
+      if (!upd.rows[0]) {
+        stock_warnings.push(`"${p.descripcion}": artículo de stock vinculado inexistente o inactivo — no se ingresó.`);
+        continue;
+      }
+      const si = upd.rows[0];
+      await client.query(
+        `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
+         VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
+        [si.id, pendiente, 'Recepción total de OC', req.user.id, si.base_location, si.area]
+      );
+      stock_ingresos.push({ stock_id: si.id, name: si.name, qty: pendiente, new_qty: parseFloat(si.qty_current), unit: si.unit });
+    }
+
     await client.query('COMMIT');
-    res.json(r.rows[0]);
+    res.json({ ...r.rows[0], stock_ingresos, stock_warnings });
   } catch(err) {
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[OC recibir]', err.message);
