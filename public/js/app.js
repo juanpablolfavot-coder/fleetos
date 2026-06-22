@@ -1232,7 +1232,7 @@ function showVehicleFicha(id, tab) {
             <td style="max-width:200px;color:var(--text2)">${o.desc}</td>
             <td>${o.mechanic}</td>
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
-            <td class="td-mono">${(o.parts_cost)>0?'$'+((o.parts_cost)/1000).toFixed(0)+'K':'—'}</td>
+            <td class="td-mono">${(o.parts_cost)>0?'$'+Math.round(o.parts_cost).toLocaleString('es-AR'):'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
             <td><button class="btn btn-secondary btn-sm" onclick="printOT('${o.id}')">🖨</button></td>
           </tr>`).join('')}</tbody></table>`
@@ -4183,7 +4183,7 @@ function renderStock() {
     '<div class="kpi-row kpi-row-3" style="margin-bottom:20px">'
     + '<div class="kpi-card '+(critical===0?'ok':'danger')+'"><div class="kpi-label">Crítico según filtro</div><div class="kpi-value '+(critical===0?'ok':'danger')+'">'+critical+'</div><div class="kpi-trend">debajo del mínimo</div></div>'
     + '<div class="kpi-card info"><div class="kpi-label">Ítems visibles</div><div class="kpi-value white">'+items.length+'</div><div class="kpi-trend">de '+allItems.length+' totales</div></div>'
-    + '<div class="kpi-card ok"><div class="kpi-label">Valor visible</div><div class="kpi-value ok">$'+Math.round(totalVal/1000)+'K</div><div class="kpi-trend">valorización al costo actual</div></div>'
+    + '<div class="kpi-card ok"><div class="kpi-label">Valor visible</div><div class="kpi-value ok">$'+Math.round(totalVal).toLocaleString('es-AR')+'</div><div class="kpi-trend">valorización al costo actual</div></div>'
     + '</div>'
     + '<div class="card" style="margin-bottom:14px;padding:12px 14px">'
     + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
