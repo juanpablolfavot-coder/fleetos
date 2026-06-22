@@ -214,7 +214,8 @@ function _addTextBranchFilter(req, params, sqlRef, columns) {
 fuelRouter.get('/', authenticate, async (req, res) => {
   try {
     const { vehicle_id, limit = 50 } = req.query;
-    let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate, u.name AS driver_name
+    let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate,
+        COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id WHERE 1=1`;
     const params = [];
@@ -592,7 +593,7 @@ fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('due
 fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','chofer','mecanico','gerente_sucursal'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
-    const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l: ppuRaw, odometer_km, location, notes, ticket_image } = req.body;
+    const { vehicle_id, tank_id, fuel_type, liters: litersRaw, price_per_l: ppuRaw, odometer_km, location, notes, ticket_image, driver } = req.body;
     // ── Parseo numérico estricto — evita que "100" (string) rompa las restas SQL
     const liters = parseFloat(litersRaw);
     const ppuFrontend = parseFloat(ppuRaw);
@@ -680,6 +681,10 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT`).catch(()=>{});
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID`).catch(()=>{});
     await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ`).catch(()=>{});
+    // Chofer real de la carga (texto, no FK): el que maneja la unidad ese día.
+    // Antes solo se guardaba driver_id = quien registra (el encargado), y el
+    // listado mostraba al encargado en vez del chofer.
+    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS driver_name VARCHAR(150)`).catch(()=>{});
 
     // ── PRECIO FINAL:
     //    * Cisterna propia (tank_id presente): SIEMPRE el precio del tanque (ignoramos frontend)
@@ -710,11 +715,14 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     const kmParsed = parseInt(odometer_km, 10);
     const kmToSave = Number.isFinite(kmParsed) && kmParsed > 0 ? kmParsed : null;
     const ticketEstado = ticket_image ? 'pendiente' : null;
+    // Chofer de la carga (texto): viene del form (autocompletado con el chofer
+    // asignado a la unidad, editable). driver_id sigue siendo quien registra.
+    const driverName = (driver || '').toString().trim().slice(0, 150) || null;
     const r = await client.query(
-      `INSERT INTO fuel_logs(vehicle_id,driver_id,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image,ticket_estado)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      `INSERT INTO fuel_logs(vehicle_id,driver_id,driver_name,tank_id,fuel_type,liters,price_per_l,odometer_km,location,notes,ticket_image,ticket_estado)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
-      [vehicle_id,req.user.id,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null,ticketEstado]
+      [vehicle_id,req.user.id,driverName,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null,ticketEstado]
     );
     if (kmToSave) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND COALESCE(km_current,0)<$1',[kmToSave,vehicle_id]);
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);

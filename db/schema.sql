@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS fuel_logs (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     vehicle_id              UUID REFERENCES vehicles(id),
     driver_id               UUID REFERENCES users(id),
+    driver_name             VARCHAR(150),                -- chofer real de la carga (texto; driver_id = quien registra)
     tank_id                 UUID REFERENCES tanks(id),
     fuel_type               VARCHAR(20),                 -- 'fuel' | 'urea'
     liters                  NUMERIC(10,2),
@@ -205,6 +206,7 @@ ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado         VARCHAR(20)
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs            TEXT;
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID;
 ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at  TIMESTAMPTZ;
+ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS driver_name           VARCHAR(150);
 ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS idx_fuel_logs_vehicle ON fuel_logs(vehicle_id);

@@ -2296,6 +2296,10 @@ function openFuelLoadModal() {
 function updateFuelVehicleMeasure() {
   const vehId = document.getElementById('fl-vehicle')?.value || '';
   const v = (App.data.vehicles || []).find(x => String(x.id) === String(vehId));
+  // Autocompletar el chofer con el asignado a la unidad. Queda editable por si
+  // ese día maneja un suplente.
+  const driverInput = document.getElementById('fl-driver');
+  if (driverInput && v) driverInput.value = (v.driver && v.driver !== '—') ? v.driver : '';
   const label = document.getElementById('fl-measure-label');
   const input = document.getElementById('fl-km');
   if (!label || !input) return;
