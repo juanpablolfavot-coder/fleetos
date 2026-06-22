@@ -5774,54 +5774,7 @@ function _ocEstadoBadge(statusOrPo) {
 
 // Qué acciones puede hacer un rol sobre una OC en un estado dado
 // Devuelve lista de {key, label, color} para mostrar como botones
-function _ocAccionesPermitidas(oc, userRole, userId) {
-  const st = oc.status;
-  const esCreador = oc.requested_by === userId;
-  const esAdmin = ['dueno','gerencia'].includes(userRole);
-  const acciones = [];
-
-  // COMPRAS y admin: tomar cotización
-  if (st === 'pendiente_cotizacion' && (userRole === 'compras' || esAdmin)) {
-    acciones.push({ key: 'tomar',    label: '🔎 Tomar cotización', color: 'primary' });
-  }
-  // COMPRAS y admin: aprobar con precios (desde en_cotizacion o pendiente)
-  if (['pendiente_cotizacion','en_cotizacion'].includes(st) && (userRole === 'compras' || esAdmin)) {
-    acciones.push({ key: 'aprobar',  label: '✅ Aprobar con precios', color: 'success' });
-  }
-  // COMPRAS y admin: marcar enviada al proveedor (paso obligatorio antes de pagar/recibir)
-  if (st === 'aprobada_compras' && (userRole === 'compras' || esAdmin)) {
-    acciones.push({ key: 'enviada',  label: '📤 Marcar enviada al proveedor', color: 'primary' });
-  }
-  // TESORERÍA y admin: pagar (solo una vez enviada al proveedor)
-  if (st === 'enviada_proveedor' && (userRole === 'tesoreria' || esAdmin)) {
-    acciones.push({ key: 'pagar',    label: '✓ Confirmar pago', color: 'primary' });
-  }
-  // Recepción: la mercadería puede recibirse aunque el pago siga pendiente.
-  // Pago y entrega son circuitos separados.
-  const esMismaSucursal = userRole === 'gerente_sucursal'
-    && App?.currentUser?.sucursal
-    && oc?.sucursal
-    && String(App.currentUser.sucursal).trim().toLowerCase() === String(oc.sucursal).trim().toLowerCase();
-  if (['enviada_proveedor','pagada'].includes(st) && (
-    (['jefe_mantenimiento','paniol','contador','compras'].includes(userRole) && esCreador) ||
-    esMismaSucursal ||
-    esAdmin
-  )) {
-    acciones.push({ key: 'recibir',  label: '📦 Confirmar recepción', color: 'success' });
-  }
-  // RECHAZAR: según rol y estado
-  const puedeRechazar = (
-    esAdmin ||
-    (['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador && st === 'pendiente_cotizacion') ||
-    (userRole === 'compras'   && ['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(st)) ||
-    (userRole === 'tesoreria' && st === 'enviada_proveedor')
-  );
-  if (puedeRechazar && !['recibida','cerrada','rechazada'].includes(st)) {
-    acciones.push({ key: 'rechazar', label: '❌ Rechazar', color: 'danger' });
-  }
-
-  return acciones;
-}
+// (legacy) _ocAccionesPermitidas() eliminado: las acciones de OC se arman en openPODetail().
 
 // ¿El rol tiene permitido ver precios de OCs?
 // Los roles SOLICITANTES (jefe mant, pañol, contador) NO ven precios.
@@ -10517,21 +10470,24 @@ async function openPODetail(id) {
           && String(App.currentUser.sucursal).trim().toLowerCase() === String(po.sucursal).trim().toLowerCase();
         // 📦 Recepción de mercadería — ÚNICO camino: la recepción granular, que
         // crea historial detallado, respeta OC abierta e impacta el stock.
-        // (El botón viejo "Confirmar recepción" / POST /recibir se quitó para no
-        // dejar un camino paralelo sin trazabilidad. Se conserva el mismo acceso
-        // por rol que ya tenía "Recepciones parciales".)
+        // Visible en enviada_proveedor/pagada; en 'recibida' solo si la OC es abierta
+        // (servicios fraccionados); nunca en 'cerrada'.
         void esMismaSucursalRecepcion;
-        if (['enviada_proveedor','pagada','recibida'].includes(po.status) && (
+        const puedeRecibirMercaderia =
+          ['enviada_proveedor','pagada'].includes(po.status) ||
+          (po.status === 'recibida' && po.is_open === true);
+        if (puedeRecibirMercaderia && (
           ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'].includes(role)
         )) {
           btns.push({ label:'📦 Recibir mercadería', cls:'btn-primary', fn: () => abrirModalRecepciones(id) });
         }
 
-        // 📄 Facturas (disponible desde aprobada_compras en adelante)
-        if (['aprobada_compras','enviada_proveedor','pagada','recibida'].includes(po.status) && (
+        // 📄 Facturas (disponible desde aprobada_compras en adelante, incluida cerrada
+        // para consulta — en cerrada es solo lectura, no se cargan facturas nuevas).
+        if (['aprobada_compras','enviada_proveedor','pagada','recibida','cerrada'].includes(po.status) && (
           ['dueno','gerencia','compras','tesoreria','contador','proveedores'].includes(role)
         )) {
-          btns.push({ label:'📄 Facturas', cls:'btn-secondary', fn: () => abrirModalFacturas(id) });
+          btns.push({ label: po.status === 'cerrada' ? '📄 Ver facturas' : '📄 Facturas', cls:'btn-secondary', fn: () => abrirModalFacturas(id) });
         }
 
         // 🔒 Cerrar OC manualmente (sobre todo para OC abiertas/servicios).
@@ -11021,108 +10977,7 @@ function setPOTipo(tipo) {
   renderPOExtraFields(tipo, 'po-extra-fields');
 }
 
-async function recibirOC(id) {
-  try {
-    // Primero ver datos de la OC
-    const res = await apiFetch('/api/purchase-orders/' + id);
-    if (!res.ok) { showToast('error','Error al cargar OC'); return; }
-    const po = await res.json();
-
-    var vehiculo = po.vehicle_id
-      ? (App.data.vehicles||[]).find(function(v){ return v.id === po.vehicle_id; })
-      : null;
-
-    // Contar cuántos ítems están vinculados al stock (para el mensaje de confirmación)
-    const itemsVinculados = (po.items || []).filter(i => i.stock_item_id).length;
-    const itemsTotal = (po.items || []).length;
-
-    var partes = ['Vas a marcar la OC ' + po.code + ' como RECIBIDA.\n\nEsto no depende del pago: Tesorería seguirá viendo el pago como pendiente si corresponde.\n'];
-    if (itemsVinculados > 0) {
-      partes.push('📦 ' + itemsVinculados + ' de ' + itemsTotal + ' ítems se INGRESARÁN automáticamente al stock.');
-    }
-    if (itemsTotal - itemsVinculados > 0) {
-      partes.push('⚠️  ' + (itemsTotal - itemsVinculados) + ' ítems NO están vinculados al stock (no ingresan).');
-    }
-    if (vehiculo) {
-      partes.push('\n🚛 Se generará OT para ' + vehiculo.code + ' (' + vehiculo.plate + ') con el costo de la factura.');
-    }
-    partes.push('\n¿Confirmás?');
-
-    if (!confirm(partes.join('\n'))) return;
-
-    const r = await apiFetch('/api/purchase-orders/' + id + '/recibir', { method: 'POST' });
-    if (!r.ok) { var e = await r.json(); showToast('error', e.error||'Error'); return; }
-    var data = await r.json();
-
-    // Armar mensaje de resumen según lo que haya pasado
-    const ingresos = data.stock_ingresos || [];
-    const warnings = data.stock_warnings || [];
-    let toastMsg = '✅ OC recibida';
-    if (ingresos.length > 0) {
-      toastMsg += ' · ' + ingresos.length + ' ítem' + (ingresos.length===1?'':'s') + ' ingresado' + (ingresos.length===1?'':'s') + ' al stock';
-    }
-    if (data.ot_generada) {
-      toastMsg += ' · OT ' + data.ot_code + ' generada';
-    }
-    showToast('ok', toastMsg);
-
-    // Si hubo ingresos al stock, mostrar un modal informativo con detalle
-    if (ingresos.length > 0 || warnings.length > 0) {
-      setTimeout(() => {
-        const ingresosHTML = ingresos.length > 0 ? `
-          <div style="font-size:11px;color:var(--ok);font-weight:700;margin-top:12px;margin-bottom:8px">📦 INGRESADO AL STOCK</div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead>
-              <tr style="background:var(--bg3)">
-                <th style="text-align:left;padding:6px">Código</th>
-                <th style="text-align:left;padding:6px">Nombre</th>
-                <th style="text-align:right;padding:6px">Cant.</th>
-                <th style="text-align:right;padding:6px">Nuevo precio</th>
-                <th style="text-align:right;padding:6px">Stock total</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${ingresos.map(it => `<tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:6px;font-family:var(--mono);font-size:11px">${it.codigo}</td>
-                <td style="padding:6px">${it.nombre}</td>
-                <td style="padding:6px;text-align:right;font-weight:700">+${it.cantidad}</td>
-                <td style="padding:6px;text-align:right;color:var(--accent)">$${Math.round(it.precio_nuevo).toLocaleString('es-AR')}</td>
-                <td style="padding:6px;text-align:right;font-weight:700;color:var(--ok)">${it.nuevo_stock}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>` : '';
-
-        const warningsHTML = warnings.length > 0 ? `
-          <div style="font-size:11px;color:var(--warn);font-weight:700;margin-top:16px;margin-bottom:8px">⚠️ ÍTEMS NO INGRESADOS AL STOCK</div>
-          <div style="background:rgba(217,119,6,.10);border-left:3px solid var(--warn);padding:10px;border-radius:var(--radius);font-size:12px">
-            ${warnings.map(w => '• ' + w).join('<br>')}
-            <div style="margin-top:8px;color:var(--text3);font-size:11px">
-              Estos ítems no tenían un ítem de stock vinculado al crear la OC.
-              Si querés que entren al stock, cargalos manualmente desde el módulo <b>Stock y pañol</b>.
-            </div>
-          </div>` : '';
-
-        openModal(
-          '📥 OC ' + po.code + ' recibida',
-          `<div style="max-height:70vh;overflow-y:auto">
-            <p style="font-size:13px;color:var(--text2)">La orden de compra quedó registrada como recibida. ${ingresos.length > 0 ? 'El stock se actualizó automáticamente con los nuevos ingresos y precios.' : ''}</p>
-            ${ingresosHTML}
-            ${warningsHTML}
-            ${data.ot_generada ? `<div style="font-size:11px;color:var(--accent);font-weight:700;margin-top:16px">🔧 OT GENERADA: ${data.ot_code}</div>` : ''}
-          </div>`,
-          [
-            { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
-            ...(data.ot_generada ? [{ label: 'Ver OT', cls: 'btn-primary', fn: () => { closeModal(); navigate('workorders'); } }] : []),
-          ]
-        );
-      }, 300);
-    }
-
-    // Refrescar listado y data
-    try { await loadInitialData(); } catch(e) {}
-    await loadPOList();
-  } catch(err) { showToast('error', err.message||'Error'); }
-}
+// (legacy) recibirOC()/POST /recibir eliminados: la recepción es por la vía granular con historial.
 
 function setPODetailTipo(tipo) {
   var hidden = document.getElementById('pod-tipo');

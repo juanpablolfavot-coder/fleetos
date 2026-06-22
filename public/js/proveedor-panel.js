@@ -73,7 +73,7 @@ window.renderProveedorPanelInline = async function() {
           <td style="text-align:center"><span class="badge ${badgeClass(pago)}">${pago}</span></td>
           <td style="text-align:center;white-space:nowrap">
             <button class="btn btn-secondary btn-sm" onclick="openPODetail('${o.id}')">👁 Ver OC</button>
-            <button class="btn btn-primary btn-sm" onclick="abrirModalFacturas('${o.id}')" style="margin-left:4px">📄 Cargar factura</button>
+            <button class="btn btn-primary btn-sm" onclick="abrirModalFacturas('${o.id}')" style="margin-left:4px">${o.status === 'cerrada' ? '📄 Ver facturas' : '📄 Cargar factura'}</button>
           </td>
         </tr>
       `;}).join('');
