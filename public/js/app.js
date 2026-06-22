@@ -318,7 +318,7 @@ function renderDashboard() {
     actividad.push({
       when: fecha,
       icon: '🔧',
-      text: `OT <b>${o.id || o.code}</b> creada (${o.vehicle || '—'})`,
+      text: `OT <b>${escapeHtml(o.id || o.code)}</b> creada (${o.vehicle || '—'})`,
       action: `navigate('workorders')`,
     });
   });
@@ -327,7 +327,7 @@ function renderDashboard() {
     actividad.push({
       when: new Date(p.created_at),
       icon: '🛒',
-      text: `OC <b>${p.code}</b> · ${p.proveedor || '—'} · ${p.status}`,
+      text: `OC <b>${escapeHtml(p.code)}</b> · ${escapeHtml(p.proveedor || '—')} · ${p.status}`,
       action: `navigate('purchase_orders')`,
     });
   });
@@ -508,7 +508,7 @@ function renderDashboard() {
     const el = document.createElement('div');
     el.className = `fleet-unit ${cls}`;
     el.textContent = vc.code;
-    el.title = `${vc.code} — ${vc.brand||''} ${vc.model||''} — ${(vc.status||'').toUpperCase()}`;
+    el.title = `${escapeHtml(vc.code)} — ${escapeHtml(vc.brand||'')} ${escapeHtml(vc.model||'')} — ${(vc.status||'').toUpperCase()}`;
     el.addEventListener('click', () => { navigate('fleet'); setTimeout(()=>filterVehicle(vc.code),100); });
     grid.appendChild(el);
   });
@@ -518,16 +518,16 @@ function renderDashboard() {
   const detainedVehicles = v.filter(x => x.status === 'detenida');
   let html = '';
   detainedVehicles.forEach(veh => {
-    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${veh.code}</b> — Unidad detenida en base.</span></div>`;
+    html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${escapeHtml(veh.code)}</b> — Unidad detenida en base.</span></div>`;
   });
   dangerDocs.forEach(d => {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
   });
   maintVencidos.forEach(m => {
-    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} ${m.unit}</span></div>`;
+    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.code)}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} ${escapeHtml(m.unit)}</span></div>`;
   });
   maintProximos.slice(0,3).forEach(m => {
-    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${m.code}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} ${m.unit}</span></div>`;
+    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.code)}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} ${escapeHtml(m.unit)}</span></div>`;
   });
   warnDocs.slice(0,2).forEach(d => {
     const days = Math.ceil((new Date(d.expiry)-new Date())/86400000);
@@ -579,8 +579,8 @@ function renderDashboard() {
     ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin órdenes de compra todavía</div>'
     : `<table><thead><tr><th>OC</th><th>Proveedor</th><th>Total</th><th>Estado</th></tr></thead><tbody>
       ${recentOCs.map(p => `<tr>
-        <td class="td-mono"><b>${p.code}</b></td>
-        <td>${(p.proveedor || '—').substring(0, 22)}</td>
+        <td class="td-mono"><b>${escapeHtml(p.code)}</b></td>
+        <td>${escapeHtml((p.proveedor || '—').substring(0, 22))}</td>
         <td class="td-mono">$${Math.round(parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0).toLocaleString('es-AR')}</td>
         <td><span class="badge ${ocStatusBadge[p.status] || 'badge-gray'}">${(p.status||'').replace('_',' ')}</span></td>
       </tr>`).join('')}
@@ -707,14 +707,14 @@ function renderFleetTable(data) {
     const ckReal = d ? d.costKmReal : 0;
     const cpkm_color = ckReal>0.25?'danger':ckReal>0.20?'warn':'ok';
     return `<tr>
-      <td class="td-mono td-main">${v.code}</td>
-      <td class="td-mono">${v.plate}</td>
-      <td class="td-main">${v.brand} ${v.model}</td>
+      <td class="td-mono td-main">${escapeHtml(v.code)}</td>
+      <td class="td-mono">${escapeHtml(v.plate)}</td>
+      <td class="td-main">${escapeHtml(v.brand)} ${escapeHtml(v.model)}</td>
       <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${v.type}</span></td>
       <td class="td-mono">${v.year}</td>
       <td class="td-mono">${formatVehicleMeasure(v)}</td>
-      <td>${v.base}</td>
-      <td>${v.driver}</td>
+      <td>${escapeHtml(v.base)}</td>
+      <td>${escapeHtml(v.driver)}</td>
       <td class="td-mono" style="color:var(--${cpkm_color})">${ckReal>0?'$'+ckReal.toFixed(3):'—'}</td>
       <td><span class="badge ${st}">${stLbl}</span></td>
       <td>
@@ -1036,12 +1036,12 @@ function showVehicleFicha(id, tab) {
   const header = `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
       <div style="background:var(--bg3);border-radius:var(--radius-lg);padding:14px 18px;text-align:center;border:1px solid var(--border)">
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--accent)">${v.code}</div>
-        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${v.plate}</div>
+        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--accent)">${escapeHtml(v.code)}</div>
+        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${escapeHtml(v.plate)}</div>
       </div>
       <div style="flex:1">
-        <div style="font-size:16px;font-weight:600;color:var(--text)">${v.brand} ${v.model} · ${v.year}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:3px">${v.type} · Base ${v.base} · ${v.driver}</div>
+        <div style="font-size:16px;font-weight:600;color:var(--text)">${escapeHtml(v.brand)} ${escapeHtml(v.model)} · ${v.year}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:3px">${v.type} · Base ${escapeHtml(v.base)} · ${escapeHtml(v.driver)}</div>
         <div style="margin-top:8px"><span class="badge ${stBadge[v.status]||'badge-gray'}">${stLabel[v.status]||v.status}</span></div>
       </div>
       <div style="text-align:right">
@@ -1236,7 +1236,7 @@ function showVehicleFicha(id, tab) {
   if (App.currentUser?.role === 'dueno') {
     actions.splice(2, 0, { label:'🗑 Dar de baja', cls:'btn-danger', fn: () => confirmBajaVehiculo(id, v.code) });
   }
-  openModal(`${v.code} — ${v.brand} ${v.model}`, header + tabBar + `<div id="ficha-tab-content">${content}</div>`, actions);
+  openModal(`${escapeHtml(v.code)} — ${escapeHtml(v.brand)} ${escapeHtml(v.model)}`, header + tabBar + `<div id="ficha-tab-content">${content}</div>`, actions);
 }
 
 async function confirmBajaVehiculo(id, code) {
@@ -1270,12 +1270,12 @@ function openEditVehicleModal(id) {
   if (!v) return;
   openModal('Editar unidad — ' + v.code, `
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="ev-code" value="${v.code}"></div>
-      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" id="ev-plate" value="${v.plate||''}"><div id="ev-plate-help" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>
+      <div class="form-group"><label class="form-label">Código interno</label><input class="form-input" id="ev-code" value="${escapeHtml(v.code)}"></div>
+      <div class="form-group"><label class="form-label">Patente</label><input class="form-input" id="ev-plate" value="${escapeHtml(v.plate||'')}"><div id="ev-plate-help" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="ev-brand" value="${v.brand}"></div>
-      <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" id="ev-model" value="${v.model}"></div>
+      <div class="form-group"><label class="form-label">Marca</label><input class="form-input" id="ev-brand" value="${escapeHtml(v.brand)}"></div>
+      <div class="form-group"><label class="form-label">Modelo</label><input class="form-input" id="ev-model" value="${escapeHtml(v.model)}"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Año</label><input class="form-input" type="number" id="ev-year" value="${v.year}"></div>
@@ -1291,7 +1291,7 @@ function openEditVehicleModal(id) {
           ${(App.config?.bases||['Central','Norte','Sur']).map(b=>`<option ${b===v.base?'selected':''}>${b}</option>`).join('')}
         </select>
       </div>
-      <div class="form-group"><label class="form-label" id="ev-driver-label">${vehicleOperatorLabel(v)}</label><input class="form-input" id="ev-driver" value="${v.driver||''}"></div>
+      <div class="form-group"><label class="form-label" id="ev-driver-label">${vehicleOperatorLabel(v)}</label><input class="form-input" id="ev-driver" value="${escapeHtml(v.driver||'')}"></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label" id="ev-km-label">${vehicleMeasureLabel(v)}</label><input class="form-input" type="number" id="ev-km" value="${v.km}"></div>
@@ -1432,7 +1432,7 @@ async function saveNewOT() {
   const poCodes = Array.isArray(ot.external_po_codes) && ot.external_po_codes.length
     ? ot.external_po_codes
     : (ot.external_po_code ? [ot.external_po_code] : []);
-  showToast('ok', `OT ${ot.code} creada${poCodes.length ? ' · OC generada/s: ' + poCodes.join(', ') : ''}`);
+  showToast('ok', `OT ${escapeHtml(ot.code)} creada${poCodes.length ? ' · OC generada/s: ' + poCodes.join(', ') : ''}`);
   await afterSave({ page: 'workorders' });
 }
 
@@ -1584,7 +1584,7 @@ function openCloseOTModal(id) {
   if (!ot.closeParts) ot.closeParts = [];
 
   const stockOpts = App.data.stock.map(s=>
-    `<option value="${s.id}" data-cost="${s.cost}" data-name="${s.name}" data-unit="${s.unit}">${s.name} — Stock: ${s.qty} ${s.unit} — $${s.cost.toLocaleString()}</option>`
+    `<option value="${s.id}" data-cost="${s.cost}" data-name="${escapeHtml(s.name)}" data-unit="${escapeHtml(s.unit)}">${escapeHtml(s.name)} — Stock: ${s.qty} ${escapeHtml(s.unit)} — $${s.cost.toLocaleString()}</option>`
   ).join('');
 
   const existingPartsHTML = (ot.parts||[]).length > 0
@@ -1597,8 +1597,8 @@ function openCloseOTModal(id) {
           <th style="text-align:right;padding:4px 6px;color:var(--text3)">Subtotal</th>
         </tr></thead>
         <tbody>${(ot.parts||[]).map(p=>`<tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:5px 6px;color:var(--text)">${p.name}</td>
-          <td style="padding:5px 6px;text-align:center;font-family:var(--mono)">${p.qty||1} ${p.unit||''}</td>
+          <td style="padding:5px 6px;color:var(--text)">${escapeHtml(p.name)}</td>
+          <td style="padding:5px 6px;text-align:center;font-family:var(--mono)">${p.qty||1} ${escapeHtml(p.unit||'')}</td>
           <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'Compra'}</span></td>
           <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">$${((p.cost||0)*(p.qty||1)).toLocaleString()}</td>
         </tr>`).join('')}</tbody>
@@ -1711,7 +1711,7 @@ function addCloseOTPart(otId) {
     if (!stockId) { showToast('warn','Seleccioná un ítem del stock'); return; }
     const item    = App.data.stock.find(s=>String(s.id)===String(stockId));
     if (!item)    return;
-    if (item.qty < qty) { showToast('warn',`Stock insuficiente. Disponible: ${item.qty} ${item.unit}`); return; }
+    if (item.qty < qty) { showToast('warn',`Stock insuficiente. Disponible: ${item.qty} ${escapeHtml(item.unit)}`); return; }
     ot.closeParts.push({ name:item.name, origin:'stock', stockId:item.id, qty, cost:cost||item.cost, unit:item.unit });
     sel.value = '';
   } else {
@@ -1737,7 +1737,7 @@ function renderCloseOTPartsList(otId) {
   } else {
     list.innerHTML = `<table style="width:100%;font-size:12px;margin-bottom:4px">
       <tbody>${parts.map((p,i)=>`<tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:5px 6px;color:var(--text)">${p.name}</td>
+        <td style="padding:5px 6px;color:var(--text)">${escapeHtml(p.name)}</td>
         <td style="padding:5px 6px;text-align:center;font-family:var(--mono)">${p.qty||1}</td>
         <td style="padding:5px 6px"><span class="badge ${p.origin==='stock'?'badge-info':'badge-purple'}">${p.origin==='stock'?'Pañol':'OC Compras'}</span></td>
         <td style="padding:5px 6px;text-align:right;font-family:var(--mono)">${p.origin==='stock' ? '$'+((p.cost||0)*(p.qty||1)).toLocaleString() : 'A cotizar'}</td>
@@ -1839,8 +1839,8 @@ async function printOT(id) {
         ? '<span class="badge-stock">📦 Pañol</span>'
         : '<span class="badge-compra">🛒 Externo</span>';
       partsRows += `<tr>
-        <td>${p.name || '—'}</td>
-        <td style="text-align:center">${qty} ${p.unit || 'un'}</td>
+        <td>${escapeHtml(p.name || '—')}</td>
+        <td style="text-align:center">${qty} ${escapeHtml(p.unit || 'un')}</td>
         <td style="text-align:center">${origenBadge}</td>
         <td style="text-align:right">$${Math.round(unitCost).toLocaleString('es-AR')}</td>
         <td style="text-align:right;font-weight:600">$${Math.round(subtotal).toLocaleString('es-AR')}</td>
@@ -1937,11 +1937,11 @@ async function printOT(id) {
       <div class="section-title">Datos del vehículo</div>
       <div class="grid-3">
         <div class="field"><div class="field-label">Código interno</div><div class="field-value">${ot.vehicle}</div></div>
-        <div class="field"><div class="field-label">Patente</div><div class="field-value">${v?v.plate:ot.plate||'—'}</div></div>
-        <div class="field"><div class="field-label">Marca / Modelo</div><div class="field-value">${v?(v.brand||'')+' '+(v.model||''):'—'}</div></div>
+        <div class="field"><div class="field-label">Patente</div><div class="field-value">${v?escapeHtml(v.plate):escapeHtml(ot.plate||'—')}</div></div>
+        <div class="field"><div class="field-label">Marca / Modelo</div><div class="field-value">${v?escapeHtml(v.brand||'')+' '+escapeHtml(v.model||''):'—'}</div></div>
         <div class="field"><div class="field-label">${v && isAutoelevador(v) ? 'Horas al momento' : 'Km al momento'}</div><div class="field-value">${v?formatVehicleMeasure(v):'—'}</div></div>
-        <div class="field"><div class="field-label">Base operativa</div><div class="field-value">${v?v.base||'—':'—'}</div></div>
-        <div class="field"><div class="field-label">${v && isAutoelevador(v) ? 'Operador habitual' : 'Chofer habitual'}</div><div class="field-value">${v?v.driver||'—':'—'}</div></div>
+        <div class="field"><div class="field-label">Base operativa</div><div class="field-value">${v?escapeHtml(v.base||'—'):'—'}</div></div>
+        <div class="field"><div class="field-label">${v && isAutoelevador(v) ? 'Operador habitual' : 'Chofer habitual'}</div><div class="field-value">${v?escapeHtml(v.driver||'—'):'—'}</div></div>
       </div>
     </div>
 
@@ -2158,7 +2158,7 @@ function renderFuel() {
                   <td><b>${d.destination || '—'}</b>${d.destination_detail ? `<div style="font-size:11px;color:var(--text3)">${d.destination_detail}</div>` : ''}</td>
                   <td><span class="badge ${d.type==='urea'?'badge-info':'badge-ok'}">${d.type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
                   <td class="td-mono">${Math.round(d.liters||0).toLocaleString('es-AR')} L</td>
-                  <td>${d.responsible || d.created_by_name || '—'}</td>
+                  <td>${escapeHtml(d.responsible || d.created_by_name || '—')}</td>
                   <td><span class="badge ${d.status==='recibido'?'badge-ok':'badge-warn'}">${d.status==='recibido'?'Recibido':'Despachado'}</span></td>
                   <td>
                     <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -2234,9 +2234,9 @@ function renderFuel() {
 function openFuelLoadModal() {
   const esGerenteSucursal = _fuelIsGerenteSucursal();
   const branchName = _fuelCurrentBranchName();
-  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
+  const vehicleOpts = (App.data.vehicles||[]).map(v=>`<option value="${v.id}">${escapeHtml(v.code)} — ${escapeHtml(v.plate)}</option>`).join('');
   const initialTankOptions = esGerenteSucursal
-    ? _fuelTanksForType('diesel').map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${t.location || 'Tanque sucursal'} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`).join('')
+    ? _fuelTanksForType('diesel').map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${escapeHtml(t.location || 'Tanque sucursal')} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`).join('')
     : `<option value="Cisterna R3">Cisterna R3 (descuenta stock)</option><option value="Estación de servicio">Estación de servicio</option><option value="Bidón / Sucursal">Bidón / Sucursal</option><option value="Otra">Otra</option>`;
   openModal(esGerenteSucursal ? `Cargar consumo interno — ${branchName}` : 'Registrar carga de combustible / urea', `
     <div class="form-row">
@@ -2327,7 +2327,7 @@ function updateFuelPlaceOpts() {
   if (!placeEl) return;
   if (_fuelIsGerenteSucursal()) {
     const opts = _fuelTanksForType(tipo === 'urea' ? 'urea' : 'diesel')
-      .map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${t.location || 'Tanque sucursal'} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`)
+      .map(t => `<option value="${String(t.location || '').replace(/"/g,'&quot;')}">${escapeHtml(t.location || 'Tanque sucursal')} (${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L)</option>`)
       .join('');
     placeEl.innerHTML = opts || '<option value="">— Sin tanque disponible —</option>';
     updateFuelPlaceNote();
@@ -2673,7 +2673,7 @@ function openFuelTankEntryTicket(entryOrId) {
         <div><b>Remito</b><br>${entry.remito || '—'}</div>
         <div><b>Precio/L</b><br>${ppu}</div>
         <div><b>Total estimado</b><br>${total}</div>
-        <div><b>Registró</b><br>${entry.created_by_name || App.currentUser?.name || '—'}</div>
+        <div><b>Registró</b><br>${escapeHtml(entry.created_by_name || App.currentUser?.name || '—')}</div>
       </div>
 
       <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
@@ -2715,7 +2715,7 @@ function printFuelTankEntryTicket(entryId) {
           <div><b>Producto</b>${_fuelTankTypeLabel(entry.type)}</div><div><b>Litros ingresados</b>${litros} L</div>
           <div><b>Cisterna</b>${entry.tank_location || 'Cisterna'}</div><div><b>Proveedor</b>${entry.supplier || '—'}</div>
           <div><b>Remito</b>${entry.remito || '—'}</div><div><b>Precio/L</b>${ppu}</div>
-          <div><b>Total estimado</b>${total}</div><div><b>Registró</b>${entry.created_by_name || App.currentUser?.name || '—'}</div>
+          <div><b>Total estimado</b>${total}</div><div><b>Registró</b>${escapeHtml(entry.created_by_name || App.currentUser?.name || '—')}</div>
         </div>
         <div class="box">Nivel anterior: <b style="display:inline">${Math.round(parseFloat(entry.previous_l)||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(parseFloat(entry.new_l)||0).toLocaleString('es-AR')} L</b></div>
       </div>
@@ -2738,7 +2738,7 @@ function openFuelDispatchModal() {
   const tankInfo = (type) => {
     const t = _fuelFindTankForType(type);
     if (!t) return 'Sin cisterna configurada';
-    return `${t.location || 'Cisterna'} · ${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L disponibles`;
+    return `${escapeHtml(t.location || 'Cisterna')} · ${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L disponibles`;
   };
   openModal('🚚 Despacho interno de combustible', `
     <div style="background:rgba(59,130,246,.10);border:1px solid rgba(59,130,246,.25);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.45;margin-bottom:12px">
@@ -2789,7 +2789,7 @@ function updateFuelDispatchTankInfo() {
     el.innerHTML = 'Origen: <b style="color:var(--danger)">No hay cisterna configurada para este producto</b>';
     return;
   }
-  el.innerHTML = `Origen: <b>${t.location || 'Cisterna'}</b> · Disponible: <b>${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L</b>`;
+  el.innerHTML = `Origen: <b>${escapeHtml(t.location || 'Cisterna')}</b> · Disponible: <b>${Math.round(parseFloat(t.current_l)||0).toLocaleString('es-AR')} L</b>`;
 }
 
 async function saveFuelDispatch() {
@@ -2932,7 +2932,7 @@ function openFuelDispatchTicket(dispatchId) {
         <div><b>Responsable retira</b><br>${d.responsible || '—'}</div>
         <div><b>Vehículo / transporte</b><br>${d.transport_vehicle || '—'}</div>
         <div><b>Remito referencia</b><br>${d.remito || '—'}</div>
-        <div><b>Registró</b><br>${d.created_by_name || App.currentUser?.name || '—'}</div>
+        <div><b>Registró</b><br>${escapeHtml(d.created_by_name || App.currentUser?.name || '—')}</div>
         <div><b>Estado</b><br>${recibido ? 'Recibido' : 'Despachado'}</div>
       </div>
       ${d.notes ? `<div style="margin-top:12px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)"><b>Observación</b><br>${escapeHtml(d.notes)}</div>` : ''}
@@ -2982,7 +2982,7 @@ function printFuelDispatchTicket(dispatchId) {
           <div><b>Origen</b>${d.tank_location || 'Cisterna'}</div><div><b>Destino</b>${d.destination || '—'}</div>
           <div><b>Detalle destino</b>${d.destination_detail || '—'}</div><div><b>Responsable retira</b>${d.responsible || '—'}</div>
           <div><b>Vehículo / transporte</b>${d.transport_vehicle || '—'}</div><div><b>Remito referencia</b>${d.remito || '—'}</div>
-          <div><b>Registró</b>${d.created_by_name || App.currentUser?.name || '—'}</div><div><b>Estado</b>${recibido ? 'Recibido' : 'Despachado'}</div>
+          <div><b>Registró</b>${escapeHtml(d.created_by_name || App.currentUser?.name || '—')}</div><div><b>Estado</b>${recibido ? 'Recibido' : 'Despachado'}</div>
         </div>
         ${d.notes ? `<div class="box"><b>Observación</b>${escapeHtml(d.notes)}</div>` : ''}
         <div class="box">Nivel anterior: <b style="display:inline">${Math.round(d.previous_l||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(d.new_l||0).toLocaleString('es-AR')} L</b></div>
@@ -3197,7 +3197,7 @@ function renderTires() {
           <select class="form-select" id="tire-vehicle-sel"
             style="width:auto;padding:5px 10px;font-size:12px"
             onchange="refreshTireMap()">
-            ${vehicleOpts.map(v=>`<option value="${v.code}">${v.code} · ${v.brand.split('-')[0]} · ${v.type}</option>`).join('')}
+            ${vehicleOpts.map(v=>`<option value="${escapeHtml(v.code)}">${escapeHtml(v.code)} · ${escapeHtml(v.brand.split('-')[0])} · ${v.type}</option>`).join('')}
           </select>
         </div>
         <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:10px;line-height:1.5">
@@ -3238,17 +3238,17 @@ function renderTires() {
           <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km acum.</th><th>Dibujo</th><th>Tipo</th><th>Precio compra</th><th></th></tr></thead>
           <tbody id="stock-tires-tbody">${App.data.tires.filter(t=>t.vehicle==='STOCK').map(t=>`<tr
             draggable="true"
-            ondragstart="onStockTireDragStart(event,'${t.serial}')"
+            ondragstart="onStockTireDragStart(event,'${escapeHtml(t.serial)}')"
             style="cursor:grab"
             title="Arrastrá al mapa para montar">
-            <td class="td-mono td-main">${t.serial}</td>
-            <td>${t.brand}</td>
+            <td class="td-mono td-main">${escapeHtml(t.serial)}</td>
+            <td>${escapeHtml(t.brand)}</td>
             <td class="td-mono">${t.size}</td>
             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
             <td class="td-mono" style="color:var(--ok)">${(t.tread||0)}/20mm</td>
             <td><span class="badge ${t.km===0?'badge-ok':'badge-purple'}">${t.km===0?'Nueva':'Usada/Recapada'}</span></td>
             <td class="td-mono">$${(t.price||0).toLocaleString()}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${t.serial}')">Montar</button></td>
+            <td><button class="btn btn-primary btn-sm" onclick="openMountFromStockModal('${escapeJsArg(t.serial)}')">Montar</button></td>
           </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:16px">Sin cubiertas en stock</td></tr>'}
           </tbody>
         </table>
@@ -3264,13 +3264,13 @@ function renderTires() {
         <table>
           <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km acum.</th><th>Dibujo</th><th>Precio compra</th><th></th></tr></thead>
           <tbody>${inRecap.map(t=>`<tr>
-            <td class="td-mono td-main">${t.serial}</td>
-            <td>${t.brand||'—'}</td>
+            <td class="td-mono td-main">${escapeHtml(t.serial)}</td>
+            <td>${escapeHtml(t.brand||'—')}</td>
             <td class="td-mono">${t.size||'—'}</td>
             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
             <td class="td-mono" style="color:var(--warn)">${(t.tread||0)}mm</td>
             <td class="td-mono">$${(t.price||0).toLocaleString()}</td>
-            <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Acción</button></td>
+            <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${escapeJsArg(t.serial)}')">Acción</button></td>
           </tr>`).join('')||'<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:16px">Ninguna cubierta en recapado</td></tr>'}
           </tbody>
         </table>
@@ -3286,8 +3286,8 @@ function renderTires() {
         <table>
           <thead><tr><th>Serie</th><th>Marca / Modelo</th><th>Medida</th><th>Km total</th><th>Último dibujo</th><th>Precio compra</th></tr></thead>
           <tbody>${inBaja.map(t=>`<tr style="opacity:0.7">
-            <td class="td-mono td-main">${t.serial}</td>
-            <td>${t.brand||'—'}</td>
+            <td class="td-mono td-main">${escapeHtml(t.serial)}</td>
+            <td>${escapeHtml(t.brand||'—')}</td>
             <td class="td-mono">${t.size||'—'}</td>
             <td class="td-mono">${(t.km||0).toLocaleString()} km</td>
             <td class="td-mono" style="color:var(--danger)">${(t.tread||0)}mm</td>
@@ -3306,7 +3306,7 @@ function renderTires() {
             style="width:auto;padding:5px 10px;font-size:12px"
             onchange="renderTireHistory()">
             <option value="">Todas las cubiertas</option>
-            ${App.data.tires.map(t=>`<option value="${t.serial}">${t.serial}</option>`).join('')}
+            ${App.data.tires.map(t=>`<option value="${escapeHtml(t.serial)}">${escapeHtml(t.serial)}</option>`).join('')}
           </select>
           <button class="btn btn-secondary btn-sm" onclick="openManualMoveModal()">+ Registrar movimiento</button>
         </div>
@@ -3352,7 +3352,7 @@ async function onDropToStock(event) {
   });
   if (r.ok) {
     tire.vehicle = 'STOCK'; tire.pos = null;
-    showToast('ok', `${tire.serial} desmontada al stock`);
+    showToast('ok', `${escapeHtml(tire.serial)} desmontada al stock`);
   } else { showToast('error','Error al desmontar cubierta'); }
   _dragSerial = null; _dragFromPos = null;
   renderTires();
@@ -3372,17 +3372,17 @@ function renderTireMapDnD(vehicleCode, config) {
         const bg= t.status==='danger'?'var(--danger-bg)':t.status==='warn'?'var(--warn-bg)':'var(--ok-bg)';
         const bc= t.status==='danger'?'rgba(239,68,68,.5)':t.status==='warn'?'rgba(245,158,11,.5)':'rgba(34,197,94,.4)';
         return `<div class="tire-dnd-slot occupied"
-          data-pos="${pos}" data-serial="${t.serial}" data-vehicle="${vehicleCode}"
+          data-pos="${escapeHtml(pos)}" data-serial="${escapeHtml(t.serial)}" data-vehicle="${escapeHtml(vehicleCode)}"
           draggable="true"
-          ondragstart="onTireDragStart(event,'${t.serial}','${pos}')"
+          ondragstart="onTireDragStart(event,'${escapeHtml(t.serial)}','${pos}')"
           ondragover="onTireDragOver(event)"
           ondragleave="onTireDragLeave(event)"
           ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          onclick="openTireDetail('${t.serial}')"
+          onclick="openTireDetail('${escapeJsArg(t.serial)}')"
           style="background:${bg};border-color:${bc};cursor:grab"
-          title="${t.serial} · ${t.brand} · Clic: detalle · Arrastrar: cambiar posición">
+          title="${escapeHtml(t.serial)} · ${escapeHtml(t.brand)} · Clic: detalle · Arrastrar: cambiar posición">
           <span style="font-size:13px;font-weight:700;font-family:var(--mono);color:${c}">${t.tread||0}mm</span>
-          <span style="font-size:8px;font-family:var(--mono);color:${c};text-align:center;line-height:1.3;word-break:break-all">${t.serial}</span>
+          <span style="font-size:8px;font-family:var(--mono);color:${c};text-align:center;line-height:1.3;word-break:break-all">${escapeHtml(t.serial)}</span>
           <span style="font-size:9px;font-family:var(--mono);background:rgba(0,0,0,.2);padding:1px 4px;border-radius:3px;color:${c}">${pos}</span>
         </div>`;
       } else {
@@ -3391,7 +3391,7 @@ function renderTireMapDnD(vehicleCode, config) {
           ondragover="onTireDragOver(event)"
           ondragleave="onTireDragLeave(event)"
           ondrop="onTireDrop(event,'${pos}','${vehicleCode}')"
-          onclick="openMountFromStockModal('',\'${vehicleCode}\',\'${pos}\')"
+          onclick="openMountFromStockModal('',\'${escapeJsArg(vehicleCode)}\',\'${escapeJsArg(pos)}\')"
           title="Posición vacía — clic o soltá una cubierta aquí">
           <span style="font-size:20px;color:var(--text3);line-height:1">+</span>
           <span style="font-size:9px;font-family:var(--mono);color:var(--text3)">${pos}</span>
@@ -3400,7 +3400,7 @@ function renderTireMapDnD(vehicleCode, config) {
       }
     };
     return `<div style="background:var(--bg3);border-radius:var(--radius);padding:12px 14px;border:1px solid var(--border);margin-bottom:8px">
-      <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${axle.name}</div>
+      <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">${escapeHtml(axle.name)}</div>
       <div style="display:flex;align-items:center;justify-content:center;gap:10px">
         <div style="display:flex;gap:6px">${leftPos.map(slot).join('')}</div>
         <div style="width:44px;height:3px;background:var(--border2);border-radius:2px;flex-shrink:0"></div>
@@ -3447,7 +3447,7 @@ async function onTireDrop(event, toPos, vehicleCode) {
       method:'POST',
       body: JSON.stringify({ to_vehicle_id: vehicle.id, to_position: toPos, type: 'Montaje', notes: 'Montado desde stock por drag & drop' })
     });
-    if (r.ok) { stockTire.vehicle = vehicleCode; stockTire.pos = toPos; showToast('ok', `${stockTire.serial} montada en ${toPos}`); }
+    if (r.ok) { stockTire.vehicle = vehicleCode; stockTire.pos = toPos; showToast('ok', `${escapeHtml(stockTire.serial)} montada en ${toPos}`); }
     else { showToast('error','Error al montar cubierta'); }
     _dragSerial = null; _dragFromPos = null;
     renderTires(); return;
@@ -3459,17 +3459,17 @@ async function onTireDrop(event, toPos, vehicleCode) {
 
   if (targetTire) {
     // Permuta — mover ambas
-    const r1 = await apiFetch(`/api/tires/${draggedTire.id}/move`, { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: toPos, type: 'Rotación (permuta)', notes: `Permuta con ${targetTire.serial}` }) });
-    const r2 = await apiFetch(`/api/tires/${targetTire.id}/move`,  { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: _dragFromPos, type: 'Rotación (permuta)', notes: `Permuta con ${draggedTire.serial}` }) });
+    const r1 = await apiFetch(`/api/tires/${draggedTire.id}/move`, { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: toPos, type: 'Rotación (permuta)', notes: `Permuta con ${escapeHtml(targetTire.serial)}` }) });
+    const r2 = await apiFetch(`/api/tires/${targetTire.id}/move`,  { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: _dragFromPos, type: 'Rotación (permuta)', notes: `Permuta con ${escapeHtml(draggedTire.serial)}` }) });
     if (r1.ok && r2.ok) {
       draggedTire.pos = toPos; targetTire.pos = _dragFromPos;
-      showToast('ok', `Permuta: ${draggedTire.serial} ↔ ${targetTire.serial}`);
+      showToast('ok', `Permuta: ${escapeHtml(draggedTire.serial)} ↔ ${escapeHtml(targetTire.serial)}`);
     } else { showToast('error','Error al registrar permuta'); }
   } else {
     const r = await apiFetch(`/api/tires/${draggedTire.id}/move`, { method:'POST', body: JSON.stringify({ to_vehicle_id: vehicle?.id, to_position: toPos, type: 'Rotación', notes: '' }) });
     if (r.ok) {
       draggedTire.pos = toPos; draggedTire.vehicle = vehicleCode;
-      showToast('ok', `${draggedTire.serial}: ${_dragFromPos} → ${toPos}`);
+      showToast('ok', `${escapeHtml(draggedTire.serial)}: ${_dragFromPos} → ${toPos}`);
     } else { showToast('error','Error al registrar movimiento'); }
   }
 
@@ -3488,13 +3488,13 @@ function renderTireTableBody(vehicleCode) {
     return;
   }
   tbody.innerHTML = tires.map(t=>`<tr>
-    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${t.serial}')">${t.serial}</td>
+    <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${escapeJsArg(t.serial)}')">${escapeHtml(t.serial)}</td>
     <td class="td-mono">${t.pos}</td>
-    <td style="font-size:12px">${t.brand.split(' ')[0]} ${t.brand.split(' ')[1]||''}</td>
+    <td style="font-size:12px">${escapeHtml(t.brand.split(' ')[0])} ${escapeHtml(t.brand.split(' ')[1]||'')}</td>
     <td class="td-mono">${(t.km||0).toLocaleString()}</td>
     <td class="td-mono" style="color:var(--${t.status==='danger'?'danger':t.status==='warn'?'warn':'ok'})">${t.tread||0}/20mm</td>
     <td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td>
-    <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${t.serial}')">Ver</button></td>
+    <td><button class="btn btn-secondary btn-sm" onclick="openTireDetail('${escapeJsArg(t.serial)}')">Ver</button></td>
   </tr>`).join('');
 }
 
@@ -3514,7 +3514,7 @@ function renderTireHistory() {
     <thead><tr><th>Fecha</th><th>Cubierta</th><th>Desde</th><th>Hacia</th><th>Tipo</th><th>Unidad</th><th>Km</th><th>Operario</th><th>Observación</th></tr></thead>
     <tbody>${hist.map(h=>`<tr>
       <td class="td-mono" style="font-size:11px">${h.date}</td>
-      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${h.serial}')">${h.serial}</td>
+      <td class="td-mono td-main" style="cursor:pointer;text-decoration:underline" onclick="openTireDetail('${escapeJsArg(h.serial)}')">${escapeHtml(h.serial)}</td>
       <td class="td-mono" style="color:var(--text3)">${h.fromPos}</td>
       <td class="td-mono" style="color:var(--accent)">→ ${h.toPos}</td>
       <td><span class="badge ${h.type.includes('Rotación')?'badge-info':h.type==='Montaje'?'badge-ok':h.type.includes('Baja')?'badge-danger':'badge-gray'}">${h.type}</span></td>
@@ -3546,7 +3546,7 @@ function openMountFromStockModal(serial='', vehicleCode='', pos='') {
         <label class="form-label">Cubierta a montar</label>
         <select class="form-select" id="ms-serial">
           ${stock.length
-            ? stock.map(t=>`<option value="${t.serial}" ${t.serial===serial?'selected':''}>${t.serial} · ${t.brand} · ${t.km===0?'Nueva':'Usada '+(t.km||0).toLocaleString()+'km'} · ${t.tread||0}mm dibujo</option>`).join('')
+            ? stock.map(t=>`<option value="${escapeHtml(t.serial)}" ${t.serial===serial?'selected':''}>${escapeHtml(t.serial)} · ${escapeHtml(t.brand)} · ${t.km===0?'Nueva':'Usada '+(t.km||0).toLocaleString()+'km'} · ${t.tread||0}mm dibujo</option>`).join('')
             : '<option value="">— Sin cubiertas en stock —</option>'
           }
         </select>
@@ -3723,7 +3723,7 @@ function openTireDetail(serial) {
     </div>
 
     <table style="width:100%;font-size:13px;margin-bottom:16px">
-      <tr><td style="color:var(--text3);padding:5px 0;width:38%">Marca / Modelo</td><td style="font-weight:500">${t.brand || '—'}${t.model ? ' ' + t.model : ''}</td></tr>
+      <tr><td style="color:var(--text3);padding:5px 0;width:38%">Marca / Modelo</td><td style="font-weight:500">${escapeHtml(t.brand || '—')}${t.model ? ' ' + escapeHtml(t.model) : ''}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Medida</td><td class="td-mono">${t.size || '—'}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Posición actual</td><td class="td-mono" style="color:var(--accent)">${t.pos || '—'} · ${t.vehicle || '—'}</td></tr>
       <tr><td style="color:var(--text3);padding:5px 0">Estado</td><td><span class="badge ${t.status==='ok'?'badge-ok':t.status==='warn'?'badge-warn':'badge-danger'}">${t.status==='ok'?'OK':t.status==='warn'?'Revisar':'Crítica'}</span></td></tr>
@@ -3853,7 +3853,7 @@ function openManualMoveModal() {
         <label class="form-label">Cubierta</label>
         <select class="form-select" id="mm-serial">
           ${[...App.data.tires.filter(t=>t.vehicle===code), ...App.data.tires.filter(t=>t.vehicle==='STOCK')]
-            .map(t=>`<option value="${t.serial}">${t.serial} — ${t.pos} — ${t.brand.split(' ')[0]}</option>`).join('')}
+            .map(t=>`<option value="${escapeHtml(t.serial)}">${escapeHtml(t.serial)} — ${t.pos} — ${escapeHtml(t.brand.split(' ')[0])}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -4474,7 +4474,7 @@ function renderDocuments() {
             return `<tr>
               <td><span style="font-size:13px">${iconoTipo}</span> <span style="font-size:11px;color:var(--text3)">${tipoLabel}</span></td>
               <td class="td-main">${d.vehicle || '—'}</td>
-              <td class="td-mono" style="color:var(--text3);font-size:11px">${d.plate||'—'}</td>
+              <td class="td-mono" style="color:var(--text3);font-size:11px">${escapeHtml(d.plate||'—')}</td>
               <td>${d.type}</td>
               <td class="td-mono">${d.expiry}</td>
               <td class="td-mono" style="color:var(--${d.status==='danger'?'danger':d.status==='warn'?'warn':'ok'})">
@@ -4585,7 +4585,7 @@ function openEditDocModal(idx) {
     </div>
     <div class="form-group">
       <label class="form-label">Patente del vehículo</label>
-      <input class="form-input" placeholder="ABC 123" id="ed-plate" value="${d.plate||''}">
+      <input class="form-input" placeholder="ABC 123" id="ed-plate" value="${escapeHtml(d.plate||'')}">
     </div>
   `, [
     { label:'Guardar cambios', cls:'btn-primary', fn: () => saveEditDoc(idx) },
@@ -4618,8 +4618,8 @@ function openNewDocModal() {
   const choferes = (App.data.users || []).filter(u => u.role === 'chofer' || u.role === 'dueno' || u.role === 'gerencia' || u.role === 'jefe_mantenimiento' || u.role === 'mecanico');
   const vehiculos = App.data.vehicles || [];
 
-  const vehOpts = vehiculos.map(v => `<option value="${v.id}" data-code="${v.code}" data-plate="${v.plate||''}">${v.code} — ${v.plate||'sin patente'} · ${v.brand||''} ${v.model||''}</option>`).join('');
-  const userOpts = choferes.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name} · ${u.role}</option>`).join('');
+  const vehOpts = vehiculos.map(v => `<option value="${v.id}" data-code="${escapeHtml(v.code)}" data-plate="${escapeHtml(v.plate||'')}">${escapeHtml(v.code)} — ${escapeHtml(v.plate||'sin patente')} · ${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')}</option>`).join('');
+  const userOpts = choferes.map(u => `<option value="${u.id}" data-name="${escapeHtml(u.name)}">${escapeHtml(u.name)} · ${u.role}</option>`).join('');
 
   openModal('Cargar nuevo documento', `
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text3)">
@@ -4936,7 +4936,7 @@ function exportCostPDF() {
     totalKm          += d.kmMes;
     rows.push([
       v.code,
-      `${v.brand||''} ${v.model||''}`.trim() || '—',
+      `${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')}`.trim() || '—',
       d.kmMes.toLocaleString('es-AR'),
       '$'+comb.toLocaleString('es-AR'),
       '$'+prev.toLocaleString('es-AR'),
@@ -5108,11 +5108,11 @@ function renderCosts() {
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;color:var(--text3)">
             <div style="display:flex;justify-content:space-between;margin-bottom:4px">
               <span>Unidad más costosa del mes:</span>
-              <span style="cursor:pointer;text-decoration:underline;color:var(--danger)" onclick="openCostDrillDown('${sorted[0].code}')">${sorted[0].code}</span>
+              <span style="cursor:pointer;text-decoration:underline;color:var(--danger)" onclick="openCostDrillDown('${escapeJsArg(sorted[0].code)}')">${escapeHtml(sorted[0].code)}</span>
             </div>
             ${conDatos.length>0 ? `<div style="display:flex;justify-content:space-between">
               <span>Más eficiente ($/km):</span>
-              <span style="cursor:pointer;color:var(--ok)">${conDatos[conDatos.length-1].code} · $${conDatos[conDatos.length-1]._costReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+              <span style="cursor:pointer;color:var(--ok)">${escapeHtml(conDatos[conDatos.length-1].code)} · $${conDatos[conDatos.length-1]._costReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
             </div>` : ''}
           </div>
         ` : ''}
@@ -5140,9 +5140,9 @@ function renderCosts() {
             const ev = (avgNum>0 && ck>avgNum*1.25)?['danger','Alto']:(avgNum>0 && ck>avgNum)?['warn','Revisar']:['ok','Eficiente'];
             const litros = litrosByVeh[v.code] || 0;
             const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
-            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${v.code}')" title="Clic para ver desglose completo">
-              <td class="td-mono td-main">${v.code}</td>
-              <td>${v.brand || ''} ${v.model || ''}</td>
+            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${escapeJsArg(v.code)}')" title="Clic para ver desglose completo">
+              <td class="td-mono td-main">${escapeHtml(v.code)}</td>
+              <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total).toLocaleString('es-AR'):'—'}</td>
@@ -5153,7 +5153,7 @@ function renderCosts() {
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
-              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${v.code}')">Ver</button></td>
+              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
             </tr>`;
           }).join('')}
           ${sorted.filter(v => v._totalMes > 0).length === 0 ? '<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text3)">Sin movimientos registrados en este mes</td></tr>' : ''}
@@ -5231,8 +5231,8 @@ function openCostDrillDown(vehicleCode) {
   openModal(`Desglose de costos — ${vehicleCode}`, `
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)">
       <div>
-        <div style="font-size:16px;font-weight:600">${d.v.brand} ${d.v.model} · ${d.v.year}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px">${d.v.driver} · Base ${d.v.base} · ${d.kmMes.toLocaleString()} km este mes</div>
+        <div style="font-size:16px;font-weight:600">${escapeHtml(d.v.brand)} ${escapeHtml(d.v.model)} · ${d.v.year}</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">${escapeHtml(d.v.driver)} · Base ${escapeHtml(d.v.base)} · ${d.kmMes.toLocaleString()} km este mes</div>
       </div>
       <div style="margin-left:auto;text-align:right">
         <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'})">${d.costKmReal>0?'$'+d.costKmReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'Sin datos'}</div>
@@ -5245,7 +5245,7 @@ function openCostDrillDown(vehicleCode) {
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">
       ${d.rubros.map(r=>`
         <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 8px;text-align:center;border:1px solid var(--border);cursor:pointer;transition:all .15s"
-          onclick="toggleCostRubro('${vehicleCode}','${r.id}')"
+          onclick="toggleCostRubro('${escapeJsArg(vehicleCode)}','${r.id}')"
           id="rubro-card-${r.id}">
           <div style="width:8px;height:8px;border-radius:50%;background:${r.color};margin:0 auto 5px"></div>
           <div style="font-size:11px;color:var(--text3);margin-bottom:3px;line-height:1.3">${r.short || r.label.split(' ')[0]}</div>
@@ -5405,19 +5405,19 @@ function renderMaintenance() {
 
   const rows = plans.map(p => `
     <tr>
-      <td class="td-mono td-main">${p.v.code}</td>
+      <td class="td-mono td-main">${escapeHtml(p.v.code)}</td>
       <td>
         <div style="font-weight:500">${p.taskName}</div>
-        <div style="font-size:11px;color:var(--text3)">c/${p.interval.toLocaleString()} ${p.unit} · último: ${p.lastMaint.toLocaleString()} ${p.unit}</div>
+        <div style="font-size:11px;color:var(--text3)">c/${p.interval.toLocaleString()} ${escapeHtml(p.unit)} · último: ${p.lastMaint.toLocaleString()} ${escapeHtml(p.unit)}</div>
       </td>
       <td><span class="badge badge-info">${p.isFork?'Por horas':'Por km'}</span></td>
-      <td class="td-mono">${p.nextKm.toLocaleString()} ${p.unit}</td>
-      <td class="td-mono">${p.km.toLocaleString()} ${p.unit}</td>
+      <td class="td-mono">${p.nextKm.toLocaleString()} ${escapeHtml(p.unit)}</td>
+      <td class="td-mono">${p.km.toLocaleString()} ${escapeHtml(p.unit)}</td>
       <td style="width:140px">
         <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
           <div style="background:var(--${p.status});width:${p.pct}%;height:100%"></div>
         </div>
-        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}% · faltan ${Math.max(0,p.nextKm-p.km).toLocaleString()} ${p.unit}</div>
+        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}% · faltan ${Math.max(0,p.nextKm-p.km).toLocaleString()} ${escapeHtml(p.unit)}</div>
       </td>
       <td><span class="badge badge-${p.status}">${p.status==='ok'?'Al día':p.status==='warn'?'Próximo':'Vencido'}</span></td>
       <td>
@@ -5465,7 +5465,7 @@ function openMaintConfigModal(vehicleId) {
   const lastKm   = ts.maint_last_km    || 0;
   const taskName = ts.maint_task_name  || 'Cambio aceite + filtros';
 
-  openModal(`⚙ Configurar mantenimiento — ${v.code}`, `
+  openModal(`⚙ Configurar mantenimiento — ${escapeHtml(v.code)}`, `
     <div style="margin-bottom:14px;font-size:12px;color:var(--text3)">
       ${isFork ? 'Configurá el plan de mantenimiento preventivo por horas para este autoelevador.' : 'Configurá el plan de mantenimiento preventivo para esta unidad.'} Los datos se guardan en la ficha técnica.
     </div>
@@ -5533,7 +5533,7 @@ async function saveMaintConfig(vehicleId) {
   v.tech_spec = updated.tech_spec || newTechSpec;
 
   closeModal();
-  showToast('ok', `Mantenimiento de ${v.code} configurado — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
+  showToast('ok', `Mantenimiento de ${escapeHtml(v.code)} configurado — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
   renderMaintenance();
   renderDashboard(); // actualizar alertas del panel
 }
@@ -5541,7 +5541,7 @@ async function saveMaintConfig(vehicleId) {
 
 function openNewMaintModal() {
   const vehicleOpts = (App.data.vehicles||[]).map(v =>
-    `<option value="${v.id}" data-code="${v.code}" data-unit="${vehicleMeasureUnit(v)}" data-isfork="${isAutoelevador(v)?'1':'0'}">${v.code} — ${v.brand} ${v.model} (${formatVehicleMeasure(v)})</option>`
+    `<option value="${v.id}" data-code="${escapeHtml(v.code)}" data-unit="${vehicleMeasureUnit(v)}" data-isfork="${isAutoelevador(v)?'1':'0'}">${escapeHtml(v.code)} — ${escapeHtml(v.brand)} ${escapeHtml(v.model)} (${formatVehicleMeasure(v)})</option>`
   ).join('');
   openModal('Nueva tarea de mantenimiento', `
     <div class="form-group" style="margin-bottom:12px">
@@ -5674,7 +5674,7 @@ async function createPreventiveOT(vehicleCode, task) {
     parts_cost: 0, labor_cost: 0
   });
 
-  showToast('ok', `OT preventiva ${wo.code} creada para ${vehicleCode}`);
+  showToast('ok', `OT preventiva ${escapeHtml(wo.code)} creada para ${vehicleCode}`);
   renderMaintenance();
 }
 
@@ -5986,12 +5986,12 @@ async function renderUsers() {
           ${pending.map(u=>`
             <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-radius:var(--radius);margin-bottom:8px;border:1px solid var(--border)">
               <div>
-                <div style="font-weight:600;color:var(--text)">${u.name}</div>
-                <div style="font-size:12px;color:var(--text3)">${u.email} ${u.vehicle_code?'· Unidad: '+u.vehicle_code:''}</div>
+                <div style="font-weight:600;color:var(--text)">${escapeHtml(u.name)}</div>
+                <div style="font-size:12px;color:var(--text3)">${escapeHtml(u.email)} ${u.vehicle_code?'· Unidad: '+u.vehicle_code:''}</div>
               </div>
               <div style="display:flex;gap:8px">
                 <button class="btn btn-primary btn-sm" onclick="approveUser('${u.id}')">✓ Aprobar</button>
-                <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="rejectUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">✕ Rechazar</button>
+                <button class="btn btn-secondary btn-sm" style="color:var(--danger)" onclick="rejectUser('${u.id}','${escapeJsArg(u.name)}')">✕ Rechazar</button>
               </div>
             </div>`).join('')}
         </div>`;
@@ -6018,16 +6018,16 @@ async function renderUsers() {
           <tbody>
             ${active.map(u => `
               <tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:12px 16px;font-weight:600;color:var(--text)">${u.name}</td>
-                <td style="padding:12px 16px;color:var(--text2);font-size:13px">${u.email}</td>
+                <td style="padding:12px 16px;font-weight:600;color:var(--text)">${escapeHtml(u.name)}</td>
+                <td style="padding:12px 16px;color:var(--text2);font-size:13px">${escapeHtml(u.email)}</td>
                 <td style="padding:12px 16px">
                   <span style="background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:3px 10px;font-size:12px;color:var(--text2)">
                     ${ROLES_LIST.find(r=>r.value===u.role)?.label || u.role}
                   </span>
                 </td>
                 <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.vehicle_code || '—'}</td>
-                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.sucursal || '—'}</td>
-                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${u.area || '—'}</td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${escapeHtml(u.sucursal || '—')}</td>
+                <td style="padding:12px 16px;color:var(--text3);font-size:13px">${escapeHtml(u.area || '—')}</td>
                 <td style="padding:12px 16px">
                   <span style="background:${u.active ? 'rgba(34,197,94,.15)' : 'rgba(239,68,68,.15)'};color:${u.active ? '#22c55e' : '#ef4444'};border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600">
                     ${u.active ? 'Activo' : 'Inactivo'}
@@ -6036,7 +6036,7 @@ async function renderUsers() {
                 <td style="padding:12px 16px;color:var(--text3);font-size:12px">${u.last_login ? new Date(u.last_login).toLocaleDateString('es-AR') : 'Nunca'}</td>
                 <td style="padding:12px 16px">
                   <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('${u.id}')">Editar</button>
-                  ${userHasRole('dueno') && u.email !== 'admin@fleetos.com' ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);margin-left:6px" onclick="confirmDeleteUser('${u.id}','${u.name.replace(/'/g,"\\'")}')">🗑 Eliminar</button>` : ''}
+                  ${userHasRole('dueno') && u.email !== 'admin@fleetos.com' ? `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:#ef4444;border:1px solid rgba(239,68,68,.3);margin-left:6px" onclick="confirmDeleteUser('${u.id}','${escapeJsArg(u.name)}')">🗑 Eliminar</button>` : ''}
                 </td>
               </tr>
             `).join('')}
@@ -6075,7 +6075,7 @@ async function approveUser(id) {
     method: 'PUT',
     body: JSON.stringify({ name: u.name, role: u.role, vehicle_code: u.vehicle_code, sucursal: u.sucursal || null, area: u.area || null, active: true })
   });
-  if (res2.ok) { showToast('ok', `✓ ${u.name} aprobado — ya puede ingresar al sistema`); renderUsers(); }
+  if (res2.ok) { showToast('ok', `✓ ${escapeHtml(u.name)} aprobado — ya puede ingresar al sistema`); renderUsers(); }
   else { const e = await res2.json(); showToast('error', e.error || 'Error al aprobar'); }
 }
 
@@ -6128,7 +6128,7 @@ function refreshUserOrgArea(prefix) {
 
 function openNewUserModal() {
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}">${r.label}</option>`).join('');
-  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}">${v.code} · ${v.plate}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${escapeHtml(v.code)}">${escapeHtml(v.code)} · ${escapeHtml(v.plate)}</option>`).join('');
 
   openModal('Nuevo usuario', `
     <div class="form-grid">
@@ -6195,7 +6195,7 @@ function openEditUserModal(id) {
   const name = u.name, email = u.email, role = u.role;
   const vehicle = u.vehicle_code || '', active = !!u.active, sucursal = u.sucursal || '', area = u.area || '';
   const rolesOpts = ROLES_LIST.map(r => `<option value="${r.value}" ${r.value===role?'selected':''}>${r.label}</option>`).join('');
-  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${v.code}" ${v.code===vehicle?'selected':''}>${v.code} · ${v.plate}</option>`).join('');
+  const vehiclesOpts = (App.data.vehicles||[]).map(v => `<option value="${escapeHtml(v.code)}" ${v.code===vehicle?'selected':''}>${escapeHtml(v.code)} · ${escapeHtml(v.plate)}</option>`).join('');
 
   openModal(`Editar: ${name}`, `
     <div class="form-grid">
@@ -6498,7 +6498,7 @@ function _otRenderRow(o) {
 
     <td style="padding:10px 12px">
       <div style="font-family:var(--mono);font-weight:700;font-size:13px;color:var(--text)">${o.vehicle||'—'}</div>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--text3)">${o.plate||'—'}</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3)">${escapeHtml(o.plate||'—')}</div>
     </td>
 
     <td style="padding:10px 12px">
@@ -6703,8 +6703,8 @@ function renderChoferPanel() {
       <!-- Card vehículo asignado -->
       <div class="card" style="text-align:center;margin-bottom:16px;padding:24px 20px">
         ${myVehicle ? `
-          <div style="font-size:22px;font-weight:700;color:var(--info);letter-spacing:1px">${myVehicle.code}</div>
-          <div style="color:var(--text3);font-size:13px;margin:4px 0 10px">${myVehicle.plate} · ${myVehicle.brand} ${myVehicle.model}</div>
+          <div style="font-size:22px;font-weight:700;color:var(--info);letter-spacing:1px">${escapeHtml(myVehicle.code)}</div>
+          <div style="color:var(--text3);font-size:13px;margin:4px 0 10px">${escapeHtml(myVehicle.plate)} · ${escapeHtml(myVehicle.brand)} ${escapeHtml(myVehicle.model)}</div>
           <div style="display:flex;align-items:center;justify-content:center;gap:12px">
             <span class="badge ${statusClass[myVehicle.status]||'badge-ok'}">${statusLabel[myVehicle.status]||myVehicle.status}</span>
             <span style="font-family:monospace;font-size:13px;color:var(--text2)">${(myVehicle.km||0).toLocaleString()} km</span>
@@ -6801,7 +6801,7 @@ function openChoferNovedadModal() {
     <div class="form-group">
       <label class="form-label">Vehículo</label>
       <select class="form-select" id="cn-vehicle">
-        ${(App.data.vehicles||[]).map(v=>`<option value="${v.id}" ${myVehicle?.id===v.id?'selected':''}>${v.code} — ${v.plate}</option>`).join('')}
+        ${(App.data.vehicles||[]).map(v=>`<option value="${v.id}" ${myVehicle?.id===v.id?'selected':''}>${escapeHtml(v.code)} — ${escapeHtml(v.plate)}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -6854,7 +6854,7 @@ function openChoferChecklistModal() {
 
   openModal('✅ Checklist de salida', `
     <div style="font-size:13px;color:var(--text3);margin-bottom:12px">
-      ${myVehicle ? myVehicle.code+' — '+myVehicle.plate : 'Completá el checklist antes de salir'}
+      ${myVehicle ? escapeHtml(myVehicle.code)+' — '+escapeHtml(myVehicle.plate) : 'Completá el checklist antes de salir'}
     </div>
     ${items.map(item=>`
       <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
@@ -6994,7 +6994,7 @@ async function _renderDailyActivityInto(containerId) {
             : `<div style="max-height:200px;overflow-y:auto">
                 ${d.sin_checklist.map(v=>`
                   <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
-                    <span><b>${v.code}</b> ${v.plate}</span>
+                    <span><b>${escapeHtml(v.code)}</b> ${escapeHtml(v.plate)}</span>
                     <span style="color:var(--text3)">${v.driver_name||'Sin chofer'}</span>
                   </div>`).join('')}
                </div>`
@@ -7054,7 +7054,7 @@ async function _renderDailyActivityInto(containerId) {
                 <td class="td-main">${f.vehicle_code||'—'}</td>
                 <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'Urea':'Gasoil'}</span></td>
                 <td class="td-mono">${parseFloat(f.liters||0).toFixed(0)} L</td>
-                <td>${f.location||'—'}</td>
+                <td>${escapeHtml(f.location||'—')}</td>
                 <td>${f.ticket_image?'<span style="color:var(--ok)">✓ Sí</span>':'<span style="color:var(--text3)">No</span>'}</td>
               </tr>`).join('')}</tbody>
             </table></div>`
@@ -7360,7 +7360,7 @@ function openNewOTModal(preselectedVehicle) {
           <div class="form-group"><label class="form-label">Responsable / mecánico</label>
             <input class="form-input" list="ot-mecanicos-list" id="ot-mechanic" placeholder="Nombre del responsable">
             <datalist id="ot-mecanicos-list">
-              ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${u.name}">`).join('')}
+              ${(App.data.users||[]).filter(u=>['mecanico','jefe_mantenimiento','encargado_taller'].includes(u.role)).map(u=>`<option value="${escapeHtml(u.name)}">`).join('')}
             </datalist>
           </div>
           <div class="form-group"><label class="form-label">Fecha límite</label>
@@ -7438,7 +7438,7 @@ function _otPopulateTarget(tipo, preselectedVehicle) {
   if (tipo === 'vehiculo') {
     label.textContent = 'Unidad (vehículo)';
     const opts = (App.data.vehicles || [])
-      .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${v.code} — ${v.brand||''} ${v.model||''} (${v.plate})</option>`)
+      .map(v => `<option value="${v.id||v._id}" ${preselectedVehicle===v.code?'selected':''}>${escapeHtml(v.code)} — ${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')} (${escapeHtml(v.plate)})</option>`)
       .join('');
     select.innerHTML = `<option value="">— Seleccioná una unidad —</option>${opts}`;
     if (hint) hint.innerHTML = `<span style="color:var(--text3)">${(App.data.vehicles||[]).length} unidades disponibles</span>`;
@@ -7454,7 +7454,7 @@ function _otPopulateTarget(tipo, preselectedVehicle) {
       otro:        'Activo',
     }[tipo] || 'Activo';
 
-    const opts = assets.map(a => `<option value="${a.id}">${a.code} — ${a.name}${a.location?' ('+a.location+')':''}</option>`).join('');
+    const opts = assets.map(a => `<option value="${a.id}">${escapeHtml(a.code)} — ${escapeHtml(a.name)}${a.location?' ('+escapeHtml(a.location)+')':''}</option>`).join('');
 
     if (assets.length === 0) {
       select.innerHTML = `<option value="">— No hay ${label.textContent.toLowerCase()}s registrados —</option>`;
@@ -7585,16 +7585,16 @@ function onOTPartNameInput(idx, val) {
     const critical = qty <= parseFloat(s.qty_min || 0);
     const color = critical ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
     const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    return `<div onclick="selectOTStockItem(${idx},'${s.id}','${safeName}','${s.unit||'un'}',${parseFloat(s.unit_cost||0)},${qty})"
+    return `<div onclick="selectOTStockItem(${idx},'${s.id}','${safeName}','${escapeJsArg(s.unit||'un')}',${parseFloat(s.unit_cost||0)},${qty})"
       style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
       onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
       <div>
-        <div style="font-weight:600">${s.name}</div>
-        <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
+        <div style="font-weight:600">${escapeHtml(s.name)}</div>
+        <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(s.code||'—')}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
-        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${escapeHtml(s.unit||'un')}</div>
+        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${escapeHtml(s.unit||'un')}</div>
       </div>
     </div>`;
   }).join('');
@@ -7745,7 +7745,7 @@ function openEditTechSpecModal(id) {
     { key:'battery',             label:'Baterías' },
     { key:'grease',              label:'Puntos de engrase' },
   ];
-  openModal(`Editar ficha técnica — ${v.code}`, `
+  openModal(`Editar ficha técnica — ${escapeHtml(v.code)}`, `
     <div style="margin-bottom:12px;font-size:12px;color:var(--text3)">
       Los datos del fabricante se cargan como base. Podés modificar cualquier campo para este vehículo específico.
     </div>
@@ -7771,7 +7771,7 @@ function openAxleConfigModal(id) {
   const v = App.data.vehicles.find(x => x.id === id);
   if (!v) return;
   const currentAxles = v.tech_spec?.axles || getAxleConfig(v);
-  openModal(`⚙️ Configurar ejes — ${v.code}`, `
+  openModal(`⚙️ Configurar ejes — ${escapeHtml(v.code)}`, `
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
       Configurá la cantidad y tipo de ejes. Los cambios afectan el mapa de cubiertas.
     </div>
@@ -7779,7 +7779,7 @@ function openAxleConfigModal(id) {
       ${currentAxles.map((axle, i) => `
         <div id="axle-row-${i}" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;background:var(--bg3);padding:8px 12px;border-radius:var(--radius)">
           <div style="font-size:12px;font-weight:700;min-width:50px">Eje ${i+1}</div>
-          <input class="form-input" id="axle-label-${i}" value="${axle.label||axle.name?.split('—')[1]?.trim()||''}" placeholder="Ej: Dirección, Tracción, Portante" style="flex:2">
+          <input class="form-input" id="axle-label-${i}" value="${escapeHtml(axle.label||axle.name?.split('—')[1]?.trim()||'')}" placeholder="Ej: Dirección, Tracción, Portante" style="flex:2">
           <select class="form-select" id="axle-dual-${i}" style="flex:1">
             <option value="false" ${!axle.dual?'selected':''}>Simple (2 cub.)</option>
             <option value="true"  ${axle.dual?'selected':''}>Dual (4 cub.)</option>
@@ -8218,7 +8218,7 @@ async function renderAuditorVisual(el) {
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
           <select class="form-select" id="vis-timeline-vehicle" style="max-width:260px;padding:6px 10px;font-size:12px" onchange="renderAuditorVisualTimeline()">
             <option value="">— Seleccioná un vehículo —</option>
-            ${App.data.vehicles.map(v=>`<option value="${v.code}">${v.code} · ${v.plate||'—'}</option>`).join('')}
+            ${App.data.vehicles.map(v=>`<option value="${escapeHtml(v.code)}">${escapeHtml(v.code)} · ${escapeHtml(v.plate||'—')}</option>`).join('')}
           </select>
           <span style="font-size:11px;color:var(--text3)" id="vis-timeline-info"></span>
         </div>
@@ -8406,11 +8406,11 @@ async function _renderAuditorHeatmap() {
         </div>
         ${vehiculos.map(v => `
           <div style="display:grid;grid-template-columns:100px repeat(${dias},1fr);gap:2px;margin-bottom:2px;align-items:center">
-            <div style="font-size:11px;font-family:var(--mono);color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${v.code} · ${v.plate} · ${v.total} eventos en el mes">${v.code}</div>
+            <div style="font-size:11px;font-family:var(--mono);color:var(--text);padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(v.code)} · ${escapeHtml(v.plate)} · ${v.total} eventos en el mes">${escapeHtml(v.code)}</div>
             ${Array.from({length:dias}, (_,i) => {
               const dia = i+1;
               const n = v.dias[dia] || 0;
-              return `<div title="${v.code} · día ${dia}: ${n} evento${n===1?'':'s'}"
+              return `<div title="${escapeHtml(v.code)} · día ${dia}: ${n} evento${n===1?'':'s'}"
                 style="aspect-ratio:1;min-width:16px;background:${colorFor(n)};border-radius:3px;border:1px solid var(--border)"></div>`;
             }).join('')}
           </div>
@@ -8673,7 +8673,7 @@ async function renderAuditorOTs(el) {
 // ── Tab 4: Trazabilidad por unidad ───────────────────────
 async function renderAuditorTrazabilidad(el) {
   const vehicleOpts = (App.data.vehicles||[]).map(v =>
-    `<option value="${v.id}">${v.code} — ${v.plate}</option>`).join('');
+    `<option value="${v.id}">${escapeHtml(v.code)} — ${escapeHtml(v.plate)}</option>`).join('');
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:16px">
@@ -8934,7 +8934,7 @@ async function openVerificacionTickets() {
             📅 ${new Date(t.logged_at).toLocaleString('es-AR')}<br>
             🚛 ${t.vehicle_code} · 👤 ${t.driver_name||'—'}<br>
             ⛽ ${t.liters} L × $${t.price_per_l}/L = <strong>$${total}</strong><br>
-            📍 ${t.location||'—'}
+            📍 ${escapeHtml(t.location||'—')}
           </div>
           <div class="form-group">
             <label class="form-label">Observación (si rechazás)</label>
@@ -8996,7 +8996,7 @@ async function verificarTicket(id, accion) {
             📅 ${new Date(next.logged_at).toLocaleString('es-AR')}<br>
             🚛 ${next.vehicle_code} · 👤 ${next.driver_name||'—'}<br>
             ⛽ ${next.liters} L × $${next.price_per_l}/L = <strong>$${total}</strong><br>
-            📍 ${next.location||'—'}
+            📍 ${escapeHtml(next.location||'—')}
           </div>
           <div class="form-group">
             <label class="form-label">Observación (si rechazás)</label>
@@ -9307,23 +9307,23 @@ function _poRenderRow(po) {
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${po.code||'—'}<div style="margin-top:4px">${_ocPrioridadBadge(po)}</div></td>
+    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${escapeHtml(po.code||'—')}<div style="margin-top:4px">${_ocPrioridadBadge(po)}</div></td>
 
     <td style="padding:10px 12px">
       ${_ocEstadoBadge(po)}
     </td>
 
     <td style="padding:10px 12px;font-size:12px">
-      ${po.sucursal ? `<span style='background:rgba(37,99,235,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--mono)'>${po.sucursal}</span>` : '<span style="color:var(--text3)">—</span>'}
+      ${po.sucursal ? `<span style='background:rgba(37,99,235,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--mono)'>${escapeHtml(po.sucursal)}</span>` : '<span style="color:var(--text3)">—</span>'}
     </td>
 
-    <td style="padding:10px 12px;font-size:12px;color:var(--text3)">${po.area||'—'}</td>
+    <td style="padding:10px 12px;font-size:12px;color:var(--text3)">${escapeHtml(po.area||'—')}</td>
 
     <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.solicitante_nombre||'—'}</td>
 
-    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.proveedor || '<span style="color:var(--text3)">Sin asignar</span>'}</td>
+    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.proveedor ? escapeHtml(po.proveedor) : '<span style="color:var(--text3)">Sin asignar</span>'}</td>
 
-    <td style="padding:10px 12px;font-size:11px;font-family:var(--mono);color:var(--text2)">${po.factura_nro || '<span style="color:var(--text3)">—</span>'}</td>
+    <td style="padding:10px 12px;font-size:11px;font-family:var(--mono);color:var(--text2)">${po.factura_nro ? escapeHtml(po.factura_nro) : '<span style="color:var(--text3)">—</span>'}</td>
 
     <td style="padding:10px 12px;min-width:120px">
       <div style="display:flex;align-items:center;gap:6px">
@@ -9539,7 +9539,7 @@ async function openNewPOModal() {
             <label class="form-label">Vehículo <span class="ocv-opt">(opcional)</span></label>
             <select class="form-select" id="po-vehicle">
               <option value="">— Sin vehículo asignado —</option>
-              ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+              ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${escapeHtml(v.code)} · ${escapeHtml(v.plate)}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -9565,7 +9565,7 @@ async function openNewPOModal() {
           ${catalogoProveedores.length > 0 ? `
             <select class="form-select" id="po-supplier-select" onchange="_poOnSupplierChange(this.value)">
               <option value="">— Seleccioná del catálogo —</option>
-              ${catalogoProveedores.map(s => `<option value="${s.id}" data-name="${s.name}" data-fpago="${s.forma_pago||''}" data-ccdias="${s.cc_dias||''}" data-moneda="${s.moneda||'ARS'}">${s.name}${s.cuit ? ' · ' + s.cuit : ''}</option>`).join('')}
+              ${catalogoProveedores.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" data-fpago="${escapeHtml(s.forma_pago||'')}" data-ccdias="${s.cc_dias||''}" data-moneda="${s.moneda||'ARS'}">${escapeHtml(s.name)}${s.cuit ? ' · ' + escapeHtml(s.cuit) : ''}</option>`).join('')}
               <option value="__manual__">✍️ Escribir uno manualmente (no está en el catálogo)</option>
             </select>
             <div id="po-supplier-manual" style="display:none;margin-top:6px">
@@ -9786,7 +9786,7 @@ async function openNewPOModalJefe() {
           <label class="form-label">Vehículo (opcional)</label>
           <select class="form-select" id="poj-vehicle">
             <option value="">— Sin vehículo asignado —</option>
-            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${v.code} · ${v.plate}</option>`).join('')}
+            ${(App.data.vehicles||[]).map(v => `<option value="${v.id}">${escapeHtml(v.code)} · ${escapeHtml(v.plate)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -9968,10 +9968,10 @@ function previewPOJefeFile(input) {
     if (preview) {
       preview.innerHTML = esPDF
         ? `<div style="font-size:32px;margin-bottom:4px">📄</div>
-           <div style="font-size:12px;color:var(--text)">${file.name}</div>
+           <div style="font-size:12px;color:var(--text)">${escapeHtml(file.name)}</div>
            <div style="font-size:10px;color:var(--text3);margin-top:4px">PDF subido (${Math.round(file.size/1024)}KB) · click para cambiar</div>`
         : `<img src="${e.target.result}" style="max-width:120px;max-height:100px;border-radius:6px;margin-bottom:4px">
-           <div style="font-size:11px;color:var(--text3)">${file.name} · click para cambiar</div>`;
+           <div style="font-size:11px;color:var(--text3)">${escapeHtml(file.name)} · click para cambiar</div>`;
     }
   };
   reader.readAsDataURL(file);
@@ -10103,7 +10103,7 @@ async function saveNewPO() {
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error'); return; }
     const po = await res.json();
     closeModal();
-    showToast('ok', `OC ${po.code} creada`);
+    showToast('ok', `OC ${escapeHtml(po.code)} creada`);
     _poItemCount = 1;
     // Recargar listado (usa la nueva loadPOList sin parámetros)
     await loadPOList();
@@ -10248,7 +10248,7 @@ async function openPODetail(id) {
       if (v) { vehInfoDet.code = v.code; vehInfoDet.plate = v.plate; }
     }
 
-    openModal(`${st.icon} ${po.code} — ${po.sucursal||'—'} · ${po.area||'—'}`, `
+    openModal(`${st.icon} ${escapeHtml(po.code)} — ${escapeHtml(po.sucursal||'—')} · ${escapeHtml(po.area||'—')}`, `
       <div style="background:${st.color}22;border:1px solid ${st.color};border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="background:${st.color};color:white;padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700">${st.label}</span>
@@ -10298,7 +10298,7 @@ async function openPODetail(id) {
       ${po.vehicle_id ? `
       <div class="card" style="padding:12px 16px;margin-bottom:16px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🚛 Vehículo</div>
-        <div style="font-size:15px;font-weight:700;color:var(--accent)">${vehInfoDet.code || '—'} · ${vehInfoDet.plate || '—'}</div>
+        <div style="font-size:15px;font-weight:700;color:var(--accent)">${escapeHtml(vehInfoDet.code || '—')} · ${escapeHtml(vehInfoDet.plate || '—')}</div>
         ${po.ot_id ? `<div style="font-size:11px;margin-top:4px">✅ OT generada: <a onclick="closeModal();navigate('workorders')" style="color:var(--accent);cursor:pointer;text-decoration:underline">Ver en OTs</a></div>` :
           (po.status==='aprobada_compras' ? '<div style="font-size:11px;color:var(--text3);margin-top:3px">💡 Al recibir se generará automáticamente una OT con el costo de la factura</div>' : '')}
       </div>` : ''}
@@ -10313,10 +10313,10 @@ async function openPODetail(id) {
               const cat = (App.data.suppliers || []).filter(s => s.status === 'activo');
               const readonly = !(canEdit && !esTerminal);
               if (readonly) {
-                return `<input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" readonly>`;
+                return `<input class="form-input" id="pod-proveedor" value="${escapeHtml(po.proveedor||'')}" readonly>`;
               }
               if (!cat.length) {
-                return `<input class="form-input" id="pod-proveedor" value="${po.proveedor||''}" placeholder="Nombre del proveedor">
+                return `<input class="form-input" id="pod-proveedor" value="${escapeHtml(po.proveedor||'')}" placeholder="Nombre del proveedor">
                         <div style="font-size:11px;color:var(--warn);margin-top:3px">⚠️ Cargá proveedores en el módulo "🏢 Proveedores" para elegirlos del catálogo.</div>`;
               }
               // Matchear proveedor actual por supplier_id o por nombre
@@ -10324,10 +10324,10 @@ async function openPODetail(id) {
               return `
                 <select class="form-select" id="pod-supplier-select" onchange="onPODSupplierChange()">
                   <option value="">— Seleccionar del catálogo —</option>
-                  ${cat.map(s => `<option value="${s.id}" data-name="${s.name}" ${s.id===matchedId?'selected':''}>${s.name}${s.cuit?' · '+s.cuit:''}</option>`).join('')}
+                  ${cat.map(s => `<option value="${s.id}" data-name="${escapeHtml(s.name)}" ${s.id===matchedId?'selected':''}>${escapeHtml(s.name)}${s.cuit?' · '+escapeHtml(s.cuit):''}</option>`).join('')}
                   <option value="__manual__" ${!matchedId && po.proveedor ? 'selected' : ''}>✏️ Escribir manualmente...</option>
                 </select>
-                <input class="form-input" id="pod-proveedor" value="${po.proveedor||''}"
+                <input class="form-input" id="pod-proveedor" value="${escapeHtml(po.proveedor||'')}"
                   placeholder="Nombre del proveedor"
                   style="margin-top:6px;${matchedId ? 'display:none' : ''}">
               `;
@@ -10398,7 +10398,7 @@ async function openPODetail(id) {
               ${po.items.map(i => `<tr>
                 <td>${escapeHtml(i.descripcion)}</td>
                 <td style="text-align:center">${parseFloat(i.cantidad)}</td>
-                <td style="text-align:center">${i.unidad}</td>
+                <td style="text-align:center">${escapeHtml(i.unidad)}</td>
                 ${puedeVerPrecios ? `
                   <td style="text-align:right;font-family:monospace">${po.moneda==='USD'?'US$':'$'}${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
                   <td style="text-align:right;font-family:monospace;font-weight:600">${po.moneda==='USD'?'US$':'$'}${Math.round(parseFloat(i.subtotal||0)).toLocaleString('es-AR')}</td>
@@ -10711,7 +10711,7 @@ async function printPO(id) {
     const win = window.open('', '_blank');
     win.document.write(`<!DOCTYPE html><html lang="es"><head>
       <meta charset="UTF-8">
-      <title>OC ${po.code} — Biletta</title>
+      <title>OC ${escapeHtml(po.code)} — Biletta</title>
       <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family: 'Segoe UI', Arial, sans-serif; font-size:13px; color:#111; padding:32px; background:#fff; }
@@ -10751,7 +10751,7 @@ async function printPO(id) {
           </div>
         </div>
         <div>
-          <div class="doc-code">${po.code}</div>
+          <div class="doc-code">${escapeHtml(po.code)}</div>
           <div class="doc-sub">ORDEN DE COMPRA</div>
           <div class="doc-sub">Fecha: ${new Date(po.created_at).toLocaleDateString('es-AR')}</div>
           <div style="margin-top:6px;text-align:right">
@@ -10763,12 +10763,12 @@ async function printPO(id) {
       <div class="section">
         <div class="section-title">📋 Datos del pedido</div>
         <div class="grid3">
-          <div class="field"><div class="field-label">Sucursal</div><div class="field-value">${po.sucursal||'—'}</div></div>
-          <div class="field"><div class="field-label">Área</div><div class="field-value">${po.area||'—'}</div></div>
+          <div class="field"><div class="field-label">Sucursal</div><div class="field-value">${escapeHtml(po.sucursal||'—')}</div></div>
+          <div class="field"><div class="field-label">Área</div><div class="field-value">${escapeHtml(po.area||'—')}</div></div>
           <div class="field"><div class="field-label">Prioridad</div><div class="field-value">${(()=>{const p=po.prioridad||'Normal';const c=p==='Urgente'?'#ef4444':p==='Media'?'#f59e0b':'var(--text)';const ic=p==='Urgente'?'🔴 ':p==='Media'?'🟡 ':'';return `<span style="color:${c};font-weight:${p==='Normal'?'400':'700'}">${ic}${p}</span>`;})()}</div></div>
           <div class="field"><div class="field-label">Solicitado por</div><div class="field-value">${po.solicitante_nombre||'—'}</div></div>
-          <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${po.proveedor||'—'}</div></div>
-          <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${vehInfo.code || '—'}${vehInfo.plate ? ' ('+vehInfo.plate+')' : ''}</div></div>
+          <div class="field"><div class="field-label">Proveedor</div><div class="field-value">${escapeHtml(po.proveedor||'—')}</div></div>
+          <div class="field"><div class="field-label">Vehículo asociado</div><div class="field-value">${escapeHtml(vehInfo.code || '—')}${vehInfo.plate ? ' ('+escapeHtml(vehInfo.plate)+')' : ''}</div></div>
           <div class="field"><div class="field-label">Moneda</div><div class="field-value">${po.moneda==="USD" ? "Dólares (USD)" : "Pesos (ARS)"}</div></div>
         </div>
       </div>
@@ -10777,7 +10777,7 @@ async function printPO(id) {
       <div class="section">
         <div class="section-title">💰 Datos de facturación</div>
         <div class="grid3">
-          <div class="field"><div class="field-label">Nº Factura</div><div class="field-value">${po.factura_nro||'—'}</div></div>
+          <div class="field"><div class="field-label">Nº Factura</div><div class="field-value">${escapeHtml(po.factura_nro||'—')}</div></div>
           <div class="field"><div class="field-label">Fecha Factura</div><div class="field-value">${po.factura_fecha ? new Date(po.factura_fecha).toLocaleDateString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
@@ -10801,7 +10801,7 @@ async function printPO(id) {
             ${po.items.map(i => `<tr>
               <td>${escapeHtml(i.descripcion)}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
-              <td style="text-align:center">${i.unidad||'un'}</td>
+              <td style="text-align:center">${escapeHtml(i.unidad||'un')}</td>
               <td style="text-align:right">$${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
               <td style="text-align:right;font-weight:600">$${Math.round(parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)).toLocaleString('es-AR')}</td>
             </tr>`).join('')}
@@ -10843,7 +10843,7 @@ async function printPO(id) {
             <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Solicitó</td><td style="padding:8px"><b>${po.solicitante_nombre||'—'}</b></td><td style="padding:8px">${po.created_at ? new Date(po.created_at).toLocaleString('es-AR') : '—'}</td></tr>
             <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Tomó cotización</td><td style="padding:8px">${po.cotizador_nombre ? '<b>'+po.cotizador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.cotizado_at ? new Date(po.cotizado_at).toLocaleString('es-AR') : '—'}</td></tr>
             <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Aprobó compras</td><td style="padding:8px">${po.aprobador_nombre ? '<b>'+po.aprobador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.aprobado_compras_at ? new Date(po.aprobado_compras_at).toLocaleString('es-AR') : '—'}</td></tr>
-            ${facturas.length ? (() => { const f1 = facturas.slice().sort((a,b) => new Date(a.uploaded_at) - new Date(b.uploaded_at))[0]; return `<tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Cargó factura</td><td style="padding:8px"><b>${f1.uploaded_by_name||'—'}</b></td><td style="padding:8px">${f1.uploaded_at ? new Date(f1.uploaded_at).toLocaleString('es-AR') : '—'}</td></tr>`; })() : ''}
+            ${facturas.length ? (() => { const f1 = facturas.slice().sort((a,b) => new Date(a.uploaded_at) - new Date(b.uploaded_at))[0]; return `<tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Cargó factura</td><td style="padding:8px"><b>${escapeHtml(f1.uploaded_by_name||'—')}</b></td><td style="padding:8px">${f1.uploaded_at ? new Date(f1.uploaded_at).toLocaleString('es-AR') : '—'}</td></tr>`; })() : ''}
             <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Pagó tesorería</td><td style="padding:8px">${po.pagador_nombre ? '<b>'+po.pagador_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.pagado_at ? new Date(po.pagado_at).toLocaleString('es-AR') : '—'}</td></tr>
             <tr style="border-bottom:1px solid #e5e7eb"><td style="padding:8px">Recibió mercadería</td><td style="padding:8px">${po.receptor_nombre ? '<b>'+po.receptor_nombre+'</b>' : '—'}</td><td style="padding:8px">${po.recibido_at ? new Date(po.recibido_at).toLocaleString('es-AR') : '—'}</td></tr>
             ${po.status === 'rechazada' ? `<tr style="background:#fee2e2"><td style="padding:8px">Rechazada</td><td style="padding:8px"><b>${po.rechazador_nombre||'—'}</b></td><td style="padding:8px">${po.rechazado_at ? new Date(po.rechazado_at).toLocaleString('es-AR') : '—'}</td></tr>` : ''}
@@ -10870,10 +10870,10 @@ async function printPO(id) {
           <tbody>
             ${recepciones.map(r => `<tr style="border-bottom:1px solid #e5e7eb">
               <td style="padding:6px">${new Date(r.received_at).toLocaleString('es-AR')}</td>
-              <td style="padding:6px">${r.destino || '—'}</td>
-              <td style="padding:6px">${r.remito_nro || '—'}</td>
+              <td style="padding:6px">${escapeHtml(r.destino || '—')}</td>
+              <td style="padding:6px">${escapeHtml(r.remito_nro || '—')}</td>
               <td style="padding:6px">${(r.items||[]).map(it => `${escapeHtml(it.descripcion)}: ${parseFloat(it.cantidad).toFixed(2)} ${escapeHtml(it.unidad||'')}`).join(' · ')}</td>
-              <td style="padding:6px">${r.received_by_name || '—'}</td>
+              <td style="padding:6px">${escapeHtml(r.received_by_name || '—')}</td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -10893,19 +10893,19 @@ async function printPO(id) {
           return `
             <div style="border:1px solid #e5e7eb;border-radius:4px;padding:10px;margin-bottom:8px;font-size:11px;background:${f.pagada?'#dcfce7':'#fff'}">
               <div style="display:flex;justify-content:space-between;font-weight:600">
-                <span>N° ${f.invoice_nro} · Total c/IVA $${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}${f.pagada?' ✓ PAGADA':''}</span>
+                <span>N° ${escapeHtml(f.invoice_nro)} · Total c/IVA $${monto.toLocaleString('es-AR',{minimumFractionDigits:2})}${f.pagada?' ✓ PAGADA':''}</span>
                 <span style="color:#374151">Vence ${venc}</span>
               </div>
-              <div style="color:#6b7280;margin-top:4px">Neto $${neto.toLocaleString('es-AR',{minimumFractionDigits:2})} · IVA ${ivaPctF}% · Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''} · Cargada por ${f.uploaded_by_name||'—'}</div>
+              <div style="color:#6b7280;margin-top:4px">Neto $${neto.toLocaleString('es-AR',{minimumFractionDigits:2})} · IVA ${ivaPctF}% · Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''} · Cargada por ${escapeHtml(f.uploaded_by_name||'—')}</div>
               ${pagos.length ? `
                 <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb">
                   ${pagos.map(p => {
                     let detalle = '';
-                    if (p.metodo === 'transferencia') detalle = ` · ${p.banco_origen||''}→${p.banco_destino||''}`;
+                    if (p.metodo === 'transferencia') detalle = ` · ${escapeHtml(p.banco_origen||'')}→${escapeHtml(p.banco_destino||'')}`;
                     else if (p.metodo === 'cheque') detalle = ` · Cheque ${p.cheque_nro||''} ${p.cheque_banco||''}`;
                     else if (p.metodo === 'echeq') detalle = ` · eCheq ${p.echeq_nro||''}`;
                     else if (p.metodo === 'tarjeta') detalle = ` · Aprob ${p.tarjeta_aprobacion||''}`;
-                    return `<div style="padding:2px 0;color:#166534">💰 $${parseFloat(p.monto).toLocaleString('es-AR',{minimumFractionDigits:2})} · ${p.metodo}${detalle} · ${new Date(p.paid_at).toLocaleDateString('es-AR')} (${p.paid_by_name||'—'})</div>`;
+                    return `<div style="padding:2px 0;color:#166534">💰 $${parseFloat(p.monto).toLocaleString('es-AR',{minimumFractionDigits:2})} · ${p.metodo}${detalle} · ${new Date(p.paid_at).toLocaleDateString('es-AR')} (${escapeHtml(p.paid_by_name||'—')})</div>`;
                   }).join('')}
                 </div>
               ` : '<div style="margin-top:4px;color:#92400e;font-style:italic">Sin pagos registrados</div>'}
@@ -10921,7 +10921,7 @@ async function printPO(id) {
       </div>
 
       <div style="margin-top:32px;font-size:10px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;padding-top:10px">
-        Expreso Biletta SRL · Orden de Compra ${po.code} · Generado el ${nowDateAR()} ${nowTimeAR()}
+        Expreso Biletta SRL · Orden de Compra ${escapeHtml(po.code)} · Generado el ${nowDateAR()} ${nowTimeAR()}
       </div>
     </body></html>`);
     win.document.close();
@@ -11927,17 +11927,17 @@ function _supRenderRow(s) {
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
 
     <td style="padding:10px 12px">
-      <div style="font-weight:600;color:var(--text)">${s.name}</div>
-      ${s.razon_social ? `<div style="font-size:10px;color:var(--text3)">${s.razon_social}</div>` : ''}
+      <div style="font-weight:600;color:var(--text)">${escapeHtml(s.name)}</div>
+      ${s.razon_social ? `<div style="font-size:10px;color:var(--text3)">${escapeHtml(s.razon_social)}</div>` : ''}
     </td>
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text2)">${s.cuit || '—'}</td>
+    <td style="padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text2)">${escapeHtml(s.cuit || '—')}</td>
 
     <td style="padding:10px 12px">${rubros || '<span style="color:var(--text3);font-size:10px">—</span>'}${extraRubros}</td>
 
     <td style="padding:10px 12px;font-size:12px">
       <div>${s.contact_person || '—'}</div>
-      ${s.email ? `<div style="font-size:10px;color:var(--text3)">${s.email}</div>` : ''}
+      ${s.email ? `<div style="font-size:10px;color:var(--text3)">${escapeHtml(s.email)}</div>` : ''}
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-size:12px;color:var(--text2)">${s.phone || '—'}</td>
@@ -12023,7 +12023,7 @@ function _openSupplierModal(existing) {
       <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:16px">
         <div>
           <label class="form-label">Nombre comercial *</label>
-          <input id="sup-name" class="form-input" value="${s.name||''}" placeholder="Ej: Distribuidora ABC">
+          <input id="sup-name" class="form-input" value="${escapeHtml(s.name||'')}" placeholder="Ej: Distribuidora ABC">
         </div>
         <div>
           <label class="form-label">Estado</label>
@@ -12036,12 +12036,12 @@ function _openSupplierModal(existing) {
       </div>
       <div style="margin-bottom:16px">
         <label class="form-label">Razón social</label>
-        <input id="sup-razon" class="form-input" value="${s.razon_social||''}" placeholder="Ej: Distribuidora ABC S.R.L.">
+        <input id="sup-razon" class="form-input" value="${escapeHtml(s.razon_social||'')}" placeholder="Ej: Distribuidora ABC S.R.L.">
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
         <div>
           <label class="form-label">CUIT</label>
-          <input id="sup-cuit" class="form-input" value="${s.cuit||''}" placeholder="30-12345678-9">
+          <input id="sup-cuit" class="form-input" value="${escapeHtml(s.cuit||'')}" placeholder="30-12345678-9">
         </div>
         <div>
           <label class="form-label">Condición IVA</label>
@@ -12069,7 +12069,7 @@ function _openSupplierModal(existing) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
         <div>
           <label class="form-label">Email</label>
-          <input id="sup-email" class="form-input" type="email" value="${s.email||''}" placeholder="contacto@proveedor.com">
+          <input id="sup-email" class="form-input" type="email" value="${escapeHtml(s.email||'')}" placeholder="contacto@proveedor.com">
         </div>
         <div>
           <label class="form-label">Sitio web</label>
@@ -12174,7 +12174,7 @@ function _openSupplierModal(existing) {
   `;
 
   openModal(
-    isEdit ? `Editar proveedor — ${s.name}` : 'Nuevo proveedor',
+    isEdit ? `Editar proveedor — ${escapeHtml(s.name)}` : 'Nuevo proveedor',
     body,
     [
       ...(isEdit && canDeleteSupplier ? [{ label: '🗑 Eliminar', cls: 'btn-danger', fn: () => _supDelete(s.id) }] : []),
@@ -12243,7 +12243,7 @@ async function _supSave(id) {
     const res = await apiFetch(url, { method, body: JSON.stringify(payload) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Error al guardar');
-    showToast('ok', id ? `Proveedor actualizado: ${payload.name}` : `Proveedor creado: ${payload.name}`);
+    showToast('ok', id ? `Proveedor actualizado: ${escapeHtml(payload.name)}` : `Proveedor creado: ${escapeHtml(payload.name)}`);
     closeModal();
     await loadSuppliersList();
   } catch(err) {
@@ -12274,8 +12274,8 @@ async function openSupplierDetail(id) {
     <div style="max-height:70vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-size:18px;font-weight:700;color:var(--text)">${sup.name}</div>
-          <div style="font-size:12px;color:var(--text3)">${sup.razon_social||'—'}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text)">${escapeHtml(sup.name)}</div>
+          <div style="font-size:12px;color:var(--text3)">${escapeHtml(sup.razon_social||'—')}</div>
         </div>
         <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;font-family:var(--mono);background:var(--bg3)">${statusBadge}</span>
       </div>
@@ -12283,14 +12283,14 @@ async function openSupplierDetail(id) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:16px">
         <div>
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">🏢 Fiscal</div>
-          <div style="padding:8px 0"><b>CUIT:</b> <span style="font-family:var(--mono)">${sup.cuit||'—'}</span></div>
+          <div style="padding:8px 0"><b>CUIT:</b> <span style="font-family:var(--mono)">${escapeHtml(sup.cuit||'—')}</span></div>
           <div style="padding:4px 0"><b>IVA:</b> ${ivaLabel}</div>
         </div>
         <div>
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;font-weight:700;margin-bottom:8px">📞 Contacto</div>
           <div style="padding:4px 0"><b>Persona:</b> ${sup.contact_person||'—'}</div>
           <div style="padding:4px 0"><b>Tel:</b> <span style="font-family:var(--mono)">${sup.phone||'—'}</span></div>
-          <div style="padding:4px 0"><b>Email:</b> ${sup.email||'—'}</div>
+          <div style="padding:4px 0"><b>Email:</b> ${escapeHtml(sup.email||'—')}</div>
           ${sup.website ? `<div style="padding:4px 0"><b>Web:</b> <a href="${sup.website}" target="_blank" style="color:var(--accent)">${sup.website}</a></div>` : ''}
         </div>
       </div>
@@ -12340,7 +12340,7 @@ async function openSupplierDetail(id) {
   `;
 
   openModal(
-    `Proveedor: ${sup.name}`,
+    `Proveedor: ${escapeHtml(sup.name)}`,
     body,
     [
       { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
@@ -12466,7 +12466,7 @@ function _labAddRow() {
   const mechanics = (App.data.users || []).filter(u =>
     ['mecanico','jefe_mantenimiento','dueno','gerencia'].includes(u.role)
   );
-  const mechOpts = mechanics.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name} (${u.role})</option>`).join('');
+  const mechOpts = mechanics.map(u => `<option value="${u.id}" data-name="${escapeHtml(u.name)}">${escapeHtml(u.name)} (${u.role})</option>`).join('');
 
   const body = `
     <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
@@ -12668,8 +12668,8 @@ function _partsRender(parts) {
     return `<div style="display:grid;grid-template-columns:70px 1fr 70px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div style="color:${origenColor};font-weight:600;font-size:11px">${origenLabel}</div>
       <div>
-        <div style="font-weight:600">${p.name}</div>
-        <div style="color:var(--text3);font-size:10px">${(p.unit||'un')}${stockCode}${poCode}${p.origin==='externo' && cost>0 ? ' · precio aprobado por Compras' : ''}</div>
+        <div style="font-weight:600">${escapeHtml(p.name)}</div>
+        <div style="color:var(--text3);font-size:10px">${escapeHtml((p.unit||'un'))}${stockCode}${poCode}${p.origin==='externo' && cost>0 ? ' · precio aprobado por Compras' : ''}</div>
       </div>
       <div style="text-align:center;font-family:var(--mono)">${qty}</div>
       <div style="text-align:right;font-family:var(--mono);color:var(--text3)">${costText}</div>
@@ -12851,16 +12851,16 @@ function _partsNameInput(val) {
     const qty = parseFloat(s.qty_current || 0);
     const color = qty <= parseFloat(s.qty_min || 0) ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
     const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    return `<div onclick="_partsSelectStock('${s.id}','${safeName}','${s.unit||'un'}',${parseFloat(s.unit_cost||0)},${qty})"
+    return `<div onclick="_partsSelectStock('${s.id}','${safeName}','${escapeJsArg(s.unit||'un')}',${parseFloat(s.unit_cost||0)},${qty})"
       style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
       onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
       <div>
-        <div style="font-weight:600">${s.name}</div>
-        <div style="color:var(--text3);font-family:monospace;font-size:11px">${s.code||'—'}</div>
+        <div style="font-weight:600">${escapeHtml(s.name)}</div>
+        <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(s.code||'—')}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${s.unit||'un'}</div>
-        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${s.unit||'un'}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${escapeHtml(s.unit||'un')}</div>
+        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${escapeHtml(s.unit||'un')}</div>
       </div>
     </div>`;
   }).join('');
@@ -13091,12 +13091,12 @@ function _renderAssetsRows(assets, typeLabels, statusLabels, statusColors, canEd
   }
   return assets.map(a => `
     <tr>
-      <td class="td-mono"><a onclick="openAssetDetailModal('${a.id}')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-weight:600">${a.code}</a></td>
-      <td><b>${a.name}</b></td>
+      <td class="td-mono"><a onclick="openAssetDetailModal('${a.id}')" style="color:var(--accent);cursor:pointer;text-decoration:underline;font-weight:600">${escapeHtml(a.code)}</a></td>
+      <td><b>${escapeHtml(a.name)}</b></td>
       <td>${typeLabels[a.type] || a.type}</td>
-      <td>${a.location || '<span style="color:var(--text3)">—</span>'}</td>
+      <td>${a.location ? escapeHtml(a.location) : '<span style="color:var(--text3)">—</span>'}</td>
       <td><span style="color:${statusColors[a.status]};font-weight:600">● ${statusLabels[a.status] || a.status}</span></td>
-      <td>${a.brand || a.model ? `${a.brand || ''} ${a.model || ''}`.trim() : '<span style="color:var(--text3)">—</span>'}</td>
+      <td>${a.brand || a.model ? `${escapeHtml(a.brand || '')} ${escapeHtml(a.model || '')}`.trim() : '<span style="color:var(--text3)">—</span>'}</td>
       <td style="text-align:right;font-family:var(--mono)">${a.purchase_price ? '$' + Math.round(parseFloat(a.purchase_price)).toLocaleString('es-AR') : '<span style="color:var(--text3)">—</span>'}</td>
       <td>
         <div style="display:flex;gap:4px">
@@ -13251,11 +13251,11 @@ function openEditAssetModal(id) {
   const a = (App.data.assets || []).find(x => x.id === id);
   if (!a) { showToast('error', 'Activo no encontrado'); return; }
 
-  openModal(`Editar activo — ${a.code}`, `
+  openModal(`Editar activo — ${escapeHtml(a.code)}`, `
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Código</label>
-        <input class="form-input" id="ea-code" value="${a.code}" readonly style="background:var(--bg3)">
+        <input class="form-input" id="ea-code" value="${escapeHtml(a.code)}" readonly style="background:var(--bg3)">
         <div style="font-size:10px;color:var(--text3);margin-top:3px">El código no se puede modificar</div>
       </div>
       <div class="form-group">
@@ -13365,12 +13365,12 @@ async function saveEditAsset(id) {
 async function deleteAsset(id) {
   const a = (App.data.assets || []).find(x => x.id === id);
   if (!a) return;
-  if (!confirm(`¿Eliminar el activo "${a.name}" (${a.code})?\n\nEsta acción lo desactiva. Si tiene OTs asociadas, se conservan en el historial.`)) return;
+  if (!confirm(`¿Eliminar el activo "${escapeHtml(a.name)}" (${escapeHtml(a.code)})?\n\nEsta acción lo desactiva. Si tiene OTs asociadas, se conservan en el historial.`)) return;
 
   try {
     const res = await apiFetch(`/api/assets/${id}`, { method: 'DELETE' });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error'); return; }
-    showToast('ok', `Activo ${a.code} eliminado`);
+    showToast('ok', `Activo ${escapeHtml(a.code)} eliminado`);
   } catch(err) {
     showToast('error', err.message);
   }
@@ -13418,10 +13418,10 @@ function openVehicleHistoryModal(vehicleCode) {
     'rechazada':            'var(--danger)',
   };
 
-  openModal(`📋 Historial completo — ${v.code} (${v.plate || '—'})`, `
+  openModal(`📋 Historial completo — ${escapeHtml(v.code)} (${escapeHtml(v.plate || '—')})`, `
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px">
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
-        <div><b>${v.brand || '—'} ${v.model || ''}</b></div>
+        <div><b>${escapeHtml(v.brand || '—')} ${escapeHtml(v.model || '')}</b></div>
         <div>Año: ${v.year || '—'}</div>
         <div>Km: ${v.km ? v.km.toLocaleString('es-AR') : '—'}</div>
         <div>Estado: <span style="color:var(--${v.status==='ok'?'ok':v.status==='taller'?'warn':'danger'})">${v.status || '—'}</span></div>
@@ -13463,7 +13463,7 @@ function openVehicleHistoryModal(vehicleCode) {
           </thead>
           <tbody>
             ${ots.map(o => `<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:8px;font-family:var(--mono);font-weight:600"><a onclick="closeModal();navigate('workorders');setTimeout(()=>{const ot=(App.data.workOrders||[]).find(x=>x.id==='${o.id}'||x.code==='${o.code || o.id}');if(ot)openEditOTModal(ot.id);},200)" style="color:var(--accent);cursor:pointer">${o.code || o.id}</a></td>
+              <td style="padding:8px;font-family:var(--mono);font-weight:600"><a onclick="closeModal();navigate('workorders');setTimeout(()=>{const ot=(App.data.workOrders||[]).find(x=>x.id==='${o.id}'||x.code==='${escapeJsArg(o.code || o.id)}');if(ot)openEditOTModal(ot.id);},200)" style="color:var(--accent);cursor:pointer">${escapeHtml(o.code || o.id)}</a></td>
               <td style="padding:8px">${(o.opened || o.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px">${o.type || '—'}</td>
               <td style="padding:8px">${escapeHtml((o.desc || o.description || '—').substring(0, 50))}</td>
@@ -13491,9 +13491,9 @@ function openVehicleHistoryModal(vehicleCode) {
           </thead>
           <tbody>
             ${ocs.map(p => `<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:8px;font-family:var(--mono);font-weight:600">${p.code || '—'}</td>
+              <td style="padding:8px;font-family:var(--mono);font-weight:600">${escapeHtml(p.code || '—')}</td>
               <td style="padding:8px">${(p.created_at || '—').toString().slice(0,10)}</td>
-              <td style="padding:8px">${p.proveedor || '—'}</td>
+              <td style="padding:8px">${escapeHtml(p.proveedor || '—')}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round(p.factura_monto || p.total_estimado || 0).toLocaleString('es-AR')}</td>
               <td style="padding:8px"><span style="color:${ocStatusColors[p.status] || 'var(--text3)'};font-weight:600">● ${p.status || '—'}</span></td>
             </tr>`).join('')}
@@ -13588,12 +13588,12 @@ function openFuelVehicleTicket(logId) {
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
         <div><b>Unidad</b><br>${f.vehicle || '—'}</div>
-        <div><b>Patente</b><br>${f.plate || '—'}</div>
+        <div><b>Patente</b><br>${escapeHtml(f.plate || '—')}</div>
         <div><b>Producto</b><br>${_fuelProductLabel(f.fuel_type)}</div>
         <div><b>Litros cargados</b><br>${litros} L</div>
         <div><b>Odómetro</b><br>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div>
         <div><b>Lugar / cisterna</b><br>${f.place || 'Cisterna'}</div>
-        <div><b>Registró</b><br>${f.driver || App.currentUser?.name || '—'}</div>
+        <div><b>Registró</b><br>${escapeHtml(f.driver || App.currentUser?.name || '—')}</div>
         <div><b>Estado</b><br>Ticket interno generado</div>
         ${verPrecios ? `<div><b>Precio/L</b><br>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div><div><b>Total</b><br>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>` : ''}
       </div>
@@ -13637,10 +13637,10 @@ function printFuelVehicleTicket(logId) {
       <div class="ticket">
         <div class="head"><div><div class="brand">Expreso Biletta SRL</div><div class="sub">Salida de cisterna a vehículo</div></div><div><div class="code">${code}</div><div class="sub">${fecha}</div></div></div>
         <div class="grid">
-          <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${f.plate || '—'}</div>
+          <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${escapeHtml(f.plate || '—')}</div>
           <div><b>Producto</b>${_fuelProductLabel(f.fuel_type)}</div><div><b>Litros cargados</b>${litros} L</div>
           <div><b>Odómetro</b>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div><div><b>Lugar / cisterna</b>${f.place || 'Cisterna'}</div>
-          <div><b>Registró</b>${f.driver || App.currentUser?.name || '—'}</div><div><b>Estado</b>Ticket interno generado</div>
+          <div><b>Registró</b>${escapeHtml(f.driver || App.currentUser?.name || '—')}</div><div><b>Estado</b>Ticket interno generado</div>
           ${priceHtml}
         </div>
         <div class="box">Comprobante interno generado automáticamente por FleetOS al descontar litros de cisterna propia.</div>
@@ -13660,7 +13660,7 @@ function _renderFuelLogRows(logs) {
   return logs.map(f => `<tr>
     <td class="td-mono" style="font-size:11px">${f.date || '—'}</td>
     <td class="td-main">${f.vehicle || '—'}</td>
-    <td>${f.driver || '—'}</td>
+    <td>${escapeHtml(f.driver || '—')}</td>
     <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
     <td class="td-mono">${f.liters || 0} L</td>
     <td class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
@@ -13968,7 +13968,7 @@ function viewTicket(logId) {
   openModal(`🧾 Ticket — ${f.vehicle} · ${f.date}`, `
     <div style="background:var(--bg3);padding:10px;border-radius:var(--radius);margin-bottom:14px;font-size:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
       <div><b>Unidad</b><br>${f.vehicle}</div>
-      <div><b>Chofer</b><br>${f.driver || '—'}</div>
+      <div><b>Chofer</b><br>${escapeHtml(f.driver || '—')}</div>
       <div><b>Litros</b><br>${f.liters} L</div>
       <div><b>Total</b><br>$${(f.total||0).toLocaleString('es-AR')}</div>
     </div>
@@ -14090,7 +14090,7 @@ function openAssetDetailModal(id) {
 
   const canEdit = userHasRole('dueno', 'gerencia', 'jefe_mantenimiento');
 
-  openModal(`🏗️ ${a.code} — ${a.name}`, `
+  openModal(`🏗️ ${escapeHtml(a.code)} — ${escapeHtml(a.name)}`, `
     <!-- Header con foto placeholder + info principal -->
     <div style="display:grid;grid-template-columns:auto 1fr;gap:20px;margin-bottom:20px">
       <div style="width:120px;height:120px;background:var(--bg3);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:52px">
@@ -14098,9 +14098,9 @@ function openAssetDetailModal(id) {
       </div>
       <div>
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${typeLabels[a.type] || 'Activo'}</div>
-        <div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:4px">${a.name}</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text);margin-bottom:4px">${escapeHtml(a.name)}</div>
         <div style="font-size:13px;color:var(--text3);margin-bottom:10px">
-          ${a.brand || ''} ${a.model || ''} ${a.serial_no ? ` · S/N: ${a.serial_no}` : ''}
+          ${escapeHtml(a.brand || '')} ${escapeHtml(a.model || '')} ${a.serial_no ? ` · S/N: ${a.serial_no}` : ''}
         </div>
         <div>
           <span style="display:inline-block;padding:4px 12px;background:${statusColors[a.status]};color:white;border-radius:20px;font-size:11px;font-weight:700">
@@ -14122,7 +14122,7 @@ function openAssetDetailModal(id) {
       </div>
       <div class="kpi-card info" style="padding:12px">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase">Ubicación</div>
-        <div style="font-size:14px;font-weight:700;margin-top:4px">${a.location || '—'}</div>
+        <div style="font-size:14px;font-weight:700;margin-top:4px">${escapeHtml(a.location || '—')}</div>
       </div>
       <div class="kpi-card info" style="padding:12px">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase">OTs asociadas</div>
@@ -14134,10 +14134,10 @@ function openAssetDetailModal(id) {
     <div style="margin-bottom:20px">
       <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)">📋 Ficha técnica</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:13px">
-        <div><span style="color:var(--text3);font-size:11px">Código interno:</span> <b>${a.code}</b></div>
+        <div><span style="color:var(--text3);font-size:11px">Código interno:</span> <b>${escapeHtml(a.code)}</b></div>
         <div><span style="color:var(--text3);font-size:11px">Categoría:</span> ${a.category || '—'}</div>
-        <div><span style="color:var(--text3);font-size:11px">Marca:</span> ${a.brand || '—'}</div>
-        <div><span style="color:var(--text3);font-size:11px">Modelo:</span> ${a.model || '—'}</div>
+        <div><span style="color:var(--text3);font-size:11px">Marca:</span> ${escapeHtml(a.brand || '—')}</div>
+        <div><span style="color:var(--text3);font-size:11px">Modelo:</span> ${escapeHtml(a.model || '—')}</div>
         <div><span style="color:var(--text3);font-size:11px">N° de serie:</span> <span class="td-mono">${a.serial_no || '—'}</span></div>
         <div><span style="color:var(--text3);font-size:11px">Fecha de compra:</span> ${a.purchase_date ? a.purchase_date.slice(0,10) : '—'}</div>
         <div style="grid-column:span 2"><span style="color:var(--text3);font-size:11px">Garantía:</span> <span style="color:${garantiaColor};font-weight:600">${garantiaStatus}</span></div>
@@ -14174,7 +14174,7 @@ function openAssetDetailModal(id) {
           <tbody>
             ${otsDelActivo.slice(0, 10).map(o => `
               <tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:6px;font-family:var(--mono);font-weight:600">${o.code || o.id.substring(0,8)}</td>
+                <td style="padding:6px;font-family:var(--mono);font-weight:600">${escapeHtml(o.code || o.id.substring(0,8))}</td>
                 <td style="padding:6px">${(o.opened || '—').toString().slice(0,10)}</td>
                 <td style="padding:6px">${escapeHtml(((o.desc || o.description || '—')+'').substring(0,40))}</td>
                 <td style="padding:6px;text-align:right;font-family:var(--mono)">$${Math.round((parseFloat(o.parts_cost)||0)+(parseFloat(o.labor_cost)||0)).toLocaleString('es-AR')}</td>

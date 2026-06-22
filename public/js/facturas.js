@@ -283,7 +283,7 @@
               <tbody>
                 ${ocs.map(o => `
                   <tr style="border-bottom:1px solid #334155;color:#e2e8f0">
-                    <td style="padding:12px;font-weight:600">${o.code}</td>
+                    <td style="padding:12px;font-weight:600">${escapeHtml(o.code)}</td>
                     <td style="padding:12px;font-size:13px">${new Date(o.created_at).toLocaleDateString('es-AR')}</td>
                     <td style="padding:12px;text-align:right">$${fmt(o.total_estimado)}</td>
                     <td style="padding:12px;text-align:right;color:${parseFloat(o.total_facturado_con_iva||0)>=parseFloat(o.total_estimado||0)*(1+(parseFloat(o.iva_pct||0)/100))?'#10b981':'#f59e0b'}">$${fmt(o.total_facturado_con_iva || o.total_facturado)}</td>

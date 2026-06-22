@@ -16,6 +16,25 @@ window.escapeHtml = function (value) {
     .replace(/'/g, '&#39;');
 };
 
+// ── Escape para argumento dentro de un string JS en un atributo HTML ──────
+// Para el patrón onclick="fn('${valor}')": el valor vive a la vez dentro de un
+// string JS con comillas simples Y dentro de un atributo HTML con comillas
+// dobles. escapeHtml NO sirve acá (el navegador des-escapa las entidades antes
+// de que corra el JS, así que un &#39; vuelve a ser ' y rompe el string).
+//   - \  y  '   se escapan al estilo JS (\\ y \') para no cerrar el string.
+//   - "  <  >   se pasan a entidad para no cerrar el atributo ni la etiqueta.
+//   - saltos de línea se neutralizan (romperían el literal JS).
+window.escapeJsArg = function (value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r?\n/g, ' ');
+};
+
 (function () {
   const TZ = 'America/Argentina/Buenos_Aires';
   const pad2 = (n) => String(n).padStart(2, '0');
