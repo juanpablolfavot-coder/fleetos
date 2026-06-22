@@ -4,6 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Expreso Biletta — FleetOS</title>
+
+  <!-- PWA: instalable como app desde el celular -->
+  <meta name="theme-color" content="#2563eb">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="FleetOS">
+
   <link rel="stylesheet" href="css/main.css?v=v2light-inter-20260419b">
   <link rel="stylesheet" href="css/login.css?v=v2light-inter-20260419b">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -287,6 +298,15 @@ html, body {
 <script src="js/proveedor-panel.js?v=6"></script>
 <script src="js/pagos.js?v=1777100000"></script>
 <script src="js/timeline.js?v=3"></script>
+
+<!-- PWA: registra el service worker (requisito para "Instalar app" en Android) -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function () { /* sin SW, la app sigue funcionando igual */ });
+    });
+  }
+</script>
 
 </body>
 </html>

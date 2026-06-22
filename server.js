@@ -173,6 +173,10 @@ app.use(express.static(path.join(__dirname, 'public'), {
   etag: false,
   lastModified: false,
   setHeaders: (res, filePath) => {
+    // MIME explícito para el manifest PWA (algunas versiones de Express no lo conocen).
+    if (/\.webmanifest$/.test(filePath)) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+    }
     if (/\.(js|css)$/.test(filePath)) {
       if (res.req && res.req.query && res.req.query.v) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
