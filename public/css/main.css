@@ -422,7 +422,7 @@ tr:hover td { background: var(--bg3); color: var(--text); }
   }
   .nav-item span:not(.nav-icon) {
     display: block !important;
-    font-size: 8px !important;
+    font-size: 9px !important;
     text-align: center !important;
     line-height: 1 !important;
     white-space: nowrap !important;
@@ -490,8 +490,17 @@ tr:hover td { background: var(--bg3); color: var(--text); }
   /* Fleet grid más pequeño */
   .fleet-unit { font-size: 8px !important; padding: 4px 2px !important; }
 
-  /* Botones en tablas */
-  .btn-sm { font-size: 10px !important; padding: 3px 6px !important; }
+  /* Targets táctiles: botones y campos cómodos para el dedo en celular.
+     (Las reglas más específicas .topbar-actions .btn / .section-header .btn
+     mantienen su tamaño compacto por mayor especificidad.) */
+  .btn     { padding: 11px 16px !important; font-size: 14px !important; }
+  .btn-sm  { padding: 8px 13px !important;  font-size: 13px !important; }
+  .btn-icon{ padding: 9px 11px !important; }
+  .form-input, .form-select, .form-textarea,
+  input:not([type=checkbox]):not([type=radio]), select, textarea {
+    font-size: 16px !important;   /* 16px evita el zoom automático de iOS al enfocar */
+    padding: 11px 12px !important;
+  }
 }
 
 
