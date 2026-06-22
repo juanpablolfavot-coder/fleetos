@@ -64,8 +64,8 @@ window.renderProveedorPanelInline = async function() {
         const pago = normalizarPago(o);
         return `
         <tr>
-          <td class="td-main td-mono">${o.code}</td>
-          <td>${o.supplier_name || o.proveedor || '—'}</td>
+          <td class="td-main td-mono">${escapeHtml(o.code)}</td>
+          <td>${escapeHtml(o.supplier_name || o.proveedor || '—')}</td>
           <td>${new Date(o.created_at).toLocaleDateString('es-AR')}</td>
           <td style="text-align:right">$${fmt(o.total_estimado)}</td>
           <td style="text-align:right;color:${facColor};font-weight:600">$${fmt(o.total_facturado)}</td>

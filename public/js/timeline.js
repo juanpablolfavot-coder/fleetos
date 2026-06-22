@@ -144,10 +144,10 @@
             ${recepciones.map(r => `
               <div style="display:flex;align-items:start;gap:10px;padding:6px 0;border-left:2px solid var(--ok);padding-left:10px;margin-bottom:6px">
                 <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:600">${r.destino || '—'}${r.remito_nro ? ' · Remito '+r.remito_nro : ''}</div>
-                  <div style="font-size:11px;color:var(--text3)">por ${r.received_by_name || '—'} · ${fmtDate(r.received_at)}</div>
-                  ${(r.items || []).length ? `<div style="font-size:12px;color:var(--text2);margin-top:3px">${r.items.map(it => `${it.descripcion}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${it.unidad||''}</strong>`).join(' · ')}</div>` : ''}
-                  ${r.notes ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;font-style:italic">${r.notes}</div>` : ''}
+                  <div style="font-size:13px;font-weight:600">${escapeHtml(r.destino || '—')}${r.remito_nro ? ' · Remito '+escapeHtml(r.remito_nro) : ''}</div>
+                  <div style="font-size:11px;color:var(--text3)">por ${escapeHtml(r.received_by_name || '—')} · ${fmtDate(r.received_at)}</div>
+                  ${(r.items || []).length ? `<div style="font-size:12px;color:var(--text2);margin-top:3px">${r.items.map(it => `${escapeHtml(it.descripcion)}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${escapeHtml(it.unidad||'')}</strong>`).join(' · ')}</div>` : ''}
+                  ${r.notes ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}
                 </div>
               </div>
             `).join('')}
@@ -165,16 +165,16 @@
               const borderColor = f.pagada ? 'var(--ok)' : (vencida ? 'var(--danger)' : 'var(--warn)');
               return `
                 <div style="border-left:2px solid ${borderColor};padding-left:10px;margin-bottom:8px">
-                  <div style="font-size:13px;font-weight:600">${f.invoice_nro} · $${fmt(f.invoice_monto)}${f.pagada?' <span style="color:var(--ok);font-size:11px">✓ PAGADA</span>':(vencida?' <span style="color:var(--danger);font-size:11px">⚠ VENCIDA</span>':'')}</div>
-                  <div style="font-size:11px;color:var(--text3)">Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · Vence ${venc} · ${f.forma_pago||'—'}${f.cc_dias?' '+f.cc_dias+'d':''}</div>
-                  <div style="font-size:11px;color:var(--text3)">Cargada por ${f.uploaded_by_name||'—'}</div>
+                  <div style="font-size:13px;font-weight:600">${escapeHtml(f.invoice_nro)} · $${fmt(f.invoice_monto)}${f.pagada?' <span style="color:var(--ok);font-size:11px">✓ PAGADA</span>':(vencida?' <span style="color:var(--danger);font-size:11px">⚠ VENCIDA</span>':'')}</div>
+                  <div style="font-size:11px;color:var(--text3)">Fecha ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · Vence ${venc} · ${escapeHtml(f.forma_pago||'—')}${f.cc_dias?' '+f.cc_dias+'d':''}</div>
+                  <div style="font-size:11px;color:var(--text3)">Cargada por ${escapeHtml(f.uploaded_by_name||'—')}</div>
 
                   ${pagos.length ? `
                     <div style="margin-top:6px;margin-left:8px;border-left:1px dashed var(--border2);padding-left:8px">
                       ${pagos.map(p => `
                         <div style="font-size:12px;padding:3px 0">
-                          <strong style="color:var(--ok)">💰 $${fmt(p.monto)}</strong> · ${p.metodo}${p.comprobante_nro?' #'+p.comprobante_nro:''}
-                          <div style="font-size:11px;color:var(--text3)">${p.paid_by_name||'—'} · ${fmtDate(p.paid_at)}</div>
+                          <strong style="color:var(--ok)">💰 $${fmt(p.monto)}</strong> · ${escapeHtml(p.metodo)}${p.comprobante_nro?' #'+escapeHtml(p.comprobante_nro):''}
+                          <div style="font-size:11px;color:var(--text3)">${escapeHtml(p.paid_by_name||'—')} · ${fmtDate(p.paid_at)}</div>
                           ${detallesPago(p)}
                         </div>
                       `).join('')}
@@ -197,19 +197,19 @@
   function detallesPago(p) {
     const d = [];
     if (p.metodo === 'transferencia') {
-      if (p.banco_origen)      d.push(`Origen: ${p.banco_origen}`);
-      if (p.banco_destino)     d.push(`Destino: ${p.banco_destino}`);
-      if (p.cbu_alias_destino) d.push(`CBU/Alias: ${p.cbu_alias_destino}`);
+      if (p.banco_origen)      d.push(`Origen: ${escapeHtml(p.banco_origen)}`);
+      if (p.banco_destino)     d.push(`Destino: ${escapeHtml(p.banco_destino)}`);
+      if (p.cbu_alias_destino) d.push(`CBU/Alias: ${escapeHtml(p.cbu_alias_destino)}`);
     } else if (p.metodo === 'cheque') {
-      if (p.cheque_nro)         d.push(`Cheque N° ${p.cheque_nro}`);
-      if (p.cheque_banco)       d.push(`${p.cheque_banco}`);
+      if (p.cheque_nro)         d.push(`Cheque N° ${escapeHtml(p.cheque_nro)}`);
+      if (p.cheque_banco)       d.push(`${escapeHtml(p.cheque_banco)}`);
       if (p.cheque_fecha_cobro) d.push(`Cobro: ${new Date(p.cheque_fecha_cobro).toLocaleDateString('es-AR')}`);
     } else if (p.metodo === 'echeq') {
-      if (p.echeq_nro)        d.push(`eCheq N° ${p.echeq_nro}`);
-      if (p.echeq_banco)      d.push(`${p.echeq_banco}`);
+      if (p.echeq_nro)        d.push(`eCheq N° ${escapeHtml(p.echeq_nro)}`);
+      if (p.echeq_banco)      d.push(`${escapeHtml(p.echeq_banco)}`);
       if (p.echeq_fecha_pago) d.push(`Fecha: ${new Date(p.echeq_fecha_pago).toLocaleDateString('es-AR')}`);
     } else if (p.metodo === 'tarjeta') {
-      if (p.tarjeta_aprobacion) d.push(`Aprob: ${p.tarjeta_aprobacion}`);
+      if (p.tarjeta_aprobacion) d.push(`Aprob: ${escapeHtml(p.tarjeta_aprobacion)}`);
       if (p.tarjeta_cuotas)     d.push(`${p.tarjeta_cuotas} cuotas`);
     }
     if (!d.length) return '';

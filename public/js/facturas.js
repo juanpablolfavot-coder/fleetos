@@ -74,7 +74,7 @@
         <div style="padding:20px;border-bottom:1px solid #334155;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#1e293b;z-index:10">
           <div>
             <div style="font-size:18px;font-weight:700">📄 Facturas · ${oc.code || ''}</div>
-            <div style="font-size:13px;color:#94a3b8;margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Total OC c/IVA: <strong>$${fmt(totalOC)}</strong> <span style="color:#64748b">(neto $${fmt(subtotalOC)} · IVA ${fmt(ivaOC)}%)</span> · Facturado c/IVA: <strong style="color:${totalFacturado>=totalOC?'#10b981':'#f59e0b'}">$${fmt(totalFacturado)}</strong></div>
+            <div style="font-size:13px;color:#94a3b8;margin-top:4px">${escapeHtml(oc.proveedor || 'Sin proveedor')} · Total OC c/IVA: <strong>$${fmt(totalOC)}</strong> <span style="color:#64748b">(neto $${fmt(subtotalOC)} · IVA ${fmt(ivaOC)}%)</span> · Facturado c/IVA: <strong style="color:${totalFacturado>=totalOC?'#10b981':'#f59e0b'}">$${fmt(totalFacturado)}</strong></div>
           </div>
           <button onclick="this.closest('.modal-facturas-overlay').remove()" style="background:transparent;border:none;color:#94a3b8;font-size:28px;cursor:pointer;line-height:1">×</button>
         </div>
@@ -158,12 +158,12 @@
               <div style="background:#0f172a;border:1px solid ${vencida?'#ef4444':'#334155'};border-radius:8px;padding:12px;margin-bottom:8px">
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
                   <div style="flex:1">
-                    <div style="font-weight:600">📄 ${f.invoice_nro} · Total c/IVA $${fmt(totalConIvaFactura(f))}</div>
+                    <div style="font-weight:600">📄 ${escapeHtml(f.invoice_nro)} · Total c/IVA $${fmt(totalConIvaFactura(f))}</div>
                     <div style="font-size:11px;color:#64748b">Neto $${fmt(f.invoice_monto)} · IVA ${fmt(f.iva_pct || 0)}%</div>
                     <div style="font-size:12px;color:#94a3b8">Fecha: ${new Date(f.invoice_fecha).toLocaleDateString('es-AR')} · Vence: ${venc}${vencida?' <span style="color:#ef4444;font-weight:600">VENCIDA</span>':''} · ${f.forma_pago || '—'} ${f.cc_dias?'· '+f.cc_dias+' días':''}</div>
-                    <div style="font-size:12px;color:#94a3b8">Cargada por ${f.uploaded_by_name || '—'} el ${new Date(f.uploaded_at).toLocaleDateString('es-AR')}</div>
-                    ${f.file_url ? `<div style="font-size:12px;margin-top:4px"><a href="${f.file_url}" target="_blank" style="color:#3b82f6">📎 Ver archivo</a></div>` : ''}
-                    ${f.notes ? `<div style="font-size:12px;color:#94a3b8;margin-top:4px;font-style:italic">${f.notes}</div>` : ''}
+                    <div style="font-size:12px;color:#94a3b8">Cargada por ${escapeHtml(f.uploaded_by_name || '—')} el ${new Date(f.uploaded_at).toLocaleDateString('es-AR')}</div>
+                    ${f.file_url ? `<div style="font-size:12px;margin-top:4px"><a href="${escapeHtml(f.file_url)}" target="_blank" style="color:#3b82f6">📎 Ver archivo</a></div>` : ''}
+                    ${f.notes ? `<div style="font-size:12px;color:#94a3b8;margin-top:4px;font-style:italic">${escapeHtml(f.notes)}</div>` : ''}
                   </div>
                   <div style="text-align:right;margin-left:12px">
                     ${parseFloat(f.total_pagado||0) > 0 ? `<div style="font-size:11px;color:#10b981">Pagado: $${fmt(f.total_pagado)}</div>` : '<div style="font-size:11px;color:#f59e0b">Sin pagos</div>'}
@@ -331,7 +331,7 @@
       } catch { _suppliersCache = []; }
     }
     sel.innerHTML = '<option value="">— Seleccionar —</option>' +
-      (_suppliersCache || []).map(s => `<option value="${s.id}" ${s.id===currentSupplierId?'selected':''}>${s.name}${s.cuit?' · '+s.cuit:''}</option>`).join('');
+      (_suppliersCache || []).map(s => `<option value="${s.id}" ${s.id===currentSupplierId?'selected':''}>${escapeHtml(s.name)}${s.cuit?' · '+escapeHtml(s.cuit):''}</option>`).join('');
   }
 
   // Observar el modal de edición de user

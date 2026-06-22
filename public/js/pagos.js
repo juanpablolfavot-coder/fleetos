@@ -237,13 +237,13 @@
                     return `
                     <tr>
                       <td>${badgeEstadoPago(f)}</td>
-                      <td class="td-mono">${f.po_code || '—'}</td>
+                      <td class="td-mono">${escapeHtml(f.po_code || '—')}</td>
                       <td>
-                        <div style="font-weight:600">${f.supplier_name || f.proveedor || '—'}</div>
-                        ${f.supplier_cuit ? `<div style="font-size:10px;color:var(--text3)">CUIT ${f.supplier_cuit}</div>` : ''}
+                        <div style="font-weight:600">${escapeHtml(f.supplier_name || f.proveedor || '—')}</div>
+                        ${f.supplier_cuit ? `<div style="font-size:10px;color:var(--text3)">CUIT ${escapeHtml(f.supplier_cuit)}</div>` : ''}
                       </td>
                       <td>
-                        <div class="td-mono">${f.invoice_nro || '—'}</div>
+                        <div class="td-mono">${escapeHtml(f.invoice_nro || '—')}</div>
                         <div style="font-size:10px;color:var(--text3)">${fechaAR(f.invoice_fecha)}</div>
                       </td>
                       <td>
@@ -330,8 +330,8 @@
       <div style="background:#fff;border-radius:12px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;color:var(--text);border:1px solid var(--border2);box-shadow:0 20px 60px rgba(0,0,0,.3)">
         <div style="padding:20px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:10">
           <div>
-            <div style="font-size:18px;font-weight:700">💳 Pago · Factura ${factura.invoice_nro}</div>
-            <div style="font-size:13px;color:var(--text3);margin-top:4px">${oc.code} · ${oc.proveedor || '—'}</div>
+            <div style="font-size:18px;font-weight:700">💳 Pago · Factura ${escapeHtml(factura.invoice_nro)}</div>
+            <div style="font-size:13px;color:var(--text3);margin-top:4px">${escapeHtml(oc.code)} · ${escapeHtml(oc.proveedor || '—')}</div>
           </div>
           <button onclick="this.closest('.modal-pago-overlay').remove()" style="background:transparent;border:none;color:var(--text3);font-size:28px;cursor:pointer;line-height:1">×</button>
         </div>
@@ -453,10 +453,10 @@
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
                   <div style="flex:1">
                     <div style="font-weight:600">💰 $${fmt(p.monto)} · ${p.metodo.toUpperCase()}</div>
-                    <div style="font-size:12px;color:var(--text3)">${new Date(p.paid_at).toLocaleString('es-AR')} · por ${p.paid_by_name || '—'}</div>
+                    <div style="font-size:12px;color:var(--text3)">${new Date(p.paid_at).toLocaleString('es-AR')} · por ${escapeHtml(p.paid_by_name || '—')}</div>
                     ${detallePago(p)}
-                    ${p.file_url ? `<div style="font-size:12px;margin-top:4px"><a href="${p.file_url}" target="_blank" style="color:var(--accent)">📎 Ver comprobante</a></div>` : ''}
-                    ${p.notes ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;font-style:italic">${p.notes}</div>` : ''}
+                    ${p.file_url ? `<div style="font-size:12px;margin-top:4px"><a href="${escapeHtml(p.file_url)}" target="_blank" style="color:var(--accent)">📎 Ver comprobante</a></div>` : ''}
+                    ${p.notes ? `<div style="font-size:12px;color:var(--text3);margin-top:4px;font-style:italic">${escapeHtml(p.notes)}</div>` : ''}
                   </div>
                   ${puedeAnular ? `<button onclick="anularPago('${poId}','${facId}','${p.id}')" class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger)">Anular</button>` : ''}
                 </div>
@@ -476,23 +476,23 @@
   function detallePago(p) {
     let detalles = [];
     if (p.metodo === 'transferencia') {
-      if (p.banco_origen)  detalles.push(`Origen: ${p.banco_origen}`);
-      if (p.banco_destino) detalles.push(`Destino: ${p.banco_destino}`);
-      if (p.cbu_alias_destino) detalles.push(`CBU/Alias: ${p.cbu_alias_destino}`);
+      if (p.banco_origen)  detalles.push(`Origen: ${escapeHtml(p.banco_origen)}`);
+      if (p.banco_destino) detalles.push(`Destino: ${escapeHtml(p.banco_destino)}`);
+      if (p.cbu_alias_destino) detalles.push(`CBU/Alias: ${escapeHtml(p.cbu_alias_destino)}`);
     } else if (p.metodo === 'cheque') {
-      if (p.cheque_nro)         detalles.push(`N° ${p.cheque_nro}`);
-      if (p.cheque_banco)       detalles.push(`Banco: ${p.cheque_banco}`);
+      if (p.cheque_nro)         detalles.push(`N° ${escapeHtml(p.cheque_nro)}`);
+      if (p.cheque_banco)       detalles.push(`Banco: ${escapeHtml(p.cheque_banco)}`);
       if (p.cheque_fecha_cobro) detalles.push(`Fecha: ${new Date(p.cheque_fecha_cobro).toLocaleDateString('es-AR')}`);
-      if (p.cheque_a_nombre)    detalles.push(`A nombre de: ${p.cheque_a_nombre}`);
+      if (p.cheque_a_nombre)    detalles.push(`A nombre de: ${escapeHtml(p.cheque_a_nombre)}`);
     } else if (p.metodo === 'echeq') {
-      if (p.echeq_nro)        detalles.push(`N° ${p.echeq_nro}`);
-      if (p.echeq_banco)      detalles.push(`Banco: ${p.echeq_banco}`);
+      if (p.echeq_nro)        detalles.push(`N° ${escapeHtml(p.echeq_nro)}`);
+      if (p.echeq_banco)      detalles.push(`Banco: ${escapeHtml(p.echeq_banco)}`);
       if (p.echeq_fecha_pago) detalles.push(`Fecha: ${new Date(p.echeq_fecha_pago).toLocaleDateString('es-AR')}`);
     } else if (p.metodo === 'tarjeta') {
-      if (p.tarjeta_aprobacion) detalles.push(`Aprobación: ${p.tarjeta_aprobacion}`);
+      if (p.tarjeta_aprobacion) detalles.push(`Aprobación: ${escapeHtml(p.tarjeta_aprobacion)}`);
       if (p.tarjeta_cuotas)     detalles.push(`${p.tarjeta_cuotas} cuotas`);
     }
-    if (p.comprobante_nro) detalles.push(`Comp: ${p.comprobante_nro}`);
+    if (p.comprobante_nro) detalles.push(`Comp: ${escapeHtml(p.comprobante_nro)}`);
     if (!detalles.length) return '';
     return `<div style="font-size:12px;color:var(--text2);margin-top:4px">${detalles.join(' · ')}</div>`;
   }
