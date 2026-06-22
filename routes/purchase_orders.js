@@ -1230,94 +1230,10 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 //  compatibilidad, blindado contra OC abiertas.
 //  La mercadería puede recibirse aunque el pago siga pendiente.
 // ─────────────────────────────────────────────────────────────
-router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const cur = await client.query('SELECT status, requested_by, sucursal, COALESCE(is_open,FALSE) AS is_open FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
-    if (!cur.rows[0]) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'OC no encontrada' });
-    }
-    // Las OC abiertas (servicios/entregas fraccionadas) no se reciben "en total" por
-    // este atajo: se cargan por la recepción granular y se cierran a mano.
-    if (cur.rows[0].is_open === true) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Esta OC es abierta: usá "Recibir mercadería" (recepción por cantidades) y luego "Cerrar OC".' });
-    }
-
-    // Jefe mant, compras, paniol, contador: solo pueden recibir las que crearon
-    if (['jefe_mantenimiento','compras','paniol','contador'].includes(req.user.role) && cur.rows[0].requested_by !== req.user.id) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
-    }
-    if (!['enviada_proveedor','pagada'].includes(cur.rows[0].status)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Solo se puede recibir una OC que ya fue enviada al proveedor o pagada' });
-    }
-
-    if (req.user.role === 'gerente_sucursal') {
-      const sucUser = String(req.user.sucursal || '').trim().toLowerCase();
-      const sucOC   = String(cur.rows[0].sucursal || '').trim().toLowerCase();
-      if (!sucUser || !sucOC || sucUser !== sucOC) {
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Solo podés recibir OCs de tu sucursal' });
-      }
-    }
-    const r = await client.query(`
-      UPDATE purchase_orders SET
-        status = 'recibida',
-        delivery_status = 'total',
-        recibido_por = $1,
-        recibido_at = NOW(),
-        recibido_en = NOW()
-      WHERE id = $2 RETURNING *`,
-      [req.user.id, req.params.id]
-    );
-
-    // Ingreso a stock de las cantidades pendientes (solo ítems vinculados a stock).
-    // Si hubo recepciones parciales previas, esas ya ingresaron su parte; acá solo
-    // entra lo que quedaba pendiente, así no se duplica.
-    const stock_ingresos = [];
-    const stock_warnings = [];
-    const pend = await client.query(
-      `SELECT poi.id, poi.stock_item_id, poi.descripcion, poi.cantidad AS pedida,
-              COALESCE((SELECT SUM(pori.cantidad) FROM purchase_order_receipt_items pori WHERE pori.po_item_id = poi.id),0) AS recibida
-       FROM purchase_order_items poi
-       WHERE poi.po_id = $1::uuid AND poi.stock_item_id IS NOT NULL`,
-      [req.params.id]
-    );
-    for (const p of pend.rows) {
-      const pendiente = parseFloat(p.pedida) - parseFloat(p.recibida);
-      if (!(pendiente > 0.0001)) continue;
-      const upd = await client.query(
-        `UPDATE stock_items SET qty_current = qty_current + $1, updated_at = NOW()
-         WHERE id = $2::uuid AND active = TRUE
-         RETURNING id, name, qty_current, base_location, area, unit`,
-        [pendiente, p.stock_item_id]
-      );
-      if (!upd.rows[0]) {
-        stock_warnings.push(`"${p.descripcion}": artículo de stock vinculado inexistente o inactivo — no se ingresó.`);
-        continue;
-      }
-      const si = upd.rows[0];
-      await client.query(
-        `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-         VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-        [si.id, pendiente, 'Recepción total de OC', req.user.id, si.base_location, si.area]
-      );
-      stock_ingresos.push({ stock_id: si.id, name: si.name, qty: pendiente, new_qty: parseFloat(si.qty_current), unit: si.unit });
-    }
-
-    await client.query('COMMIT');
-    res.json({ ...r.rows[0], stock_ingresos, stock_warnings });
-  } catch(err) {
-    await client.query('ROLLBACK').catch(()=>{});
-    console.error('[OC recibir]', err.message);
-    res.status(500).json({ error: 'Error al recibir OC' });
-  } finally {
-    client.release();
-  }
+router.post('/:id/recibir', authenticate, (req, res) => {
+  // LEGACY deshabilitado: la recepción se hace por POST /:id/recepciones (granular),
+  // que deja historial detallado, respeta OC abierta e impacta el stock.
+  return res.status(410).json({ error: 'Endpoint legacy no disponible. Usá la recepción por cantidades (Recibir mercadería).' });
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -1352,6 +1268,39 @@ router.post('/:id/cerrar', authenticate, requireRole('dueno','gerencia','compras
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[OC cerrar]', err.message);
     res.status(500).json({ error: 'Error al cerrar OC' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/reabrir — Reabre una OC cerrada (solo dueño/gerencia)
+//  Vuelve a 'recibida' para poder corregir (ej. anular una recepción). Si luego
+//  pago+entrega siguen en total, el recálculo la vuelve a cerrar sola.
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/reabrir', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT status FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!cur.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'OC no encontrada' });
+    }
+    if (cur.rows[0].status !== 'cerrada') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Solo se puede reabrir una OC cerrada' });
+    }
+    const r = await client.query(
+      `UPDATE purchase_orders SET status = 'recibida' WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json(r.rows[0]);
+  } catch(err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[OC reabrir]', err.message);
+    res.status(500).json({ error: 'Error al reabrir OC' });
   } finally {
     client.release();
   }

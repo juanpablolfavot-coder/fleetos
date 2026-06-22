@@ -81,7 +81,7 @@
 
         <div style="padding:20px">
 
-          ${pendienteFacturar > 0.01 && puedeCargarFacturas() ? `
+          ${pendienteFacturar > 0.01 && puedeCargarFacturas() && oc.status !== 'cerrada' ? `
           <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;padding:16px;margin-bottom:20px">
             <div style="font-weight:600;margin-bottom:12px;color:#cbd5e1">+ Cargar nueva factura</div>
 
