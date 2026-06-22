@@ -211,8 +211,20 @@ function _addTextBranchFilter(req, params, sqlRef, columns) {
   } catch(e) {}
 })();
 
+// Garantiza la columna driver_name de fuel_logs ANTES de leer el listado.
+// (El listado la usa; sin esto, si no se corrió migrate ni se registró una carga
+// nueva, la consulta fallaba y el listado salía VACÍO — parecía que se borraban
+// las cargas, pero estaban intactas.) Se ejecuta una sola vez por proceso.
+let _fuelDriverColEnsured = false;
+async function ensureFuelDriverCol() {
+  if (_fuelDriverColEnsured) return;
+  try { await query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS driver_name VARCHAR(150)`); } catch (_) {}
+  _fuelDriverColEnsured = true;
+}
+
 fuelRouter.get('/', authenticate, async (req, res) => {
   try {
+    await ensureFuelDriverCol();
     const { vehicle_id, limit = 50 } = req.query;
     let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate,
         COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name
@@ -225,7 +237,7 @@ fuelRouter.get('/', authenticate, async (req, res) => {
     if (vehicle_id) { params.push(vehicle_id); ref.value += ` AND fl.vehicle_id=$${params.length}`; }
     ref.value += ` ORDER BY fl.logged_at DESC LIMIT $${params.length+1}`; params.push(parseInt(limit));
     res.json((await query(ref.value, params)).rows);
-  } catch (err) { res.status(500).json({ error: 'Error combustible' }); }
+  } catch (err) { console.error('[fuel GET]', err.message); res.status(500).json({ error: 'Error combustible' }); }
 });
 fuelRouter.get('/tanks', authenticate, async (req, res) => {
   try {
