@@ -26,6 +26,21 @@ const { authenticate, requireRole } = require('../middleware/auth');
 
 const ROLES_RECIBIR = ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'];
 
+// Seguridad: un gerente_sucursal solo puede operar recepciones de OCs de SU sucursal.
+// Devuelve null si está OK, o { status, error } si hay que cortar.
+// `runner` es query (lecturas) o client.query.bind(client) (dentro de transacción).
+async function checkSucursalScope(runner, poId, req) {
+  if (req.user?.role !== 'gerente_sucursal') return null; // otros roles no se restringen acá
+  const r = await runner(`SELECT sucursal FROM purchase_orders WHERE id=$1::uuid`, [poId]);
+  if (!r.rows[0]) return { status: 404, error: 'OC no encontrada' };
+  const sucUser = String(req.user.sucursal || '').trim().toLowerCase();
+  const sucOC   = String(r.rows[0].sucursal || '').trim().toLowerCase();
+  if (!sucUser || !sucOC || sucUser !== sucOC) {
+    return { status: 403, error: 'Solo podés operar recepciones de OCs de tu sucursal' };
+  }
+  return null;
+}
+
 // Destinos fijos predefinidos (el frontend les agrega las sucursales dinámicamente)
 const DESTINOS_FIJOS = [
   'Depósito',
@@ -218,6 +233,8 @@ async function revertirStockDeRecepcion(client, receiptId, userId) {
 // ─────────────────────────────────────────────────────────────
 router.get('/:id/recepciones', authenticate, async (req, res) => {
   try {
+    const scopeErr = await checkSucursalScope(query, req.params.id, req);
+    if (scopeErr) return res.status(scopeErr.status).json({ error: scopeErr.error });
     const recs = await query(`
       SELECT
         r.id, r.po_id, r.received_by, r.received_at, r.destino, r.remito_nro, r.notes,
@@ -279,6 +296,8 @@ router.get('/:id/recepciones/aux/destinos', authenticate, async (req, res) => {
 // ─────────────────────────────────────────────────────────────
 router.get('/:id/items-pendientes', authenticate, async (req, res) => {
   try {
+    const scopeErr = await checkSucursalScope(query, req.params.id, req);
+    if (scopeErr) return res.status(scopeErr.status).json({ error: scopeErr.error });
     const r = await query(`
       SELECT
         poi.id, poi.descripcion, poi.unidad,
@@ -340,6 +359,8 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
     }
+    const scopeErr = await checkSucursalScope(client.query.bind(client), req.params.id, req);
+    if (scopeErr) { await client.query('ROLLBACK'); return res.status(scopeErr.status).json({ error: scopeErr.error }); }
     const ocAbierta = po.rows[0].is_open === true;
     // Estados finales: nunca se recibe. 'recibida' bloquea SALVO que la OC sea abierta
     // (servicios/entregas fraccionadas que se descuentan progresivamente).
@@ -440,6 +461,9 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
   try {
     await client.query('BEGIN');
     await ensurePOReceiptStateColumns(client);
+
+    const scopeErr = await checkSucursalScope(client.query.bind(client), req.params.id, req);
+    if (scopeErr) { await client.query('ROLLBACK'); return res.status(scopeErr.status).json({ error: scopeErr.error }); }
 
     const rec = await client.query(
       `SELECT id, received_by FROM purchase_order_receipts WHERE id=$1::uuid AND po_id=$2::uuid FOR UPDATE`,
