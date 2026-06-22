@@ -94,6 +94,14 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS km_current  INT DEFAULT 0;
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_spec   JSONB DEFAULT '{}'::jsonb;
 
+-- Columnas usadas por la app (alta/edición de vehículos, chofer asignado, sucursal/base,
+-- filtros y reportes). Deben existir o se rompe flota en una base recién creada.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS base        VARCHAR(200);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_id   UUID REFERENCES users(id);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         VARCHAR(100);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   VARCHAR(100);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center VARCHAR(100);
+
 -- Normalización de tipos de vehículos para bases ya existentes.
 -- Corrige el constraint viejo que no aceptaba autoelevador, semirremolque ni acoplado.
 DO $$

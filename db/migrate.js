@@ -11,11 +11,19 @@ async function migrate() {
     console.log('Conectando a PostgreSQL...');
     await client.query('BEGIN');
 
-    // Ejecutar esquema
-    const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-    // Separar por ; pero ignorar procedimientos PL/pgSQL
-    await client.query(schema);
-    console.log('✓ Esquema creado');
+    // Ejecutar esquema base + migraciones SQL en orden.
+    // Antes solo corría schema.sql; los archivos numerados (columnas de compras,
+    // triggers de pagos y de auto-estado de entrega) quedaban afuera y faltaban en
+    // una base recién creada. Todos son idempotentes (IF NOT EXISTS / CREATE OR REPLACE
+    // / DROP TRIGGER IF EXISTS), así que es seguro correrlos sobre una base ya viva.
+    const sqlFiles = ['schema.sql', '01-compras.sql', '02-pagos.sql', '03-status-auto.sql'];
+    for (const file of sqlFiles) {
+      const full = path.join(__dirname, file);
+      if (!fs.existsSync(full)) { console.log(`  (omitido, no existe: ${file})`); continue; }
+      const sql = fs.readFileSync(full, 'utf8');
+      await client.query(sql);
+      console.log(`✓ Aplicado: ${file}`);
+    }
 
     // Crear usuario dueño inicial.
     // La contraseña NO se hardcodea: se toma de ADMIN_PASSWORD o, si no está,

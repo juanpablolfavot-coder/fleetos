@@ -50,6 +50,15 @@ async function ensureVehicleSchema() {
   await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_name TEXT`).catch(()=>{});
   await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS tech_spec JSONB DEFAULT '{}'::jsonb`).catch(()=>{});
 
+  // Columnas que el código usa (alta/edición de vehículos, JOIN con users, filtro por
+  // sucursal) pero que no estaban en el esquema base. Sin esto, una base recién creada
+  // rompía al abrir flota o al dar de alta un vehículo.
+  await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS base        VARCHAR(200)`).catch(()=>{});
+  await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS driver_id   UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         VARCHAR(100)`).catch(()=>{});
+  await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   VARCHAR(100)`).catch(()=>{});
+  await query(`ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center VARCHAR(100)`).catch(()=>{});
+
   // La base vieja tenía un CHECK que no aceptaba autoelevador/semirremolque/acoplado.
   // Normalizamos valores antiguos y recreamos el constraint con todos los tipos válidos.
   await query(`
