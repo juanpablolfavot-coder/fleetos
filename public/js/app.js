@@ -1861,7 +1861,7 @@ async function printOT(id) {
         <td>${l.worker_name || '—'}</td>
         <td style="text-align:center">${fecha}</td>
         <td style="text-align:right">${hours.toFixed(2)} h</td>
-        <td>${l.notes || '—'}</td>
+        <td>${escapeHtml(l.notes || '—')}</td>
       </tr>`;
     });
   } else {
@@ -2936,7 +2936,7 @@ function openFuelDispatchTicket(dispatchId) {
         <div><b>Registró</b><br>${d.created_by_name || App.currentUser?.name || '—'}</div>
         <div><b>Estado</b><br>${recibido ? 'Recibido' : 'Despachado'}</div>
       </div>
-      ${d.notes ? `<div style="margin-top:12px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)"><b>Observación</b><br>${d.notes}</div>` : ''}
+      ${d.notes ? `<div style="margin-top:12px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)"><b>Observación</b><br>${escapeHtml(d.notes)}</div>` : ''}
       <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
         Nivel anterior: <b>${Math.round(d.previous_l||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b>${Math.round(d.new_l||0).toLocaleString('es-AR')} L</b>
       </div>
@@ -2985,7 +2985,7 @@ function printFuelDispatchTicket(dispatchId) {
           <div><b>Vehículo / transporte</b>${d.transport_vehicle || '—'}</div><div><b>Remito referencia</b>${d.remito || '—'}</div>
           <div><b>Registró</b>${d.created_by_name || App.currentUser?.name || '—'}</div><div><b>Estado</b>${recibido ? 'Recibido' : 'Despachado'}</div>
         </div>
-        ${d.notes ? `<div class="box"><b>Observación</b>${d.notes}</div>` : ''}
+        ${d.notes ? `<div class="box"><b>Observación</b>${escapeHtml(d.notes)}</div>` : ''}
         <div class="box">Nivel anterior: <b style="display:inline">${Math.round(d.previous_l||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(d.new_l||0).toLocaleString('es-AR')} L</b></div>
         ${receivedHtml}
         <div class="firma"><div>Firma entrega</div><div>Firma recibe</div></div>
@@ -7055,7 +7055,7 @@ async function _renderDailyActivityInto(containerId) {
                       <b>${o.vehicle_code||'—'}</b>
                       <span class="badge ${o.priority==='critica'?'badge-danger':o.priority==='urgente'?'badge-warn':'badge-info'}">${o.priority||'normal'}</span>
                     </div>
-                    <div style="color:var(--text3);font-size:12px;margin-top:2px">${(o.description||'').substring(0,60)}${o.description?.length>60?'...':''}</div>
+                    <div style="color:var(--text3);font-size:12px;margin-top:2px">${escapeHtml((o.description||'').substring(0,60))}${o.description?.length>60?'...':''}</div>
                   </div>`).join('')}
                </div>`
           }
@@ -7075,7 +7075,7 @@ async function _renderDailyActivityInto(containerId) {
                 <td>${c.driver_name||'—'}</td>
                 <td class="td-mono">${c.km_at_check?.toLocaleString()||'—'}</td>
                 <td><span class="badge ${c.all_ok?'badge-ok':'badge-warn'}">${c.all_ok?'✓ OK':'⚠ Con prob.'}</span></td>
-                <td style="font-size:11px;color:var(--text3)">${c.observations?c.observations.substring(0,40)+'...':'—'}</td>
+                <td style="font-size:11px;color:var(--text3)">${escapeHtml(c.observations?c.observations.substring(0,40)+'...':'—')}</td>
               </tr>`).join('')}</tbody>
             </table></div>`
         }
@@ -8664,7 +8664,7 @@ async function renderAuditorCombustible(el) {
         <span style="font-size:20px">${a.severidad==='alta'?'🔴':'🟡'}</span>
         <div>
           <div style="font-weight:700;font-size:14px">${a.titulo}</div>
-          <div style="font-size:12px;color:var(--text3)">${a.descripcion}</div>
+          <div style="font-size:12px;color:var(--text3)">${escapeHtml(a.descripcion)}</div>
         </div>
       </div>
       <div class="table-wrap">
@@ -8697,7 +8697,7 @@ async function renderAuditorOTs(el) {
         <span style="font-size:20px">${a.severidad==='alta'?'🔴':'🟡'}</span>
         <div>
           <div style="font-weight:700;font-size:14px">${a.titulo}</div>
-          <div style="font-size:12px;color:var(--text3)">${a.descripcion}</div>
+          <div style="font-size:12px;color:var(--text3)">${escapeHtml(a.descripcion)}</div>
         </div>
       </div>
       <div class="table-wrap">
@@ -8822,7 +8822,7 @@ async function renderAuditorLog(el) {
   if (d.nota) {
     el.innerHTML = `<div class="card" style="text-align:center;padding:32px">
       <div style="font-size:24px;margin-bottom:12px">🗂</div>
-      <div style="font-weight:600">${d.nota}</div>
+      <div style="font-weight:600">${escapeHtml(d.nota)}</div>
       <div style="font-size:13px;color:var(--text3);margin-top:8px">Las acciones críticas (crear/cerrar OTs, bajas de stock, dar de baja vehículos) quedan registradas con usuario y timestamp.</div>
     </div>`; return;
   }
@@ -10322,7 +10322,7 @@ async function openPODetail(id) {
       ${po.motivo_devolucion ? `
       <div class="card" style="padding:10px 14px;margin-bottom:14px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35)">
         <div style="font-size:11px;color:var(--warn);font-weight:700;text-transform:uppercase;margin-bottom:4px">⏪ Devuelta por corrección</div>
-        <div style="font-size:13px;color:var(--text)">${po.motivo_devolucion}</div>
+        <div style="font-size:13px;color:var(--text)">${escapeHtml(po.motivo_devolucion)}</div>
       </div>` : ''}
 
       ${po.vehicle_id ? `
@@ -10426,7 +10426,7 @@ async function openPODetail(id) {
             </tr></thead>
             <tbody>
               ${po.items.map(i => `<tr>
-                <td>${i.descripcion}</td>
+                <td>${escapeHtml(i.descripcion)}</td>
                 <td style="text-align:center">${parseFloat(i.cantidad)}</td>
                 <td style="text-align:center">${i.unidad}</td>
                 ${puedeVerPrecios ? `
@@ -10456,7 +10456,7 @@ async function openPODetail(id) {
 
       <div class="card" style="padding:12px 16px;margin-bottom:4px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones</div>
-        <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit && !esTerminal?'':'readonly'} placeholder="—">${po.notes||''}</textarea>
+        <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit && !esTerminal?'':'readonly'} placeholder="—">${escapeHtml(po.notes||'')}</textarea>
       </div>`,
       (() => {
         // ── Armar botones según rol + estado actual (lógica limpia) ──
@@ -10809,7 +10809,7 @@ async function printPO(id) {
           </tr></thead>
           <tbody>
             ${po.items.map(i => `<tr>
-              <td>${i.descripcion}</td>
+              <td>${escapeHtml(i.descripcion)}</td>
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
               <td style="text-align:center">${i.unidad||'un'}</td>
               <td style="text-align:right">$${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
@@ -10835,7 +10835,7 @@ async function printPO(id) {
       ${po.observaciones ? `
       <div class="section">
         <div class="section-title">📝 Observaciones</div>
-        <div class="observ-box">${po.observaciones}</div>
+        <div class="observ-box">${escapeHtml(po.observaciones)}</div>
       </div>
       ` : ''}
 
@@ -10859,8 +10859,8 @@ async function printPO(id) {
             ${po.status === 'rechazada' ? `<tr style="background:#fee2e2"><td style="padding:8px">Rechazada</td><td style="padding:8px"><b>${po.rechazador_nombre||'—'}</b></td><td style="padding:8px">${po.rechazado_at ? new Date(po.rechazado_at).toLocaleString('es-AR') : '—'}</td></tr>` : ''}
           </tbody>
         </table>
-        ${po.motivo_devolucion ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>⏪ Devuelta por:</b> ${po.motivo_devolucion}</div>` : ''}
-        ${po.motivo_rechazo ? `<div style="background:#fee2e2;border:1px solid #ef4444;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>❌ Motivo de rechazo:</b> ${po.motivo_rechazo}</div>` : ''}
+        ${po.motivo_devolucion ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>⏪ Devuelta por:</b> ${escapeHtml(po.motivo_devolucion)}</div>` : ''}
+        ${po.motivo_rechazo ? `<div style="background:#fee2e2;border:1px solid #ef4444;border-radius:4px;padding:8px 10px;margin-top:10px;font-size:11px"><b>❌ Motivo de rechazo:</b> ${escapeHtml(po.motivo_rechazo)}</div>` : ''}
         <div style="margin-top:12px;padding:10px;background:#eff6ff;border:1px solid #3b82f6;border-radius:4px;font-size:12px">
           <b>📍 Estado actual:</b> <span style="${statusBadge};padding:2px 8px;border-radius:4px;font-weight:700">${po.status.toUpperCase()}</span>
         </div>
@@ -10882,7 +10882,7 @@ async function printPO(id) {
               <td style="padding:6px">${new Date(r.received_at).toLocaleString('es-AR')}</td>
               <td style="padding:6px">${r.destino || '—'}</td>
               <td style="padding:6px">${r.remito_nro || '—'}</td>
-              <td style="padding:6px">${(r.items||[]).map(it => `${it.descripcion}: ${parseFloat(it.cantidad).toFixed(2)} ${it.unidad||''}`).join(' · ')}</td>
+              <td style="padding:6px">${(r.items||[]).map(it => `${escapeHtml(it.descripcion)}: ${parseFloat(it.cantidad).toFixed(2)} ${escapeHtml(it.unidad||'')}`).join(' · ')}</td>
               <td style="padding:6px">${r.received_by_name || '—'}</td>
             </tr>`).join('')}
           </tbody>
@@ -12238,7 +12238,7 @@ function _openSupplierModal(existing) {
       <div style="font-size:11px;color:var(--accent);font-weight:700;margin-bottom:10px;letter-spacing:.5px">📝 NOTAS</div>
       <div style="margin-bottom:16px">
         <label class="form-label">Observaciones</label>
-        <textarea id="sup-notes" class="form-input" rows="2" placeholder="Notas internas...">${s.notes||''}</textarea>
+        <textarea id="sup-notes" class="form-input" rows="2" placeholder="Notas internas...">${escapeHtml(s.notes||'')}</textarea>
       </div>
 
       <div id="sup-blacklist-row" style="display:${s.status==='blacklist'?'block':'none'};margin-bottom:10px">
@@ -12403,13 +12403,13 @@ async function openSupplierDetail(id) {
       ${sup.notes ? `
       <div style="padding:12px;background:rgba(217,119,6,.10);border-left:3px solid var(--warn);border-radius:var(--radius);font-size:13px;margin-bottom:10px">
         <div style="font-size:10px;color:var(--warn);text-transform:uppercase;font-weight:700;margin-bottom:4px">📝 Notas</div>
-        ${sup.notes}
+        ${escapeHtml(sup.notes)}
       </div>` : ''}
 
       ${sup.blacklist_reason ? `
       <div style="padding:12px;background:rgba(220,38,38,.10);border-left:3px solid var(--danger);border-radius:var(--radius);font-size:13px">
         <div style="font-size:10px;color:var(--danger);text-transform:uppercase;font-weight:700;margin-bottom:4px">🚫 Razón blacklist</div>
-        ${sup.blacklist_reason}
+        ${escapeHtml(sup.blacklist_reason)}
       </div>` : ''}
     </div>
   `;
@@ -12517,7 +12517,7 @@ function _labRender(partes) {
     return `<div style="display:grid;grid-template-columns:1fr 70px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div>
         <div style="font-weight:600">${p.worker_name}</div>
-        <div style="color:var(--text3);font-size:10px">${fecha}${p.notes ? ' · ' + p.notes.substring(0,50) : ''}</div>
+        <div style="color:var(--text3);font-size:10px">${fecha}${p.notes ? ' · ' + escapeHtml(p.notes.substring(0,50)) : ''}</div>
       </div>
       <div style="text-align:center;font-family:var(--mono)">${hours} h</div>
       ${window._labCurrentOtClosed ? '<span></span>' : `<button type="button" onclick="_labDelete('${p.id}')"
@@ -13402,7 +13402,7 @@ function openEditAssetModal(id) {
 
     <div class="form-group">
       <label class="form-label">Notas</label>
-      <textarea class="form-textarea" id="ea-notes">${a.notes||''}</textarea>
+      <textarea class="form-textarea" id="ea-notes">${escapeHtml(a.notes||'')}</textarea>
     </div>
   `, [
     { label: 'Cancelar', cls: 'btn-secondary', fn: closeModal },
@@ -13541,7 +13541,7 @@ function openVehicleHistoryModal(vehicleCode) {
               <td style="padding:8px;font-family:var(--mono);font-weight:600"><a onclick="closeModal();navigate('workorders');setTimeout(()=>{const ot=(App.data.workOrders||[]).find(x=>x.id==='${o.id}'||x.code==='${o.code || o.id}');if(ot)openEditOTModal(ot.id);},200)" style="color:var(--accent);cursor:pointer">${o.code || o.id}</a></td>
               <td style="padding:8px">${(o.opened || o.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px">${o.type || '—'}</td>
-              <td style="padding:8px">${(o.desc || o.description || '—').substring(0, 50)}</td>
+              <td style="padding:8px">${escapeHtml((o.desc || o.description || '—').substring(0, 50))}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString('es-AR')}</td>
               <td style="padding:8px"><span style="color:${statusColors[o.status] || 'var(--text3)'};font-weight:600">● ${o.status || '—'}</span></td>
             </tr>`).join('')}
@@ -14223,7 +14223,7 @@ function openAssetDetailModal(id) {
       <div style="margin-bottom:20px">
         <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📝 Notas</div>
         <div style="background:var(--bg3);padding:10px 14px;border-radius:var(--radius);font-size:13px;color:var(--text)">
-          ${a.notes}
+          ${escapeHtml(a.notes)}
         </div>
       </div>
     ` : ''}
@@ -14251,7 +14251,7 @@ function openAssetDetailModal(id) {
               <tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:6px;font-family:var(--mono);font-weight:600">${o.code || o.id.substring(0,8)}</td>
                 <td style="padding:6px">${(o.opened || '—').toString().slice(0,10)}</td>
-                <td style="padding:6px">${((o.desc || o.description || '—')+'').substring(0,40)}</td>
+                <td style="padding:6px">${escapeHtml(((o.desc || o.description || '—')+'').substring(0,40))}</td>
                 <td style="padding:6px;text-align:right;font-family:var(--mono)">$${Math.round((parseFloat(o.parts_cost)||0)+(parseFloat(o.labor_cost)||0)).toLocaleString('es-AR')}</td>
                 <td style="padding:6px">${o.status || '—'}</td>
               </tr>
