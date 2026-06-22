@@ -10430,7 +10430,12 @@ async function openPODetail(id) {
         btns.push({ label:'Cerrar', cls:'btn-secondary', fn: closeModal });
         btns.push({ label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } });
 
-        // Si la OC está rechazada, solo cerrar e imprimir. Recibida puede seguir con factura/pago pendiente.
+        // OC cerrada: dueño/gerencia pueden reabrirla (para corregir, ej. anular una recepción).
+        if (po.status === 'cerrada' && ['dueno','gerencia'].includes(role)) {
+          btns.push({ label:'🔓 Reabrir OC', cls:'btn-warn', fn: () => reabrirOC(id) });
+        }
+
+        // Si la OC está rechazada/cerrada, solo cerrar/imprimir (+ reabrir si corresponde).
         if (esTerminal) return btns;
 
         // Botón de guardar cambios — solo si el rol puede editar
@@ -11584,6 +11589,18 @@ async function cerrarOC(id) {
     const r = await apiFetch('/api/purchase-orders/' + id + '/cerrar', { method: 'POST' });
     if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al cerrar OC'); return; }
     showToast('ok', '🔒 OC cerrada');
+    closeModal();
+    await loadPOList();
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
+
+// Reabrir una OC cerrada (dueño/gerencia) para poder corregir.
+async function reabrirOC(id) {
+  if (!confirm('¿Reabrir esta OC cerrada? Vuelve a "recibida" para poder corregir (ej. anular una recepción). Si pago y entrega siguen completos, se volverá a cerrar sola.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/reabrir', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al reabrir OC'); return; }
+    showToast('ok', '🔓 OC reabierta');
     closeModal();
     await loadPOList();
   } catch(err) { showToast('error', err.message || 'Error'); }

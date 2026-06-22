@@ -465,6 +465,14 @@ router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBI
     const scopeErr = await checkSucursalScope(client.query.bind(client), req.params.id, req);
     if (scopeErr) { await client.query('ROLLBACK'); return res.status(scopeErr.status).json({ error: scopeErr.error }); }
 
+    // No se puede anular una recepción si la OC está en estado final: anularla
+    // revertiría stock/entrega y dejaría la OC inconsistente. Hay que reabrirla primero.
+    const ocEstado = await client.query('SELECT status FROM purchase_orders WHERE id=$1::uuid', [req.params.id]);
+    if (['cerrada','rechazada'].includes(ocEstado.rows[0]?.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: `La OC está ${ocEstado.rows[0].status}. Reabrila antes de anular una recepción.` });
+    }
+
     const rec = await client.query(
       `SELECT id, received_by FROM purchase_order_receipts WHERE id=$1::uuid AND po_id=$2::uuid FOR UPDATE`,
       [req.params.rid, req.params.id]
