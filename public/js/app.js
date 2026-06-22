@@ -272,6 +272,7 @@ function renderDashboard() {
   });
   const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'pendiente_cotizacion' || p.status === 'en_cotizacion');
   const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'enviada_proveedor' || p.status === 'pagada');
+  const fuelObs = (App.data.fuelLogs||[]).filter(f => f.ticket_estado === 'observado');
 
   // Mantenimientos vencidos (>=95% del intervalo)
   const maintAlerts = v.map(veh => {
@@ -355,6 +356,25 @@ function renderDashboard() {
     return d.toLocaleDateString('es-AR');
   };
 
+  // ═══ Centro de comando: helper de tarjeta (solo presentación) ═══
+  const _tones = {
+    danger: ['rgba(239,68,68,.12)', 'rgba(239,68,68,.30)', 'var(--danger)'],
+    warn:   ['rgba(245,158,11,.12)', 'rgba(245,158,11,.30)', 'var(--warn)'],
+    ok:     ['rgba(16,185,129,.10)', 'rgba(16,185,129,.28)', 'var(--ok)'],
+    info:   ['rgba(37,99,235,.10)',  'rgba(37,99,235,.28)',  'var(--accent)'],
+    muted:  ['var(--bg3)',           'var(--border)',        'var(--text3)'],
+  };
+  const cmdTile = ({ icon, label, value, sub, tone = 'muted', nav, id }) => {
+    const [bg, bd, fg] = _tones[tone] || _tones.muted;
+    const click = nav ? `onclick="navigate('${nav}')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'"` : '';
+    return `<div ${id ? `id="${id}"` : ''} ${click} style="${nav ? 'cursor:pointer;' : ''}background:${bg};border:1px solid ${bd};border-radius:var(--radius);padding:14px;transition:transform .15s">
+      <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px"><span style="font-size:14px">${icon}</span>${label}</div>
+      <div style="font-size:26px;font-weight:800;line-height:1;color:${fg}">${value}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:5px">${sub}</div>
+    </div>`;
+  };
+  const verPagos = ['dueno','gerencia','tesoreria'].includes(App.currentUser?.role);
+
   // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
     <!-- KPIs superiores -->
@@ -381,40 +401,26 @@ function renderDashboard() {
       </div>
     </div>
 
-    <!-- BLOQUE 1: PENDIENTES CRÍTICOS (6 tarjetas accionables) -->
+    <!-- CENTRO DE COMANDO: indicadores accionables de un vistazo -->
     <div class="card" style="margin-bottom:16px;${totalPendientes > 0 ? 'border-left:4px solid var(--danger)' : 'border-left:4px solid var(--ok)'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div>
-          <div class="card-title" style="margin:0">${totalPendientes > 0 ? '🔥 Requieren tu atención hoy' : '✅ Todo al día'}</div>
+          <div class="card-title" style="margin:0">🧭 Centro de comando</div>
           <div style="font-size:11px;color:var(--text3);margin-top:2px">${totalPendientes > 0 ? `${totalPendientes} pendientes críticos` : 'Ningún pendiente crítico ahora mismo'}</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
-        <div onclick="navigate('documents')" style="cursor:pointer;background:${dangerDocs.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${dangerDocs.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📄 Docs vencidos</div>
-          <div style="font-size:22px;font-weight:700;color:${dangerDocs.length>0?'var(--danger)':'var(--text3)'}">${dangerDocs.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">${dangerDocs.length>0?'requieren renovar':'todo al día'}</div>
-        </div>
-        <div onclick="navigate('workorders')" style="cursor:pointer;background:${otsUrgentes.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${otsUrgentes.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🚨 OTs urgentes</div>
-          <div style="font-size:22px;font-weight:700;color:${otsUrgentes.length>0?'var(--danger)':'var(--text3)'}">${otsUrgentes.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">${otsAbiertas.length} abiertas total</div>
-        </div>
-        <div onclick="navigate('maintenance')" style="cursor:pointer;background:${maintVencidos.length>0?'rgba(239,68,68,.12)':'var(--bg3)'};border:1px solid ${maintVencidos.length>0?'rgba(239,68,68,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🔧 Mant. vencidos</div>
-          <div style="font-size:22px;font-weight:700;color:${maintVencidos.length>0?'var(--danger)':'var(--text3)'}">${maintVencidos.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">${maintProximos.length} próximos</div>
-        </div>
-        <div onclick="navigate('purchase_orders')" style="cursor:pointer;background:${ocsRevision.length>0?'rgba(245,158,11,.12)':'var(--bg3)'};border:1px solid ${ocsRevision.length>0?'rgba(245,158,11,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🛒 OCs por aprobar</div>
-          <div style="font-size:22px;font-weight:700;color:${ocsRevision.length>0?'var(--warn)':'var(--text3)'}">${ocsRevision.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">${ocsAprobadas.length} aprobadas</div>
-        </div>
-        <div onclick="navigate('stock')" style="cursor:pointer;background:${stockBajo.length>0?'rgba(245,158,11,.12)':'var(--bg3)'};border:1px solid ${stockBajo.length>0?'rgba(245,158,11,.3)':'var(--border)'};border-radius:var(--radius);padding:12px;transition:all .15s" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📦 Stock bajo</div>
-          <div style="font-size:22px;font-weight:700;color:${stockBajo.length>0?'var(--warn)':'var(--text3)'}">${stockBajo.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">${stockBajo.length>0?'necesitan reposición':'todo abastecido'}</div>
-        </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+        ${cmdTile({ icon:'🛒', label:'OC por cotizar',      value:ocsRevision.length,  sub:`${ocsAprobadas.length} en curso`,                                tone:ocsRevision.length>0?'warn':'muted', nav:'purchase_orders' })}
+        ${cmdTile({ icon:'📦', label:'OC por recibir',      value:ocsAprobadas.length, sub:'aprobadas / enviadas',                                           tone:ocsAprobadas.length>0?'info':'muted', nav:'purchase_orders' })}
+        ${cmdTile({ icon:'🔧', label:'OT abiertas',         value:otsAbiertas.length,  sub:`${otsUrgentes.length} urgentes`,                                 tone:otsUrgentes.length>0?'danger':(otsAbiertas.length>0?'info':'ok'), nav:'workorders' })}
+        ${cmdTile({ icon:'🚛', label:'Unidades en taller',  value:taller+detenida,     sub:`${taller} taller · ${detenida} detenida${detenida===1?'':'s'}`,  tone:(taller+detenida)>0?'warn':'ok', nav:'fleet' })}
+        ${cmdTile({ icon:'📥', label:'Stock crítico',       value:stockBajo.length,    sub:stockBajo.length>0?'necesitan reposición':'abastecido',          tone:stockBajo.length>0?'warn':'ok', nav:'stock' })}
+        ${cmdTile({ icon:'⛽', label:'Combustible observado',value:fuelObs.length,      sub:fuelObs.length>0?'tickets a revisar':'sin observaciones',         tone:fuelObs.length>0?'warn':'ok', nav:'fuel' })}
+        ${cmdTile({ icon:'📄', label:'Documentos',          value:dangerDocs.length+warnDocs.length, sub:`${dangerDocs.length} vencidos · ${warnDocs.length} por vencer`, tone:dangerDocs.length>0?'danger':(warnDocs.length>0?'warn':'ok'), nav:'documents' })}
+        ${cmdTile({ icon:'🛠️', label:'Mantenimiento',        value:maintVencidos.length, sub:`${maintProximos.length} próximos`,                              tone:maintVencidos.length>0?'danger':(maintProximos.length>0?'warn':'ok'), nav:'maintenance' })}
+        ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
+        ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
+        ${verPagos ? cmdTile({ icon:'🔴', label:'Pagos vencidos',       value:'…', sub:'facturas atrasadas', tone:'danger', id:'cmd-pag-vencidos' }) : ''}
       </div>
     </div>
 
@@ -603,6 +609,31 @@ function renderDashboard() {
   // ═══ Actividad del día (antiguo panel "Operativo del día") ═══
   // Se llena asincrónicamente para no bloquear la primera renderización.
   _renderDailyActivityInto('dash-daily-activity');
+
+  // ═══ Centro de comando: tiles financieros (async, solo roles con acceso a pagos) ═══
+  // Lee datos que ya existen (/api/payments/pendientes); no cambia ninguna lógica.
+  if (verPagos) {
+    (async () => {
+      try {
+        const res = await apiFetch('/api/payments/pendientes');
+        if (!res || !res.ok) return;
+        const rows = await res.json();
+        const pend = rows.filter(r => !r.pagada);
+        const suma = (arr) => arr.reduce((a, r) => a + (parseFloat(r.saldo) || 0), 0);
+        const porVencer = pend.filter(r => r.por_vencer);
+        const vencidas  = pend.filter(r => r.vencida);
+        const setTile = (id, n, monto, vacio) => {
+          const el = document.getElementById(id);
+          if (!el || el.children.length < 3) return;
+          el.children[1].textContent = n;
+          el.children[2].textContent = n > 0 ? '$' + Math.round(monto).toLocaleString('es-AR') : vacio;
+        };
+        setTile('cmd-fac-pend',      pend.length,      suma(pend),      'sin pendientes');
+        setTile('cmd-pag-porvencer', porVencer.length, suma(porVencer), 'nada por vencer');
+        setTile('cmd-pag-vencidos',  vencidas.length,  suma(vencidas),  'sin vencidas');
+      } catch (e) { /* la parte financiera es opcional; si falla, queda en '…' */ }
+    })();
+  }
 }
 
 // ── FLOTA ──
