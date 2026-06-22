@@ -5695,6 +5695,9 @@ function openModal(title, bodyHTML, actions=[]) {
   overlay.style.display = 'flex';
 }
 function closeModal() {
+  // Al cerrar, olvidar la OC abierta para que timeline.js no enriquezca otra
+  // trazabilidad con datos de la OC anterior.
+  if (window.App) App.currentPODetailId = null;
   const overlay = document.getElementById('modal-overlay');
   if (overlay) {
     overlay.classList.remove('open');
@@ -10165,6 +10168,10 @@ async function openPODetail(id) {
     const res = await apiFetch(`/api/purchase-orders/${id}?_t=${ts}`);
     if (!res.ok) { showToast('error','Error al cargar OC'); return; }
     const po = await res.json();
+    // ID autoritativo de la OC abierta — lo usa timeline.js para enriquecer la
+    // trazabilidad. Sin esto, timeline.js adivinaba el id y podía arrastrar las
+    // facturas/pagos de OTRA OC.
+    if (window.App) App.currentPODetailId = id;
 
     const role    = App.currentUser?.role;
     const puedeVerPrecios = _ocPuedeVerPrecios(role);

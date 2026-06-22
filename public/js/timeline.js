@@ -24,20 +24,11 @@
   observer.observe(document.body, { childList: true, subtree: true });
 
   function extractPOId() {
-    // Estrategia 1: leer del título del modal
-    const titulo = document.querySelector('.modal-title, [id*="modal-title"]');
-    // Estrategia 2: del último onclick
-    const buttons = document.querySelectorAll('button[onclick*="po-detail"], button[onclick*="openPODetail"]');
-    // Estrategia 3: leer de la variable global de App
-    if (window.App?.currentPODetailId) return window.App.currentPODetailId;
-
-    // Mejor estrategia: capturar el id desde el href del PDF/print
-    const printBtn = document.querySelector('button[onclick*="printPO"]');
-    if (printBtn) {
-      const m = printBtn.getAttribute('onclick').match(/printPO\('([^']+)'\)/);
-      if (m) return m[1];
-    }
-    return null;
+    // ÚNICA fuente confiable: el id que setea openPODetail al abrir el modal.
+    // (Antes había un fallback que buscaba "button[onclick*=printPO]" en TODO el
+    // documento y agarraba el botón de imprimir de cualquier fila de la lista de
+    // fondo → arrastraba las facturas/pagos de OTRA OC. Eliminado.)
+    return window.App?.currentPODetailId || null;
   }
 
   const fmt = (n) => parseFloat(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
