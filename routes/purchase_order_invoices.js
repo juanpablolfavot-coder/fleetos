@@ -81,7 +81,7 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
       FROM purchase_orders po
       LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN purchase_order_invoices f ON f.po_id = po.id
-      WHERE po.status IN ('aprobada_compras','pagada','recibida')
+      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
       GROUP BY po.id, s.name
       ORDER BY po.created_at DESC
     `);
@@ -173,7 +173,7 @@ router.post('/:id/facturas', authenticate, requireRole(...ROLES_CARGAR_FAC), asy
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
     }
-    if (!['aprobada_compras','pagada','recibida'].includes(poRow.rows[0].status)) {
+    if (!['aprobada_compras','enviada_proveedor','pagada','recibida'].includes(poRow.rows[0].status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `No se puede facturar una OC en estado ${poRow.rows[0].status}` });
     }

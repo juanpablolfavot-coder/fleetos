@@ -129,7 +129,7 @@ async function ensureTables() {
     JOIN purchase_orders po ON po.id = poi.po_id
     WHERE poi.work_order_part_id = wop.id
       AND wop.origin = 'externo'
-      AND po.status IN ('aprobada_compras','pagada','recibida')
+      AND po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
       AND COALESCE(poi.precio_unit,0) > 0
   `).catch(()=>{});
 
@@ -147,7 +147,7 @@ async function ensureTables() {
         ) AS rn
       FROM purchase_order_items poi
       JOIN purchase_orders po ON po.id = poi.po_id
-      WHERE po.status IN ('aprobada_compras','pagada','recibida')
+      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
         AND poi.work_order_part_id IS NULL
         AND COALESCE(poi.precio_unit,0) > 0
     ), ext_parts AS (
@@ -185,7 +185,7 @@ async function ensureTables() {
       SELECT id AS po_id
       FROM purchase_orders
       WHERE ot_id IS NOT NULL
-        AND status IN ('aprobada_compras','pagada','recibida')
+        AND status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
     ), ext_parts AS (
       SELECT
         wop.id,
@@ -251,7 +251,7 @@ async function syncApprovedPOCostsToWorkOrder(client, poId) {
     [poId]
   );
   const po = poRes.rows[0];
-  if (!po || !po.ot_id || !['aprobada_compras','pagada','recibida'].includes(po.status)) {
+  if (!po || !po.ot_id || !['aprobada_compras','enviada_proveedor','pagada','recibida'].includes(po.status)) {
     return { updated_parts: 0, ot_id: po?.ot_id || null };
   }
 
@@ -382,16 +382,16 @@ function normalizarPrioridad(v) {
 function estadosQueVe(role) {
   if (role === 'dueno' || role === 'gerencia') return null; // null = todos
   if (role === 'compras') {
-    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','pagada','recibida','rechazada'];
+    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','enviada_proveedor','pagada','recibida','rechazada'];
   }
   if (role === 'tesoreria') {
-    return ['aprobada_compras','pagada','recibida','rechazada'];
+    return ['aprobada_compras','enviada_proveedor','pagada','recibida','rechazada'];
   }
   if (role === 'auditor') {
     return ['pagada','recibida'];
   }
   if (role === 'proveedores') {
-    return ['aprobada_compras','pagada','recibida'];
+    return ['aprobada_compras','enviada_proveedor','pagada','recibida'];
   }
   if (['jefe_mantenimiento','paniol','contador','gerente_sucursal'].includes(role)) {
     return null; // ve todos los estados, pero filtramos por requested_by abajo (solo las propias)
@@ -811,7 +811,7 @@ router.patch('/:id', authenticate, async (req, res) => {
         return ['proveedor','supplier_id','iva_pct','forma_pago','cc_dias','moneda','prioridad','notes',
                 'factura_nro','factura_fecha','factura_monto'];
       }
-      if (role === 'tesoreria' && estado === 'aprobada_compras') {
+      if (role === 'tesoreria' && estado === 'enviada_proveedor') {
         // Tesorería solo puede corregir notas, no datos de factura (ya llegan cargados)
         return ['notes'];
       }
@@ -1305,8 +1305,8 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
       ['dueno','gerencia'].includes(rol) ||
       // Solicitantes (jefe mant, paniol, contador): solo rechazan las propias en pendiente
       (['jefe_mantenimiento','paniol','contador'].includes(rol) && esCreador && estadoActual === 'pendiente_cotizacion') ||
-      (rol === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(estadoActual)) ||
-      (rol === 'tesoreria' && estadoActual === 'aprobada_compras')
+      (rol === 'compras'   && ['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(estadoActual)) ||
+      (rol === 'tesoreria' && estadoActual === 'enviada_proveedor')
     );
     if (!puedeRechazar) {
       await client.query('ROLLBACK');
@@ -1340,7 +1340,8 @@ router.post('/:id/rechazar', authenticate, requireRole('dueno','gerencia','jefe_
 //  Reglas de a dónde vuelve cada estado:
 //    en_cotizacion      → pendiente_cotizacion  (compras dice que faltan datos)
 //    aprobada_compras   → en_cotizacion         (tesorería dice que algo está mal)
-//    pagada             → aprobada_compras      (raro, pero puede pasar)
+//    enviada_proveedor  → aprobada_compras      (compras des-envía / corrige)
+//    pagada             → enviada_proveedor     (raro, pero puede pasar)
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compras','tesoreria','jefe_mantenimiento','paniol','contador','gerente_sucursal'), async (req, res) => {
   const client = await pool.connect();
@@ -1365,7 +1366,8 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
     const mapaDevolver = {
       'en_cotizacion':      'pendiente_cotizacion',
       'aprobada_compras':   'en_cotizacion',
-      'pagada':             'aprobada_compras'
+      'enviada_proveedor':  'aprobada_compras',
+      'pagada':             'enviada_proveedor'
     };
     const estadoNuevo = mapaDevolver[estadoActual];
     if (!estadoNuevo) {
@@ -1376,10 +1378,10 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
     // Validar que el rol pueda devolver desde el estado actual
     const puedeDevolver = (
       esAdmin ||
-      // Compras devuelve cuando está cotizando (al solicitante)
-      (rol === 'compras' && estadoActual === 'en_cotizacion') ||
+      // Compras devuelve cuando está cotizando (al solicitante) o des-envía una OC ya enviada
+      (rol === 'compras' && ['en_cotizacion','enviada_proveedor'].includes(estadoActual)) ||
       // Tesorería devuelve cuando tiene que pagar (a compras)
-      (rol === 'tesoreria' && estadoActual === 'aprobada_compras') ||
+      (rol === 'tesoreria' && estadoActual === 'enviada_proveedor') ||
       // Solicitantes pueden devolver pagadas (a tesorería) si llegó algo mal — raro
       (['jefe_mantenimiento','paniol','contador'].includes(rol) && estadoActual === 'pagada' && cur.rows[0].requested_by === req.user.id)
     );
@@ -1394,7 +1396,8 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
     const limpieza = {
       'pendiente_cotizacion': 'cotizado_por = NULL, cotizado_at = NULL',
       'en_cotizacion':        'aprobado_compras_por = NULL, aprobado_compras_at = NULL',
-      'aprobada_compras':     'pagado_por = NULL, pagado_at = NULL'
+      'aprobada_compras':     'enviada_por = NULL, fecha_envio_prov = NULL',
+      'enviada_proveedor':    'pagado_por = NULL, pagado_at = NULL'
     }[estadoNuevo];
 
     const r = await client.query(` 

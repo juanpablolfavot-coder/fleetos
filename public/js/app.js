@@ -9203,7 +9203,7 @@ function _poRenderKPIs() {
   const isPendienteCotizacion = (p) => p.status === 'pendiente_cotizacion';
   const isEnCotizacion = (p) => p.status === 'en_cotizacion';
   const isAprobadaPorRecibir = (p) => (
-    p.status === 'aprobada_compras' &&
+    ['aprobada_compras','enviada_proveedor'].includes(p.status) &&
     String(p.delivery_status || 'pendiente').toLowerCase() !== 'total'
   );
   const isRecibida = (p) => (
@@ -9414,6 +9414,7 @@ function _poProgress(po) {
   if (status === 'pendiente_cotizacion') return 15;
   if (status === 'en_cotizacion') return 35;
   if (status === 'aprobada_compras') return 60;
+  if (status === 'enviada_proveedor') return 68;
 
   // Estados avanzados, pero incompletos: no mostrar 100 para no confundir.
   let pct = 60;
@@ -10233,10 +10234,12 @@ async function openPODetail(id) {
         bloqueoMensaje = '🔒 Esta OC ya avanzó a tesorería/recepción. No podés modificarla en su etapa actual.';
       }
     } else if (role === 'tesoreria') {
-      if (po.status === 'aprobada_compras') {
+      if (['aprobada_compras','enviada_proveedor'].includes(po.status)) {
         // Tesorería NO edita datos — solo verifica y paga (la factura llega cargada por compras)
         canEdit = false;
-        bloqueoMensaje = '📋 Tesorería: Click en "📄 Facturas" para ver/cargar facturas y registrar pagos. Cada factura puede tener uno o varios pagos parciales.';
+        bloqueoMensaje = po.status === 'aprobada_compras'
+          ? '⏳ Esta OC todavía no fue enviada al proveedor. Compras debe marcarla como enviada antes de poder pagarla.'
+          : '📋 Tesorería: Click en "📄 Facturas" para ver/cargar facturas y registrar pagos. Cada factura puede tener uno o varios pagos parciales.';
       } else if (po.status === 'pagada') {
         bloqueoMensaje = '🔒 Esta OC ya fue pagada. Los datos de factura quedan congelados.';
       } else {
@@ -10540,10 +10543,10 @@ async function openPODetail(id) {
 
         // ⏪ Devolver (retrocede etapa con motivo)
         const puedeDevolver = (
-          (role === 'compras' && po.status === 'en_cotizacion') ||
-          (role === 'tesoreria' && po.status === 'aprobada_compras') ||
+          (role === 'compras' && ['en_cotizacion','enviada_proveedor'].includes(po.status)) ||
+          (role === 'tesoreria' && po.status === 'enviada_proveedor') ||
           (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status === 'pagada') ||
-          (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','pagada'].includes(po.status))
+          (['dueno','gerencia'].includes(role) && ['en_cotizacion','aprobada_compras','enviada_proveedor','pagada'].includes(po.status))
         );
         if (puedeDevolver) {
           btns.push({ label: role === 'compras' ? '↩ Rechazo parcial / corregir' : '⏪ Devolver', cls:'btn-warn', fn: () => devolverOC(id, po.status) });
@@ -10552,8 +10555,8 @@ async function openPODetail(id) {
         // ❌ Rechazar (cierre definitivo)
         const puedeRechazar = (
           (['jefe_mantenimiento','paniol','contador'].includes(role) && esCreador && po.status === 'pendiente_cotizacion') ||
-          (role === 'compras' && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)) ||
-          (role === 'tesoreria' && po.status === 'aprobada_compras') ||
+          (role === 'compras' && ['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(po.status)) ||
+          (role === 'tesoreria' && po.status === 'enviada_proveedor') ||
           ['dueno','gerencia'].includes(role)
         );
         if (puedeRechazar) {
