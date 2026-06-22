@@ -5714,8 +5714,12 @@ function openModal(title, bodyHTML, actions=[]) {
   const footer = document.getElementById('modal-footer');
   // Hacer que los botones envuelvan en múltiples líneas si no entran
   footer.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;padding:12px 16px';
-  footer.innerHTML = actions.map((a,i)=>`<button class="btn ${a.cls}" id="modal-action-${i}" style="white-space:nowrap">${a.label}</button>`).join('');
-  actions.forEach((a,i) => { document.getElementById('modal-action-'+i).onclick = a.fn; });
+  // Un item { spacer:true } empuja los botones que siguen hacia la derecha
+  // (separa "utilidad" de "acciones" para que no queden todos amontonados).
+  footer.innerHTML = actions.map((a,i)=> a.spacer
+    ? `<div style="flex:1 1 8px;min-width:8px"></div>`
+    : `<button class="btn ${a.cls}" id="modal-action-${i}" style="white-space:nowrap">${a.label}</button>`).join('');
+  actions.forEach((a,i) => { if (a.spacer) return; const _b = document.getElementById('modal-action-'+i); if (_b) _b.onclick = a.fn; });
   if (modal) modal.style.display = 'block';
   overlay.classList.add('open');
   overlay.style.display = 'flex';
@@ -10532,6 +10536,9 @@ async function openPODetail(id) {
 
         // Si la OC está rechazada/cerrada, solo cerrar/imprimir (+ reabrir si corresponde).
         if (esTerminal) return btns;
+
+        // Separador: utilidad (Cerrar/Imprimir) a la izquierda, acciones a la derecha.
+        btns.push({ spacer: true });
 
         // Botón de guardar cambios — solo si el rol puede editar
         // (Los artículos ya son editables inline cuando canEdit, no hace falta botón aparte)
