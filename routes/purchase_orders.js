@@ -1142,8 +1142,45 @@ router.post('/:id/aprobar-compras', authenticate, requireRole('dueno','gerencia'
 });
 
 // ─────────────────────────────────────────────────────────────
+//  POST /:id/marcar-enviada — Compras marca que la OC se envió al proveedor
+//  aprobada_compras → enviada_proveedor
+//  Paso OBLIGATORIO: no se puede pagar ni recibir hasta marcar la OC como enviada.
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/marcar-enviada', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT status FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!cur.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'OC no encontrada' });
+    }
+    if (cur.rows[0].status !== 'aprobada_compras') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Solo se puede marcar como enviada una OC aprobada por compras' });
+    }
+    const r = await client.query(`
+      UPDATE purchase_orders SET
+        status = 'enviada_proveedor',
+        enviada_por = $1,
+        fecha_envio_prov = NOW()
+      WHERE id = $2 RETURNING *`,
+      [req.user.id, req.params.id]
+    );
+    await client.query('COMMIT');
+    res.json(r.rows[0]);
+  } catch(err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[OC marcar-enviada]', err.message);
+    res.status(500).json({ error: 'Error al marcar la OC como enviada' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
 //  POST /:id/pagar — Tesorería confirma el pago
-//  aprobada_compras → pagada
+//  enviada_proveedor → pagada
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreria'), async (req, res) => {
   const client = await pool.connect();
@@ -1155,9 +1192,9 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
     }
-    if (cur.rows[0].status !== 'aprobada_compras') {
+    if (cur.rows[0].status !== 'enviada_proveedor') {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Solo se puede pagar una OC aprobada por compras' });
+      return res.status(400).json({ error: 'Solo se puede pagar una OC que ya fue enviada al proveedor' });
     }
     const r = await client.query(`
       UPDATE purchase_orders SET
@@ -1204,9 +1241,9 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Solo podés recibir OCs que creaste vos' });
     }
-    if (!['aprobada_compras','pagada'].includes(cur.rows[0].status)) {
+    if (!['enviada_proveedor','pagada'].includes(cur.rows[0].status)) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Solo se puede recibir una OC aprobada por compras o pagada' });
+      return res.status(400).json({ error: 'Solo se puede recibir una OC que ya fue enviada al proveedor o pagada' });
     }
 
     if (req.user.role === 'gerente_sucursal') {

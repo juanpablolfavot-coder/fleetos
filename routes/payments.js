@@ -133,9 +133,9 @@ function ensurePaymentEngine() {
           status = CASE
             WHEN v_po_status = 'recibida' THEN 'recibida'
             WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
-            WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','pagada') THEN 'pagada'
+            WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
             WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
-            WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' THEN 'aprobada_compras'
+            WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' THEN 'enviada_proveedor'
             ELSE status
           END,
           pagado_at = CASE WHEN v_payment_status='total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
@@ -201,9 +201,9 @@ function ensurePaymentEngine() {
         status = CASE
           WHEN po.status = 'recibida' THEN 'recibida'
           WHEN e.payment_status = 'total' AND COALESCE(po.delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN e.payment_status = 'total' AND po.status IN ('aprobada_compras','pagada') THEN 'pagada'
+          WHEN e.payment_status = 'total' AND po.status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
           WHEN e.payment_status <> 'total' AND po.status = 'pagada' AND COALESCE(po.delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN e.payment_status <> 'total' AND po.status = 'pagada' THEN 'aprobada_compras'
+          WHEN e.payment_status <> 'total' AND po.status = 'pagada' THEN 'enviada_proveedor'
           ELSE po.status
         END
     FROM estados e
@@ -271,9 +271,9 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
         status = CASE
           WHEN status = 'recibida' THEN 'recibida'
           WHEN $2::varchar = 'total' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN $2::varchar = 'total' AND status IN ('aprobada_compras','pagada') THEN 'pagada'
+          WHEN $2::varchar = 'total' AND status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
           WHEN $2::varchar <> 'total' AND status = 'pagada' AND COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN $2::varchar <> 'total' AND status = 'pagada' THEN 'aprobada_compras'
+          WHEN $2::varchar <> 'total' AND status = 'pagada' THEN 'enviada_proveedor'
           ELSE status
         END,
         pagado_at = CASE WHEN $2::varchar='total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
@@ -396,7 +396,7 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
          f.id, f.invoice_monto, f.invoice_monto AS invoice_neto, f.iva_pct,
          ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
          COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p WHERE p.invoice_id=f.id),0) AS monto_pagado,
-         po.proveedor,
+         po.proveedor, po.status AS po_status,
          s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
        FROM purchase_order_invoices f
        JOIN purchase_orders po ON po.id = f.po_id
@@ -408,6 +408,11 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     if (!f.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Factura no encontrada' });
+    }
+    // Gate: no se puede pagar una OC que todavía no fue enviada al proveedor.
+    if (['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(f.rows[0].po_status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No se puede pagar: la OC todavía no fue enviada al proveedor' });
     }
 
     const totalFactura = parseFloat(f.rows[0].invoice_total) || 0;
@@ -568,7 +573,7 @@ router.post('/:id/facturas/:fid/pagos-multiple', authenticate, requireRole(...RO
          f.id, f.invoice_monto, f.iva_pct,
          ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
          COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p WHERE p.invoice_id=f.id),0) AS monto_pagado,
-         po.proveedor,
+         po.proveedor, po.status AS po_status,
          s.name AS supplier_name, s.bank_name AS supplier_bank, s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias
        FROM purchase_order_invoices f
        JOIN purchase_orders po ON po.id = f.po_id
@@ -578,6 +583,10 @@ router.post('/:id/facturas/:fid/pagos-multiple', authenticate, requireRole(...RO
       [req.params.fid, req.params.id]
     );
     if (!f.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Factura no encontrada' }); }
+    if (['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(f.rows[0].po_status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No se puede pagar: la OC todavía no fue enviada al proveedor' });
+    }
 
     const totalFactura = parseFloat(f.rows[0].invoice_total) || 0;
     const pagadoActual = parseFloat(f.rows[0].monto_pagado) || 0;
