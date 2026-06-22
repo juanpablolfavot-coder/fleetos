@@ -102,6 +102,15 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         VARCHAR(100);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   VARCHAR(100);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center VARCHAR(100);
 
+-- Datos de GPS (los completa el servicio Powerfleet en runtime; se declaran acá
+-- para que existan desde una base recién migrada y el panel auditor no falle).
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_lat        NUMERIC(10,7);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_lng        NUMERIC(10,7);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_speed      NUMERIC(6,1) DEFAULT 0;
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_status     VARCHAR(20)  DEFAULT 'unknown';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_hour_meter NUMERIC(10,2);
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_updated_at TIMESTAMPTZ;
+
 -- Normalización de tipos de vehículos para bases ya existentes.
 -- Corrige el constraint viejo que no aceptaba autoelevador, semirremolque ni acoplado.
 DO $$
