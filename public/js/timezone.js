@@ -42,10 +42,23 @@ window.escapeJsArg = function (value) {
   function toDate(value) {
     if (!value) return new Date();
     if (value instanceof Date) return value;
-    // Si viene "YYYY-MM-DD HH:mm:ss-03" o "YYYY-MM-DD HH:mm:ss", JS lo entiende mejor con T.
-    const txt = String(value).trim();
-    const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(txt) ? txt.replace(' ', 'T') : txt;
-    const d = new Date(normalized);
+    const raw = String(value).trim();
+
+    // 1) Intento directo. Postgres devuelve "YYYY-MM-DD HH:MM:SS.ffffff-03"
+    //    (con espacio y offset corto), y V8 ESO lo parsea bien.
+    //    OJO: antes se hacía replace(' ','T') siempre, y con la 'T' el motor pasa
+    //    a modo ISO estricto donde el offset "-03" (sin ":00") es inválido →
+    //    new Date() caía al fallback = AHORA, y todo figuraba con la hora de recarga.
+    let d = new Date(raw);
+    if (!isNaN(d.getTime())) return d;
+
+    // 2) Fallback: normalizar a ISO estricto (T, milisegundos de 3 dígitos,
+    //    offset "±HH" → "±HH:00") por si algún formato no parseó directo.
+    const iso = raw
+      .replace(' ', 'T')
+      .replace(/(\.\d{3})\d+/, '$1')
+      .replace(/([+-]\d{2})$/, '$1:00');
+    d = new Date(iso);
     return isNaN(d.getTime()) ? new Date() : d;
   }
 
