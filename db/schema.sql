@@ -677,6 +677,9 @@ ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(20) DEFAULT 'pendiente';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente';
+-- is_open se define formalmente en 01-compras.sql, pero el bloque de reparación de
+-- más abajo lo referencia y schema.sql corre primero: lo garantizamos acá.
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS is_open BOOLEAN DEFAULT FALSE;
 
 -- Artículos de cada OC
 CREATE TABLE IF NOT EXISTS purchase_order_items (
@@ -809,7 +812,8 @@ SET status = 'recibida',
     recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
 FROM ult_recepcion
 WHERE po.id = ult_recepcion.po_id
-  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada')
+  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada','cerrada')
+  AND COALESCE(po.is_open, FALSE) = FALSE
   AND COALESCE(po.delivery_status, '') = 'total';
 
 -- Reparación legacy: facturas que estaban marcadas pagadas por la lógica vieja
