@@ -573,14 +573,6 @@ function renderDashboard() {
   // ═══ OCs recientes ═══
   const ocEl = document.getElementById('dash-oc');
   const recentOCs = (App.data.purchaseOrders||[]).slice(0,5);
-  const ocStatusBadge = {
-    'pendiente_cotizacion': 'badge-warn',
-    'en_cotizacion':        'badge-info',
-    'aprobada_compras':     'badge-info',
-    'pagada':               'badge-ok',
-    'recibida':             'badge-ok',
-    'rechazada':            'badge-danger',
-  };
   ocEl.innerHTML = recentOCs.length === 0
     ? '<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px">Sin órdenes de compra todavía</div>'
     : `<table><thead><tr><th>OC</th><th>Proveedor</th><th>Total</th><th>Estado</th></tr></thead><tbody>
@@ -588,7 +580,7 @@ function renderDashboard() {
         <td class="td-mono"><b>${escapeHtml(p.code)}</b></td>
         <td>${escapeHtml((p.proveedor || '—').substring(0, 22))}</td>
         <td class="td-mono">$${Math.round(parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0).toLocaleString('es-AR')}</td>
-        <td><span class="badge ${ocStatusBadge[p.status] || 'badge-gray'}">${(p.status||'').replace('_',' ')}</span></td>
+        <td>${_ocEstadoBadge(p)}</td>
       </tr>`).join('')}
     </tbody></table>`;
 
@@ -5806,7 +5798,18 @@ function _ocEstadoBadge(statusOrPo) {
 
   return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:${e.bg};color:${e.fg};border:1px solid ${e.border};font-size:11px;font-weight:600;white-space:nowrap">
     <span>${e.icon}</span><span>${label}</span>
-  </span>`;
+  </span>` + _ocParcialChips(po, status);
+}
+
+// Chips secundarios de avance parcial (entrega/pago). SOLO visual: no cambian el
+// estado real de la OC, solo lo hacen más legible de un vistazo.
+function _ocParcialChips(po, status) {
+  if (!po || ['cerrada','rechazada','recibida'].includes(status)) return '';
+  const chip = (txt) => `<span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:10px;background:rgba(245,158,11,.13);color:#f59e0b;border:1px solid rgba(245,158,11,.35);font-size:9px;font-weight:700;margin-left:4px;white-space:nowrap">${txt}</span>`;
+  let out = '';
+  if (String(po.delivery_status || '').toLowerCase() === 'parcial') out += chip('📦 entrega parcial');
+  if (String(po.payment_status || '').toLowerCase() === 'parcial')  out += chip('💵 pago parcial');
+  return out;
 }
 
 // Qué acciones puede hacer un rol sobre una OC en un estado dado
@@ -10825,7 +10828,7 @@ async function printPO(id) {
           <div class="doc-sub">ORDEN DE COMPRA</div>
           <div class="doc-sub">Fecha: ${new Date(po.created_at).toLocaleDateString('es-AR')}</div>
           <div style="margin-top:6px;text-align:right">
-            <span class="status-pill" style="${statusBadge}">${(po.status||'').replace('_',' ')}</span>
+            <span class="status-pill" style="${statusBadge}">${(OC_ESTADOS[po.status] && OC_ESTADOS[po.status].label) || (po.status||'').replace('_',' ')}</span>
           </div>
         </div>
       </div>
@@ -10852,7 +10855,7 @@ async function printPO(id) {
           <div class="field"><div class="field-label">Monto Factura</div><div class="field-value">${po.factura_monto ? '$'+parseFloat(po.factura_monto).toLocaleString('es-AR') : '—'}</div></div>
           <div class="field"><div class="field-label">IVA</div><div class="field-value">${po.iva_pct ? po.iva_pct+'%' : '—'}</div></div>
           <div class="field"><div class="field-label">Forma de pago</div><div class="field-value">${_ocFormaPagoLabel(po.forma_pago, po.cc_dias)}</div></div>
-          <div class="field"><div class="field-label">Estado</div><div class="field-value">${(po.status||'').replace('_',' ')}</div></div>
+          <div class="field"><div class="field-label">Estado</div><div class="field-value">${(OC_ESTADOS[po.status] && OC_ESTADOS[po.status].label) || (po.status||'').replace('_',' ')}</div></div>
         </div>
       </div>
       ` : ''}
