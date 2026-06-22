@@ -2214,7 +2214,7 @@ function renderFuel() {
     </div>
     <div class="card" style="padding:0">
       <div class="table-wrap">
-        <table><thead><tr>
+        <table class="table-cards"><thead><tr>
           <th onclick="_fuelSortBy('date')" style="cursor:pointer;user-select:none">Fecha <span id="fuel-sort-date" style="opacity:.3">⇅</span></th>
           <th onclick="_fuelSortBy('vehicle')" style="cursor:pointer;user-select:none">Unidad <span id="fuel-sort-vehicle" style="opacity:.3">⇅</span></th>
           <th onclick="_fuelSortBy('driver')" style="cursor:pointer;user-select:none">Chofer <span id="fuel-sort-driver" style="opacity:.3">⇅</span></th>
@@ -13755,19 +13755,19 @@ function _renderFuelLogRows(logs) {
     return `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
   }
   return logs.map(f => `<tr>
-    <td class="td-mono" style="font-size:11px">${f.date || '—'}</td>
-    <td class="td-main">${f.vehicle || '—'}</td>
-    <td>${escapeHtml(f.driver || '—')}${f.cargado_por && f.cargado_por !== '—' && f.cargado_por !== f.driver ? `<div style="font-size:10px;color:var(--text3)">cargó: ${escapeHtml(f.cargado_por)}</div>` : ''}</td>
-    <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
-    <td class="td-mono">${f.liters || 0} L</td>
-    <td class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
+    <td data-label="Fecha" class="td-mono" style="font-size:11px">${f.date || '—'}</td>
+    <td data-label="Unidad" class="td-main">${f.vehicle || '—'}</td>
+    <td data-label="Chofer">${escapeHtml(f.driver || '—')}${f.cargado_por && f.cargado_por !== '—' && f.cargado_por !== f.driver ? `<div style="font-size:10px;color:var(--text3)">cargó: ${escapeHtml(f.cargado_por)}</div>` : ''}</td>
+    <td data-label="Tipo"><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
+    <td data-label="Litros" class="td-mono">${f.liters || 0} L</td>
+    <td data-label="Odómetro" class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
     ${verPrecios ? `
-      <td class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
-      <td class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
+      <td data-label="Precio/L" class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
+      <td data-label="Total" class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
     ` : ''}
-    <td>${f.place || '—'}</td>
-    <td><span class="badge ${f.ticket_estado==='verificado'?'badge-ok':(f.ticket_estado==='observado'?'badge-warn':'badge-info')}">${f.ticket_estado ? ('Ticket ' + f.ticket_estado) : (f.status||'—')}</span></td>
-    <td>
+    <td data-label="Lugar">${f.place || '—'}</td>
+    <td data-label="Estado"><span class="badge ${f.ticket_estado==='verificado'?'badge-ok':(f.ticket_estado==='observado'?'badge-warn':'badge-info')}">${f.ticket_estado ? ('Ticket ' + f.ticket_estado) : (f.status||'—')}</span></td>
+    <td data-label="">
       <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
         ${_fuelIsCisternaVehicleLog(f)
           ? `<button class="btn btn-secondary btn-sm" onclick="openFuelVehicleTicket('${f.id}')" title="Ticket interno de cisterna a vehículo">🧾 Ticket</button>`
