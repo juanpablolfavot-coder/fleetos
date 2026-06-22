@@ -3,7 +3,6 @@
 -- Idempotente
 -- ══════════════════════════════════════════════════════════════════════
 
-BEGIN;
 
 ALTER TABLE purchase_order_payments
   ADD COLUMN IF NOT EXISTS banco_origen VARCHAR(100),
@@ -192,7 +191,6 @@ SET payment_status = e.payment_status,
 FROM estados e
 WHERE po.id = e.po_id;
 
-COMMIT;
 
 SELECT 'pagos tesoreria con IVA incluido' AS check,
        COUNT(*) FILTER (WHERE column_name IN ('banco_origen','cheque_nro','echeq_nro','tarjeta_aprobacion')) AS cols_nuevas
