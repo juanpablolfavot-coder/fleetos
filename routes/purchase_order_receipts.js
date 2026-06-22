@@ -53,11 +53,21 @@ const DESTINOS_FIJOS = [
 // ─────────────────────────────────────────────────────────────
 //  Helper: columnas defensivas para bases que vienen de versiones viejas
 // ─────────────────────────────────────────────────────────────
-async function ensurePOReceiptStateColumns(client) {
-  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
-  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_por UUID`).catch(()=>{});
-  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_at TIMESTAMPTZ`).catch(()=>{});
-  await client.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ`).catch(()=>{});
+let _poReceiptColsEnsured = false;
+async function ensurePOReceiptStateColumns(_client) {
+  // Memoizado: corre una sola vez por proceso. El DDL va por el pool (autocommit),
+  // no por la transacción del caller: así, aunque la recepción haga ROLLBACK, las
+  // columnas ya quedaron creadas y el memo es seguro. Solo se memoiza si tuvo éxito.
+  if (_poReceiptColsEnsured) return;
+  try {
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente'`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_por UUID`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ`);
+    _poReceiptColsEnsured = true;
+  } catch (e) {
+    console.warn('[ensurePOReceiptStateColumns]', e.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

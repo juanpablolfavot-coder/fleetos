@@ -3979,7 +3979,7 @@ function stockCanManage() {
 function stockBaseOptions() {
   const cfgBases = Array.isArray(App.config?.bases) ? App.config.bases : [];
   const dataBases = (App.data.stock || []).map(s => s.sucursal || s.base_location).filter(Boolean);
-  const fallback = App.currentUser?.sucursal ? [App.currentUser.sucursal] : ['Central'];
+  const fallback = App.currentUser?.sucursal ? [App.currentUser.sucursal] : [];
   return [...new Set([...fallback, ...cfgBases, ...dataBases])].filter(Boolean);
 }
 
