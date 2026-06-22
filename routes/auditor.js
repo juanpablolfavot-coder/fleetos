@@ -13,6 +13,20 @@ const canAudit = (req, res, next) => {
   res.status(403).json({ error: 'Acceso restringido al auditor' });
 };
 
+// Asegura las tablas opcionales UNA sola vez (no en cada GET).
+// El panel auditor es de solo lectura: no debería disparar DDL en cada request.
+let _auditorSchemaReady = false;
+async function ensureAuditorSchema() {
+  if (_auditorSchemaReady) return;
+  await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT').catch(()=>{});
+  await query(`CREATE TABLE IF NOT EXISTS fuel_logs (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, tank_id UUID, fuel_type VARCHAR(20), liters NUMERIC, price_per_l NUMERIC, odometer_km INTEGER, location TEXT, notes TEXT, ticket_image TEXT, logged_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+  await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
+  await query(`CREATE TABLE IF NOT EXISTS work_order_parts (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), wo_id UUID, stock_id UUID, name TEXT, origin VARCHAR(20), qty NUMERIC, unit VARCHAR(20), unit_cost NUMERIC DEFAULT 0, subtotal NUMERIC GENERATED ALWAYS AS (qty * unit_cost) STORED, added_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+  await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+  await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, driver_name VARCHAR(100), vehicle_code VARCHAR(20), km_at_check INTEGER, items JSONB DEFAULT '[]', observations TEXT, all_ok BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+  _auditorSchemaReady = true;
+}
+
 // ── 1. Resumen ejecutivo del mes ──────────────────────────
 auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
   try {
@@ -24,12 +38,8 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
     const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-    // Asegurar que existen las tablas opcionales
-    await query('ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT').catch(()=>{});
-    await query(`CREATE TABLE IF NOT EXISTS fuel_logs (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, tank_id UUID, fuel_type VARCHAR(20), liters NUMERIC, price_per_l NUMERIC, odometer_km INTEGER, location TEXT, notes TEXT, ticket_image TEXT, logged_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
-    await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
-    await query(`CREATE TABLE IF NOT EXISTS stock_movements (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), stock_id UUID, type VARCHAR(20), qty NUMERIC, reason TEXT, wo_id UUID, user_id UUID, requires_approval BOOLEAN DEFAULT FALSE, approved_by UUID, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
-    await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, driver_id UUID, driver_name VARCHAR(100), vehicle_code VARCHAR(20), km_at_check INTEGER, items JSONB DEFAULT '[]', observations TEXT, all_ok BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+    // Asegurar que existen las tablas opcionales (una sola vez, no en cada GET)
+    await ensureAuditorSchema();
 
     const [fuel, ots, stock, checklists, vehiculos, accesos, ocsMes, facturadoMes, pagadoMes, deuda, comprasCat] = await Promise.all([
       // Combustible del mes
@@ -136,7 +146,7 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
         })),
       },
     });
-  } catch(err) { console.error('auditor resumen:', err.message); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('auditor resumen:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 2. Anomalías de combustible ──────────────────────────
@@ -247,16 +257,15 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
     }
 
     res.json({ total_anomalias: anomalias.length, anomalias });
-  } catch(err) { console.error('auditor anomalias fuel:', err.message); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('auditor anomalias fuel:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 3. Anomalías en OTs ───────────────────────────────────
 auditorRouter.get('/anomalias-ots', authenticate, canAudit, async (req, res) => {
   try {
     const anomalias = [];
-    // Asegurar tablas
-    await query(`CREATE TABLE IF NOT EXISTS work_orders (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), code VARCHAR(20), vehicle_id UUID, type VARCHAR(30), status VARCHAR(20), priority VARCHAR(20), description TEXT, mechanic_id UUID, reporter_id UUID, labor_cost NUMERIC DEFAULT 0, parts_cost NUMERIC DEFAULT 0, km_at_open INTEGER, opened_at TIMESTAMPTZ DEFAULT NOW(), closed_at TIMESTAMPTZ, root_cause TEXT)`).catch(()=>{});
-    await query(`CREATE TABLE IF NOT EXISTS work_order_parts (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), wo_id UUID, stock_id UUID, name TEXT, origin VARCHAR(20), qty NUMERIC, unit VARCHAR(20), unit_cost NUMERIC DEFAULT 0, subtotal NUMERIC GENERATED ALWAYS AS (qty * unit_cost) STORED, added_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+    // Asegurar tablas (una sola vez, no en cada GET)
+    await ensureAuditorSchema();
 
     // a) OTs con costo de mano de obra muy alto (> 3x el promedio)
     const costos = await query(`
@@ -354,7 +363,7 @@ auditorRouter.get('/anomalias-ots', authenticate, canAudit, async (req, res) => 
     }
 
     res.json({ total_anomalias: anomalias.length, anomalias });
-  } catch(err) { console.error('auditor anomalias ots:', err.message); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('auditor anomalias ots:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 4. Trazabilidad completa por unidad ───────────────────
@@ -393,7 +402,7 @@ auditorRouter.get('/trazabilidad/:vehicleId', authenticate, canAudit, async (req
       documentos: docs.rows,
       cubiertas: tires.rows,
     });
-  } catch(err) { console.error('auditor trazabilidad:', err.message); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('auditor trazabilidad:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 5. Log de acciones del sistema ───────────────────────
@@ -419,7 +428,7 @@ auditorRouter.get('/log-acciones', authenticate, canAudit, async (req, res) => {
     
     const result = await query(sql, params);
     res.json({ total: result.rows.length, log: result.rows });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 6. Reporte comparativo mensual ───────────────────────
@@ -461,7 +470,7 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
       });
     }
     res.json({ meses });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 7. Uso de flota (heatmap de actividad por vehículo × día) ──
@@ -477,8 +486,8 @@ auditorRouter.get('/uso-flota', authenticate, canAudit, async (req, res) => {
     const lastDay = new Date(yr, mo, 0).getDate();
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-    // Asegurar tablas por si aún no existen (mismo patrón que resumen)
-    await query(`CREATE TABLE IF NOT EXISTS checklists (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), vehicle_id UUID, vehicle_code VARCHAR(20), created_at TIMESTAMPTZ DEFAULT NOW())`).catch(()=>{});
+    // Asegurar tablas por si aún no existen (una sola vez, no en cada GET)
+    await ensureAuditorSchema();
 
     // Una sola query que une 3 fuentes y cuenta actividad por vehículo × día
     const r = await query(`
@@ -523,7 +532,7 @@ auditorRouter.get('/uso-flota', authenticate, canAudit, async (req, res) => {
     });
   } catch(err) {
     console.error('auditor uso-flota:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });
 
@@ -574,7 +583,7 @@ auditorRouter.get('/gps-hoy', authenticate, canAudit, async (req, res) => {
       })),
       cargas_hoy: fuelHoy.rows,
     });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 7. Proxy IA — llama a Claude desde el backend (protege la API key) ──
@@ -624,6 +633,6 @@ auditorRouter.post('/ia', authenticate, canAudit, async (req, res) => {
     res.json({ respuesta: texto });
   } catch(err) {
     console.error('auditor ia:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error del servidor' });
   }
 });

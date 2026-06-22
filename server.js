@@ -1,14 +1,33 @@
 process.env.TZ = process.env.TZ || 'America/Argentina/Buenos_Aires';
-// Manejo global de errores: loguea pero NO mata el proceso
-// (matar el proceso hacía que Render reiniciara el server ante CUALQUIER error, interrumpiendo a todos)
-process.on('uncaughtException', (e) => {
-  console.error('UNCAUGHT EXCEPTION:', e.message, e.stack);
-  // NO process.exit — dejamos que el server siga sirviendo otros requests
-});
+
+// Referencia al server HTTP (se asigna en app.listen) para poder hacer
+// un apagado ordenado ante un crash real.
+let httpServer = null;
+
+// unhandledRejection: una promesa rechazada y no capturada (típicamente una
+// query "fire and forget" de fondo) NO debe tirar abajo el server. Solo se loguea.
+// Esto preserva el comportamiento que evitaba reinicios por cualquier error suelto.
 process.on('unhandledRejection', (r) => {
   console.error('UNHANDLED REJECTION:', r);
-  // NO process.exit
+  // NO process.exit — un rechazo suelto no justifica matar el proceso.
 });
+
+// uncaughtException: acá el proceso QUEDÓ en estado indefinido (Node lo advierte).
+// Seguir sirviendo requests sobre un proceso corrupto puede dejar transacciones de
+// pagos/stock a medio aplicar. Lo correcto: dejar de tomar conexiones nuevas y salir,
+// para que Render levante un proceso limpio. Damos un margen breve para cerrar lo en vuelo.
+let _shuttingDown = false;
+process.on('uncaughtException', (e) => {
+  console.error('UNCAUGHT EXCEPTION:', e.message, e.stack);
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  try {
+    if (httpServer) httpServer.close(() => process.exit(1));
+  } catch (_) { /* noop */ }
+  // Red de seguridad: si el cierre ordenado se cuelga, forzar salida.
+  setTimeout(() => process.exit(1), 3000).unref();
+});
+
 require('dotenv').config();
 const express=require('express');
 const helmet=require('helmet');
@@ -56,7 +75,20 @@ app.use(helmet({
   },
   crossOriginEmbedderPolicy: false,
 }));
-app.use(cors({origin:(o,cb)=>cb(null,true),credentials:true}));
+// CORS: si hay FRONTEND_URL configurado, se restringe a esos orígenes (recomendado en
+// producción). Si NO está configurado, se mantiene el comportamiento previo (refleja origen)
+// para no romper entornos sin la variable. Las requests del mismo origen (sin header Origin)
+// siempre se permiten.
+const ALLOWED_ORIGINS = String(process.env.FRONTEND_URL || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({
+  origin: (o, cb) => {
+    if (!o) return cb(null, true);                       // mismo origen / curl / apps móviles
+    if (ALLOWED_ORIGINS.length === 0) return cb(null, true); // sin whitelist: comportamiento previo
+    return cb(null, ALLOWED_ORIGINS.includes(o));        // con whitelist: solo orígenes permitidos
+  },
+  credentials: true,
+}));
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use(hpp());
@@ -179,7 +211,7 @@ app.use((err,req,res,next)=>{
 });
 
 const PORT=process.env.PORT||3000;
-app.listen(PORT, () => {
+httpServer = app.listen(PORT, () => {
   console.log('FleetOS OK port', PORT);
   // Iniciar sync GPS con Powerfleet cada 5 minutos
   startGPSSync(5);

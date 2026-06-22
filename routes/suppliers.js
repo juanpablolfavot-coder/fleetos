@@ -175,7 +175,7 @@ router.get('/', authenticate, async (req, res) => {
     sql += ` ORDER BY name ASC`;
     const r = await query(sql, params);
     res.json(r.rows);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // GET /api/suppliers/:id
@@ -184,7 +184,7 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
     const r = await query('SELECT * FROM suppliers WHERE id = $1', [req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Proveedor no encontrado' });
     res.json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // POST /api/suppliers — crear
@@ -234,7 +234,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
     );
     res.locals.recordId = r.rows[0].id;
     res.status(201).json(r.rows[0]);
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // PUT /api/suppliers/:id — actualizar
@@ -295,7 +295,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
     if (!r.rows[0]) return res.status(404).json({ error: 'Proveedor no encontrado' });
     res.locals.recordId = r.rows[0].id;
     res.json(r.rows[0]);
-  } catch(err) { console.error('[suppliers] PUT:', err); res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error('[suppliers] PUT:', err); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // DELETE /api/suppliers/:id — soft delete
@@ -307,7 +307,7 @@ router.delete('/:id', authenticate, requireRole('dueno','gerencia'), validateUUI
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'Proveedor no encontrado' });
     res.json({ ok: true });
-  } catch(err) { res.status(500).json({ error: err.message }); }
+  } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 module.exports = router;
