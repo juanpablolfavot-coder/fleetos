@@ -272,7 +272,7 @@ function renderDashboard() {
     return min > 0 && cur <= min;
   });
   const ocsRevision = (App.data.purchaseOrders||[]).filter(p => p.status === 'pendiente_cotizacion' || p.status === 'en_cotizacion');
-  const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'pagada');
+  const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'enviada_proveedor' || p.status === 'pagada');
 
   // Mantenimientos vencidos (>=95% del intervalo)
   const maintAlerts = v.map(veh => {
@@ -5744,8 +5744,10 @@ const OC_ESTADOS = {
   pendiente_cotizacion: { label: 'Pendiente cotización', icon: '📝', bg: 'rgba(251,191,36,.15)', fg: '#f59e0b', border: 'rgba(251,191,36,.4)' },
   en_cotizacion:        { label: 'En cotización',        icon: '🔎', bg: 'rgba(139,92,246,.15)', fg: '#a78bfa', border: 'rgba(139,92,246,.4)' },
   aprobada_compras:     { label: 'Aprobada por compras', icon: '✅', bg: 'rgba(14,165,233,.15)', fg: '#38bdf8', border: 'rgba(14,165,233,.4)' },
+  enviada_proveedor:    { label: 'Enviada al proveedor', icon: '📤', bg: 'rgba(99,102,241,.15)', fg: '#818cf8', border: 'rgba(99,102,241,.4)' },
   pagada:               { label: 'Pagada',               icon: '💰', bg: 'rgba(34,197,94,.15)',  fg: '#4ade80', border: 'rgba(34,197,94,.4)' },
   recibida:             { label: 'Recibida',             icon: '📦', bg: 'rgba(16,185,129,.2)',  fg: '#10b981', border: 'rgba(16,185,129,.5)' },
+  cerrada:              { label: 'Cerrada',              icon: '🔒', bg: 'rgba(100,116,139,.18)', fg: '#94a3b8', border: 'rgba(100,116,139,.45)' },
   rechazada:            { label: 'Rechazada',            icon: '❌', bg: 'rgba(239,68,68,.15)',  fg: '#f87171', border: 'rgba(239,68,68,.4)' }
 };
 
@@ -5786,8 +5788,12 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   if (['pendiente_cotizacion','en_cotizacion'].includes(st) && (userRole === 'compras' || esAdmin)) {
     acciones.push({ key: 'aprobar',  label: '✅ Aprobar con precios', color: 'success' });
   }
-  // TESORERÍA y admin: pagar
-  if (st === 'aprobada_compras' && (userRole === 'tesoreria' || esAdmin)) {
+  // COMPRAS y admin: marcar enviada al proveedor (paso obligatorio antes de pagar/recibir)
+  if (st === 'aprobada_compras' && (userRole === 'compras' || esAdmin)) {
+    acciones.push({ key: 'enviada',  label: '📤 Marcar enviada al proveedor', color: 'primary' });
+  }
+  // TESORERÍA y admin: pagar (solo una vez enviada al proveedor)
+  if (st === 'enviada_proveedor' && (userRole === 'tesoreria' || esAdmin)) {
     acciones.push({ key: 'pagar',    label: '✓ Confirmar pago', color: 'primary' });
   }
   // Recepción: la mercadería puede recibirse aunque el pago siga pendiente.
@@ -5796,7 +5802,7 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
     && App?.currentUser?.sucursal
     && oc?.sucursal
     && String(App.currentUser.sucursal).trim().toLowerCase() === String(oc.sucursal).trim().toLowerCase();
-  if (['aprobada_compras','pagada'].includes(st) && (
+  if (['enviada_proveedor','pagada'].includes(st) && (
     (['jefe_mantenimiento','paniol','contador','compras'].includes(userRole) && esCreador) ||
     esMismaSucursal ||
     esAdmin
@@ -5807,10 +5813,10 @@ function _ocAccionesPermitidas(oc, userRole, userId) {
   const puedeRechazar = (
     esAdmin ||
     (['jefe_mantenimiento','paniol','contador'].includes(userRole) && esCreador && st === 'pendiente_cotizacion') ||
-    (userRole === 'compras'   && ['pendiente_cotizacion','en_cotizacion'].includes(st)) ||
-    (userRole === 'tesoreria' && st === 'aprobada_compras')
+    (userRole === 'compras'   && ['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(st)) ||
+    (userRole === 'tesoreria' && st === 'enviada_proveedor')
   );
-  if (puedeRechazar && !['recibida','rechazada'].includes(st)) {
+  if (puedeRechazar && !['recibida','cerrada','rechazada'].includes(st)) {
     acciones.push({ key: 'rechazar', label: '❌ Rechazar', color: 'danger' });
   }
 
@@ -9127,8 +9133,10 @@ async function renderPurchaseOrders() {
         <option value="pendiente_cotizacion">📝 Pendiente cotización</option>
         <option value="en_cotizacion">🔎 En cotización</option>
         <option value="aprobada_compras">✅ Aprobada por compras</option>
+        <option value="enviada_proveedor">📤 Enviada al proveedor</option>
         <option value="pagada">💰 Pagada</option>
         <option value="recibida">📦 Recibida</option>
+        <option value="cerrada">🔒 Cerrada</option>
         <option value="rechazada">❌ Rechazada</option>
       </select>
 
@@ -10489,17 +10497,22 @@ async function openPODetail(id) {
           btns.push({ label:'✅ Aprobar con precios', cls:'btn-primary', fn: () => aprobarOC(id) });
         }
 
-        // ✅ Aprobada compras → tesorería/dueño confirman pago
-        if (po.status === 'aprobada_compras' && (role === 'tesoreria' || ['dueno','gerencia'].includes(role))) {
+        // 📤 Aprobada compras → compras/dueño marcan enviada al proveedor (paso obligatorio)
+        if (po.status === 'aprobada_compras' && (role === 'compras' || ['dueno','gerencia'].includes(role))) {
+          btns.push({ label:'📤 Marcar enviada al proveedor', cls:'btn-primary', fn: () => marcarEnviadaOC(id) });
+        }
+
+        // ✅ Enviada al proveedor → tesorería/dueño confirman pago
+        if (po.status === 'enviada_proveedor' && (role === 'tesoreria' || ['dueno','gerencia'].includes(role))) {
           btns.push({ label:'✓ Confirmar pago', cls:'btn-primary', fn: () => pagarOC(id) });
         }
 
-        // 📦 Recepción: disponible desde aprobada_compras. No depende del pago.
+        // 📦 Recepción: disponible desde que se envió al proveedor. No depende del pago.
         const esMismaSucursalRecepcion = role === 'gerente_sucursal'
           && App.currentUser?.sucursal
           && po.sucursal
           && String(App.currentUser.sucursal).trim().toLowerCase() === String(po.sucursal).trim().toLowerCase();
-        if (['aprobada_compras','pagada'].includes(po.status) && (
+        if (['enviada_proveedor','pagada'].includes(po.status) && (
           (['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) ||
           esMismaSucursalRecepcion ||
           ['dueno','gerencia'].includes(role)
@@ -10507,15 +10520,15 @@ async function openPODetail(id) {
           btns.push({ label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) });
         }
 
-        // 📦 Recepciones parciales (disponible desde aprobada_compras en adelante, salvo rechazada)
-        if (['aprobada_compras','pagada','recibida'].includes(po.status) && (
+        // 📦 Recepciones parciales (disponible desde enviada al proveedor en adelante, salvo rechazada)
+        if (['enviada_proveedor','pagada','recibida'].includes(po.status) && (
           ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'].includes(role)
         )) {
           btns.push({ label:'📦 Recepciones parciales', cls:'btn-secondary', fn: () => abrirModalRecepciones(id) });
         }
 
         // 📄 Facturas (disponible desde aprobada_compras en adelante)
-        if (['aprobada_compras','pagada','recibida'].includes(po.status) && (
+        if (['aprobada_compras','enviada_proveedor','pagada','recibida'].includes(po.status) && (
           ['dueno','gerencia','compras','tesoreria','contador','proveedores'].includes(role)
         )) {
           btns.push({ label:'📄 Facturas', cls:'btn-secondary', fn: () => abrirModalFacturas(id) });
@@ -11689,6 +11702,18 @@ function getPOExtraFields() {
 
 /* FIN OC EXTRAS v1 */
 /* --- OC WORKFLOW ACTIONS v2 — 6 estados nuevos --- */
+
+// COMPRAS marca la OC como enviada al proveedor (paso obligatorio antes de pagar/recibir)
+async function marcarEnviadaOC(id) {
+  if (!confirm('¿Confirmás que esta OC se envió al proveedor? Recién después se podrá pagar o recibir.')) return;
+  try {
+    const r = await apiFetch('/api/purchase-orders/' + id + '/marcar-enviada', { method: 'POST' });
+    if (!r.ok) { const e = await r.json(); showToast('error', e.error || 'Error al marcar enviada'); return; }
+    showToast('ok', '📤 OC marcada como enviada al proveedor');
+    closeModal();
+    await loadPOList();
+  } catch(err) { showToast('error', err.message || 'Error'); }
+}
 
 // COMPRAS toma la OC para empezar a cotizar
 async function tomarCotizacionOC(id) {

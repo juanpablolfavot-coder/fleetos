@@ -71,9 +71,9 @@ BEGIN
       status = CASE
         WHEN v_po_status = 'recibida' THEN 'recibida'
         WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
-        WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','pagada') THEN 'pagada'
+        WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
         WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
-        WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' THEN 'aprobada_compras'
+        WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' THEN 'enviada_proveedor'
         ELSE v_po_status
       END,
       pagado_at = CASE WHEN v_payment_status = 'total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
@@ -139,9 +139,9 @@ SET payment_status = e.payment_status,
     status = CASE
       WHEN po.status = 'recibida' THEN 'recibida'
       WHEN e.payment_status = 'total' AND COALESCE(po.delivery_status,'pendiente') = 'total' THEN 'recibida'
-      WHEN e.payment_status = 'total' AND po.status IN ('aprobada_compras','pagada') THEN 'pagada'
+      WHEN e.payment_status = 'total' AND po.status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
       WHEN e.payment_status <> 'total' AND po.status = 'pagada' AND COALESCE(po.delivery_status,'pendiente') = 'total' THEN 'recibida'
-      WHEN e.payment_status <> 'total' AND po.status = 'pagada' THEN 'aprobada_compras'
+      WHEN e.payment_status <> 'total' AND po.status = 'pagada' THEN 'enviada_proveedor'
       ELSE po.status
     END
 FROM estados e
@@ -199,7 +199,7 @@ BEGIN
       status = CASE
         WHEN v_delivery_status = 'total' AND v_po_status <> 'rechazada' THEN 'recibida'
         WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' AND COALESCE(v_payment_status,'pendiente') = 'total' THEN 'pagada'
-        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' THEN 'aprobada_compras'
+        WHEN v_delivery_status <> 'total' AND v_po_status = 'recibida' THEN 'enviada_proveedor'
         ELSE status
       END,
       recibido_at = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_at, NOW()) ELSE recibido_at END,

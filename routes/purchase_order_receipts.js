@@ -101,7 +101,7 @@ async function recalcDeliveryStatus(client, poId) {
       status = CASE
         WHEN p.delivery_status = 'total' AND po.status <> 'rechazada' THEN 'recibida'
         WHEN p.delivery_status <> 'total' AND po.status = 'recibida' AND COALESCE(po.payment_status,'pendiente') = 'total' THEN 'pagada'
-        WHEN p.delivery_status <> 'total' AND po.status = 'recibida' THEN 'aprobada_compras'
+        WHEN p.delivery_status <> 'total' AND po.status = 'recibida' THEN 'enviada_proveedor'
         ELSE po.status
       END,
       recibido_por = CASE
@@ -258,6 +258,11 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
     if (['rechazada','recibida'].includes(po.rows[0].status)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: `No se puede recibir una OC ${po.rows[0].status}` });
+    }
+    // Gate: no se puede recibir una OC que todavía no fue enviada al proveedor.
+    if (['pendiente_cotizacion','en_cotizacion','aprobada_compras'].includes(po.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'No se puede recibir: la OC todavía no fue enviada al proveedor' });
     }
 
     // Validar que los ítems pertenecen a la OC y que no exceden la cantidad pendiente
