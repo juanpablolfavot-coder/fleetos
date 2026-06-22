@@ -1223,7 +1223,11 @@ router.post('/:id/pagar', authenticate, requireRole('dueno','gerencia','tesoreri
 });
 
 // ─────────────────────────────────────────────────────────────
-//  POST /:id/recibir — Confirmar recepción
+//  POST /:id/recibir — Confirmar recepción (LEGACY)
+//  ⚠ LEGACY: la UI ya NO usa este atajo. La recepción se hace por la vía
+//  granular (POST /:id/recepciones), que deja historial detallado, respeta
+//  OC abierta e impacta el stock. Se mantiene este endpoint solo por
+//  compatibilidad, blindado contra OC abiertas.
 //  La mercadería puede recibirse aunque el pago siga pendiente.
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','compras','paniol','contador','gerente_sucursal'), async (req, res) => {
