@@ -227,7 +227,8 @@ fuelRouter.get('/', authenticate, async (req, res) => {
     await ensureFuelDriverCol();
     const { vehicle_id, limit = 50 } = req.query;
     let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate,
-        COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name
+        COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name,
+        u.name AS cargado_por
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id WHERE 1=1`;
     const params = [];

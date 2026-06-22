@@ -13632,7 +13632,8 @@ function openFuelVehicleTicket(logId) {
         <div><b>Litros cargados</b><br>${litros} L</div>
         <div><b>Odómetro</b><br>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div>
         <div><b>Lugar / cisterna</b><br>${f.place || 'Cisterna'}</div>
-        <div><b>Registró</b><br>${escapeHtml(f.driver || App.currentUser?.name || '—')}</div>
+        <div><b>Chofer</b><br>${escapeHtml(f.driver || '—')}</div>
+        <div><b>Cargó</b><br>${escapeHtml(f.cargado_por || App.currentUser?.name || '—')}</div>
         <div><b>Estado</b><br>Ticket interno generado</div>
         ${verPrecios ? `<div><b>Precio/L</b><br>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div><div><b>Total</b><br>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>` : ''}
       </div>
@@ -13679,7 +13680,7 @@ function printFuelVehicleTicket(logId) {
           <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${escapeHtml(f.plate || '—')}</div>
           <div><b>Producto</b>${_fuelProductLabel(f.fuel_type)}</div><div><b>Litros cargados</b>${litros} L</div>
           <div><b>Odómetro</b>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div><div><b>Lugar / cisterna</b>${f.place || 'Cisterna'}</div>
-          <div><b>Registró</b>${escapeHtml(f.driver || App.currentUser?.name || '—')}</div><div><b>Estado</b>Ticket interno generado</div>
+          <div><b>Chofer</b>${escapeHtml(f.driver || '—')}</div><div><b>Cargó</b>${escapeHtml(f.cargado_por || App.currentUser?.name || '—')}</div><div><b>Estado</b>Ticket interno generado</div>
           ${priceHtml}
         </div>
         <div class="box">Comprobante interno generado automáticamente por FleetOS al descontar litros de cisterna propia.</div>
@@ -13699,7 +13700,7 @@ function _renderFuelLogRows(logs) {
   return logs.map(f => `<tr>
     <td class="td-mono" style="font-size:11px">${f.date || '—'}</td>
     <td class="td-main">${f.vehicle || '—'}</td>
-    <td>${escapeHtml(f.driver || '—')}</td>
+    <td>${escapeHtml(f.driver || '—')}${f.cargado_por && f.cargado_por !== '—' && f.cargado_por !== f.driver ? `<div style="font-size:10px;color:var(--text3)">cargó: ${escapeHtml(f.cargado_por)}</div>` : ''}</td>
     <td><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
     <td class="td-mono">${f.liters || 0} L</td>
     <td class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
