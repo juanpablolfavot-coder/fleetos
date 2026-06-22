@@ -176,7 +176,7 @@ router.get('/:id/recepciones', authenticate, async (req, res) => {
 router.get('/:id/recepciones/aux/destinos', authenticate, async (req, res) => {
   try {
     const sucs = await query(
-      `SELECT nombre FROM sucursales WHERE active=TRUE ORDER BY nombre`
+      `SELECT nombre FROM sucursales WHERE activo=TRUE ORDER BY nombre`
     ).catch(() => ({ rows: [] }));
 
     res.json({

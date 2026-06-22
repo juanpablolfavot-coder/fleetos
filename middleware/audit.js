@@ -45,9 +45,12 @@ const auditMutations = (req, res, next) => {
     try {
       if (res.statusCode >= 400) return;                 // solo acciones exitosas
       if (res.locals && res.locals._audited) return;     // ya lo registró auditAction (detallado)
-      if (/^\/api\/auth\//.test(req.path)) return;       // no auditar login/refresh/password
+      // El middleware está montado en '/api/', así que req.path viene SIN el prefijo
+      // (/auth/login en vez de /api/auth/login). Usamos originalUrl para tener la ruta real.
+      const fullPath = (req.originalUrl || req.url || '').split('?')[0];
+      if (/^\/api\/auth\//.test(fullPath)) return;       // no auditar login/refresh/password
 
-      const seg = req.path.split('/').filter(Boolean);   // ['api','stock','<id>','egreso']
+      const seg = fullPath.split('/').filter(Boolean);   // ['api','stock','<id>','egreso']
       const tabla = (seg[1] || 'api').slice(0, 100);
       const recordId = seg.find(s => UUID_RE.test(s)) || null;
 
