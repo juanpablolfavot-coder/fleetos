@@ -43,7 +43,7 @@ Render Dashboard → **New +** → **Cron Job**:
 | **Runtime** | Node |
 | **Build Command** | `npm install` |
 | **Command** | `npm run backup` |
-| **Schedule** | `0 6 * * *` (06:00 UTC = **03:00 Argentina**, diario) |
+| **Schedule** | `0 6,18 * * *` (06:00 y 18:00 UTC = **03:00 y 15:00 Argentina**, cada 12 h) |
 
 ### Paso 3 — Variables de entorno del Cron Job
 En el Cron Job, sección **Environment**, cargá:
