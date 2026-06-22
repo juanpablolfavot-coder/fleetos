@@ -1230,10 +1230,16 @@ router.post('/:id/recibir', authenticate, requireRole('dueno','gerencia','jefe_m
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const cur = await client.query('SELECT status, requested_by, sucursal FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    const cur = await client.query('SELECT status, requested_by, sucursal, COALESCE(is_open,FALSE) AS is_open FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
     if (!cur.rows[0]) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'OC no encontrada' });
+    }
+    // Las OC abiertas (servicios/entregas fraccionadas) no se reciben "en total" por
+    // este atajo: se cargan por la recepción granular y se cierran a mano.
+    if (cur.rows[0].is_open === true) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Esta OC es abierta: usá "Recibir mercadería" (recepción por cantidades) y luego "Cerrar OC".' });
     }
 
     // Jefe mant, compras, paniol, contador: solo pueden recibir las que crearon

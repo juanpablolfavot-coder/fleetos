@@ -112,7 +112,10 @@
             </div>
 
             <div style="margin-bottom:12px">
-              <label style="font-size:12px;color:var(--text3)">Cantidades recibidas / utilizadas</label>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <label style="font-size:12px;color:var(--text3)">Cantidades recibidas / utilizadas</label>
+                ${!isOpen ? `<button type="button" class="btn btn-ghost btn-sm" onclick="recepRecibirTodo()" style="font-size:11px">✓ Recibir todo lo pendiente</button>` : ''}
+              </div>
               <div style="background:#fff;border:1px solid var(--border2);border-radius:6px;padding:10px;margin-top:4px">
                 ${items.filter(i => isOpen || parseFloat(i.pendiente) > 0.001).map(i => {
                   const max = isOpen ? '' : `max="${i.pendiente}"`;
@@ -182,6 +185,14 @@
       console.error(err);
       showToast('error', 'Error al cambiar el estado');
     }
+  };
+
+  // Atajo: completar cada cantidad con lo pendiente (el "max" de cada input).
+  window.recepRecibirTodo = function() {
+    document.querySelectorAll('[data-recep-item]').forEach(inp => {
+      const max = inp.getAttribute('max');
+      if (max != null && max !== '') inp.value = max;
+    });
   };
 
   window.guardarRecepcion = async function(poId) {

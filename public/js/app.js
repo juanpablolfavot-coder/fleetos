@@ -10515,19 +10515,16 @@ async function openPODetail(id) {
           && App.currentUser?.sucursal
           && po.sucursal
           && String(App.currentUser.sucursal).trim().toLowerCase() === String(po.sucursal).trim().toLowerCase();
-        if (['enviada_proveedor','pagada'].includes(po.status) && (
-          (['jefe_mantenimiento','paniol','contador','compras'].includes(role) && esCreador) ||
-          esMismaSucursalRecepcion ||
-          ['dueno','gerencia'].includes(role)
-        )) {
-          btns.push({ label:'📦 Confirmar recepción', cls:'btn-primary', fn: () => recibirOC(id) });
-        }
-
-        // 📦 Recepciones parciales (disponible desde enviada al proveedor en adelante, salvo rechazada)
+        // 📦 Recepción de mercadería — ÚNICO camino: la recepción granular, que
+        // crea historial detallado, respeta OC abierta e impacta el stock.
+        // (El botón viejo "Confirmar recepción" / POST /recibir se quitó para no
+        // dejar un camino paralelo sin trazabilidad. Se conserva el mismo acceso
+        // por rol que ya tenía "Recepciones parciales".)
+        void esMismaSucursalRecepcion;
         if (['enviada_proveedor','pagada','recibida'].includes(po.status) && (
           ['dueno','gerencia','jefe_mantenimiento','paniol','contador','compras','gerente_sucursal'].includes(role)
         )) {
-          btns.push({ label:'📦 Recepciones parciales', cls:'btn-secondary', fn: () => abrirModalRecepciones(id) });
+          btns.push({ label:'📦 Recibir mercadería', cls:'btn-primary', fn: () => abrirModalRecepciones(id) });
         }
 
         // 📄 Facturas (disponible desde aprobada_compras en adelante)
