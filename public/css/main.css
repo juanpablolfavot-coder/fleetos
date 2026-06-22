@@ -456,6 +456,39 @@ tr:hover td { background: var(--bg3); color: var(--text); }
   .table-wrap { overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; }
   table { min-width: 500px !important; }
 
+  /* Tabla → tarjetas: cada fila se ve como una tarjeta con etiquetas (data-label).
+     Solo aplica a las tablas marcadas con .table-cards. */
+  table.table-cards { min-width: 0 !important; display: block !important; }
+  table.table-cards thead { display: none !important; }
+  table.table-cards tbody { display: block !important; }
+  table.table-cards tr {
+    display: block !important;
+    background: var(--bg2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: var(--shadow) !important;
+    padding: 8px 12px !important;
+    margin-bottom: 10px !important;
+  }
+  table.table-cards td {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 6px 0 !important;
+    border: none !important;
+    border-bottom: 1px solid var(--border) !important;
+    text-align: right !important;
+    font-size: 13px !important;
+  }
+  table.table-cards tr td:last-child { border-bottom: none !important; }
+  table.table-cards td::before {
+    content: attr(data-label);
+    font-size: 10px; font-weight: 700; color: var(--text3);
+    text-transform: uppercase; letter-spacing: .5px;
+    text-align: left; white-space: nowrap; flex-shrink: 0;
+  }
+
   /* Section header apilado */
   .section-header {
     flex-direction: column !important;
