@@ -90,7 +90,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '6mb' }));  // tickets/facturas en base64 pueden superar 2mb
 app.use(hpp());
 app.use(sanitize);
 app.use(compression());
