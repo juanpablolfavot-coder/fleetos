@@ -47,7 +47,7 @@
         <div style="padding:20px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff;z-index:10">
           <div>
             <div style="font-size:18px;font-weight:700">📦 Recepciones · ${oc.code || ''}</div>
-            <div style="font-size:13px;color:var(--text3);margin-top:4px">${oc.proveedor || 'Sin proveedor'} · Estado entrega: <strong style="color:${statusColor}">${statusLabel}</strong></div>
+            <div style="font-size:13px;color:var(--text3);margin-top:4px">${escapeHtml(oc.proveedor || 'Sin proveedor')} · Estado entrega: <strong style="color:${statusColor}">${statusLabel}</strong></div>
           </div>
           <button onclick="this.closest('.modal-recepciones-overlay').remove()" style="background:transparent;border:none;color:var(--text3);font-size:28px;cursor:pointer;line-height:1">×</button>
         </div>
@@ -81,7 +81,7 @@
                     const pen = parseFloat(i.pendiente).toFixed(2);
                     const completo = parseFloat(i.pendiente) <= 0.001;
                     return `<tr>
-                      <td>${i.descripcion}</td>
+                      <td>${escapeHtml(i.descripcion)}</td>
                       <td style="text-align:right">${ped} ${i.unidad || ''}</td>
                       <td style="text-align:right;color:${rec > 0 ? 'var(--ok)' : 'var(--text3)'}">${rec}</td>
                       <td style="text-align:right;color:${completo && !isOpen ? 'var(--ok)' : 'var(--warn)'};font-weight:600">${(completo && !isOpen) ? '✓' : pen}${isOpen ? ' (abierta)' : ''}</td>
@@ -118,7 +118,7 @@
                   const max = isOpen ? '' : `max="${i.pendiente}"`;
                   return `
                   <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <div style="font-size:13px">${i.descripcion}</div>
+                    <div style="font-size:13px">${escapeHtml(i.descripcion)}</div>
                     <input type="number" step="0.01" min="0" ${max} data-recep-item="${i.id}" placeholder="0" class="form-input" style="text-align:right">
                     <div style="font-size:11px;color:var(--text3)">${isOpen ? 'libre' : '/ ' + parseFloat(i.pendiente).toFixed(2)} ${i.unidad || ''}</div>
                   </div>`;
@@ -146,12 +146,12 @@
                 <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
                   <div style="flex:1">
                     <div style="font-weight:600">📥 ${new Date(r.received_at).toLocaleString('es-AR')}</div>
-                    <div style="font-size:12px;color:var(--text3)">por ${r.received_by_name || '—'} · Destino: <strong>${r.destino}</strong>${r.remito_nro ? ' · Remito: '+r.remito_nro : ''}</div>
+                    <div style="font-size:12px;color:var(--text3)">por ${escapeHtml(r.received_by_name || '—')} · Destino: <strong>${escapeHtml(r.destino)}</strong>${r.remito_nro ? ' · Remito: '+escapeHtml(r.remito_nro) : ''}</div>
                   </div>
                   ${puedeAnular ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:var(--danger)" onclick="anularRecepcion('${poId}','${r.id}')">Anular</button>` : ''}
                 </div>
-                ${(r.items || []).length ? `<div style="font-size:13px;margin-top:6px">${r.items.map(it => `<div style="padding:2px 0">• ${it.descripcion}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${it.unidad || ''}</strong></div>`).join('')}</div>` : ''}
-                ${r.notes ? `<div style="font-size:12px;color:var(--text3);margin-top:6px;font-style:italic">${r.notes}</div>` : ''}
+                ${(r.items || []).length ? `<div style="font-size:13px;margin-top:6px">${r.items.map(it => `<div style="padding:2px 0">• ${escapeHtml(it.descripcion)}: <strong>${parseFloat(it.cantidad).toFixed(2)} ${escapeHtml(it.unidad || '')}</strong></div>`).join('')}</div>` : ''}
+                ${r.notes ? `<div style="font-size:12px;color:var(--text3);margin-top:6px;font-style:italic">${escapeHtml(r.notes)}</div>` : ''}
               </div>`;
             }).join('')}
           </div>` : '<div style="text-align:center;color:var(--text3);padding:20px">Sin recepciones registradas todavía</div>'}

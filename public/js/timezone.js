@@ -1,5 +1,21 @@
 // FleetOS — zona horaria única del sistema
 // Argentina no cambia por horario de verano: siempre usamos America/Argentina/Buenos_Aires.
+
+// ── Escape HTML (anti-XSS) ──────────────────────────────────────────────
+// Convierte caracteres peligrosos en su entidad para que un dato de usuario
+// se muestre SIEMPRE como texto y nunca se ejecute como HTML/JS.
+// Seguro para texto y para atributos entre comillas. NO usar dentro de
+// strings de JavaScript (ej: onclick="algo('...')"), ahí no aplica.
+window.escapeHtml = function (value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 (function () {
   const TZ = 'America/Argentina/Buenos_Aires';
   const pad2 = (n) => String(n).padStart(2, '0');
