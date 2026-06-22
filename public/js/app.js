@@ -4103,19 +4103,19 @@ function renderStock() {
         + '<button class="btn btn-danger btn-sm" onclick="openStockBajaItemModal(\''+s.id+'\')" title="Baja auditada">✕ Baja</button>'
       : '<span style="font-size:11px;color:var(--text3);padding:0 4px" title="Sin permiso para editar stock">🔒</span>';
     tableRows += '<tr>'
-      + '<td class="td-mono td-main">'+stockFormValue(s.code)+'</td>'
-      + '<td>'+stockFormValue(s.name)+'</td>'
-      + '<td>'+stockFormValue(s.sucursal || s.base_location || 'Central')+'</td>'
-      + '<td><span class="tag" style="background:rgba(14,165,233,.12);color:var(--accent)">'+stockFormValue(s.area || 'Depósito')+'</span></td>'
-      + '<td><span class="tag" style="background:var(--bg4);color:var(--text2)">'+stockFormValue(s.cat)+'</span></td>'
-      + '<td class="td-mono" style="color:var(--'+st+')">'+qty+' '+stockFormValue(s.unit)+'</td>'
-      + '<td class="td-mono">'+min+' '+stockFormValue(s.unit)+'</td>'
-      + '<td class="td-mono">'+(parseFloat(s.reorder)||0)+' '+stockFormValue(s.unit)+'</td>'
-      + '<td class="td-mono">$'+(parseFloat(s.cost)||0).toLocaleString('es-AR')+'</td>'
-      + '<td class="td-mono">$'+Math.round(qty*(parseFloat(s.cost)||0)).toLocaleString('es-AR')+'</td>'
-      + '<td style="font-size:12px">'+stockFormValue(s.supplier || '—')+'</td>'
-      + '<td><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
-      + '<td style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px;flex-wrap:wrap">'
+      + '<td data-label="Código" class="td-mono td-main">'+stockFormValue(s.code)+'</td>'
+      + '<td data-label="Descripción">'+stockFormValue(s.name)+'</td>'
+      + '<td data-label="Sucursal">'+stockFormValue(s.sucursal || s.base_location || 'Central')+'</td>'
+      + '<td data-label="Área"><span class="tag" style="background:rgba(14,165,233,.12);color:var(--accent)">'+stockFormValue(s.area || 'Depósito')+'</span></td>'
+      + '<td data-label="Cat."><span class="tag" style="background:var(--bg4);color:var(--text2)">'+stockFormValue(s.cat)+'</span></td>'
+      + '<td data-label="Stock" class="td-mono" style="color:var(--'+st+')">'+qty+' '+stockFormValue(s.unit)+'</td>'
+      + '<td data-label="Mínimo" class="td-mono">'+min+' '+stockFormValue(s.unit)+'</td>'
+      + '<td data-label="P. pedido" class="td-mono">'+(parseFloat(s.reorder)||0)+' '+stockFormValue(s.unit)+'</td>'
+      + '<td data-label="Costo unit." class="td-mono">$'+(parseFloat(s.cost)||0).toLocaleString('es-AR')+'</td>'
+      + '<td data-label="Valorización" class="td-mono">$'+Math.round(qty*(parseFloat(s.cost)||0)).toLocaleString('es-AR')+'</td>'
+      + '<td data-label="Proveedor" style="font-size:12px">'+stockFormValue(s.supplier || '—')+'</td>'
+      + '<td data-label="Estado"><span class="badge badge-'+st+'">'+stLbl+'</span></td>'
+      + '<td data-label="" style="white-space:nowrap;display:flex;gap:4px;padding:8px 6px;flex-wrap:wrap">'
       +   '<button class="btn btn-secondary btn-sm" onclick="openStockEgresoModal(\''+s.id+'\')">Egreso</button>'
       +   managerBtns
       + '</td>'
@@ -4182,7 +4182,7 @@ function renderStock() {
     +   '<div><div class="section-title">Inventario por sucursal y área</div><div class="section-sub">Cada área administra su propio stock/pañol: Administración · Depósito · Taller</div></div>'
     +   '<div style="display:flex;gap:8px;flex-wrap:wrap">'+adminButtons+'</div>'
     + '</div>'
-    + '<div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr>'
+    + '<div class="card" style="padding:0"><div class="table-wrap"><table class="table-cards"><thead><tr>'
     + '<th>Código</th><th>Descripción</th><th>Sucursal</th><th>Área</th><th>Cat.</th><th>Stock</th><th>Mínimo</th><th>P. pedido</th><th>Costo unit.</th><th>Valorización</th><th>Proveedor</th><th>Estado</th><th></th>'
     + '</tr></thead><tbody>'+tableRows+'</tbody></table></div></div>'
     + histSection;
@@ -9174,7 +9174,7 @@ async function renderPurchaseOrders() {
 
     <div id="po-table-wrap" class="card" style="padding:0;overflow:hidden">
       <div style="overflow-x:auto">
-        <table id="po-table" style="width:100%;border-collapse:collapse;font-size:13px">
+        <table id="po-table" class="table-cards" style="width:100%;border-collapse:collapse;font-size:13px">
           <thead id="po-thead"></thead>
           <tbody id="po-tbody"><tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando...</td></tr></tbody>
         </table>
@@ -9400,25 +9400,25 @@ function _poRenderRow(po) {
   return `<tr style="border-left:3px solid ${sideColor};border-bottom:1px solid var(--border);transition:background .1s"
     onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background='transparent'">
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${escapeHtml(po.code||'—')}<div style="margin-top:4px">${_ocPrioridadBadge(po)}</div></td>
+    <td data-label="Código" style="padding:10px 12px;font-family:var(--mono);font-weight:700;color:var(--accent);white-space:nowrap">${origenIcon}${escapeHtml(po.code||'—')}<div style="margin-top:4px">${_ocPrioridadBadge(po)}</div></td>
 
-    <td style="padding:10px 12px">
+    <td data-label="Estado" style="padding:10px 12px">
       ${_ocEstadoBadge(po)}
     </td>
 
-    <td style="padding:10px 12px;font-size:12px">
+    <td data-label="Sucursal" style="padding:10px 12px;font-size:12px">
       ${po.sucursal ? `<span style='background:rgba(37,99,235,.15);color:var(--accent);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--mono)'>${escapeHtml(po.sucursal)}</span>` : '<span style="color:var(--text3)">—</span>'}
     </td>
 
-    <td style="padding:10px 12px;font-size:12px;color:var(--text3)">${escapeHtml(po.area||'—')}</td>
+    <td data-label="Área" style="padding:10px 12px;font-size:12px;color:var(--text3)">${escapeHtml(po.area||'—')}</td>
 
-    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.solicitante_nombre||'—'}</td>
+    <td data-label="Solicitante" style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.solicitante_nombre||'—'}</td>
 
-    <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.proveedor ? escapeHtml(po.proveedor) : '<span style="color:var(--text3)">Sin asignar</span>'}</td>
+    <td data-label="Proveedor" style="padding:10px 12px;font-size:12px;color:var(--text2)">${po.proveedor ? escapeHtml(po.proveedor) : '<span style="color:var(--text3)">Sin asignar</span>'}</td>
 
-    <td style="padding:10px 12px;font-size:11px;font-family:var(--mono);color:var(--text2)">${po.factura_nro ? escapeHtml(po.factura_nro) : '<span style="color:var(--text3)">—</span>'}</td>
+    <td data-label="Factura" style="padding:10px 12px;font-size:11px;font-family:var(--mono);color:var(--text2)">${po.factura_nro ? escapeHtml(po.factura_nro) : '<span style="color:var(--text3)">—</span>'}</td>
 
-    <td style="padding:10px 12px;min-width:120px">
+    <td data-label="Progreso" style="padding:10px 12px;min-width:120px">
       <div style="display:flex;align-items:center;gap:6px">
         <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:50px;max-width:80px">
           <div style="height:100%;background:${sideColor};width:${progress}%;transition:width .3s"></div>
@@ -9428,18 +9428,18 @@ function _poRenderRow(po) {
       ${progressLabel ? `<div style="font-size:9px;color:${progress===100?'var(--ok)':'var(--warn)'};font-family:var(--mono);margin-top:3px;white-space:nowrap">${progressLabel}</div>` : ''}
     </td>
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
+    <td data-label="Total" style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
       ${puedeVerPrecios
         ? `$${Math.round(total).toLocaleString('es-AR')}${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}`
         : `<span style="color:var(--text3)" title="Solo compras/tesorería ven los precios">—</span>`
       }
     </td>
 
-    <td style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
+    <td data-label="Fecha" style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
       ${po.created_at ? new Date(po.created_at).toLocaleDateString('es-AR') : '—'}
     </td>
 
-    <td style="padding:10px 12px;white-space:nowrap;text-align:right">
+    <td data-label="" style="padding:10px 12px;white-space:nowrap;text-align:right">
       <button class="btn btn-secondary btn-sm" onclick="openPODetail('${po.id}')">Ver</button>
       <button class="btn btn-secondary btn-sm" onclick="printPO('${po.id}')" title="Imprimir" style="margin-left:4px">🖨</button>
       ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="deletePO('${po.id}')" style="margin-left:4px">✕</button>` : ''}
