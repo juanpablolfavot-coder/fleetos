@@ -64,6 +64,7 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente'`).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_por UUID REFERENCES users(id)`).catch(()=>{});
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS is_open BOOLEAN DEFAULT FALSE`).catch(()=>{});
 
   // Reparación defensiva: si una OC ya tiene recepción total registrada,
   // debe quedar recibida aunque todavía no esté pagada.
@@ -83,8 +84,8 @@ async function ensureTables() {
       recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
     FROM ult_recepcion
     WHERE po.id = ult_recepcion.po_id
-      AND COALESCE(po.status, '') <> 'recibida'
-      AND COALESCE(po.status, '') <> 'rechazada'
+      AND COALESCE(po.status, '') NOT IN ('recibida','rechazada','cerrada')
+      AND COALESCE(po.is_open, FALSE) = FALSE
       AND COALESCE(po.delivery_status, '') = 'total'
   `).catch(()=>{});
   await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS rechazado_at TIMESTAMPTZ`).catch(()=>{});
@@ -1275,8 +1276,12 @@ router.post('/:id/cerrar', authenticate, requireRole('dueno','gerencia','compras
 
 // ─────────────────────────────────────────────────────────────
 //  POST /:id/reabrir — Reabre una OC cerrada (solo dueño/gerencia)
-//  Vuelve a 'recibida' para poder corregir (ej. anular una recepción). Si luego
-//  pago+entrega siguen en total, el recálculo la vuelve a cerrar sola.
+//  Calcula el estado real según lo ya ocurrido para no inventar trazabilidad:
+//    delivery_status total → recibida
+//    payment_status total  → pagada
+//    si no                 → enviada_proveedor
+//  Así, al corregir (ej. anular una recepción), el estado refleja la realidad.
+//  Si pago+entrega siguen en total, el recálculo la vuelve a cerrar sola.
 // ─────────────────────────────────────────────────────────────
 router.post('/:id/reabrir', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   const client = await pool.connect();
@@ -1292,7 +1297,12 @@ router.post('/:id/reabrir', authenticate, requireRole('dueno','gerencia'), async
       return res.status(400).json({ error: 'Solo se puede reabrir una OC cerrada' });
     }
     const r = await client.query(
-      `UPDATE purchase_orders SET status = 'recibida' WHERE id = $1 RETURNING *`,
+      `UPDATE purchase_orders SET status = CASE
+         WHEN COALESCE(delivery_status,'pendiente') = 'total' THEN 'recibida'
+         WHEN COALESCE(payment_status,'pendiente')  = 'total' THEN 'pagada'
+         ELSE 'enviada_proveedor'
+       END
+       WHERE id = $1 RETURNING *`,
       [req.params.id]
     );
     await client.query('COMMIT');

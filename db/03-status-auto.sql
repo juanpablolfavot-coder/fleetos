@@ -240,7 +240,8 @@ SET status = 'recibida',
     recibido_en = COALESCE(po.recibido_en, ult_recepcion.received_at)
 FROM ult_recepcion
 WHERE po.id = ult_recepcion.po_id
-  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada')
+  AND COALESCE(po.status, '') NOT IN ('recibida','rechazada','cerrada')
+  AND COALESCE(po.is_open, FALSE) = FALSE
   AND COALESCE(po.delivery_status, '') = 'total';
 
 -- Reparar facturas viejas: pago total se evalúa con IVA incluido.
