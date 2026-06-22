@@ -141,6 +141,27 @@ router.post('/refresh', async (req, res) => {
     }
 
     const { user_id, role } = result.rows[0];
+
+    // Rotación: el refresh token es de un solo uso. Invalidamos el usado y emitimos
+    // uno nuevo. Si te roban el token, deja de servir apenas el cliente legítimo
+    // refresca, y se acota la ventana de validez. (Cada dispositivo tiene su propia
+    // fila, así que el multi-dispositivo sigue funcionando: cada uno rota el suyo.)
+    await query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash]);
+    await query('DELETE FROM refresh_tokens WHERE user_id = $1 AND expires_at < NOW()', [user_id]);
+    const newRefresh = crypto.randomBytes(64).toString('hex');
+    const newHash    = crypto.createHash('sha256').update(newRefresh).digest('hex');
+    const newExpiry  = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await query(
+      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+      [user_id, newHash, newExpiry]
+    );
+    res.cookie('refreshToken', newRefresh, {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge:   7 * 24 * 60 * 60 * 1000,
+    });
+
     const accessToken = jwt.sign({ id: user_id, role }, process.env.JWT_SECRET, {
       expiresIn: process.env.JWT_EXPIRES_IN || '8h'
     });
