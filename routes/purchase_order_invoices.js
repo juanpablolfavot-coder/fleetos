@@ -81,7 +81,7 @@ router.get('/mis-ocs', authenticate, async (req, res) => {
       FROM purchase_orders po
       LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN purchase_order_invoices f ON f.po_id = po.id
-      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida')
+      WHERE po.status IN ('aprobada_compras','enviada_proveedor','pagada','recibida','cerrada')
       GROUP BY po.id, s.name
       ORDER BY po.created_at DESC
     `);

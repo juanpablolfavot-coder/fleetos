@@ -3,7 +3,6 @@
 -- Idempotente: se puede correr N veces sin romper nada
 -- ══════════════════════════════════════════════════════════════════════
 
-BEGIN;
 
 -- ─────────────────────────────────────────────────────────
 -- 1) SUPPLIERS: condición de pago por defecto
@@ -96,7 +95,6 @@ CREATE TABLE IF NOT EXISTS purchase_order_payments (
 
 CREATE INDEX IF NOT EXISTS idx_pop_invoice ON purchase_order_payments(invoice_id);
 
-COMMIT;
 
 -- ─────────────────────────────────────────────────────────
 -- Verificación

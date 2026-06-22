@@ -7,7 +7,6 @@
 -- 3) Una OC puede estar: recibida + pago pendiente.
 -- ══════════════════════════════════════════════════════════════════════
 
-BEGIN;
 
 CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
 DECLARE
@@ -238,6 +237,5 @@ UPDATE purchase_order_invoices f
 SET pagada = (COALESCE(f.monto_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999)
 WHERE TRUE;
 
-COMMIT;
 
 SELECT 'Estados OC/facturas actualizados con IVA y recepción independiente del pago' AS info;

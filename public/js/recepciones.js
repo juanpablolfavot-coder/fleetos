@@ -176,7 +176,7 @@
         if (cb) cb.checked = !isOpen;
         return;
       }
-      showToast('ok', isOpen ? 'OC marcada como abierta' : 'OC marcada como cerrada');
+      showToast('ok', isOpen ? 'OC marcada como abierta' : 'OC ya no queda como abierta');
       abrirModalRecepciones(poId);
     } catch (err) {
       console.error(err);
