@@ -6601,8 +6601,8 @@ function _otRenderRow(o) {
       <span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-gray'}" style="font-size:10px">${o.type||'—'}</span>
     </td>
 
-    <td style="padding:10px 12px;max-width:220px;color:var(--text2);font-size:12px;line-height:1.4">
-      ${(o.desc||'—').substring(0,120)}${(o.desc||'').length>120?'…':''}
+    <td style="padding:10px 12px;max-width:150px;color:var(--text2);font-size:12px;line-height:1.35">
+      ${(o.desc||'—').substring(0,80)}${(o.desc||'').length>80?'…':''}
     </td>
 
     <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${o.mechanic||'—'}</td>
@@ -6625,9 +6625,9 @@ function _otRenderRow(o) {
       ` : `<span class="badge ${o.priority==='Urgente'?'badge-danger':o.priority==='Media'?'badge-warn':'badge-gray'}" style="font-size:10px">${o.priority||'—'}</span>`}
     </td>
 
-    <td style="padding:10px 12px;min-width:120px">
+    <td style="padding:10px 12px;min-width:72px">
       <div style="display:flex;align-items:center;gap:6px">
-        <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:50px;max-width:80px">
+        <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;min-width:34px;max-width:52px">
           <div style="height:100%;background:${progColor};width:${progress}%;transition:width .3s"></div>
         </div>
         <span style="font-size:10px;font-family:var(--mono);color:var(--text3);min-width:30px">${progress}%</span>
