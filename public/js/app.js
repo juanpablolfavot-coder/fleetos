@@ -584,7 +584,7 @@ function renderDashboard() {
       ${ultimasCargas.map(f=>`<tr>
         <td class="td-main">${f.vehicle}</td>
         <td class="td-mono">${f.liters} L</td>
-        <td class="td-mono">${(()=>{const logs=(App.data.fuelLogs||[]).filter(x=>x.vehicle===f.vehicle&&x.km>0&&String(x.fuel_type||'').toLowerCase()!=='urea').sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' km/L':'—'}return '—'})()}</td>
+        <td class="td-mono">${(()=>{const veh=(App.data.vehicles||[]).find(x=>x.code===f.vehicle);const u=veh&&isAutoelevador(veh)?'h/L':'km/L';const logs=(App.data.fuelLogs||[]).filter(x=>x.vehicle===f.vehicle&&x.km>0&&String(x.fuel_type||'').toLowerCase()!=='urea').sort((a,b)=>a.km-b.km);if(logs.length>=2){const diff=logs[logs.length-1].km-logs[0].km;const lts=logs.reduce((a,x)=>a+x.liters,0);return diff>0&&lts>0?(diff/lts).toFixed(1)+' '+u:'—'}return '—'})()}</td>
         <td><span class="badge ${f.status==='OK'?'badge-ok':'badge-warn'}">${f.status}</span></td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -2248,7 +2248,7 @@ function renderFuel() {
           <th onclick="_fuelSortBy('driver')" style="cursor:pointer;user-select:none">Chofer <span id="fuel-sort-driver" style="opacity:.3">⇅</span></th>
           <th>Tipo</th>
           <th onclick="_fuelSortBy('liters')" style="cursor:pointer;user-select:none">Litros <span id="fuel-sort-liters" style="opacity:.3">⇅</span></th>
-          <th>Odómetro</th>
+          <th title="Odómetro (km) para vehículos, horómetro (h) para autoelevadores">Odóm. / Horóm.</th>
           ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
             <th>Precio/L</th>
             <th onclick="_fuelSortBy('total')" style="cursor:pointer;user-select:none">Total <span id="fuel-sort-total" style="opacity:.3">⇅</span></th>
@@ -13918,6 +13918,11 @@ function openFuelVehicleTicket(logId) {
   const f = (App.data.fuelLogs || []).find(x => x.id === logId);
   if (!f) { showToast('error', 'No se encontró la carga'); return; }
 
+  // Lectura: km para vehículos, horas para autoelevadores (se guarda en f.km).
+  const _tv = (App.data.vehicles||[]).find(x => x.code === f.vehicle);
+  const _tUnit  = (_tv && isAutoelevador(_tv)) ? 'h' : 'km';
+  const _tLabel = (_tv && isAutoelevador(_tv)) ? 'Horómetro' : 'Odómetro';
+
   const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
   const code = _fuelVehicleTicketCode(f);
   const fecha = f.logged_at ? new Date(f.logged_at).toLocaleString('es-AR') : (f.date || '—');
@@ -13943,7 +13948,7 @@ function openFuelVehicleTicket(logId) {
         <div><b>Patente</b><br>${escapeHtml(f.plate || '—')}</div>
         <div><b>Producto</b><br>${_fuelProductLabel(f.fuel_type)}</div>
         <div><b>Litros cargados</b><br>${litros} L</div>
-        <div><b>Odómetro</b><br>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div>
+        <div><b>${_tLabel}</b><br>${f.km ? f.km.toLocaleString('es-AR') + ' ' + _tUnit : '—'}</div>
         <div><b>Lugar / cisterna</b><br>${f.place || 'Cisterna'}</div>
         <div><b>Chofer</b><br>${escapeHtml(f.driver || '—')}</div>
         <div><b>Cargó</b><br>${escapeHtml(f.cargado_por || App.currentUser?.name || '—')}</div>
@@ -13992,7 +13997,7 @@ function printFuelVehicleTicket(logId) {
         <div class="grid">
           <div><b>Unidad</b>${f.vehicle || '—'}</div><div><b>Patente</b>${escapeHtml(f.plate || '—')}</div>
           <div><b>Producto</b>${_fuelProductLabel(f.fuel_type)}</div><div><b>Litros cargados</b>${litros} L</div>
-          <div><b>Odómetro</b>${f.km ? f.km.toLocaleString('es-AR') + ' km' : '—'}</div><div><b>Lugar / cisterna</b>${f.place || 'Cisterna'}</div>
+          <div><b>${_tLabel}</b>${f.km ? f.km.toLocaleString('es-AR') + ' ' + _tUnit : '—'}</div><div><b>Lugar / cisterna</b>${f.place || 'Cisterna'}</div>
           <div><b>Chofer</b>${escapeHtml(f.driver || '—')}</div><div><b>Cargó</b>${escapeHtml(f.cargado_por || App.currentUser?.name || '—')}</div><div><b>Estado</b>Ticket interno generado</div>
           ${priceHtml}
         </div>
@@ -14010,13 +14015,19 @@ function _renderFuelLogRows(logs) {
   if (!logs || logs.length === 0) {
     return `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
   }
-  return logs.map(f => `<tr>
+  return logs.map(f => {
+    // La lectura se guarda en f.km, pero para autoelevadores son HORAS, no km.
+    const veh = (App.data.vehicles||[]).find(x => x.code === f.vehicle);
+    const isFork = !!veh && isAutoelevador(veh);
+    const readUnit  = isFork ? 'h' : 'km';
+    const readLabel = isFork ? 'Horómetro' : 'Odómetro';
+    return `<tr>
     <td data-label="Fecha" class="td-mono" style="font-size:11px">${f.date || '—'}</td>
     <td data-label="Unidad" class="td-main">${f.vehicle || '—'}</td>
     <td data-label="Chofer">${escapeHtml(f.driver || '—')}${f.cargado_por && f.cargado_por !== '—' && f.cargado_por !== f.driver ? `<div style="font-size:10px;color:var(--text3)">cargó: ${escapeHtml(f.cargado_por)}</div>` : ''}</td>
     <td data-label="Tipo"><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
     <td data-label="Litros" class="td-mono">${f.liters || 0} L</td>
-    <td data-label="Odómetro" class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' km' : '—'}</td>
+    <td data-label="${readLabel}" class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' '+readUnit : '—'}</td>
     ${verPrecios ? `
       <td data-label="Precio/L" class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
       <td data-label="Total" class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>
@@ -14036,7 +14047,8 @@ function _renderFuelLogRows(logs) {
         ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar" style="padding:4px 8px">🗑</button>` : ''}
       </div>
     </td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
 // Filtrar cargas por texto de búsqueda y tipo (con paginación)
@@ -14128,22 +14140,25 @@ function exportFuelPDF() {
   const totalLitros = filtered.reduce((a,b) => a + (b.liters||0), 0);
   const totalPesos  = filtered.reduce((a,b) => a + (b.total||0), 0);
 
-  const tableData = filtered.map(f => [
+  const tableData = filtered.map(f => {
+    const veh = (App.data.vehicles||[]).find(x => x.code === f.vehicle);
+    const readUnit = veh && isAutoelevador(veh) ? 'h' : 'km';
+    return [
     f.date || '—',
     f.vehicle || '—',
     f.driver || '—',
     f.fuel_type === 'urea' ? 'Urea' : 'Gasoil',
     (f.liters||0).toString() + ' L',
-    f.km > 0 ? f.km.toLocaleString('es-AR') : '—',
+    f.km > 0 ? f.km.toLocaleString('es-AR') + ' ' + readUnit : '—',
     '$' + (f.ppu||0).toLocaleString('es-AR'),
     '$' + (f.total||0).toLocaleString('es-AR'),
     f.place || '—',
     f.status || '—',
-  ]);
+  ]; });
 
   doc.autoTable({
     startY: startY,
-    head: [['Fecha','Unidad','Chofer','Tipo','Litros','Odómetro','Precio/L','Total','Lugar','Estado']],
+    head: [['Fecha','Unidad','Chofer','Tipo','Litros','Odóm./Horóm.','Precio/L','Total','Lugar','Estado']],
     body: tableData,
     ..._pdfTableStyle(),
     columnStyles: {
