@@ -4844,7 +4844,7 @@ async function saveNewDoc() {
     if (!res.ok) { const e = await res.json(); showToast('error', e.error||'Error al cargar documento'); return; }
     closeModal();
     showToast('ok', `Documento ${type} cargado correctamente`);
-    // El auto-refresh ya va a re-renderizar
+    await afterSave({ page: 'documents' });
   } catch(err) {
     showToast('error', err.message);
   }
@@ -7271,6 +7271,7 @@ async function saveChoferChecklist(myVehicle, items) {
     ? '✅ Checklist OK — Buen viaje!'
     : `⚠ Checklist guardado con ${criticalFailed.length} problema(s) — OT generada automáticamente`;
   showToast(allOk ? 'ok' : 'warn', msg);
+  await afterSave({ page: 'chofer_panel' });
 }
 
 // ── PANEL ENCARGADO ──
@@ -11757,6 +11758,7 @@ async function saveAreasConfig() {
     App.config.areas = newAreas;
     closeModal();
     showToast('ok', 'Áreas por sucursal actualizadas');
+    await afterSave();
   } catch(err) {
     showToast('error', err.message || 'Error al guardar');
   }
@@ -13612,7 +13614,7 @@ async function saveNewAsset() {
     if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al crear activo'); return; }
     closeModal();
     showToast('ok', `Activo ${code} registrado correctamente`);
-    // El auto-refresh ya va a re-cargar la data
+    await afterSave({ page: 'assets' });
   } catch(err) {
     showToast('error', err.message);
   }
@@ -13728,6 +13730,7 @@ async function saveEditAsset(id) {
     if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error'); return; }
     closeModal();
     showToast('ok', 'Activo actualizado');
+    await afterSave({ page: 'assets' });
   } catch(err) {
     showToast('error', err.message);
   }
@@ -13742,6 +13745,7 @@ async function deleteAsset(id) {
     const res = await apiFetch(`/api/assets/${id}`, { method: 'DELETE' });
     if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error'); return; }
     showToast('ok', `Activo ${escapeHtml(a.code)} eliminado`);
+    await afterSave({ page: 'assets' });
   } catch(err) {
     showToast('error', err.message);
   }
