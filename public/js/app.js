@@ -4907,6 +4907,12 @@ function getCostDetail(vehicleCode, mesStr) {
   }
   // Sin datos de km GPS en cargas del mes → no estimamos, mostramos sin datos
 
+  // Lecturas DISTINTAS de horómetro/odómetro en el mes. Hacen falta ≥2 distintas
+  // para poder calcular horas/km del período. Si el operador deja la hora
+  // autocompletada (misma en cada carga), todas coinciden → 1 distinta → no se
+  // puede calcular y el costo/hora sería engañoso.
+  const readingsCount = new Set(kmsDelMes).size;
+
   // ── Costo/km real ──
   const totalMes = fuelTotal + ureaTotal + prevTotal + corrTotal;
   const costKmReal = kmMes > 0 && totalMes > 0 ? totalMes / kmMes : 0;
@@ -4927,7 +4933,7 @@ function getCostDetail(vehicleCode, mesStr) {
 
   return {
     v, kmMes, totalMes, costKmReal,
-    litrosMes, kmPorLitro, measureUnit,
+    litrosMes, kmPorLitro, measureUnit, readingsCount,
     manoTotal, repTotal,
     rubros: [
       {
@@ -5005,8 +5011,9 @@ function exportCostPDF() {
     // Autoelevadores: se miden por hora (d.kmMes son horas, d.costKmReal es $/hora).
     // Van en su propia tabla y NO entran en el promedio $/km de la flota.
     if (isAutoelevador(v)) {
-      forkTotalGeneral += Math.round(d.totalMes);
-      forkTotalHoras   += d.kmMes;
+      // Solo promediar los que tienen horas calculables (≥2 lecturas → kmMes>0),
+      // para no inflar el promedio con costo sin horas.
+      if (d.kmMes > 0) { forkTotalGeneral += Math.round(d.totalMes); forkTotalHoras += d.kmMes; }
       forkRows.push(fila);
     } else if (isRemolcado(v)) {
       // Remolcados: sin motor → solo mantenimiento, sin km ni $/km.
@@ -5177,8 +5184,28 @@ function renderCosts() {
   const avg = conDatos.length > 0
     ? avgNum.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : '—';
-  // Promedio de costo/hora de los autoelevadores (su unidad correcta).
-  const conDatosFork = sortedForks.filter(v => v._costReal > 0);
+  // Confianza del costo/hora de un autoelevador. El divisor de horas sale del
+  // delta del horómetro entre cargas, así que es frágil:
+  //  - insuf: <2 lecturas distintas → no se puede calcular (operador no actualizó
+  //    el horómetro, o hubo una sola carga).
+  //  - broken: consumo implícito imposible (litros/hora altísimo) → la ventana de
+  //    horas no representa el uso real; el costo/hora estaría inflado.
+  //  - low: solo una ventana (2 lecturas) → confiable a medias.
+  // Los 'insuf' y 'broken' NO entran al promedio para no contaminarlo.
+  const FORK_MAX_LH = 12; // L/hora tope plausible para un autoelevador
+  const forkConf = (v) => {
+    const d = v._detail;
+    if (!d) return { insuf:true, low:false, broken:false, impliedLh:0 };
+    const ck = d.costKmReal, readings = d.readingsCount || 0;
+    const impliedLh = d.kmMes > 0 ? (d.litrosMes / d.kmMes) : 0;
+    const insuf  = !(ck > 0) || readings < 2;
+    const broken = !insuf && impliedLh > FORK_MAX_LH;
+    const low    = !insuf && !broken && readings <= 2;
+    return { insuf, low, broken, impliedLh };
+  };
+  // Promedio de costo/hora de los autoelevadores (su unidad correcta), solo con
+  // datos confiables (excluye insuficientes y consumos imposibles).
+  const conDatosFork = sortedForks.filter(v => { const c = forkConf(v); return !c.insuf && !c.broken; });
   const avgForkNum = conDatosFork.length > 0
     ? (conDatosFork.reduce((a,v)=>a+v._costReal,0)/conDatosFork.length)
     : 0;
@@ -5321,7 +5348,7 @@ function renderCosts() {
       <div class="kpi-card info" style="border-color:rgba(245,158,11,.4)">
         <div class="kpi-label">⏱ Costo/hora promedio — Autoelevadores</div>
         <div class="kpi-value white">$${avgFork}</div>
-        <div class="kpi-trend">${conDatosFork.length} autoelevador${conDatosFork.length===1?'':'es'} con movimiento · se miden por hora</div>
+        <div class="kpi-trend">${conDatosFork.length} con dato confiable · promedio entre autoelevadores (por hora)</div>
       </div>
     </div>
     <div class="section-header">
@@ -5342,10 +5369,24 @@ function renderCosts() {
             const d = v._detail;
             if (!d || d.totalMes === 0) return '';
             const ck = d.costKmReal; // para autoelevadores, costKmReal = costo por HORA
-            // Evaluación relativa al promedio de los autoelevadores (no al de camiones).
-            const ev = (avgForkNum>0 && ck>avgForkNum*1.25)?['danger','Alto']:(avgForkNum>0 && ck>avgForkNum)?['warn','Revisar']:['ok','Eficiente'];
             const litros = litrosByVeh[v.code] || 0;
             const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
+            // Celda $/h y badge de evaluación según la confianza del dato.
+            const conf = forkConf(v);
+            const ckFmt = '$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+            let ckCell, evalCell;
+            if (conf.insuf) {
+              ckCell   = `<span style="color:var(--text3)" title="Hacen falta al menos 2 lecturas de horómetro distintas en el mes para calcular el costo/hora">datos insuf.</span>`;
+              evalCell = `<span class="badge badge-info" title="No se puede calcular el costo/hora: faltan lecturas de horómetro (revisá que carguen las horas reales)">s/d</span>`;
+            } else if (conf.broken) {
+              ckCell   = `<span style="font-weight:700;color:var(--warn)">${ckFmt}</span>`;
+              evalCell = `<span class="badge badge-warn" title="Consumo implícito de ${conf.impliedLh.toFixed(1)} L/h: la ventana de horas no representa el uso real. El costo/hora está probablemente inflado — revisá cómo se cargan las horas.">⚠ revisar carga</span>`;
+            } else {
+              const ev = (avgForkNum>0 && ck>avgForkNum*1.25)?['danger','Alto']:(avgForkNum>0 && ck>avgForkNum)?['warn','Revisar']:['ok','Eficiente'];
+              const lowMark = conf.low ? ` <span style="color:var(--warn)" title="Calculado con una sola ventana entre 2 cargas: confianza media">⚠</span>` : '';
+              ckCell   = `<span style="font-weight:700;color:var(--${ev[0]})">${ckFmt}</span>${lowMark}`;
+              evalCell = `<span class="badge badge-${ev[0]}">${ev[1]}</span>`;
+            }
             return `<tr style="cursor:pointer" onclick="openCostDrillDown('${escapeJsArg(v.code)}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${escapeHtml(v.code)}</td>
               <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
@@ -5356,9 +5397,9 @@ function renderCosts() {
               <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
-              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono">${ckCell}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
-              <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
+              <td>${evalCell}</td>
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
             </tr>`;
           }).join('')}
