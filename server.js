@@ -158,6 +158,21 @@ app.get('/api/health', async (req, res) => {
     res.status(503).json({ status: 'error', db: 'disconnected' });
   }
 });
+// Devuelve la versión (commit) que el server está sirviendo AHORA. Sirve para
+// diagnosticar deploys de un vistazo: si Render quedó pegado en un commit viejo,
+// acá se ve. Coincide con el ?v= que se inyecta en los <script>/<link>.
+// 'source' indica de dónde salió la versión; si dice 'fallback-timestamp' es que
+// Render no expuso RENDER_GIT_COMMIT y el cache-busting depende del reinicio.
+app.get('/api/version', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.json({
+    version: BUILD_VERSION,
+    source: process.env.RENDER_GIT_COMMIT ? 'RENDER_GIT_COMMIT'
+      : process.env.COMMIT_SHA ? 'COMMIT_SHA'
+      : process.env.SOURCE_VERSION ? 'SOURCE_VERSION'
+      : 'fallback-timestamp'
+  });
+});
 // Cache de assets JS/CSS según el cache-busting por versión:
 //  - Con ?v=<versión> (lo que inyecta el catch-all de abajo en cada <script>/<link>):
 //    es seguro cachear el archivo "para siempre". Al hacer deploy cambia BUILD_VERSION →
