@@ -666,6 +666,15 @@ function isAutoelevador(vOrType) {
   return normalizeVehicleTypeLabel(raw) === 'autoelevador';
 }
 
+// Remolcados: semirremolques y acoplados. No tienen motor, no cargan
+// combustible ni tienen km/horas propios. Se evalúan solo por costo de
+// mantenimiento, no por $/km ni $/hora.
+function isRemolcado(vOrType) {
+  const raw = typeof vOrType === 'string' ? vOrType : (vOrType?.type || '');
+  const t = normalizeVehicleTypeLabel(raw);
+  return t === 'semirremolque' || t === 'acoplado';
+}
+
 function vehicleMeasureLabel(v, lower=false) {
   const label = isAutoelevador(v) ? 'Horas actuales' : 'Km actuales';
   return lower ? label.toLowerCase() : label;
@@ -4969,8 +4978,10 @@ function exportCostPDF() {
   // Recopilar datos del mes seleccionado
   const rows = [];
   const forkRows = [];
+  const remolRows = [];
   let totalCombustible = 0, totalPreventivo = 0, totalCorrectivo = 0, totalGeneral = 0, totalKm = 0;
   let forkTotalGeneral = 0, forkTotalHoras = 0;
+  let remolTotalGeneral = 0;
   App.data.vehicles.forEach(v => {
     const d = getCostDetail(v.code, mesStr);
     if (!d || d.totalMes === 0) return;
@@ -4997,6 +5008,16 @@ function exportCostPDF() {
       forkTotalGeneral += Math.round(d.totalMes);
       forkTotalHoras   += d.kmMes;
       forkRows.push(fila);
+    } else if (isRemolcado(v)) {
+      // Remolcados: sin motor → solo mantenimiento, sin km ni $/km.
+      remolTotalGeneral += Math.round(d.totalMes);
+      remolRows.push([
+        v.code,
+        `${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')}`.trim() || '—',
+        '$'+prev.toLocaleString('es-AR'),
+        '$'+corr.toLocaleString('es-AR'),
+        '$'+Math.round(d.totalMes).toLocaleString('es-AR'),
+      ]);
     } else {
       totalKm += d.kmMes;
       rows.push(fila);
@@ -5083,6 +5104,33 @@ function exportCostPDF() {
     }
   }
 
+  // ── Tabla aparte para remolcados (semirremolque / acoplado): solo mantenimiento ──
+  if (remolRows.length) {
+    const rbase = (doc.lastAutoTable.finalY || 100) + 105;
+    doc.setFontSize(11);
+    doc.setFont('helvetica','bold');
+    doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
+    doc.text('REMOLCADOS — solo mantenimiento (sin motor, no aplica $/km)', 40, rbase);
+    doc.autoTable({
+      startY: rbase + 12,
+      head: [['Unidad','Marca/Modelo','Preventivo','Correctivo','Total mes']],
+      body: remolRows,
+      ..._pdfTableStyle(),
+      columnStyles: {
+        0: { cellWidth: 60, fontStyle: 'bold' },
+        1: { cellWidth: 180 },
+        2: { halign: 'right', cellWidth: 100 },
+        3: { halign: 'right', cellWidth: 100 },
+        4: { halign: 'right', cellWidth: 110, fontStyle: 'bold' },
+      },
+    });
+    const ry = doc.lastAutoTable.finalY || (rbase + 12);
+    doc.setFontSize(9);
+    doc.setFont('helvetica','normal');
+    doc.setTextColor(100, 105, 120);
+    doc.text(`Total mantenimiento de remolcados: $${remolTotalGeneral.toLocaleString('es-AR')}`, 40, ry + 20);
+  }
+
   doc.save(`Costos-Biletta-${mesStr}.pdf`);
   showToast('ok', 'PDF de costos descargado');
 }
@@ -5119,8 +5167,9 @@ function renderCosts() {
   // costo/km de los camiones distorsiona el promedio de la flota y la evaluación
   // Alto/Revisar/Eficiente. Por eso se separan en su propia sección y tienen su
   // propio promedio (ver más abajo).
-  const sortedTrucks = sorted.filter(v => !isAutoelevador(v));
-  const sortedForks  = sorted.filter(v =>  isAutoelevador(v));
+  const sortedTrucks     = sorted.filter(v => !isAutoelevador(v) && !isRemolcado(v));
+  const sortedForks      = sorted.filter(v =>  isAutoelevador(v));
+  const sortedRemolcados = sorted.filter(v =>  isRemolcado(v));   // ordenados por costo total (sorted ya viene por _totalMes desc)
   const conDatos = sortedTrucks.filter(v => v._costReal > 0);
   const avgNum = conDatos.length > 0
     ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length)
@@ -5310,6 +5359,42 @@ function renderCosts() {
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
+              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
+    ${sortedRemolcados.filter(v => v._totalMes > 0).length > 0 ? `
+    <!-- ═══ Remolcados (semirremolque / acoplado): sin motor, solo mantenimiento ═══ -->
+    <div class="section-header" style="margin-top:24px">
+      <div>
+        <div class="section-title">🚛 Remolcados — solo mantenimiento</div>
+        <div style="font-size:12px;color:var(--text3)">Semirremolques y acoplados no tienen motor ni km propios. Se ordenan por costo total de mantenimiento del mes (no aplica $/km).</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table id="costs-table-remolque">
+          <thead><tr>
+            <th>Código</th><th>Marca / Modelo</th>
+            <th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
+            <th>Total mes</th><th>% mes</th><th></th>
+          </tr></thead>
+          <tbody>${sortedRemolcados.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
+            const d = v._detail;
+            if (!d || d.totalMes === 0) return '';
+            const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
+            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${escapeJsArg(v.code)}')" title="Clic para ver desglose completo">
+              <td class="td-mono td-main">${escapeHtml(v.code)}</td>
+              <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
+              <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
             </tr>`;
           }).join('')}
