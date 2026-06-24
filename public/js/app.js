@@ -4968,7 +4968,9 @@ function exportCostPDF() {
 
   // Recopilar datos del mes seleccionado
   const rows = [];
+  const forkRows = [];
   let totalCombustible = 0, totalPreventivo = 0, totalCorrectivo = 0, totalGeneral = 0, totalKm = 0;
+  let forkTotalGeneral = 0, forkTotalHoras = 0;
   App.data.vehicles.forEach(v => {
     const d = getCostDetail(v.code, mesStr);
     if (!d || d.totalMes === 0) return;
@@ -4979,8 +4981,7 @@ function exportCostPDF() {
     totalPreventivo  += prev;
     totalCorrectivo  += corr;
     totalGeneral     += Math.round(d.totalMes);
-    totalKm          += d.kmMes;
-    rows.push([
+    const fila = [
       v.code,
       `${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')}`.trim() || '—',
       d.kmMes.toLocaleString('es-AR'),
@@ -4989,7 +4990,17 @@ function exportCostPDF() {
       '$'+corr.toLocaleString('es-AR'),
       '$'+Math.round(d.totalMes).toLocaleString('es-AR'),
       d.costKmReal>0 ? '$'+d.costKmReal.toFixed(3) : '—',
-    ]);
+    ];
+    // Autoelevadores: se miden por hora (d.kmMes son horas, d.costKmReal es $/hora).
+    // Van en su propia tabla y NO entran en el promedio $/km de la flota.
+    if (isAutoelevador(v)) {
+      forkTotalGeneral += Math.round(d.totalMes);
+      forkTotalHoras   += d.kmMes;
+      forkRows.push(fila);
+    } else {
+      totalKm += d.kmMes;
+      rows.push(fila);
+    }
   });
 
   const { jsPDF } = window.jspdf;
@@ -5036,7 +5047,40 @@ function exportCostPDF() {
     doc.setFontSize(9);
     doc.setFont('helvetica','normal');
     doc.setTextColor(100, 105, 120);
-    doc.text(`Costo promedio de la flota: $${(totalGeneral/totalKm).toFixed(3)} / km`, 40, finalY + 82);
+    // Promedio de camiones (excluye autoelevadores, que se miden por hora).
+    doc.text(`Costo promedio de la flota (camiones): $${((totalGeneral-forkTotalGeneral)/totalKm).toFixed(3)} / km`, 40, finalY + 82);
+  }
+
+  // ── Tabla aparte para autoelevadores (costo por hora) ──
+  if (forkRows.length) {
+    const fbase = (doc.lastAutoTable.finalY || 100) + 105;
+    doc.setFontSize(11);
+    doc.setFont('helvetica','bold');
+    doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
+    doc.text('AUTOELEVADORES — costo por hora', 40, fbase);
+    doc.autoTable({
+      startY: fbase + 12,
+      head: [['Unidad','Marca/Modelo','Horas','Combustible','Preventivo','Correctivo','Total mes','$/hora']],
+      body: forkRows,
+      ..._pdfTableStyle(),
+      columnStyles: {
+        0: { cellWidth: 60, fontStyle: 'bold' },
+        1: { cellWidth: 130 },
+        2: { halign: 'right', cellWidth: 65 },
+        3: { halign: 'right', cellWidth: 85 },
+        4: { halign: 'right', cellWidth: 85 },
+        5: { halign: 'right', cellWidth: 85 },
+        6: { halign: 'right', cellWidth: 90, fontStyle: 'bold' },
+        7: { halign: 'right', cellWidth: 70 },
+      },
+    });
+    if (forkTotalHoras > 0) {
+      const fy = doc.lastAutoTable.finalY || (fbase + 12);
+      doc.setFontSize(9);
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(100, 105, 120);
+      doc.text(`Costo promedio de autoelevadores: $${(forkTotalGeneral/forkTotalHoras).toFixed(3)} / hora`, 40, fy + 20);
+    }
   }
 
   doc.save(`Costos-Biletta-${mesStr}.pdf`);
@@ -5071,12 +5115,26 @@ function renderCosts() {
     return { ...v, _costReal: d ? d.costKmReal : 0, _totalMes: d ? d.totalMes : 0, _kmMes: d ? d.kmMes : 0, _detail: d };
   });
   const sorted = [...withCost].sort((a,b) => b._totalMes - a._totalMes);
-  const conDatos = sorted.filter(v => v._costReal > 0);
+  // Los autoelevadores se miden por HORA, no por km. Mezclar su costo/hora con el
+  // costo/km de los camiones distorsiona el promedio de la flota y la evaluación
+  // Alto/Revisar/Eficiente. Por eso se separan en su propia sección y tienen su
+  // propio promedio (ver más abajo).
+  const sortedTrucks = sorted.filter(v => !isAutoelevador(v));
+  const sortedForks  = sorted.filter(v =>  isAutoelevador(v));
+  const conDatos = sortedTrucks.filter(v => v._costReal > 0);
   const avgNum = conDatos.length > 0
     ? (conDatos.reduce((a,v)=>a+v._costReal,0)/conDatos.length)
     : 0;
   const avg = conDatos.length > 0
     ? avgNum.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
+    : '—';
+  // Promedio de costo/hora de los autoelevadores (su unidad correcta).
+  const conDatosFork = sortedForks.filter(v => v._costReal > 0);
+  const avgForkNum = conDatosFork.length > 0
+    ? (conDatosFork.reduce((a,v)=>a+v._costReal,0)/conDatosFork.length)
+    : 0;
+  const avgFork = conDatosFork.length > 0
+    ? avgForkNum.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : '—';
 
   // ═══ TOTALES DEL MES (de Panel contable) ═══
@@ -5131,7 +5189,7 @@ function renderCosts() {
       <div class="kpi-card info">
         <div class="kpi-label">📐 Costo/km promedio</div>
         <div class="kpi-value white">$${avg}</div>
-        <div class="kpi-trend">${conDatos.length} unidades con movimiento · ${otsMes.length} OTs cerradas</div>
+        <div class="kpi-trend">${conDatos.length} camiones con movimiento · ${otsMes.length} OTs cerradas</div>
       </div>
     </div>
 
@@ -5177,7 +5235,7 @@ function renderCosts() {
             <th style="color:#3b82f6">Combustible</th><th style="color:#06b6d4">Urea</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
             <th>Total</th><th>$/km</th><th>% mes</th><th>Eval.</th><th></th>
           </tr></thead>
-          <tbody>${sorted.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
+          <tbody>${sortedTrucks.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
             const d = v._detail;
             if (!d || d.totalMes === 0) return '';
             const ck = d.costKmReal;
@@ -5202,14 +5260,67 @@ function renderCosts() {
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
             </tr>`;
           }).join('')}
-          ${sorted.filter(v => v._totalMes > 0).length === 0 ? '<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text3)">Sin movimientos registrados en este mes</td></tr>' : ''}
+          ${sortedTrucks.filter(v => v._totalMes > 0).length === 0 ? '<tr><td colspan="12" style="padding:32px;text-align:center;color:var(--text3)">Sin camiones con movimientos en este mes</td></tr>' : ''}
           </tbody>
         </table>
       </div>
     </div>
+
+    ${sortedForks.filter(v => v._totalMes > 0).length > 0 ? `
+    <!-- ═══ Autoelevadores: se miden por HORA, no por km — sección y promedio aparte ═══ -->
+    <div class="kpi-row" style="margin:24px 0 16px">
+      <div class="kpi-card info" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">⏱ Costo/hora promedio — Autoelevadores</div>
+        <div class="kpi-value white">$${avgFork}</div>
+        <div class="kpi-trend">${conDatosFork.length} autoelevador${conDatosFork.length===1?'':'es'} con movimiento · se miden por hora</div>
+      </div>
+    </div>
+    <div class="section-header">
+      <div>
+        <div class="section-title">⏱ Autoelevadores — costo por hora</div>
+        <div style="font-size:12px;color:var(--text3)">Se evalúan entre ellos (no contra el costo/km de los camiones), porque trabajan por hora.</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div class="table-wrap">
+        <table id="costs-table-fork">
+          <thead><tr>
+            <th>Código</th><th>Marca / Modelo</th><th>Horas</th><th>Litros</th>
+            <th style="color:#3b82f6">Combustible</th><th style="color:#06b6d4">Urea</th><th style="color:#22c55e">Preventivo</th><th style="color:#ef4444">Correctivo</th>
+            <th>Total</th><th>$/h</th><th>% mes</th><th>Eval.</th><th></th>
+          </tr></thead>
+          <tbody>${sortedForks.filter(v => v._totalMes > 0).slice(0,30).map(v=>{
+            const d = v._detail;
+            if (!d || d.totalMes === 0) return '';
+            const ck = d.costKmReal; // para autoelevadores, costKmReal = costo por HORA
+            // Evaluación relativa al promedio de los autoelevadores (no al de camiones).
+            const ev = (avgForkNum>0 && ck>avgForkNum*1.25)?['danger','Alto']:(avgForkNum>0 && ck>avgForkNum)?['warn','Revisar']:['ok','Eficiente'];
+            const litros = litrosByVeh[v.code] || 0;
+            const pctMes = totalGeneral > 0 ? (d.totalMes/totalGeneral*100).toFixed(1) : 0;
+            return `<tr style="cursor:pointer" onclick="openCostDrillDown('${escapeJsArg(v.code)}')" title="Clic para ver desglose completo">
+              <td class="td-mono td-main">${escapeHtml(v.code)}</td>
+              <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
+              <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString()+' h' : '—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
+              <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
+              <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
+              <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
   `;
 
-  setTimeout(() => buildCostRankChart(sorted, avgNum), 100);
+  setTimeout(() => buildCostRankChart(sortedTrucks, avgNum), 100);
 }
 
 function buildCostRankChart(sorted, avgNum) {
