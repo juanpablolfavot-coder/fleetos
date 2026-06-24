@@ -193,6 +193,25 @@ async function afterSave(options) {
   }
 }
 
+// Refresco MANUAL desde el botón de la cabecera. A diferencia de afterSave (silencioso),
+// da feedback visual. Sirve de "escape": si alguna vista quedó vieja tras una carga,
+// con un clic se recarga la data y se re-renderiza sin perder la sesión (sin Ctrl+F5).
+async function manualRefresh(btn) {
+  const el = btn || document.getElementById('btn-refresh');
+  const prev = el ? el.innerHTML : null;
+  if (el) { el.disabled = true; el.innerHTML = '⏳ Actualizando…'; }
+  try {
+    if (typeof loadInitialData === 'function') await loadInitialData();
+    if (typeof renderPage === 'function') renderPage(App.currentPage);
+    showToast?.('ok', 'Datos actualizados');
+  } catch(e) {
+    console.warn('[manualRefresh] falló:', e?.message);
+    showToast?.('error', 'No se pudo actualizar. Reintentá.');
+  } finally {
+    if (el) { el.disabled = false; el.innerHTML = prev || '🔄 Actualizar'; }
+  }
+}
+
 
 
 

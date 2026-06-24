@@ -252,7 +252,9 @@ html, body {
         <div class="topbar-title" id="topbar-title">Panel</div>
         <div class="topbar-sub"   id="topbar-sub"></div>
       </div>
-      <div class="topbar-actions"></div>
+      <div class="topbar-actions">
+        <button id="btn-refresh" class="btn btn-secondary btn-sm" onclick="manualRefresh(this)" title="Recargar los datos sin recargar la página ni perder la sesión">🔄 Actualizar</button>
+      </div>
     </div>
     <div id="page-dashboard"      class="page active"></div>
     <div id="page-fleet"          class="page"></div>
