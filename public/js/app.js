@@ -770,12 +770,27 @@ function renderFleet() {
 function renderFleetTable(data) {
   const tbody = document.getElementById('fleet-tbody');
   if (!tbody) return;
-  tbody.innerHTML = data.map(v => {
+  // Costo/km (o /hora) de cada unidad este mes + promedio por tipo, para colorear
+  // de forma relativa: rojo solo si supera 25% el promedio de SU tipo (camión vs
+  // autoelevador). Reemplaza el umbral fijo viejo de $0,25/km, que hoy —con la
+  // inflación— lo supera cualquier valor y pintaba todo de rojo sin sentido.
+  const _rows = data.map(v => ({ v, d: getCostDetail(v.code) }));
+  const _ckOf = x => (x.d ? x.d.costKmReal : 0) || 0;
+  const _avgOf = pred => {
+    const xs = _rows.filter(x => _ckOf(x) > 0 && pred(x.v)).map(_ckOf);
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+  };
+  const _avgCamion = _avgOf(v => !isAutoelevador(v) && !isRemolcado(v));
+  const _avgFork   = _avgOf(v => isAutoelevador(v));
+  tbody.innerHTML = _rows.map(({ v, d }) => {
     const st = {ok:'badge-ok',warn:'badge-warn',taller:'badge-info',detenida:'badge-danger'}[v.status]||'badge-gray';
     const stLbl = {ok:'Operativo',warn:'Con alerta',taller:'En taller',detenida:'Detenida'}[v.status]||v.status;
-    const d = getCostDetail(v.code);
     const ckReal = d ? d.costKmReal : 0;
-    const cpkm_color = ckReal>0.25?'danger':ckReal>0.20?'warn':'ok';
+    // Vara de comparación = promedio del tipo de la unidad (autoelevador usa $/hora).
+    const _base = isAutoelevador(v) ? _avgFork : _avgCamion;
+    const cpkm_color = (_base>0 && ckReal>_base*1.25) ? 'danger'
+                     : (_base>0 && ckReal>_base)      ? 'warn'
+                     : 'ok';
     return `<tr>
       <td class="td-mono td-main">${escapeHtml(v.code)}</td>
       <td class="td-mono">${escapeHtml(v.plate)}</td>
