@@ -2395,8 +2395,13 @@ function updateFuelVehicleMeasure() {
     input.type = 'number';
     input.min = '0';
     input.step = '1';
-    input.placeholder = 'Ej: 9450';
-    input.value = v?.km_current ? String(v.km_current) : '';
+    // NO autocompletamos las horas: el campo queda vacío para forzar leer el
+    // horómetro real (igual que el odómetro de los camiones). Si se precarga el
+    // último valor, el operador tiende a aceptarlo sin mirar el reloj y todas las
+    // cargas quedan con la misma hora → no se puede calcular el costo/hora.
+    // La última lectura va de referencia en el placeholder, no en el valor.
+    input.placeholder = v?.km_current ? `Leé el horómetro real — última: ${Number(v.km_current).toLocaleString('es-AR')} h` : 'Leé el horómetro real';
+    input.value = '';
     input.style.opacity = '1';
   } else {
     label.innerHTML = 'Km actual del odómetro *';
