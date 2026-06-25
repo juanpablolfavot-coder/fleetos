@@ -20,6 +20,66 @@
 const router   = require('express').Router();
 const { pool, query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { mailEnabled, sendMail } = require('../services/mailer');
+const { buildOCPdf } = require('../services/oc-pdf');
+
+// ─────────────────────────────────────────────────────────────
+//  Email de la OC al proveedor (al marcarla "Enviada al proveedor").
+//  Best-effort: NUNCA debe romper el flujo de la OC. Si no hay SMTP
+//  configurado o el proveedor no tiene email cargado, se saltea en silencio.
+// ─────────────────────────────────────────────────────────────
+async function enviarOCAlProveedor(poId) {
+  if (!mailEnabled()) { console.log('[OC email] SMTP no configurado — no se envía'); return; }
+  const r = await query(`
+    SELECT po.*, s.name AS supplier_name, s.email AS supplier_email, s.cuit AS supplier_cuit
+    FROM purchase_orders po
+    LEFT JOIN suppliers s ON s.id = po.supplier_id
+    WHERE po.id = $1`, [poId]);
+  const oc = r.rows[0];
+  if (!oc) return;
+  const to = (oc.supplier_email || '').trim();
+  if (!to) { console.log(`[OC email] OC ${oc.code}: el proveedor no tiene email cargado — no se envía`); return; }
+
+  const itemsRes = await query(
+    `SELECT descripcion, cantidad, unidad, precio_unit FROM purchase_order_items WHERE po_id = $1 ORDER BY id`, [poId]);
+  const items = itemsRes.rows;
+  const supplier = { name: oc.supplier_name, email: oc.supplier_email, cuit: oc.supplier_cuit };
+
+  const pdf = await buildOCPdf(oc, items, supplier);
+
+  const sym = oc.moneda === 'USD' ? 'US$' : '$';
+  const total = (Number(oc.total_estimado) || items.reduce((a, i) => a + (Number(i.cantidad) || 0) * (Number(i.precio_unit) || 0), 0));
+  const totalFmt = sym + total.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  await sendMail({
+    to,
+    bcc: process.env.OC_EMAIL_BCC || undefined,
+    replyTo: process.env.OC_EMAIL_REPLYTO || undefined,
+    subject: `Orden de Compra ${oc.code} — Expreso Biletta`,
+    text:
+      `Estimados de ${supplier.name || 'proveedor'},\n\n` +
+      `Adjuntamos la Orden de Compra ${oc.code}.\n` +
+      `Ítems: ${items.length} · Total estimado: ${totalFmt}` +
+      `${oc.forma_pago ? ` · Forma de pago: ${oc.forma_pago}${oc.cc_dias ? ` (${oc.cc_dias} días)` : ''}` : ''}\n\n` +
+      `Ante cualquier duda, responder a este correo.\n\nExpreso Biletta S.R.L.`,
+    html:
+      `<p>Estimados de <b>${escapeHtmlMail(supplier.name || 'proveedor')}</b>,</p>` +
+      `<p>Adjuntamos la <b>Orden de Compra ${escapeHtmlMail(oc.code)}</b>.</p>` +
+      `<ul>` +
+        `<li>Ítems: ${items.length}</li>` +
+        `<li>Total estimado: <b>${totalFmt}</b></li>` +
+        (oc.forma_pago ? `<li>Forma de pago: ${escapeHtmlMail(oc.forma_pago)}${oc.cc_dias ? ` (${oc.cc_dias} días)` : ''}</li>` : '') +
+      `</ul>` +
+      `<p>Ante cualquier duda, responder a este correo.</p>` +
+      `<p style="color:#6b7280;font-size:12px">Expreso Biletta S.R.L. · enviado automáticamente por FleetOS</p>`,
+    attachments: [{ filename: `OC-${oc.code}.pdf`, content: pdf, contentType: 'application/pdf' }],
+  });
+  console.log(`[OC email] OC ${oc.code} enviada a ${to}`);
+}
+
+function escapeHtmlMail(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Migración / creación de tablas + columnas nuevas del workflow
@@ -1170,6 +1230,9 @@ router.post('/:id/marcar-enviada', authenticate, requireRole('dueno','gerencia',
     );
     await client.query('COMMIT');
     res.json(r.rows[0]);
+    // Email al proveedor (best-effort): no se await dentro de la respuesta para no
+    // demorarla, y cualquier error se loguea sin afectar la OC ya marcada como enviada.
+    enviarOCAlProveedor(req.params.id).catch(e => console.error('[OC email] fallo:', e.message));
   } catch(err) {
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[OC marcar-enviada]', err.message);
