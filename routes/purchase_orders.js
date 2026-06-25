@@ -50,6 +50,11 @@ async function enviarOCAlProveedor(poId) {
   const sym = oc.moneda === 'USD' ? 'US$' : '$';
   const total = (Number(oc.total_estimado) || items.reduce((a, i) => a + (Number(i.cantidad) || 0) * (Number(i.precio_unit) || 0), 0));
   const totalFmt = sym + total.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Casilla automática: pedimos NO responder. Si hay un contacto de consultas
+  // configurado (OC_EMAIL_REPLYTO), lo ofrecemos como destino para dudas.
+  const contacto = process.env.OC_EMAIL_REPLYTO
+    ? `Para consultas, escribir a ${process.env.OC_EMAIL_REPLYTO}.`
+    : '';
 
   await sendMail({
     to,
@@ -61,7 +66,7 @@ async function enviarOCAlProveedor(poId) {
       `Adjuntamos la Orden de Compra ${oc.code}.\n` +
       `Ítems: ${items.length} · Total estimado: ${totalFmt}` +
       `${oc.forma_pago ? ` · Forma de pago: ${oc.forma_pago}${oc.cc_dias ? ` (${oc.cc_dias} días)` : ''}` : ''}\n\n` +
-      `Ante cualquier duda, responder a este correo.\n\nExpreso Biletta S.R.L.`,
+      `Este es un correo automático, por favor no responder a esta dirección.${contacto ? '\n' + contacto : ''}\n\nExpreso Biletta S.R.L.`,
     html:
       `<p>Estimados de <b>${escapeHtmlMail(supplier.name || 'proveedor')}</b>,</p>` +
       `<p>Adjuntamos la <b>Orden de Compra ${escapeHtmlMail(oc.code)}</b>.</p>` +
@@ -70,8 +75,8 @@ async function enviarOCAlProveedor(poId) {
         `<li>Total estimado: <b>${totalFmt}</b></li>` +
         (oc.forma_pago ? `<li>Forma de pago: ${escapeHtmlMail(oc.forma_pago)}${oc.cc_dias ? ` (${oc.cc_dias} días)` : ''}</li>` : '') +
       `</ul>` +
-      `<p>Ante cualquier duda, responder a este correo.</p>` +
-      `<p style="color:#6b7280;font-size:12px">Expreso Biletta S.R.L. · enviado automáticamente por FleetOS</p>`,
+      (contacto ? `<p>${escapeHtmlMail(contacto)}</p>` : '') +
+      `<p style="color:#6b7280;font-size:12px">⚠ Este es un correo automático, por favor no responder a esta dirección.<br>Expreso Biletta S.R.L. · enviado automáticamente por FleetOS</p>`,
     attachments: [{ filename: `OC-${oc.code}.pdf`, content: pdf, contentType: 'application/pdf' }],
   });
   console.log(`[OC email] OC ${oc.code} enviada a ${to}`);
