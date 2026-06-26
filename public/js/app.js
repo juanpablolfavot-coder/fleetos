@@ -4202,6 +4202,7 @@ function _renderStockCatalog() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
         <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">
+        <button class="btn btn-secondary btn-sm" onclick="openDispatchesPanel()">🚚 Despachos</button>
         ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
       </div>
     </div>
@@ -4216,6 +4217,7 @@ function openStockArticulo(id) {
   if (!a) return;
   const num = (v) => parseFloat(v) || 0;
   const canManage = typeof stockCanManage === 'function' ? stockCanManage() : userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'contador', 'gerente_sucursal');
+  const canSend = _stockCanSend();
   const balRows = (a.balances || []).length
     ? a.balances.map((b) => `<tr>
         <td>${escapeHtml(b.base_location)}</td><td>${escapeHtml(b.area)}</td>
@@ -4224,6 +4226,7 @@ function openStockArticulo(id) {
           <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ingreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">+</button>
           <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Egreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">−</button>
           <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ajuste','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">±</button>
+          ${canSend && num(b.qty_current) > 0 ? `<button class="btn btn-secondary btn-sm" onclick="openDispatchModal('${a.id}','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}',${num(b.qty_current)})" title="Despachar a sucursal">🚚</button>` : ''}
         </td>` : '<td></td>'}</tr>`).join('')
     : '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:12px">Sin stock en ninguna ubicación.</td></tr>';
   openModal(`${escapeHtml(a.code)} — ${escapeHtml(a.name)}`, `
@@ -4364,6 +4367,104 @@ async function saveEditCatalogItem(id) {
     if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error'); return; }
     closeModal();
     showToast('ok', 'Artículo actualizado');
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+// ── Despacho Central → Sucursal con recepción (Fase 3) ──
+function _stockCanSend() { return userHasRole('dueno', 'gerencia', 'jefe_mantenimiento'); }
+function _stockCanReceive() { return userHasRole('dueno', 'gerencia', 'gerente_sucursal', 'paniol'); }
+
+function openDispatchModal(catalogId, fromLoc, fromArea, available) {
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(catalogId));
+  if (!a) return;
+  openModal(`🚚 Despachar — ${escapeHtml(a.code)} ${escapeHtml(a.name)}`, `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Origen: <b>${escapeHtml(fromLoc)} / ${escapeHtml(fromArea)}</b> · Disponible: <b>${available} ${escapeHtml(a.unit)}</b></div>
+    <div class="form-group"><label class="form-label">Cantidad a despachar *</label><input class="form-input" id="disp-qty" type="number" min="0" step="any" placeholder="0"></div>
+    <div style="font-size:12px;color:var(--text3);margin:8px 0 4px">Destino</div>
+    ${typeof stockLocationControls === 'function' ? stockLocationControls('disp-to', '', '') : ''}
+    <div class="form-group"><label class="form-label">Nota (opcional)</label><input class="form-input" id="disp-notes" placeholder="Ej: transportado por Juan"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveDispatch('${a.id}','${escapeJsArg(fromLoc)}','${escapeJsArg(fromArea)}')">Despachar</button>
+    </div>`);
+}
+
+async function saveDispatch(catalogId, fromLoc, fromArea) {
+  const qty = parseFloat(document.getElementById('disp-qty')?.value);
+  if (!(qty > 0)) { showToast('warn', 'Ingresá la cantidad'); return; }
+  const to_location = document.getElementById('disp-to-sucursal')?.value;
+  const to_area = document.getElementById('disp-to-area')?.value || 'Depósito';
+  if (!to_location) { showToast('warn', 'Elegí la sucursal destino'); return; }
+  if (to_location === fromLoc && to_area === fromArea) { showToast('warn', 'El destino debe ser distinto del origen'); return; }
+  const notes = document.getElementById('disp-notes')?.value || '';
+  try {
+    const res = await apiFetch('/api/stock/dispatches', { method: 'POST', body: JSON.stringify({ catalog_id: catalogId, qty, from_location: fromLoc, from_area: fromArea, to_location, to_area, notes }) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error al despachar'); return; }
+    closeModal();
+    showToast('ok', 'Despacho creado — en tránsito hacia la sucursal');
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+async function openDispatchesPanel() {
+  openModal('🚚 Despachos entre sucursales', '<div id="disp-panel" style="min-height:80px;color:var(--text3)">Cargando…</div>');
+  try {
+    const res = await apiFetch('/api/stock/dispatches');
+    _renderDispatchesPanel(res.ok ? await res.json() : []);
+  } catch (e) { const el = document.getElementById('disp-panel'); if (el) el.innerHTML = '<div style="color:var(--danger)">Error al cargar despachos</div>'; }
+}
+
+function _renderDispatchesPanel(list) {
+  const el = document.getElementById('disp-panel');
+  if (!el) return;
+  const canRecv = _stockCanReceive();
+  const canSend = _stockCanSend();
+  const num = (v) => parseFloat(v) || 0;
+  const row = (d) => {
+    const badge = d.status === 'en_transito' ? '<span class="badge badge-warn">En tránsito</span>'
+      : d.status === 'recibido' ? '<span class="badge badge-ok">Recibido</span>'
+      : '<span class="badge badge-danger">Cancelado</span>';
+    const recvBtn = (d.status === 'en_transito' && canRecv) ? `<button class="btn btn-primary btn-sm" onclick="receiveDispatch('${d.id}',${num(d.qty_sent)})">✓ Recibir</button>` : '';
+    const cancBtn = (d.status === 'en_transito' && canSend) ? `<button class="btn btn-secondary btn-sm" onclick="cancelDispatch('${d.id}')">Cancelar</button>` : '';
+    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;margin-bottom:6px;font-size:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div><b>${escapeHtml(d.code)}</b> ${escapeHtml(d.name)} · <b>${num(d.qty_sent)} ${escapeHtml(d.unit)}</b></div>${badge}
+      </div>
+      <div style="color:var(--text3);margin-top:2px">${escapeHtml(d.from_location)}/${escapeHtml(d.from_area)} → ${escapeHtml(d.to_location)}/${escapeHtml(d.to_area)}${d.status === 'recibido' ? ` · recibido: <b>${num(d.qty_received)}</b>` : ''}</div>
+      ${(recvBtn || cancBtn) ? `<div style="display:flex;gap:6px;margin-top:6px">${recvBtn}${cancBtn}</div>` : ''}
+    </div>`;
+  };
+  const enTransito = list.filter((d) => d.status === 'en_transito');
+  const otros = list.filter((d) => d.status !== 'en_transito').slice(0, 20);
+  el.innerHTML = `
+    <div style="font-weight:700;margin-bottom:6px">En tránsito (${enTransito.length})</div>
+    ${enTransito.length ? enTransito.map(row).join('') : '<div style="color:var(--text3);font-size:12px;margin-bottom:8px">No hay despachos en tránsito.</div>'}
+    <div style="font-weight:700;margin:12px 0 6px">Historial</div>
+    ${otros.length ? otros.map(row).join('') : '<div style="color:var(--text3);font-size:12px">Sin historial.</div>'}`;
+}
+
+async function receiveDispatch(id, qtySent) {
+  const v = prompt(`Cantidad recibida (enviado: ${qtySent}). Dejá el mismo número si llegó todo:`, qtySent);
+  if (v === null) return;
+  const qty_received = parseFloat(v);
+  if (!(qty_received >= 0)) { showToast('warn', 'Cantidad inválida'); return; }
+  try {
+    const res = await apiFetch(`/api/stock/dispatches/${id}/recibir`, { method: 'POST', body: JSON.stringify({ qty_received }) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error al recibir'); return; }
+    closeModal();
+    showToast('ok', 'Recepción confirmada — stock sumado a la sucursal');
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+async function cancelDispatch(id) {
+  if (!confirm('¿Cancelar el despacho y devolver el stock al origen?')) return;
+  try {
+    const res = await apiFetch(`/api/stock/dispatches/${id}/cancelar`, { method: 'POST', body: JSON.stringify({}) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error al cancelar'); return; }
+    closeModal();
+    showToast('ok', 'Despacho cancelado — stock devuelto al origen');
     await afterSave({ page: 'stock' });
   } catch (err) { showToast('error', err.message); }
 }
