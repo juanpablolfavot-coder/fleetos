@@ -4134,7 +4134,241 @@ async function saveStockCategorias() {
   } catch(e) { showToast('error', 'Error al guardar categorías'); }
 }
 
-function renderStock() {
+// ════════════════════════════════════════════════════════════════════
+//  STOCK — Pantalla sobre el catálogo único + saldos por sucursal (Fase 2b)
+//  Reemplaza el modelo viejo (stock_items). La función vieja quedó como
+//  _renderStockOld() por las dudas, pero ya no se usa.
+// ════════════════════════════════════════════════════════════════════
+async function renderStock() {
+  const page = document.getElementById('page-stock');
+  if (!page) return;
+  page.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Cargando catálogo…</div>';
+  let items = [];
+  try {
+    const res = await apiFetch('/api/stock/catalog');
+    items = res.ok ? await res.json() : [];
+  } catch (e) { items = []; }
+  App.data.stockCatalog = items;
+  _renderStockCatalog();
+}
+
+function _renderStockCatalog() {
+  const page = document.getElementById('page-stock');
+  if (!page) return;
+  const all = App.data.stockCatalog || [];
+  const f = (App.stockCatFilter = App.stockCatFilter || { cat: 'all', q: '' });
+  const num = (v) => parseFloat(v) || 0;
+  const cats = [...new Set(all.map((a) => a.category).filter(Boolean))].sort();
+  const items = all.filter((a) => {
+    if (f.cat !== 'all' && a.category !== f.cat) return false;
+    if (f.q) { const q = f.q.toLowerCase(); if (!((a.code || '').toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q) || (a.supplier || '').toLowerCase().includes(q))) return false; }
+    return true;
+  });
+  const criticos = items.filter((a) => a.is_critical).length;
+  const valor = items.reduce((s, a) => s + num(a.total) * num(a.unit_cost), 0);
+  const canManage = typeof stockCanManage === 'function' ? stockCanManage() : userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'contador', 'gerente_sucursal');
+
+  const rows = items.length === 0
+    ? '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">Sin artículos con esos filtros.' + (canManage ? ' Usá <b>+ Nuevo artículo</b>.' : '') + '</td></tr>'
+    : items.map((a) => {
+        const total = num(a.total);
+        const st = a.is_critical ? 'danger' : (num(a.qty_min) > 0 && total <= num(a.qty_min) * 1.5 ? 'warn' : 'ok');
+        const stLbl = st === 'danger' ? 'Crítico' : st === 'warn' ? 'Bajo' : 'Normal';
+        const ubis = (a.balances || []).length
+          ? a.balances.map((b) => `${escapeHtml(b.base_location)}/${escapeHtml(b.area)}: <b>${num(b.qty_current)}</b>`).join(' · ')
+          : '<span style="color:var(--text3)">sin stock</span>';
+        return `<tr>
+          <td class="td-mono td-main">${escapeHtml(a.code)}</td>
+          <td>${escapeHtml(a.name)}</td>
+          <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${escapeHtml(a.category)}</span></td>
+          <td class="td-mono" style="color:var(--${st})">${total} ${escapeHtml(a.unit)}</td>
+          <td style="font-size:11px;color:var(--text3)">${ubis}</td>
+          <td><span class="badge badge-${st}">${stLbl}</span></td>
+          <td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="openStockArticulo('${a.id}')">Ver / Mover</button></td>
+        </tr>`;
+      }).join('');
+
+  const catOpts = [`<option value="all"${f.cat === 'all' ? ' selected' : ''}>Categoría: todas</option>`]
+    .concat(cats.map((c) => `<option value="${escapeHtml(c)}"${f.cat === c ? ' selected' : ''}>${escapeHtml(c)}</option>`)).join('');
+
+  page.innerHTML = `
+    <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
+      <div class="kpi-card ${criticos ? 'danger' : 'ok'}"><div class="kpi-label">Críticos</div><div class="kpi-value ${criticos ? 'danger' : 'ok'}">${criticos}</div><div class="kpi-trend">debajo del mínimo</div></div>
+      <div class="kpi-card info"><div class="kpi-label">Artículos</div><div class="kpi-value white">${items.length}</div><div class="kpi-trend">en el catálogo</div></div>
+      <div class="kpi-card ok"><div class="kpi-label">Valorización</div><div class="kpi-value ok">$${Math.round(valor).toLocaleString('es-AR')}</div><div class="kpi-trend">al costo actual</div></div>
+    </div>
+    <div class="section-header">
+      <div><div class="section-title">Catálogo de artículos</div><div class="section-sub">Un artículo = un código único · saldo por sucursal/área</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
+        <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">
+        ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
+      </div>
+    </div>
+    <div class="card" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div>`;
+}
+
+function openStockArticulo(id) {
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(id));
+  if (!a) return;
+  const num = (v) => parseFloat(v) || 0;
+  const canManage = typeof stockCanManage === 'function' ? stockCanManage() : userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'contador', 'gerente_sucursal');
+  const balRows = (a.balances || []).length
+    ? a.balances.map((b) => `<tr>
+        <td>${escapeHtml(b.base_location)}</td><td>${escapeHtml(b.area)}</td>
+        <td class="td-mono">${num(b.qty_current)} ${escapeHtml(a.unit)}</td>
+        ${canManage ? `<td style="white-space:nowrap">
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ingreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">+</button>
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Egreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">−</button>
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ajuste','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">±</button>
+        </td>` : '<td></td>'}</tr>`).join('')
+    : '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:12px">Sin stock en ninguna ubicación.</td></tr>';
+  openModal(`${escapeHtml(a.code)} — ${escapeHtml(a.name)}`, `
+    <div style="font-size:13px;color:var(--text3);margin-bottom:10px">${escapeHtml(a.category)} · ${escapeHtml(a.unit)} · mín ${num(a.qty_min)} · costo $${num(a.unit_cost).toLocaleString('es-AR')}${a.supplier ? ' · ' + escapeHtml(a.supplier) : ''}</div>
+    <table style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Sucursal</th><th style="text-align:left">Área</th><th style="text-align:left">Stock</th><th></th></tr></thead><tbody>${balRows}</tbody></table>
+    ${canManage ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ingreso','','')">+ Ingreso en otra ubicación</button>
+      <button class="btn btn-secondary btn-sm" onclick="openEditCatalogItem('${a.id}')">Editar ficha</button>
+    </div>` : ''}`);
+}
+
+function openCatalogMov(id, type, base_location, area) {
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(id));
+  if (!a) return;
+  const needLoc = !base_location;
+  const locHtml = needLoc
+    ? (typeof stockLocationControls === 'function' ? stockLocationControls('cm', '', '') : '')
+    : `<input type="hidden" id="cm-sucursal" value="${escapeHtml(base_location)}"><input type="hidden" id="cm-area" value="${escapeHtml(area)}"><div style="font-size:12px;color:var(--text3)">Ubicación: <b>${escapeHtml(base_location)} / ${escapeHtml(area)}</b></div>`;
+  const isAjuste = type === 'Ajuste';
+  openModal(`${type} — ${escapeHtml(a.code)} ${escapeHtml(a.name)}`, `
+    ${locHtml}
+    <div class="form-group" style="margin-top:10px"><label class="form-label">${isAjuste ? 'Cantidad final (stock real contado)' : 'Cantidad'} *</label>
+      <input class="form-input" id="cm-qty" type="number" min="0" step="any" placeholder="0"></div>
+    <div class="form-group"><label class="form-label">Motivo / nota</label><input class="form-input" id="cm-reason" placeholder="${isAjuste ? 'Ej: conteo físico' : 'Ej: compra / consumo'}"></div>
+    <input type="hidden" id="cm-type" value="${type}">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveCatalogMov('${a.id}')">Confirmar ${type}</button>
+    </div>`);
+}
+
+async function saveCatalogMov(id) {
+  const type = document.getElementById('cm-type')?.value;
+  const qty = parseFloat(document.getElementById('cm-qty')?.value);
+  if (!(qty >= 0) || (type !== 'Ajuste' && !(qty > 0))) { showToast('warn', 'Ingresá una cantidad válida'); return; }
+  const base_location = document.getElementById('cm-sucursal')?.value || 'Central';
+  const area = document.getElementById('cm-area')?.value || 'Depósito';
+  const reason = document.getElementById('cm-reason')?.value || '';
+  try {
+    const res = await apiFetch(`/api/stock/catalog/${id}/mov`, { method: 'POST', body: JSON.stringify({ type, qty, base_location, area, reason }) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error en el movimiento'); return; }
+    closeModal();
+    showToast('ok', `${type} registrado`);
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+function openNewCatalogItem() {
+  const cats = [...new Set((App.data.stockCatalog || []).map((a) => a.category).filter(Boolean))].sort();
+  const catOpts = cats.map((c) => `<option>${escapeHtml(c)}</option>`).join('');
+  openModal('Nuevo artículo', `
+    <div class="form-group"><label class="form-label">Nombre *</label><input class="form-input" id="nc-name" placeholder="Ej: Filtro de aceite"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Categoría</label><input class="form-input" id="nc-category" list="nc-cats" value="General"><datalist id="nc-cats">${catOpts}</datalist></div>
+      <div class="form-group"><label class="form-label">Unidad</label><input class="form-input" id="nc-unit" value="un"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" id="nc-min" type="number" min="0" value="0"></div>
+      <div class="form-group"><label class="form-label">Punto de pedido</label><input class="form-input" id="nc-reorder" type="number" min="0" value="0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Costo unitario</label><input class="form-input" id="nc-cost" type="number" min="0" value="0"></div>
+      <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" id="nc-supplier" placeholder="Opcional"></div>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:12px 0;padding-top:10px;font-size:12px;color:var(--text3)">Stock inicial (opcional)</div>
+    ${typeof stockLocationControls === 'function' ? stockLocationControls('nc', '', '') : ''}
+    <div class="form-group"><label class="form-label">Cantidad inicial</label><input class="form-input" id="nc-qty" type="number" min="0" value="0"></div>
+    <div style="font-size:11px;color:var(--text3)">El código se genera solo según la categoría (ej. FIL-005).</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveNewCatalogItem()">Crear artículo</button>
+    </div>`);
+}
+
+async function saveNewCatalogItem() {
+  const name = (document.getElementById('nc-name')?.value || '').trim();
+  if (!name) { showToast('warn', 'El nombre es obligatorio'); return; }
+  const payload = {
+    name,
+    category: (document.getElementById('nc-category')?.value || 'General').trim() || 'General',
+    unit: (document.getElementById('nc-unit')?.value || 'un').trim() || 'un',
+    qty_min: parseFloat(document.getElementById('nc-min')?.value) || 0,
+    qty_reorder: parseFloat(document.getElementById('nc-reorder')?.value) || 0,
+    unit_cost: parseFloat(document.getElementById('nc-cost')?.value) || 0,
+    supplier: (document.getElementById('nc-supplier')?.value || '').trim() || null,
+    qty_current: parseFloat(document.getElementById('nc-qty')?.value) || 0,
+    base_location: document.getElementById('nc-sucursal')?.value || 'Central',
+    area: document.getElementById('nc-area')?.value || 'Depósito',
+  };
+  try {
+    const res = await apiFetch('/api/stock/catalog', { method: 'POST', body: JSON.stringify(payload) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error al crear'); return; }
+    const created = await res.json();
+    closeModal();
+    showToast('ok', `Artículo ${created.code} creado`);
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+function openEditCatalogItem(id) {
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(id));
+  if (!a) return;
+  const num = (v) => parseFloat(v) || 0;
+  openModal(`Editar ${escapeHtml(a.code)}`, `
+    <div class="form-group"><label class="form-label">Nombre</label><input class="form-input" id="ec-name" value="${escapeHtml(a.name)}"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Categoría</label><input class="form-input" id="ec-category" value="${escapeHtml(a.category)}"></div>
+      <div class="form-group"><label class="form-label">Unidad</label><input class="form-input" id="ec-unit" value="${escapeHtml(a.unit)}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Stock mínimo</label><input class="form-input" id="ec-min" type="number" min="0" value="${num(a.qty_min)}"></div>
+      <div class="form-group"><label class="form-label">Punto de pedido</label><input class="form-input" id="ec-reorder" type="number" min="0" value="${num(a.qty_reorder)}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Costo unitario</label><input class="form-input" id="ec-cost" type="number" min="0" value="${num(a.unit_cost)}"></div>
+      <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" id="ec-supplier" value="${escapeHtml(a.supplier || '')}"></div>
+    </div>
+    <div style="font-size:11px;color:var(--text3)">El código (${escapeHtml(a.code)}) no se cambia.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveEditCatalogItem('${a.id}')">Guardar</button>
+    </div>`);
+}
+
+async function saveEditCatalogItem(id) {
+  const payload = {
+    name: (document.getElementById('ec-name')?.value || '').trim(),
+    category: (document.getElementById('ec-category')?.value || 'General').trim() || 'General',
+    unit: (document.getElementById('ec-unit')?.value || 'un').trim() || 'un',
+    qty_min: parseFloat(document.getElementById('ec-min')?.value) || 0,
+    qty_reorder: parseFloat(document.getElementById('ec-reorder')?.value) || 0,
+    unit_cost: parseFloat(document.getElementById('ec-cost')?.value) || 0,
+    supplier: (document.getElementById('ec-supplier')?.value || '').trim() || null,
+  };
+  if (!payload.name) { showToast('warn', 'El nombre es obligatorio'); return; }
+  try {
+    const res = await apiFetch(`/api/stock/catalog/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error'); return; }
+    closeModal();
+    showToast('ok', 'Artículo actualizado');
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
+}
+
+function _renderStockOld() {
   const allItems = App.data.stock || [];
   const filters = stockCurrentFilters();
   const branches = stockBaseOptions();
