@@ -4202,7 +4202,8 @@ function _renderStockCatalog() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
         <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">
-        <button class="btn btn-secondary btn-sm" onclick="openDispatchesPanel()">🚚 Despachos</button>
+        ${_stockCanSend() ? '<button class="btn btn-secondary btn-sm" onclick="openDispatchNew()">🚚 Despachar</button>' : ''}
+        <button class="btn btn-secondary btn-sm" onclick="openDispatchesPanel()">📋 Despachos</button>
         ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
       </div>
     </div>
@@ -4421,27 +4422,92 @@ function _renderDispatchesPanel(list) {
   const canRecv = _stockCanReceive();
   const canSend = _stockCanSend();
   const num = (v) => parseFloat(v) || 0;
+  const fmtDate = (s) => { try { return s ? new Date(s).toLocaleDateString('es-AR') : ''; } catch (e) { return ''; } };
+  const sideColor = (st) => st === 'en_transito' ? 'warn' : st === 'recibido' ? 'ok' : 'danger';
   const row = (d) => {
-    const badge = d.status === 'en_transito' ? '<span class="badge badge-warn">En tránsito</span>'
-      : d.status === 'recibido' ? '<span class="badge badge-ok">Recibido</span>'
+    const badge = d.status === 'en_transito' ? '<span class="badge badge-warn">🚚 En tránsito</span>'
+      : d.status === 'recibido' ? '<span class="badge badge-ok">✓ Recibido</span>'
       : '<span class="badge badge-danger">Cancelado</span>';
     const recvBtn = (d.status === 'en_transito' && canRecv) ? `<button class="btn btn-primary btn-sm" onclick="receiveDispatch('${d.id}',${num(d.qty_sent)})">✓ Recibir</button>` : '';
     const cancBtn = (d.status === 'en_transito' && canSend) ? `<button class="btn btn-secondary btn-sm" onclick="cancelDispatch('${d.id}')">Cancelar</button>` : '';
-    return `<div style="border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;margin-bottom:6px;font-size:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div><b>${escapeHtml(d.code)}</b> ${escapeHtml(d.name)} · <b>${num(d.qty_sent)} ${escapeHtml(d.unit)}</b></div>${badge}
+    const who = d.dispatched_by_name ? `Despachó ${escapeHtml(d.dispatched_by_name)}` : '';
+    const when = fmtDate(d.dispatched_at);
+    return `<div style="border:1px solid var(--border);border-left:3px solid var(--${sideColor(d.status)});border-radius:var(--radius);padding:10px 12px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">
+        <div style="font-weight:600"><span class="td-mono" style="font-size:11px">${escapeHtml(d.code)}</span> · ${escapeHtml(d.name)}</div>${badge}
       </div>
-      <div style="color:var(--text3);margin-top:2px">${escapeHtml(d.from_location)}/${escapeHtml(d.from_area)} → ${escapeHtml(d.to_location)}/${escapeHtml(d.to_area)}${d.status === 'recibido' ? ` · recibido: <b>${num(d.qty_received)}</b>` : ''}</div>
-      ${(recvBtn || cancBtn) ? `<div style="display:flex;gap:6px;margin-top:6px">${recvBtn}${cancBtn}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap">
+        <span style="background:var(--bg3);padding:4px 9px;border-radius:8px">${escapeHtml(d.from_location)} · ${escapeHtml(d.from_area)}</span>
+        <span style="color:var(--accent);font-weight:700;white-space:nowrap">→ ${num(d.qty_sent)} ${escapeHtml(d.unit)} →</span>
+        <span style="background:var(--bg3);padding:4px 9px;border-radius:8px">${escapeHtml(d.to_location)} · ${escapeHtml(d.to_area)}</span>
+      </div>
+      <div style="color:var(--text3);font-size:11px;margin-top:6px">${who}${who && when ? ' · ' : ''}${when}${d.status === 'recibido' ? ` · recibido: <b>${num(d.qty_received)}</b>${d.received_by_name ? ' por ' + escapeHtml(d.received_by_name) : ''}` : ''}</div>
+      ${(recvBtn || cancBtn) ? `<div style="display:flex;gap:6px;margin-top:8px">${recvBtn}${cancBtn}</div>` : ''}
     </div>`;
   };
   const enTransito = list.filter((d) => d.status === 'en_transito');
   const otros = list.filter((d) => d.status !== 'en_transito').slice(0, 20);
   el.innerHTML = `
-    <div style="font-weight:700;margin-bottom:6px">En tránsito (${enTransito.length})</div>
-    ${enTransito.length ? enTransito.map(row).join('') : '<div style="color:var(--text3);font-size:12px;margin-bottom:8px">No hay despachos en tránsito.</div>'}
-    <div style="font-weight:700;margin:12px 0 6px">Historial</div>
+    ${canSend ? '<div style="text-align:right;margin-bottom:10px"><button class="btn btn-primary btn-sm" onclick="openDispatchNew()">🚚 Nuevo despacho</button></div>' : ''}
+    <div style="font-weight:700;margin-bottom:8px;color:var(--warn)">🚚 En tránsito (${enTransito.length})</div>
+    ${enTransito.length ? enTransito.map(row).join('') : '<div style="color:var(--text3);font-size:12px;margin-bottom:10px;padding:10px;background:var(--bg3);border-radius:var(--radius);text-align:center">No hay despachos en tránsito.</div>'}
+    <div style="font-weight:700;margin:14px 0 8px;color:var(--text2)">Historial reciente</div>
     ${otros.length ? otros.map(row).join('') : '<div style="color:var(--text3);font-size:12px">Sin historial.</div>'}`;
+}
+
+// Nuevo despacho "desde arriba": elegir artículo + origen + destino sin entrar a la ficha.
+function openDispatchNew() {
+  const arts = (App.data.stockCatalog || []).filter((a) => (a.balances || []).some((b) => parseFloat(b.qty_current) > 0));
+  if (!arts.length) { showToast('info', 'No hay artículos con stock para despachar'); return; }
+  const artOpts = arts.map((a) => `<option value="${a.id}">${escapeHtml(a.code)} — ${escapeHtml(a.name)}</option>`).join('');
+  openModal('🚚 Nuevo despacho', `
+    <div class="form-group"><label class="form-label">Artículo *</label>
+      <select class="form-select" id="dn-article" onchange="_dispatchNewArticleChanged()">${artOpts}</select></div>
+    <div class="form-group"><label class="form-label">Origen — de dónde sale *</label>
+      <select class="form-select" id="dn-origin"></select></div>
+    <div class="form-group"><label class="form-label">Cantidad *</label>
+      <input class="form-input" id="dn-qty" type="number" min="0" step="any" placeholder="0"></div>
+    <div style="font-size:12px;color:var(--text3);margin:8px 0 4px">Destino</div>
+    ${typeof stockLocationControls === 'function' ? stockLocationControls('dn-to', '', '') : ''}
+    <div class="form-group"><label class="form-label">Nota (opcional)</label><input class="form-input" id="dn-notes" placeholder="Ej: transportado por Juan"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="_dispatchNewSave()">Despachar</button>
+    </div>`);
+  setTimeout(_dispatchNewArticleChanged, 30);
+}
+
+function _dispatchNewArticleChanged() {
+  const id = document.getElementById('dn-article')?.value;
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(id));
+  const sel = document.getElementById('dn-origin');
+  if (!a || !sel) return;
+  const bals = (a.balances || []).filter((b) => parseFloat(b.qty_current) > 0);
+  window._dnBalances = bals;
+  sel.innerHTML = bals.length
+    ? bals.map((b, i) => `<option value="${i}">${escapeHtml(b.base_location)} / ${escapeHtml(b.area)} — ${parseFloat(b.qty_current)} ${escapeHtml(a.unit || 'un')}</option>`).join('')
+    : '<option value="">Sin stock en ninguna ubicación</option>';
+}
+
+async function _dispatchNewSave() {
+  const id = document.getElementById('dn-article')?.value;
+  if (!id) { showToast('warn', 'Elegí un artículo'); return; }
+  const b = (window._dnBalances || [])[parseInt(document.getElementById('dn-origin')?.value, 10)];
+  if (!b) { showToast('warn', 'Elegí el origen'); return; }
+  const qty = parseFloat(document.getElementById('dn-qty')?.value);
+  if (!(qty > 0)) { showToast('warn', 'Ingresá la cantidad'); return; }
+  const to_location = document.getElementById('dn-to-sucursal')?.value;
+  const to_area = document.getElementById('dn-to-area')?.value || 'Depósito';
+  if (!to_location) { showToast('warn', 'Elegí la sucursal destino'); return; }
+  if (to_location === b.base_location && to_area === b.area) { showToast('warn', 'El destino debe ser distinto del origen'); return; }
+  const notes = document.getElementById('dn-notes')?.value || '';
+  try {
+    const res = await apiFetch('/api/stock/dispatches', { method: 'POST', body: JSON.stringify({ catalog_id: id, qty, from_location: b.base_location, from_area: b.area, to_location, to_area, notes }) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); showToast('error', e.error || 'Error al despachar'); return; }
+    closeModal();
+    showToast('ok', 'Despacho creado — en tránsito hacia la sucursal');
+    await afterSave({ page: 'stock' });
+  } catch (err) { showToast('error', err.message); }
 }
 
 async function receiveDispatch(id, qtySent) {
