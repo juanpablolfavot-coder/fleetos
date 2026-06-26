@@ -719,4 +719,147 @@ router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO)
   } finally { client.release(); }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  DESPACHO CENTRAL → SUCURSAL con recepción (Fase 3)
+//  Espejo del despacho de combustible: Central despacha (sale el stock del
+//  origen, queda "en tránsito") → la sucursal confirma la recepción (suma al
+//  destino, puede ajustar la cantidad recibida).
+// ════════════════════════════════════════════════════════════════════
+const ROLES_DISPATCH_SEND = ['dueno', 'gerencia', 'jefe_mantenimiento'];
+const ROLES_DISPATCH_RECV = ['dueno', 'gerencia', 'gerente_sucursal', 'paniol'];
+
+let dispatchReady = false;
+async function ensureDispatchSchema() {
+  if (dispatchReady) return;
+  await ensureCatalogSchema();
+  await query(`CREATE TABLE IF NOT EXISTS stock_dispatches (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    catalog_id UUID NOT NULL REFERENCES stock_catalog(id),
+    qty_sent NUMERIC(10,2) NOT NULL,
+    from_location VARCHAR(200) NOT NULL,
+    from_area VARCHAR(100) NOT NULL,
+    to_location VARCHAR(200) NOT NULL,
+    to_area VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'en_transito',
+    notes TEXT,
+    dispatched_by UUID REFERENCES users(id),
+    dispatched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    qty_received NUMERIC(10,2),
+    receive_notes TEXT,
+    received_by UUID REFERENCES users(id),
+    received_at TIMESTAMPTZ
+  )`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_stock_disp_status ON stock_dispatches(status)`).catch(() => {});
+  dispatchReady = true;
+}
+
+// POST /api/stock/dispatches — Central despacha a una sucursal (sale del origen)
+router.post('/dispatches', authenticate, requireRole(...ROLES_DISPATCH_SEND), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureDispatchSchema();
+    const { catalog_id } = req.body;
+    const qtyNum = positiveNumber(req.body.qty, 0);
+    if (!catalog_id) return res.status(400).json({ error: 'Falta el artículo' });
+    if (qtyNum <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+    const fromLoc = cleanText(req.body.from_location || 'Central', 'Central');
+    const fromAr = normalizeArea(req.body.from_area || 'Depósito');
+    const toLoc = cleanText(req.body.to_location, '');
+    const toAr = normalizeArea(req.body.to_area || 'Depósito');
+    if (!toLoc) return res.status(400).json({ error: 'Elegí la sucursal destino' });
+    if (toLoc === fromLoc && toAr === fromAr) return res.status(400).json({ error: 'El destino debe ser distinto del origen' });
+
+    await client.query('BEGIN');
+    const cat = await client.query('SELECT name FROM stock_catalog WHERE id = $1 AND active = TRUE', [catalog_id]);
+    if (!cat.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
+    const bal = await client.query('SELECT qty_current FROM stock_balances WHERE catalog_id=$1 AND base_location=$2 AND area=$3 FOR UPDATE', [catalog_id, fromLoc, fromAr]);
+    const disp = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
+    if (disp < qtyNum) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Stock insuficiente en ${fromLoc}/${fromAr} (hay ${disp})` }); }
+    await client.query('UPDATE stock_balances SET qty_current = qty_current - $1, updated_at = NOW() WHERE catalog_id=$2 AND base_location=$3 AND area=$4', [qtyNum, catalog_id, fromLoc, fromAr]);
+    await client.query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
+      [catalog_id, qtyNum, `Despacho a ${toLoc}/${toAr}`, fromLoc, fromAr, req.user.id]);
+    const r = await client.query(
+      `INSERT INTO stock_dispatches (catalog_id, qty_sent, from_location, from_area, to_location, to_area, notes, dispatched_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [catalog_id, qtyNum, fromLoc, fromAr, toLoc, toAr, cleanNullable(req.body.notes), req.user.id]);
+    await client.query('COMMIT');
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[dispatch create]', err.message); res.status(500).json({ error: 'Error al despachar' });
+  } finally { client.release(); }
+});
+
+// GET /api/stock/dispatches?status=en_transito — listar despachos
+router.get('/dispatches', authenticate, async (req, res) => {
+  try {
+    await ensureDispatchSchema();
+    const params = []; const parts = [];
+    const suc = userSucursal(req);
+    if (req.user?.role === 'gerente_sucursal' && suc) { params.push(suc); parts.push(` AND (d.to_location=$${params.length} OR d.from_location=$${params.length})`); }
+    if (req.query.status) { params.push(req.query.status); parts.push(` AND d.status=$${params.length}`); }
+    const sql = `SELECT d.*, c.code, c.name, c.unit,
+        du.name AS dispatched_by_name, ru.name AS received_by_name
+       FROM stock_dispatches d
+       JOIN stock_catalog c ON c.id = d.catalog_id
+       LEFT JOIN users du ON du.id = d.dispatched_by
+       LEFT JOIN users ru ON ru.id = d.received_by
+       WHERE 1=1 ${parts.join('')}
+       ORDER BY d.dispatched_at DESC LIMIT 100`;
+    res.json((await query(sql, params)).rows);
+  } catch (err) { console.error('[dispatch list]', err.message); res.status(500).json({ error: 'Error despachos' }); }
+});
+
+// POST /api/stock/dispatches/:id/recibir — la sucursal confirma la recepción
+router.post('/dispatches/:id/recibir', authenticate, requireRole(...ROLES_DISPATCH_RECV), validateUUID('id'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureDispatchSchema();
+    await client.query('BEGIN');
+    const d = await client.query('SELECT * FROM stock_dispatches WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!d.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Despacho no encontrado' }); }
+    const disp = d.rows[0];
+    if (disp.status !== 'en_transito') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'El despacho no está en tránsito' }); }
+    const suc = userSucursal(req);
+    if (req.user?.role === 'gerente_sucursal' && suc && disp.to_location !== suc) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'Solo podés recibir despachos de tu sucursal' }); }
+    const qtyRecv = req.body.qty_received != null ? Math.max(0, toNumber(req.body.qty_received, parseFloat(disp.qty_sent))) : parseFloat(disp.qty_sent);
+    await client.query(`INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
+      [disp.catalog_id, disp.to_location, disp.to_area, qtyRecv]);
+    await client.query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
+      [disp.catalog_id, qtyRecv, `Recepción de despacho desde ${disp.from_location}/${disp.from_area}`, disp.to_location, disp.to_area, req.user.id]);
+    await client.query(`UPDATE stock_dispatches SET status='recibido', qty_received=$1, receive_notes=$2, received_by=$3, received_at=NOW() WHERE id=$4`,
+      [qtyRecv, cleanNullable(req.body.receive_notes), req.user.id, req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, qty_received: qtyRecv });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[dispatch recv]', err.message); res.status(500).json({ error: 'Error al recibir' });
+  } finally { client.release(); }
+});
+
+// POST /api/stock/dispatches/:id/cancelar — anula un despacho en tránsito (devuelve al origen)
+router.post('/dispatches/:id/cancelar', authenticate, requireRole(...ROLES_DISPATCH_SEND), validateUUID('id'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureDispatchSchema();
+    await client.query('BEGIN');
+    const d = await client.query('SELECT * FROM stock_dispatches WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!d.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Despacho no encontrado' }); }
+    const disp = d.rows[0];
+    if (disp.status !== 'en_transito') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Solo se cancela un despacho en tránsito' }); }
+    await client.query(`INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
+      [disp.catalog_id, disp.from_location, disp.from_area, disp.qty_sent]);
+    await client.query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
+      [disp.catalog_id, disp.qty_sent, `Cancelación de despacho a ${disp.to_location}/${disp.to_area}`, disp.from_location, disp.from_area, req.user.id]);
+    await client.query(`UPDATE stock_dispatches SET status='cancelado' WHERE id=$1`, [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[dispatch cancel]', err.message); res.status(500).json({ error: 'Error al cancelar' });
+  } finally { client.release(); }
+});
+
 module.exports = router;
