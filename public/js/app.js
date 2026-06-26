@@ -4184,8 +4184,9 @@ function _renderStockCatalog() {
           <td class="td-mono" style="color:var(--${st})">${total} ${escapeHtml(a.unit)}</td>
           <td style="font-size:11px;color:var(--text3)">${ubis}</td>
           <td><span class="badge badge-${st}">${stLbl}</span></td>
-          <td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="openStockArticulo('${a.id}')">Ver / Mover</button></td>
-        </tr>`;
+          <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="_toggleCatDetail('${a.id}')">Mover ▾</button></td>
+        </tr>
+        <tr id="cat-detail-${a.id}" style="display:none"><td colspan="7" style="padding:0 8px 10px">${_catDetailHtml(a)}</td></tr>`;
       }).join('');
 
   const catOpts = [`<option value="all"${f.cat === 'all' ? ' selected' : ''}>Categoría: todas</option>`]
@@ -4211,6 +4212,38 @@ function _renderStockCatalog() {
       <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`;
+}
+
+// Detalle por sucursal/área (saldos + acciones) que se despliega INLINE en la
+// fila del artículo, para no tener que entrar a un modal.
+function _catDetailHtml(a) {
+  const num = (v) => parseFloat(v) || 0;
+  const canManage = typeof stockCanManage === 'function' ? stockCanManage() : userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'contador', 'gerente_sucursal');
+  const canSend = _stockCanSend();
+  const balRows = (a.balances || []).length
+    ? a.balances.map((b) => `<tr>
+        <td>${escapeHtml(b.base_location)}</td><td>${escapeHtml(b.area)}</td>
+        <td class="td-mono">${num(b.qty_current)} ${escapeHtml(a.unit)}</td>
+        ${canManage ? `<td style="white-space:nowrap">
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ingreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">+ Ingreso</button>
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Egreso','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">− Egreso</button>
+          <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ajuste','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}')">± Ajuste</button>
+          ${canSend && num(b.qty_current) > 0 ? `<button class="btn btn-secondary btn-sm" onclick="openDispatchModal('${a.id}','${escapeJsArg(b.base_location)}','${escapeJsArg(b.area)}',${num(b.qty_current)})">🚚 Despachar</button>` : ''}
+        </td>` : '<td></td>'}</tr>`).join('')
+    : '<tr><td colspan="4" style="color:var(--text3);padding:8px">Sin stock en ninguna ubicación.</td></tr>';
+  return `<div style="padding:10px 14px;background:var(--bg3);border-radius:var(--radius)">
+    <div style="font-size:12px;color:var(--text3);margin-bottom:8px">${escapeHtml(a.category)} · ${escapeHtml(a.unit)} · mín ${num(a.qty_min)} · costo $${num(a.unit_cost).toLocaleString('es-AR')}${a.supplier ? ' · ' + escapeHtml(a.supplier) : ''}</div>
+    <table style="width:100%;font-size:13px"><thead><tr><th style="text-align:left">Sucursal</th><th style="text-align:left">Área</th><th style="text-align:left">Stock</th><th></th></tr></thead><tbody>${balRows}</tbody></table>
+    ${canManage ? `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="openCatalogMov('${a.id}','Ingreso','','')">+ Ingreso en otra ubicación</button>
+      <button class="btn btn-secondary btn-sm" onclick="openEditCatalogItem('${a.id}')">Editar ficha</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function _toggleCatDetail(id) {
+  const el = document.getElementById('cat-detail-' + id);
+  if (el) el.style.display = (el.style.display === 'none' || !el.style.display) ? '' : 'none';
 }
 
 function openStockArticulo(id) {
