@@ -78,6 +78,10 @@ async function ensureExternalPOFields(clientOrQuery = query) {
   await q(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_required BOOLEAN NOT NULL DEFAULT FALSE`).catch(()=>{});
   await q(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_po_id UUID`).catch(()=>{});
   await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID`).catch(()=>{});
+  // Repuestos de pañol del modelo nuevo (catálogo + saldo por sucursal/área).
+  await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(()=>{});
+  await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS base_location VARCHAR(200)`).catch(()=>{});
+  await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS area VARCHAR(100)`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS ot_id UUID`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
   await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS tipo VARCHAR(30) DEFAULT 'flota'`).catch(()=>{});
@@ -691,9 +695,11 @@ router.delete('/:id/labor/:laborId',
 router.get('/:id/parts', authenticate, validateUUID('id'), async (req, res) => {
   try {
     const r = await query(
-      `SELECT wop.*, si.code AS stock_code, si.name AS stock_name_ref, po.code AS po_code
+      `SELECT wop.*, COALESCE(si.code, sc.code) AS stock_code,
+              COALESCE(si.name, sc.name) AS stock_name_ref, po.code AS po_code
        FROM work_order_parts wop
        LEFT JOIN stock_items si ON si.id = wop.stock_id
+       LEFT JOIN stock_catalog sc ON sc.id = wop.catalog_id
        LEFT JOIN purchase_orders po ON po.id = wop.po_id
        WHERE wop.wo_id = $1
        ORDER BY wop.added_at ASC`,
@@ -711,7 +717,7 @@ router.post('/:id/parts',
   async (req, res) => {
     const client = await require('../db/pool').pool.connect();
     try {
-      const { name, origin, stock_id, qty, unit, unit_cost } = req.body;
+      const { name, origin, stock_id, catalog_id, base_location, area, qty, unit, unit_cost } = req.body;
 
       // Validaciones básicas
       const nameClean = (name || '').trim();
@@ -720,7 +726,7 @@ router.post('/:id/parts',
       }
       const qtyNum = parseFloat(qty);
       if (!qtyNum || qtyNum <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-      const originClean = (origin === 'stock' && stock_id) ? 'stock' : 'externo';
+      const originClean = (origin === 'stock' && (stock_id || catalog_id)) ? 'stock' : 'externo';
       const unitCostNum = originClean === 'stock' ? (parseFloat(unit_cost) || 0) : 0;
 
       await client.query('BEGIN');
@@ -742,9 +748,31 @@ router.post('/:id/parts',
       const otCode = wo.rows[0].code;
       let finalUnitCost = unitCostNum;
       let finalStockId = null;
+      let finalCatalogId = null, finalLoc = null, finalArea = null;
 
-      // Si es del pañol → descontar con FOR UPDATE + registrar movimiento
-      if (originClean === 'stock') {
+      // Si es del pañol → descontar y registrar movimiento.
+      if (originClean === 'stock' && catalog_id) {
+        // Modelo nuevo: descontar del saldo del catálogo en la ubicación elegida.
+        const loc = (base_location || 'Central');
+        const ar = (area || 'Depósito');
+        const cat = await client.query('SELECT name, unit_cost FROM stock_catalog WHERE id = $1', [catalog_id]);
+        if (!cat.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
+        const bal = await client.query(
+          'SELECT qty_current FROM stock_balances WHERE catalog_id = $1 AND base_location = $2 AND area = $3 FOR UPDATE',
+          [catalog_id, loc, ar]);
+        const disp = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
+        if (disp < qtyNum) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Stock insuficiente en ${loc}/${ar}. Disponible: ${disp}` }); }
+        await client.query(
+          'UPDATE stock_balances SET qty_current = qty_current - $1, updated_at = NOW() WHERE catalog_id = $2 AND base_location = $3 AND area = $4',
+          [qtyNum, catalog_id, loc, ar]);
+        await client.query(
+          `INSERT INTO stock_movements (catalog_id, type, qty, reason, wo_id, base_location, area, user_id)
+           VALUES ($1, 'Egreso', $2, $3, $4, $5, $6, $7)`,
+          [catalog_id, qtyNum, `OT ${otCode}`, req.params.id, loc, ar, req.user.id]);
+        finalUnitCost = parseFloat(cat.rows[0].unit_cost) || 0;
+        finalCatalogId = catalog_id; finalLoc = loc; finalArea = ar;
+      } else if (originClean === 'stock') {
+        // Modelo viejo (compat): descontar de stock_items.
         const stock = await client.query(
           'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
           [stock_id]
@@ -757,7 +785,6 @@ router.post('/:id/parts',
           await client.query('ROLLBACK');
           return res.status(409).json({ error: `Stock insuficiente. Disponible: ${stock.rows[0].qty_current}` });
         }
-
         await client.query(
           'UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2',
           [qtyNum, stock_id]
@@ -767,18 +794,16 @@ router.post('/:id/parts',
            VALUES ($1, 'Egreso', $2, $3, $4, $5)`,
           [stock_id, qtyNum, `OT ${otCode} (agregado después de crear)`, req.params.id, req.user.id]
         );
-
-        // Usar siempre el precio real del pañol para valorizar la OT.
         finalUnitCost = parseFloat(stock.rows[0].unit_cost) || 0;
         finalStockId = stock_id;
       }
 
       // Insertar el repuesto en work_order_parts
       const ins = await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO work_order_parts (wo_id, stock_id, catalog_id, base_location, area, name, origin, qty, unit, unit_cost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
-        [req.params.id, finalStockId, nameClean, originClean,
+        [req.params.id, finalStockId, finalCatalogId, finalLoc, finalArea, nameClean, originClean,
          qtyNum, (unit || 'un'), finalUnitCost]
       );
 
@@ -870,6 +895,18 @@ router.delete('/:id/parts/:partId',
              req.params.id, req.user.id]
           );
         }
+      } else if (p.origin === 'stock' && p.catalog_id) {
+        // Modelo nuevo: devolver al saldo del catálogo en su ubicación.
+        const loc = p.base_location || 'Central';
+        const ar = p.area || 'Depósito';
+        await client.query(
+          `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
+          [p.catalog_id, loc, ar, p.qty]);
+        await client.query(
+          `INSERT INTO stock_movements (catalog_id, type, qty, reason, wo_id, base_location, area, user_id)
+           VALUES ($1,'Ingreso',$2,$3,$4,$5,$6,$7)`,
+          [p.catalog_id, p.qty, `Reverso por eliminación de repuesto en OT ${wo.rows[0].code}`, req.params.id, loc, ar, req.user.id]);
       }
 
       // Eliminar el repuesto
