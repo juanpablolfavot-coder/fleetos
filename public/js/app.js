@@ -4174,15 +4174,13 @@ function _renderStockCatalog() {
         const total = num(a.total);
         const st = a.is_critical ? 'danger' : (num(a.qty_min) > 0 && total <= num(a.qty_min) * 1.5 ? 'warn' : 'ok');
         const stLbl = st === 'danger' ? 'Crítico' : st === 'warn' ? 'Bajo' : 'Normal';
-        const ubis = (a.balances || []).length
-          ? a.balances.map((b) => `${escapeHtml(b.base_location)}/${escapeHtml(b.area)}: <b>${num(b.qty_current)}</b>`).join(' · ')
-          : '<span style="color:var(--text3)">sin stock</span>';
+        const ubis = _stockBalChips(a, num);
         return `<tr>
           <td class="td-mono td-main">${escapeHtml(a.code)}</td>
           <td>${escapeHtml(a.name)}</td>
           <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${escapeHtml(a.category)}</span></td>
-          <td class="td-mono" style="color:var(--${st})">${total} ${escapeHtml(a.unit)}</td>
-          <td style="font-size:11px;color:var(--text3)">${ubis}</td>
+          <td class="td-mono" style="color:var(--${st});font-weight:600;white-space:nowrap">${total} ${escapeHtml(a.unit)}</td>
+          <td>${ubis}</td>
           <td><span class="badge badge-${st}">${stLbl}</span></td>
           <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="_toggleCatDetail('${a.id}')">Mover ▾</button></td>
         </tr>
@@ -4212,6 +4210,24 @@ function _renderStockCatalog() {
       <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`;
+}
+
+// Chips compactos con el saldo por ubicación para la columna "Por sucursal/área".
+// Muestra solo las ubicaciones CON stock (las que están en 0 son ruido); si no
+// hay stock en ningún lado, muestra "sin stock". El nombre largo de la sucursal
+// (ej. "Río Tercero (Casa Central)") se abrevia sacando el paréntesis.
+function _stockShortLoc(s) {
+  return String(s || '').replace(/\s*\([^)]*\)\s*/g, ' ').trim() || String(s || '');
+}
+function _stockBalChips(a, num) {
+  const conStock = (a.balances || []).filter((b) => num(b.qty_current) > 0)
+    .sort((x, y) => num(y.qty_current) - num(x.qty_current));
+  if (!conStock.length) return '<span style="color:var(--text3);font-size:12px">sin stock</span>';
+  const chips = conStock.map((b) => `<span style="display:inline-flex;align-items:baseline;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:2px 8px;font-size:11px;line-height:1.5;white-space:nowrap">
+      <span style="color:var(--text3)">${escapeHtml(_stockShortLoc(b.base_location))} · ${escapeHtml(b.area)}</span>
+      <b style="color:var(--text1)">${num(b.qty_current)}</b>
+    </span>`).join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>`;
 }
 
 // Detalle por sucursal/área (saldos + acciones) que se despliega INLINE en la
