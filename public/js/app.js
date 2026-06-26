@@ -13358,9 +13358,13 @@ async function _partsSaveExternalLabor() {
   }
 }
 
-function _partsAddRow() {
+async function _partsAddRow() {
   if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
   if (window._labCurrentOtClosed) return showToast('info', 'La OT está cerrada: no se puede modificar');
+  // El buscador de pañol usa el catálogo; asegurarlo cargado.
+  if (!Array.isArray(App.data.stockCatalog)) {
+    try { const r = await apiFetch('/api/stock/catalog'); App.data.stockCatalog = r.ok ? await r.json() : []; } catch (e) { App.data.stockCatalog = []; }
+  }
 
   const body = `
     <div style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:var(--radius);font-size:12px;color:var(--text3)">
@@ -13381,6 +13385,11 @@ function _partsAddRow() {
         oninput="_partsNameInput(this.value)">
       <div id="pnew-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border2);border-radius:0 0 var(--radius) var(--radius);z-index:100;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.25)"></div>
       <div id="pnew-stock-info" style="display:none;font-size:11px;color:var(--text3);margin-top:4px"></div>
+    </div>
+
+    <div class="form-group" id="pnew-location-wrap" style="display:none">
+      <label class="form-label">Ubicación — de dónde sale el repuesto *</label>
+      <select class="form-select" id="pnew-location" onchange="_partsLocationChanged()"></select>
     </div>
 
     <div class="form-row">
@@ -13414,6 +13423,9 @@ function _partsAddRow() {
 
   // Limpiar dataset para nueva entrada
   window._pnewStockId = null;
+  window._pnewCatalogId = null;
+  window._pnewLoc = null;
+  window._pnewBalances = [];
   window._pnewStockAvailable = 0;
   setTimeout(() => _partsOriginChanged(), 30);
 }
@@ -13444,6 +13456,12 @@ function _partsOriginChanged() {
     if (infoEl) { infoEl.style.display = 'block'; infoEl.innerHTML = '<span style="color:var(--accent)">📦 Elegí un ítem del pañol</span>'; }
     window._pnewStockId = null;
   }
+  window._pnewCatalogId = null;
+  window._pnewLoc = null;
+  window._pnewBalances = [];
+  window._pnewStockAvailable = 0;
+  const _locWrap = document.getElementById('pnew-location-wrap');
+  if (_locWrap) _locWrap.style.display = 'none';
   _partsRecalc();
 }
 
@@ -13455,43 +13473,91 @@ function _partsNameInput(val) {
   if (origin !== 'stock') { sugEl.style.display = 'none'; return; }
 
   // Si el usuario edita después de haber seleccionado, desvincular
-  if (window._pnewStockId) {
+  if (window._pnewCatalogId || window._pnewStockId) {
+    window._pnewCatalogId = null;
     window._pnewStockId = null;
     window._pnewStockAvailable = 0;
+    window._pnewLoc = null;
+    window._pnewBalances = [];
     const nameEl = document.getElementById('pnew-name');
     if (nameEl) nameEl.style.borderLeft = '';
+    const locWrap = document.getElementById('pnew-location-wrap');
+    if (locWrap) locWrap.style.display = 'none';
   }
 
   if (!val || val.length < 2) { sugEl.style.display = 'none'; return; }
   const q = val.toLowerCase();
-  const stock = (App.data.stock || []).filter(s =>
-    (s.name||'').toLowerCase().includes(q) || (s.code||'').toLowerCase().includes(q)
+  const arts = (App.data.stockCatalog || []).filter(a =>
+    (a.name||'').toLowerCase().includes(q) || (a.code||'').toLowerCase().includes(q)
   ).slice(0, 8);
 
-  if (!stock.length) {
+  if (!arts.length) {
     sugEl.innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center">Sin resultados en el pañol. Cambiá a "Externo" si es compra de afuera.</div>';
     sugEl.style.display = 'block';
     return;
   }
 
-  sugEl.innerHTML = stock.map(s => {
-    const qty = parseFloat(s.qty_current || 0);
-    const color = qty <= parseFloat(s.qty_min || 0) ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
-    const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    return `<div onclick="_partsSelectStock('${s.id}','${safeName}','${escapeJsArg(s.unit||'un')}',${parseFloat(s.unit_cost||0)},${qty})"
+  sugEl.innerHTML = arts.map(a => {
+    const total = parseFloat(a.total || 0);
+    const color = a.is_critical ? 'var(--danger)' : (total > 0 ? 'var(--ok)' : 'var(--text3)');
+    return `<div onclick="_partsSelectCatalog('${a.id}')"
       style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
       onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
       <div>
-        <div style="font-weight:600">${escapeHtml(s.name)}</div>
-        <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(s.code||'—')}</div>
+        <div style="font-weight:600">${escapeHtml(a.name)}</div>
+        <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(a.code||'—')}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${escapeHtml(s.unit||'un')}</div>
-        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${escapeHtml(s.unit||'un')}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round(parseFloat(a.unit_cost)||0).toLocaleString('es-AR')}/${escapeHtml(a.unit||'un')}</div>
+        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${total} ${escapeHtml(a.unit||'un')}</div>
       </div>
     </div>`;
   }).join('');
   sugEl.style.display = 'block';
+}
+
+// Seleccionar un artículo del catálogo: setea nombre/unidad/costo y arma el
+// selector de ubicación con los saldos disponibles (de dónde sale el repuesto).
+function _partsSelectCatalog(catalogId) {
+  const a = (App.data.stockCatalog || []).find((x) => String(x.id) === String(catalogId));
+  if (!a) return;
+  const nameEl = document.getElementById('pnew-name');
+  const unitEl = document.getElementById('pnew-unit');
+  const costEl = document.getElementById('pnew-cost');
+  const sugEl = document.getElementById('pnew-suggestions');
+  const locWrap = document.getElementById('pnew-location-wrap');
+  const locSel = document.getElementById('pnew-location');
+
+  if (nameEl) { nameEl.value = a.name; nameEl.style.borderLeft = '3px solid var(--ok)'; }
+  if (unitEl) unitEl.value = a.unit || 'un';
+  if (costEl) { costEl.value = parseFloat(a.unit_cost) || 0; costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; }
+  if (sugEl) sugEl.style.display = 'none';
+
+  window._pnewCatalogId = a.id;
+  window._pnewStockId = null;
+  // Solo ubicaciones con stock > 0.
+  window._pnewBalances = (a.balances || []).filter((b) => parseFloat(b.qty_current) > 0);
+  if (locSel) {
+    if (window._pnewBalances.length === 0) {
+      locSel.innerHTML = '<option value="">Sin stock en ninguna ubicación</option>';
+    } else {
+      locSel.innerHTML = window._pnewBalances.map((b, i) =>
+        `<option value="${i}">${escapeHtml(b.base_location)} / ${escapeHtml(b.area)} — ${parseFloat(b.qty_current)} ${escapeHtml(a.unit || 'un')}</option>`).join('');
+    }
+  }
+  if (locWrap) locWrap.style.display = 'block';
+  _partsLocationChanged();
+}
+
+// Cambió la ubicación elegida → fijar disponible para validar la cantidad.
+function _partsLocationChanged() {
+  const locSel = document.getElementById('pnew-location');
+  const idx = locSel ? parseInt(locSel.value, 10) : NaN;
+  const b = Number.isFinite(idx) ? (window._pnewBalances || [])[idx] : null;
+  window._pnewLoc = b ? { base_location: b.base_location, area: b.area } : null;
+  window._pnewStockAvailable = b ? parseFloat(b.qty_current) : 0;
+  _partsQtyChanged();
+  _partsRecalc();
 }
 
 function _partsSelectStock(stockId, name, unit, unitCost, qtyAvailable) {
@@ -13523,7 +13589,7 @@ function _partsQtyChanged() {
   const qtyEl = document.getElementById('pnew-qty');
   const infoEl = document.getElementById('pnew-stock-info');
 
-  if (origin === 'stock' && window._pnewStockId) {
+  if (origin === 'stock' && (window._pnewCatalogId || window._pnewStockId)) {
     const available = window._pnewStockAvailable;
     if (qty > available) {
       if (qtyEl) qtyEl.style.borderColor = 'var(--danger)';
@@ -13557,11 +13623,16 @@ async function _partsSave() {
 
   if (!name || name.length < 2) { showToast('error', 'Ingresá el nombre del repuesto'); return; }
   if (!qty || qty <= 0) { showToast('error', 'Cantidad inválida'); return; }
-  if (origin === 'stock' && !window._pnewStockId) { showToast('error', 'Seleccioná un ítem del pañol o cambiá a Externo'); return; }
-  if (origin === 'stock' && qty > window._pnewStockAvailable) { showToast('error', `Cantidad mayor al stock disponible (${window._pnewStockAvailable})`); return; }
+  if (origin === 'stock' && !window._pnewCatalogId) { showToast('error', 'Seleccioná un repuesto del pañol o cambiá a Externo'); return; }
+  if (origin === 'stock' && !window._pnewLoc) { showToast('error', 'Elegí la ubicación de la que sale el repuesto'); return; }
+  if (origin === 'stock' && qty > window._pnewStockAvailable) { showToast('error', `Cantidad mayor al stock disponible en esa ubicación (${window._pnewStockAvailable})`); return; }
 
   const payload = { name, origin, qty, unit, unit_cost };
-  if (origin === 'stock') payload.stock_id = window._pnewStockId;
+  if (origin === 'stock') {
+    payload.catalog_id = window._pnewCatalogId;
+    payload.base_location = window._pnewLoc.base_location;
+    payload.area = window._pnewLoc.area;
+  }
 
   try {
     const r = await apiFetch(`/api/workorders/${otId}/parts`, {
