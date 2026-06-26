@@ -543,4 +543,180 @@ router.post('/:id/ajuste', authenticate, requireRole(...ROLES_STOCK_ADMIN), vali
   }
 });
 
+// ════════════════════════════════════════════════════════════════════
+//  CATÁLOGO ÚNICO + SALDOS POR SUCURSAL (Fase 2)
+//  Modelo nuevo: stock_catalog (artículo con código único) + stock_balances
+//  (saldo por sucursal/área). Convive con el modelo viejo (stock_items) hasta
+//  el cutover. Las tablas las crea la migración; acá se aseguran por las dudas.
+// ════════════════════════════════════════════════════════════════════
+let catalogReady = false;
+async function ensureCatalogSchema() {
+  if (catalogReady) return;
+  await query(`CREATE TABLE IF NOT EXISTS stock_catalog (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    category VARCHAR(100) NOT NULL DEFAULT 'General',
+    unit VARCHAR(20) NOT NULL DEFAULT 'un',
+    qty_min NUMERIC(10,2) NOT NULL DEFAULT 0,
+    qty_reorder NUMERIC(10,2) NOT NULL DEFAULT 0,
+    unit_cost NUMERIC(12,2) NOT NULL DEFAULT 0,
+    supplier VARCHAR(200),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`).catch(() => {});
+  await query(`CREATE TABLE IF NOT EXISTS stock_balances (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    catalog_id UUID NOT NULL REFERENCES stock_catalog(id) ON DELETE CASCADE,
+    base_location VARCHAR(200) NOT NULL,
+    area VARCHAR(100) NOT NULL,
+    qty_current NUMERIC(10,2) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (catalog_id, base_location, area)
+  )`).catch(() => {});
+  // Movimientos: que puedan referenciar el catálogo (modelo nuevo).
+  await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(() => {});
+  await query(`ALTER TABLE stock_movements ALTER COLUMN stock_id DROP NOT NULL`).catch(() => {});
+  await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_catalog ON stock_movements(catalog_id)`).catch(() => {});
+  catalogReady = true;
+}
+
+// Prefijo de código por categoría (mismo criterio que la migración Fase 1).
+const CAT_PREFIJOS = { lubricantes: 'LUB', electrico: 'ELE', filtros: 'FIL', general: 'GEN', palet: 'PAL', frenos: 'FRE' };
+function _stripAccents(s) { return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+function categoryPrefix(cat) {
+  const k = _stripAccents(cat).trim().toLowerCase();
+  return CAT_PREFIJOS[k] || (_stripAccents(cat).replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'GEN');
+}
+async function nextCatalogCode(category) {
+  const prefix = categoryPrefix(category);
+  const r = await query(`SELECT code FROM stock_catalog WHERE code LIKE $1 ORDER BY code DESC LIMIT 1`, [prefix + '-%']);
+  let n = 0;
+  if (r.rows[0]) { const m = /(\d+)$/.exec(r.rows[0].code); if (m) n = parseInt(m[1], 10); }
+  return `${prefix}-${String(n + 1).padStart(3, '0')}`;
+}
+
+// GET /api/stock/catalog — artículos con sus saldos por sucursal/área
+router.get('/catalog', authenticate, async (req, res) => {
+  try {
+    await ensureCatalogSchema();
+    const params = [];
+    let balanceFilter = '';
+    const suc = userSucursal(req);
+    if (req.user?.role === 'gerente_sucursal' && suc) { params.push(suc); balanceFilter = ` AND b.base_location = $${params.length}`; }
+    const sql = `
+      SELECT c.id, c.code, c.name, c.category, c.unit, c.qty_min, c.qty_reorder, c.unit_cost, c.supplier,
+             COALESCE(SUM(b.qty_current), 0) AS total,
+             (COALESCE(SUM(b.qty_current), 0) <= c.qty_min) AS is_critical,
+             COALESCE(json_agg(json_build_object('base_location', b.base_location, 'area', b.area, 'qty_current', b.qty_current)
+                      ORDER BY b.base_location, b.area) FILTER (WHERE b.id IS NOT NULL), '[]') AS balances
+      FROM stock_catalog c
+      LEFT JOIN stock_balances b ON b.catalog_id = c.id${balanceFilter}
+      WHERE c.active = TRUE
+      GROUP BY c.id
+      ORDER BY c.category, c.name`;
+    res.json((await query(sql, params)).rows);
+  } catch (err) { console.error('[stock catalog GET]', err.message); res.status(500).json({ error: 'Error catálogo' }); }
+});
+
+// POST /api/stock/catalog — crear artículo (código autogenerado por categoría)
+router.post('/catalog', authenticate, requireRole(...ROLES_STOCK_ADMIN), async (req, res) => {
+  try {
+    await ensureCatalogSchema();
+    const name = cleanText(req.body.name);
+    if (!name) return res.status(400).json({ error: 'El nombre es obligatorio' });
+    const category = cleanText(req.body.category, 'General');
+    const unit = cleanText(req.body.unit, 'un');
+    const qty_min = Math.max(0, toNumber(req.body.qty_min, 0));
+    const qty_reorder = Math.max(0, toNumber(req.body.qty_reorder, 0));
+    const unit_cost = Math.max(0, toNumber(req.body.unit_cost, 0));
+    const supplier = cleanNullable(req.body.supplier);
+    const code = req.body.code ? cleanCode(req.body.code) : await nextCatalogCode(category);
+    const r = await query(
+      `INSERT INTO stock_catalog (code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier]);
+    const initQty = Math.max(0, toNumber(req.body.qty_current, 0));
+    if (initQty > 0) {
+      let base_location = cleanText(req.body.base_location || 'Central', 'Central');
+      const suc = userSucursal(req);
+      if (req.user?.role === 'gerente_sucursal' && suc) base_location = suc;
+      const area = normalizeArea(req.body.area || 'Depósito');
+      await query(
+        `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
+        [r.rows[0].id, base_location, area, initQty]);
+      await query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Ingreso',$2,'Alta de artículo',$3,$4,$5)`,
+        [r.rows[0].id, initQty, base_location, area, req.user.id]);
+    }
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe un artículo con ese código' });
+    console.error('[stock catalog POST]', err.message); res.status(500).json({ error: 'Error al crear artículo' });
+  }
+});
+
+// PUT /api/stock/catalog/:id — editar la ficha (el código no se cambia)
+router.put('/catalog/:id', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), async (req, res) => {
+  try {
+    await ensureCatalogSchema();
+    const fields = []; const params = [];
+    const set = (col, val) => { params.push(val); fields.push(`${col}=$${params.length}`); };
+    if (req.body.name !== undefined) set('name', cleanText(req.body.name));
+    if (req.body.category !== undefined) set('category', cleanText(req.body.category, 'General'));
+    if (req.body.unit !== undefined) set('unit', cleanText(req.body.unit, 'un'));
+    if (req.body.qty_min !== undefined) set('qty_min', Math.max(0, toNumber(req.body.qty_min, 0)));
+    if (req.body.qty_reorder !== undefined) set('qty_reorder', Math.max(0, toNumber(req.body.qty_reorder, 0)));
+    if (req.body.unit_cost !== undefined) set('unit_cost', Math.max(0, toNumber(req.body.unit_cost, 0)));
+    if (req.body.supplier !== undefined) set('supplier', cleanNullable(req.body.supplier));
+    if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    params.push(req.params.id);
+    const r = await query(`UPDATE stock_catalog SET ${fields.join(',')}, updated_at=NOW() WHERE id=$${params.length} RETURNING *`, params);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Artículo no encontrado' });
+    res.json(r.rows[0]);
+  } catch (err) { console.error('[stock catalog PUT]', err.message); res.status(500).json({ error: 'Error al actualizar artículo' }); }
+});
+
+// POST /api/stock/catalog/:id/mov — movimiento (Ingreso/Egreso/Ajuste) en una ubicación
+router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO), validateUUID('id'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureCatalogSchema();
+    const tipo = cleanText(req.body.type);
+    if (!['Ingreso', 'Egreso', 'Ajuste'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido (Ingreso/Egreso/Ajuste)' });
+    const qty = Math.max(0, toNumber(req.body.qty, 0));
+    if (qty <= 0 && tipo !== 'Ajuste') return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' });
+    let base_location = cleanText(req.body.base_location || 'Central', 'Central');
+    const suc = userSucursal(req);
+    if (req.user?.role === 'gerente_sucursal' && suc) base_location = suc;
+    const area = normalizeArea(req.body.area || 'Depósito');
+    const reason = cleanNullable(req.body.reason);
+
+    await client.query('BEGIN');
+    const cat = await client.query('SELECT id FROM stock_catalog WHERE id=$1 AND active=TRUE', [req.params.id]);
+    if (!cat.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
+    const bal = await client.query('SELECT qty_current FROM stock_balances WHERE catalog_id=$1 AND base_location=$2 AND area=$3 FOR UPDATE', [req.params.id, base_location, area]);
+    const actual = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
+    let nueva;
+    if (tipo === 'Ingreso') nueva = actual + qty;
+    else if (tipo === 'Egreso') {
+      if (qty > actual) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Stock insuficiente en ${base_location}/${area} (hay ${actual})` }); }
+      nueva = actual - qty;
+    } else { nueva = Math.max(0, toNumber(req.body.qty, actual)); } // Ajuste: cantidad absoluta
+    await client.query(
+      `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current=$4, updated_at=NOW()`,
+      [req.params.id, base_location, area, nueva]);
+    await client.query(
+      `INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [req.params.id, tipo, tipo === 'Ajuste' ? nueva : qty, reason || `${tipo} de stock`, base_location, area, req.user.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, catalog_id: req.params.id, base_location, area, qty_current: nueva });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[stock catalog mov]', err.message); res.status(500).json({ error: 'Error en el movimiento' });
+  } finally { client.release(); }
+});
+
 module.exports = router;
