@@ -116,6 +116,34 @@ function applyStockScope(req, params, sqlParts, tableAlias = '') {
     sqlParts.push(` AND ${prefix}base_location = $${params.length}`);
   }
 }
+function userArea(req) {
+  return cleanNullable(req.user?.area);
+}
+// Scope de saldos por sucursal + área:
+//  - dueño/gerencia: ven todo.
+//  - gerente_sucursal: toda su sucursal (todas las áreas).
+//  - el resto con área asignada (pañolero, etc.): solo su sucursal + su área.
+function applyBalanceScope(req, params, sqlParts, alias = 'b') {
+  const role = req.user?.role;
+  if (role === 'dueno' || role === 'gerencia') return;
+  const suc = userSucursal(req);
+  if (suc) { params.push(suc); sqlParts.push(` AND ${alias}.base_location = $${params.length}`); }
+  if (role !== 'gerente_sucursal') {
+    const ar = userArea(req);
+    if (ar) { params.push(ar); sqlParts.push(` AND ${alias}.area = $${params.length}`); }
+  }
+}
+// Fuerza la ubicación (sucursal/área) de un movimiento según el scope del usuario.
+function scopedLocation(req, base_location, area) {
+  const role = req.user?.role;
+  let loc = base_location, ar = area;
+  if (role !== 'dueno' && role !== 'gerencia') {
+    const suc = userSucursal(req);
+    if (suc) loc = suc;
+    if (role !== 'gerente_sucursal') { const ua = userArea(req); if (ua) ar = ua; }
+  }
+  return { base_location: loc, area: ar };
+}
 function normalizeStockPayload(body = {}, req = null) {
   const code = cleanCode(body.code);
   const name = cleanText(body.name);
@@ -602,9 +630,9 @@ router.get('/catalog', authenticate, async (req, res) => {
   try {
     await ensureCatalogSchema();
     const params = [];
-    let balanceFilter = '';
-    const suc = userSucursal(req);
-    if (req.user?.role === 'gerente_sucursal' && suc) { params.push(suc); balanceFilter = ` AND b.base_location = $${params.length}`; }
+    const sc = [];
+    applyBalanceScope(req, params, sc, 'b');
+    const balanceFilter = sc.join('');
     const sql = `
       SELECT c.id, c.code, c.name, c.category, c.unit, c.qty_min, c.qty_reorder, c.unit_cost, c.supplier,
              COALESCE(SUM(b.qty_current), 0) AS total,
@@ -615,6 +643,7 @@ router.get('/catalog', authenticate, async (req, res) => {
       LEFT JOIN stock_balances b ON b.catalog_id = c.id${balanceFilter}
       WHERE c.active = TRUE
       GROUP BY c.id
+      ${balanceFilter ? 'HAVING COUNT(b.id) > 0' : ''}
       ORDER BY c.category, c.name`;
     res.json((await query(sql, params)).rows);
   } catch (err) { console.error('[stock catalog GET]', err.message); res.status(500).json({ error: 'Error catálogo' }); }
@@ -639,10 +668,9 @@ router.post('/catalog', authenticate, requireRole(...ROLES_STOCK_ADMIN), async (
       [code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier]);
     const initQty = Math.max(0, toNumber(req.body.qty_current, 0));
     if (initQty > 0) {
-      let base_location = cleanText(req.body.base_location || 'Central', 'Central');
-      const suc = userSucursal(req);
-      if (req.user?.role === 'gerente_sucursal' && suc) base_location = suc;
-      const area = normalizeArea(req.body.area || 'Depósito');
+      const scoped = scopedLocation(req, cleanText(req.body.base_location || 'Central', 'Central'), normalizeArea(req.body.area || 'Depósito'));
+      const base_location = scoped.base_location;
+      const area = scoped.area;
       await query(
         `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
          ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
@@ -687,10 +715,9 @@ router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO)
     if (!['Ingreso', 'Egreso', 'Ajuste'].includes(tipo)) return res.status(400).json({ error: 'Tipo inválido (Ingreso/Egreso/Ajuste)' });
     const qty = Math.max(0, toNumber(req.body.qty, 0));
     if (qty <= 0 && tipo !== 'Ajuste') return res.status(400).json({ error: 'La cantidad debe ser mayor a 0' });
-    let base_location = cleanText(req.body.base_location || 'Central', 'Central');
-    const suc = userSucursal(req);
-    if (req.user?.role === 'gerente_sucursal' && suc) base_location = suc;
-    const area = normalizeArea(req.body.area || 'Depósito');
+    const scoped = scopedLocation(req, cleanText(req.body.base_location || 'Central', 'Central'), normalizeArea(req.body.area || 'Depósito'));
+    const base_location = scoped.base_location;
+    const area = scoped.area;
     const reason = cleanNullable(req.body.reason);
 
     await client.query('BEGIN');
