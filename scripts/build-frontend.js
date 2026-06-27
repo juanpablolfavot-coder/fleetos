@@ -49,7 +49,27 @@ function buildFrontend({ quiet = true } = {}) {
     const abs = path.join(PUBLIC_DIR, rel);
     return `// ── ${rel} ──\n` + fs.readFileSync(abs, 'utf8');
   });
-  const bundleSrc = parts.join('\n;\n');
+  let bundleSrc = parts.join('\n;\n');
+  let minified = false;
+
+  // Minificar con esbuild SOLO whitespace + sintaxis, sin renombrar
+  // identificadores: así ninguna función/variable global cambia de nombre y
+  // los onclick="funcionGlobal()" siguen resolviendo. Si esbuild no está o
+  // falla, se usa el concatenado tal cual (fallback, sigue andando).
+  try {
+    const esbuild = require('esbuild');
+    const out = esbuild.transformSync(bundleSrc, {
+      minifyWhitespace: true,
+      minifySyntax: true,
+      minifyIdentifiers: false, // NO renombrar: protege los onclick globales
+      legalComments: 'none',
+      charset: 'utf8',
+    });
+    bundleSrc = out.code;
+    minified = true;
+  } catch (e) {
+    if (!quiet) console.warn('[build-frontend] minify omitido (' + e.message + '), uso concatenado');
+  }
 
   const hash = crypto.createHash('sha256').update(bundleSrc).digest('hex').slice(0, 12);
   const bundleName = `app.${hash}.js`;
@@ -64,13 +84,13 @@ function buildFrontend({ quiet = true } = {}) {
   }
 
   fs.writeFileSync(path.join(DIST_DIR, bundleName), bundleSrc);
-  fs.writeFileSync(path.join(DIST_DIR, 'manifest.json'), JSON.stringify({ bundle: bundleRel, files, hash }, null, 2));
+  fs.writeFileSync(path.join(DIST_DIR, 'manifest.json'), JSON.stringify({ bundle: bundleRel, files, hash, minified }, null, 2));
 
   const bytes = Buffer.byteLength(bundleSrc);
   if (!quiet) {
-    console.log(`[build-frontend] ${files.length} archivos → ${bundleRel} (${(bytes / 1024).toFixed(0)} KB)`);
+    console.log(`[build-frontend] ${files.length} archivos → ${bundleRel} (${(bytes / 1024).toFixed(0)} KB${minified ? ', minificado' : ', sin minificar'})`);
   }
-  return { bundle: bundleRel, hash, files, bytes };
+  return { bundle: bundleRel, hash, files, bytes, minified };
 }
 
 module.exports = { buildFrontend, orderedScriptFiles };
