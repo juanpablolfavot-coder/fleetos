@@ -229,7 +229,7 @@ async function ingresarStockDeRecepcion(client, receiptId, items, destino, userI
     const qty = parseFloat(it.cantidad);
     if (!(qty > 0)) continue;
     const poi = await client.query(
-      `SELECT id, descripcion, unidad FROM purchase_order_items WHERE id=$1::uuid`, [it.po_item_id]);
+      `SELECT id, descripcion, unidad, precio_unit FROM purchase_order_items WHERE id=$1::uuid`, [it.po_item_id]);
     const row = poi.rows[0];
     if (!row) continue;
 
@@ -244,7 +244,8 @@ async function ingresarStockDeRecepcion(client, receiptId, items, destino, userI
       const name = String(na.name || row.descripcion).trim();
       const category = String(na.category || 'General').trim() || 'General';
       const u = String(na.unit || unit || 'un').trim() || 'un';
-      const cost = Math.max(0, parseFloat(na.unit_cost) || 0);
+      // Costo del artículo nuevo: el que cargó el usuario, o si no, el precio de la OC.
+      const cost = Math.max(0, parseFloat(na.unit_cost) > 0 ? parseFloat(na.unit_cost) : (parseFloat(row.precio_unit) || 0));
       try {
         const code = await nextCatalogCode(client, category);
         const ins = await client.query(
@@ -378,7 +379,7 @@ router.get('/:id/items-pendientes', authenticate, async (req, res) => {
     if (scopeErr) return res.status(scopeErr.status).json({ error: scopeErr.error });
     const r = await query(`
       SELECT
-        poi.id, poi.descripcion, poi.unidad,
+        poi.id, poi.descripcion, poi.unidad, poi.precio_unit,
         poi.cantidad AS pedida,
         COALESCE(SUM(pori.cantidad), 0) AS recibida,
         (poi.cantidad - COALESCE(SUM(pori.cantidad), 0)) AS pendiente

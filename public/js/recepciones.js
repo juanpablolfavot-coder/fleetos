@@ -157,10 +157,11 @@
                         <option value="__new__">➕ Crear artículo nuevo</option>
                       </select>
                       <div id="recep-new-${i.id}" style="display:none;margin-top:8px">
-                        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">
+                        <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px">
                           <div><label style="font-size:11px;color:var(--text3)">Nombre nuevo</label><input id="recep-nname-${i.id}" class="form-input" value="${escapeHtml(i.descripcion)}"></div>
                           <div><label style="font-size:11px;color:var(--text3)">Categoría</label><input id="recep-ncat-${i.id}" class="form-input" value="General"></div>
                           <div><label style="font-size:11px;color:var(--text3)">Unidad</label><input id="recep-nunit-${i.id}" class="form-input" value="${escapeHtml(unidad)}"></div>
+                          <div><label style="font-size:11px;color:var(--text3)">Costo unit. ($)</label><input id="recep-ncost-${i.id}" class="form-input" type="number" min="0" step="0.01" value="${parseFloat(i.precio_unit) > 0 ? parseFloat(i.precio_unit) : ''}" placeholder="0"></div>
                         </div>
                       </div>
                       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
@@ -302,6 +303,7 @@
             name,
             category: document.getElementById('recep-ncat-' + id)?.value.trim() || 'General',
             unit: document.getElementById('recep-nunit-' + id)?.value.trim() || 'un',
+            unit_cost: parseFloat(document.getElementById('recep-ncost-' + id)?.value) || 0,
           };
         } else if (art) {
           item.catalog_id = art;
