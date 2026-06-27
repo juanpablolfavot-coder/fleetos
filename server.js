@@ -67,9 +67,12 @@ const BUILD_VERSION = String(
 // de cómo Render haga el deploy. Si falla, FRONTEND_BUNDLE queda null y el
 // catch-all sirve los <script> individuales (comportamiento previo intacto).
 let FRONTEND_BUNDLE = null;
+let FRONTEND_MODULE_BUNDLE = null;
 try {
-  FRONTEND_BUNDLE = require('./scripts/build-frontend').buildFrontend().bundle;
-  console.log('[frontend] bundle activo:', FRONTEND_BUNDLE);
+  const fb = require('./scripts/build-frontend').buildFrontend();
+  FRONTEND_BUNDLE = fb.bundle;
+  FRONTEND_MODULE_BUNDLE = fb.moduleBundle;
+  console.log('[frontend] bundle activo:', FRONTEND_BUNDLE, '· modules:', FRONTEND_MODULE_BUNDLE || '(nativo)');
 } catch (e) {
   console.warn('[frontend] build falló, sirviendo scripts individuales:', e.message);
 }
@@ -229,6 +232,12 @@ app.get(/^(?!\/api).*/, (req, res) => {
       replaced = true;
       return `<script src="${FRONTEND_BUNDLE}"></script>\n`;
     });
+  }
+  // Si los ES modules se bundlearon, reemplazar el <script type="module"> nativo
+  // por el bundle IIFE (clásico). Si no, queda el nativo (el navegador lo carga).
+  if (FRONTEND_MODULE_BUNDLE) {
+    html = html.replace(/<script\s+type=["']module["']\s+src=["']js\/modules\/[^"']+["']>\s*<\/script>/,
+      `<script src="${FRONTEND_MODULE_BUNDLE}"></script>`);
   }
   html = html.replace(/(src|href)=(['"])([^'"]+\.(?:js|css))(?:\?v=[^'"]*)?\2/g, (m, attr, quote, asset) => {
     if (/^https?:/i.test(asset)) return m;
