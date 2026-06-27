@@ -12,3 +12,4 @@ import './assets.mjs';
 import './tires.mjs';
 import './auditor.mjs';
 import './stock.mjs';
+import './proveedor-panel.mjs';

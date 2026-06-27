@@ -1,6 +1,13 @@
-// ═══════════════════════════════════════════════════════════
-//  FleetOS — Panel rol Proveedores (tema claro, integrado)
-// ═══════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  PANEL ROL PROVEEDORES (ES module, Fase 3) — lista de OCs del proveedor.
+//  Migrado de proveedor-panel.js. Ya se autoexpone vía window.X=; solo se
+//  agregan las dependencias legacy por el puente. (openPODetail/
+//  abrirModalFacturas son onclick que resuelven en click-time, no son deps.)
+// ════════════════════════════════════════════════════════════════════
+import { need } from './dom.mjs';
+
+const apiFetch = need('apiFetch');
+const escapeHtml = need('escapeHtml');
 
 window.renderProveedorPanelInline = async function() {
   const page = document.getElementById('page-proveedor_panel');
