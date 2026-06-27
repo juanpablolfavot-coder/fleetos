@@ -13,3 +13,7 @@ import './tires.mjs';
 import './auditor.mjs';
 import './stock.mjs';
 import './proveedor-panel.mjs';
+import './recepciones.mjs';
+import './facturas.mjs';
+import './pagos.mjs';
+import './timeline.mjs';

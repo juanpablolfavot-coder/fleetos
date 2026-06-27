@@ -595,7 +595,7 @@
       showToast('ok', data.message || 'Pago registrado');
       document.querySelector('.modal-pago-overlay')?.remove();
       // Refrescar panel si está activo
-      if (typeof renderTesoreriaPanelInline === 'function' && App.currentPage === 'tesoreria_panel') {
+      if (typeof renderTesoreriaPanelInline === 'function' && window.App.currentPage === 'tesoreria_panel') {
         renderTesoreriaPanelInline();
       }
     } catch (err) {
@@ -615,7 +615,7 @@
       }
       showToast('ok', 'Pago anulado');
       document.querySelector('.modal-pago-overlay')?.remove();
-      if (typeof renderTesoreriaPanelInline === 'function' && App.currentPage === 'tesoreria_panel') {
+      if (typeof renderTesoreriaPanelInline === 'function' && window.App.currentPage === 'tesoreria_panel') {
         renderTesoreriaPanelInline();
       }
     } catch (err) {
@@ -778,7 +778,7 @@
       const data = await res.json();
       showToast('ok', data.message || 'Pago combinado registrado');
       document.querySelector('.modal-pago-overlay')?.remove();
-      if (typeof renderTesoreriaPanelInline === 'function' && App.currentPage === 'tesoreria_panel') renderTesoreriaPanelInline();
+      if (typeof renderTesoreriaPanelInline === 'function' && window.App.currentPage === 'tesoreria_panel') renderTesoreriaPanelInline();
     } catch (err) {
       console.error(err);
       showToast('error', 'Error al registrar el pago combinado');
