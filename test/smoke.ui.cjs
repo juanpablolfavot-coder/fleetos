@@ -196,7 +196,30 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
     }, p);
     await page.waitForTimeout(200);
     const asyncErrs = errors.slice(before).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg));
-    results.push({ page: p, thrown, asyncErrs });
+    // Chequeo de onclick: cada handler del DOM renderizado llama funciones por
+    // nombre (onclick="foo()"). Si una NO resuelve a algo definido en el scope
+    // global, romperá al hacer clic. Esto cubre el punto ciego del render-only
+    // y es CLAVE para la migración a ES modules (donde lo global desaparece).
+    const missingOnclick = thrown ? [] : await page.evaluate(() => {
+      const BUILTINS = new Set(['if', 'for', 'while', 'switch', 'return', 'function', 'typeof', 'new', 'delete', 'void', 'in', 'instanceof', 'do', 'else', 'try', 'catch', 'throw', 'var', 'let', 'const', 'this', 'true', 'false', 'null',
+        'alert', 'confirm', 'prompt', 'parseInt', 'parseFloat', 'isNaN', 'Number', 'String', 'Array', 'Object', 'Math', 'Date', 'JSON', 'Boolean', 'RegExp', 'Map', 'Set', 'Promise', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval', 'encodeURIComponent', 'decodeURIComponent', 'fetch', 'window', 'document', 'console', 'event']);
+      const names = new Set();
+      document.querySelectorAll('[onclick]').forEach((el) => {
+        const code = el.getAttribute('onclick') || '';
+        // Identificadores invocados como función "pelada" (no precedidos por punto).
+        const re = /(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
+        let m;
+        while ((m = re.exec(code)) !== null) { if (!BUILTINS.has(m[2])) names.add(m[2]); }
+      });
+      const missing = [];
+      for (const n of names) {
+        let ok = false;
+        try { ok = typeof (0, eval)(n) !== 'undefined'; } catch (e) { ok = false; }
+        if (!ok) missing.push(n);
+      }
+      return missing;
+    });
+    results.push({ page: p, thrown, asyncErrs, missingOnclick });
   }
 
   await browser.close();
@@ -206,12 +229,13 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
   let failed = 0;
   console.log('\n  Smoke UI — renderPage por pantalla\n  ' + '─'.repeat(48));
   for (const r of results) {
-    const bad = r.thrown || r.asyncErrs.length;
+    const bad = r.thrown || r.asyncErrs.length || (r.missingOnclick && r.missingOnclick.length);
     if (bad) failed++;
     const mark = bad ? '✗' : '✓';
     console.log(`  ${mark} ${r.page}`);
     if (r.thrown) console.log(`      throw: ${r.thrown}`);
     for (const e of r.asyncErrs) console.log(`      ${e.kind}: ${e.msg}`);
+    if (r.missingOnclick && r.missingOnclick.length) console.log(`      onclick sin definir: ${r.missingOnclick.join(', ')}`);
   }
   const otherErrs = errors.filter((e) => e.page === 'boot' && e.kind === 'pageerror' && !IGNORE.test(e.msg));
   for (const e of otherErrs) { failed++; console.log(`  ✗ boot\n      ${e.kind}: ${e.msg}`); }
