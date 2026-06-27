@@ -10,3 +10,5 @@ import './documents.mjs';
 import './maintenance.mjs';
 import './assets.mjs';
 import './tires.mjs';
+import './auditor.mjs';
+import './stock.mjs';

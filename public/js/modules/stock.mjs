@@ -1,16 +1,25 @@
 // ════════════════════════════════════════════════════════════════════
-//  STOCK Y DEPÓSITO — pantalla del catálogo único + saldos por sucursal/área
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde renderPage). Este archivo se
-//  carga DESPUÉS de app.js, así que puede usar sus helpers globales
-//  (escapeHtml, apiFetch, openModal, showToast, afterSave, userHasRole,
-//  stockLocationControls, stockCanManage, App.data, etc.).
+//  STOCK Y DEPÓSITO (ES module, Fase 3) — catálogo único + saldos por
+//  sucursal/área, despachos y movimientos. Migrado de stock.js.
+//
+//  Los helpers compartidos (stockLocationControls, stockCanManage,
+//  stockBaseOptions) siguen viviendo en app.js; acá se leen por el puente.
 // ════════════════════════════════════════════════════════════════════
-//  STOCK — Pantalla sobre el catálogo único + saldos por sucursal/área.
-//  Reemplazó al modelo viejo (stock_items / _renderStockOld), que ya se
-//  eliminó. Helpers compartidos (stockLocationControls, stockCanManage,
-//  stockBaseOptions, etc.) siguen viviendo en app.js.
-// ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const apiFetch = need('apiFetch');
+const afterSave = need('afterSave');
+const escapeHtml = need('escapeHtml');
+const escapeJsArg = need('escapeJsArg');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+const showToast = need('showToast');
+const userHasRole = need('userHasRole');
+const stockCanManage = need('stockCanManage');
+const stockLocationControls = need('stockLocationControls');
+const stockBaseOptions = need('stockBaseOptions');
+
 async function renderStock() {
   const page = document.getElementById('page-stock');
   if (!page) return;
@@ -463,3 +472,29 @@ async function cancelDispatch(id) {
     await afterSave({ page: 'stock' });
   } catch (err) { showToast('error', err.message); }
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick).
+expose('renderStock', renderStock);
+expose('_renderStockCatalog', _renderStockCatalog);
+expose('_stockInlinePanels', _stockInlinePanels);
+expose('_renderDispatchesInline', _renderDispatchesInline);
+expose('_renderMovementsInline', _renderMovementsInline);
+expose('_stockShortLoc', _stockShortLoc);
+expose('_stockBalChips', _stockBalChips);
+expose('_catDetailHtml', _catDetailHtml);
+expose('_toggleCatDetail', _toggleCatDetail);
+expose('openCatalogMov', openCatalogMov);
+expose('saveCatalogMov', saveCatalogMov);
+expose('openNewCatalogItem', openNewCatalogItem);
+expose('saveNewCatalogItem', saveNewCatalogItem);
+expose('openEditCatalogItem', openEditCatalogItem);
+expose('saveEditCatalogItem', saveEditCatalogItem);
+expose('_stockCanSend', _stockCanSend);
+expose('_stockCanReceive', _stockCanReceive);
+expose('openDispatchModal', openDispatchModal);
+expose('saveDispatch', saveDispatch);
+expose('openDispatchNew', openDispatchNew);
+expose('_dispatchNewArticleChanged', _dispatchNewArticleChanged);
+expose('_dispatchNewSave', _dispatchNewSave);
+expose('receiveDispatch', receiveDispatch);
+expose('cancelDispatch', cancelDispatch);
