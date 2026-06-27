@@ -1,11 +1,31 @@
 // ════════════════════════════════════════════════════════════════════
-//  NEUMÁTICOS — mapa de cubiertas por eje, stock, recapado, historial. (getAxleConfig/AXLE_CONFIGS quedan en app.js: los comparte la edición de vehículos.)
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde el dispatcher renderPage en
-//  app.js). Este archivo se carga DESPUÉS de app.js, así que usa sus
-//  helpers globales (escapeHtml, apiFetch, openModal, showToast, userHasRole,
-//  App.data, etc.).
+//  NEUMÁTICOS (ES module, Fase 3) — mapa de cubiertas por eje (drag & drop),
+//  stock, recapado, baja e historial de movimientos.
+//
+//  Migrado de tires.js. Dependencias legacy declaradas con need(). OJO:
+//   - getAxleConfig y AXLE_CONFIGS viven en app.js (los comparte la edición
+//     de vehículos); AXLE_CONFIGS es const, por eso app.js lo expone en window.
+//   - _dragSerial/_dragFromPos eran globales implícitos en el script clásico;
+//     como un módulo es strict mode, acá se declaran module-local.
 // ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const escapeHtml = need('escapeHtml');
+const escapeJsArg = need('escapeJsArg');
+const apiFetch = need('apiFetch');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+const showToast = need('showToast');
+const loadInitialData = need('loadInitialData');
+const getAxleConfig = need('getAxleConfig');
+const AXLE_CONFIGS = need('AXLE_CONFIGS');
+const todayISO = need('todayISO');
+
+// Estado del drag & drop (eran globales implícitos en el script clásico).
+let _dragSerial = null;
+let _dragFromPos = null;
+
 function renderTires() {
   const mounted  = App.data.tires.filter(t=>t.vehicle!=='STOCK'&&t.vehicle!=='RECAP'&&t.vehicle!=='RECAPADO'&&t.vehicle!=='BAJA');
   const inStock  = App.data.tires.filter(t=>t.vehicle==='STOCK');
@@ -777,3 +797,26 @@ async function saveManualMove(vehicleCode) {
   showToast('ok', `Movimiento registrado: ${serial} ${fromPos} → ${toPos}`);
   renderTires();
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick/ondrag).
+expose('renderTires', renderTires);
+expose('getSelectedVehicle', getSelectedVehicle);
+expose('refreshTireMap', refreshTireMap);
+expose('onStockTireDragStart', onStockTireDragStart);
+expose('onDropToStock', onDropToStock);
+expose('renderTireMapDnD', renderTireMapDnD);
+expose('onTireDragStart', onTireDragStart);
+expose('onTireDragOver', onTireDragOver);
+expose('onTireDragLeave', onTireDragLeave);
+expose('onTireDrop', onTireDrop);
+expose('renderTireTableBody', renderTireTableBody);
+expose('renderTireHistory', renderTireHistory);
+expose('openMountFromStockModal', openMountFromStockModal);
+expose('openMountTireModal', openMountTireModal);
+expose('saveMountTire', saveMountTire);
+expose('openNewTireToStockModal', openNewTireToStockModal);
+expose('saveNewTireToStock', saveNewTireToStock);
+expose('openTireDetail', openTireDetail);
+expose('saveTireAction', saveTireAction);
+expose('openManualMoveModal', openManualMoveModal);
+expose('saveManualMove', saveManualMove);

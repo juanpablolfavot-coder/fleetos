@@ -1,11 +1,21 @@
 // ════════════════════════════════════════════════════════════════════
-//  ACTIVOS PATRIMONIALES — edificios, herramientas, equipos, etc.: alta, edición, baja.
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde el dispatcher renderPage en
-//  app.js). Este archivo se carga DESPUÉS de app.js, así que usa sus
-//  helpers globales (escapeHtml, apiFetch, openModal, showToast, userHasRole,
-//  App.data, etc.).
+//  ACTIVOS PATRIMONIALES (ES module, Fase 3) — edificios, herramientas,
+//  equipos, etc.: alta, edición, baja y ficha completa.
+//
+//  Migrado de assets.js. Dependencias legacy declaradas con need(); las
+//  funciones públicas se re-exponen en window para el dispatcher y los onclick.
 // ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const userHasRole = need('userHasRole');
+const escapeHtml = need('escapeHtml');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+const showToast = need('showToast');
+const apiFetch = need('apiFetch');
+const afterSave = need('afterSave');
+
 function renderAssets() {
   const assets = App.data.assets || [];
   const typeLabels = {
@@ -569,3 +579,15 @@ function openAssetDetailModal(id) {
     { label: 'Cerrar', cls: 'btn-primary', fn: closeModal },
   ]);
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick).
+expose('renderAssets', renderAssets);
+expose('_filterAssets', _filterAssets);
+expose('openNewAssetModal', openNewAssetModal);
+expose('saveNewAsset', saveNewAsset);
+expose('openEditAssetModal', openEditAssetModal);
+expose('saveEditAsset', saveEditAsset);
+expose('deleteAsset', deleteAsset);
+expose('openAssetDetailModal', openAssetDetailModal);
+
+export { renderAssets, _filterAssets, openNewAssetModal, saveNewAsset, openEditAssetModal, saveEditAsset, deleteAsset, openAssetDetailModal };

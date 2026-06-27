@@ -3293,6 +3293,9 @@ const AXLE_CONFIGS = {
     { name:'Eje 3 — Portante',  positions:['S3-IE','S3-II','S3-DE','S3-DD'],     dual:true  },
   ],
 };
+// Puente para el módulo de neumáticos (Fase 3): AXLE_CONFIGS es const, no queda
+// en el global object; lo exponemos para que tires.mjs lo lea.
+window.AXLE_CONFIGS = AXLE_CONFIGS;
 
 function getAxleConfig(vehicle) {
   const customAxles = vehicle?.tech_spec?.axles;

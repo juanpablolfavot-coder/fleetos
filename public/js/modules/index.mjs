@@ -8,3 +8,5 @@
 import './contador.mjs';
 import './documents.mjs';
 import './maintenance.mjs';
+import './assets.mjs';
+import './tires.mjs';
