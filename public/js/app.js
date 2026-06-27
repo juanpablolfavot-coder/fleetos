@@ -9535,6 +9535,7 @@ async function openNewPOModal() {
   window._poTipo = 'flota';
   window._poIvaPct = 0;
   window._poSupplierId = null; // para guardar el ID del proveedor del catálogo si se elige uno
+  window._ocEditValues = {};   // limpiar valores de un detalle/OC anterior (si no, pisan el autocompletado)
 
   // Proveedores del catálogo nuevo (módulo Proveedores)
   const catalogoProveedores = (App.data.suppliers || []).filter(s => s.status === 'activo');
@@ -10199,7 +10200,16 @@ function _poOnSupplierChange(value) {
   const ccdias = opt.dataset.ccdias;
   const moneda = opt.dataset.moneda;
 
-  // Autocompletar si los campos existen (se renderizan por setPOTipo -> getPOExtraFields)
+  // Persistir las condiciones del proveedor: así, si se re-renderizan los campos
+  // extra (ej. al cambiar el tipo de OC con setPOTipo), el render las vuelve a
+  // aplicar en vez de pisarlas con vacío.
+  window._ocEditValues = Object.assign({}, window._ocEditValues, {
+    forma_pago: fpago || null,
+    cc_dias: (ccdias !== '' && ccdias != null) ? ccdias : null,
+    moneda: moneda || 'ARS',
+  });
+
+  // Autocompletar el render actual (se renderizan por setPOTipo -> getPOExtraFields)
   setTimeout(() => {
     const fpagoEl  = document.getElementById('po-forma-pago');
     const ccdiasEl = document.getElementById('po-cc-dias');
@@ -10214,7 +10224,7 @@ function _poOnSupplierChange(value) {
     }
   }, 50);
 
-  showToast?.('ok', 'Condiciones del proveedor cargadas automáticamente');
+  if (fpago) showToast?.('ok', 'Condiciones del proveedor cargadas automáticamente');
 }
 
 // ── Ver detalle de OC ────────────────────────────────────
