@@ -17,3 +17,4 @@ import './recepciones.mjs';
 import './facturas.mjs';
 import './pagos.mjs';
 import './timeline.mjs';
+import './chofer-panel.mjs';
