@@ -171,39 +171,110 @@ async function recalcDeliveryStatus(client, poId) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Ingreso a stock al recibir: SOLO ítems de la OC vinculados a un
-//  artículo de stock (stock_item_id). Los de texto libre no tocan inventario.
-//  Devuelve { ingresos: [...], warnings: [...] } para mostrar al usuario.
+//  Stock: ingreso al recibir, contra el CATÁLOGO NUEVO (stock_catalog +
+//  stock_balances). Solo entran los ítems que el usuario TILDÓ "ingresar al
+//  stock" (it.to_stock). Cada uno se vincula a un artículo existente
+//  (it.catalog_id) o crea uno nuevo (it.new_article). La ubicación es
+//  sucursal/área (it.base_location / it.area). Se guarda el vínculo en el
+//  ítem recibido para poder revertirlo si se anula la recepción.
 // ─────────────────────────────────────────────────────────────
-async function ingresarStockDeRecepcion(client, items, destino, userId) {
+const CAT_PREFIJOS = { lubricantes: 'LUB', electrico: 'ELE', filtros: 'FIL', general: 'GEN', palet: 'PAL', frenos: 'FRE' };
+function _stripAccents(s) { return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+function categoryPrefix(cat) {
+  const k = _stripAccents(cat).trim().toLowerCase();
+  return CAT_PREFIJOS[k] || (_stripAccents(cat).replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'GEN');
+}
+async function nextCatalogCode(client, category) {
+  const prefix = categoryPrefix(category);
+  const r = await client.query(`SELECT code FROM stock_catalog WHERE code LIKE $1 ORDER BY code DESC LIMIT 1`, [prefix + '-%']);
+  let n = 0;
+  if (r.rows[0]) { const m = /(\d+)$/.exec(r.rows[0].code); if (m) n = parseInt(m[1], 10); }
+  return `${prefix}-${String(n + 1).padStart(3, '0')}`;
+}
+
+let _catalogReadyRcp = false;
+async function ensureCatalogForReceipts() {
+  if (_catalogReadyRcp) return;
+  try {
+    await query(`CREATE TABLE IF NOT EXISTS stock_catalog (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      code VARCHAR(50) UNIQUE NOT NULL, name VARCHAR(200) NOT NULL,
+      category VARCHAR(100) NOT NULL DEFAULT 'General', unit VARCHAR(20) NOT NULL DEFAULT 'un',
+      qty_min NUMERIC(10,2) NOT NULL DEFAULT 0, qty_reorder NUMERIC(10,2) NOT NULL DEFAULT 0,
+      unit_cost NUMERIC(12,2) NOT NULL DEFAULT 0, supplier VARCHAR(200),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+    await query(`CREATE TABLE IF NOT EXISTS stock_balances (
+      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      catalog_id UUID NOT NULL REFERENCES stock_catalog(id) ON DELETE CASCADE,
+      base_location VARCHAR(200) NOT NULL, area VARCHAR(100) NOT NULL,
+      qty_current NUMERIC(10,2) NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (catalog_id, base_location, area))`);
+    await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(() => {});
+    await query(`ALTER TABLE stock_movements ALTER COLUMN stock_id DROP NOT NULL`).catch(() => {});
+    // Vínculo en el ítem recibido para revertir el ingreso al anular la recepción.
+    await query(`ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(() => {});
+    await query(`ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS stock_base_location VARCHAR(200)`).catch(() => {});
+    await query(`ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS stock_area VARCHAR(100)`).catch(() => {});
+    _catalogReadyRcp = true;
+  } catch (e) { console.warn('[ensureCatalogForReceipts]', e.message); }
+}
+
+async function ingresarStockDeRecepcion(client, receiptId, items, destino, userId) {
+  await ensureCatalogForReceipts();
   const ingresos = [];
   const warnings = [];
   for (const it of items) {
+    if (!it.to_stock) continue; // solo los tildados
     const qty = parseFloat(it.cantidad);
     if (!(qty > 0)) continue;
     const poi = await client.query(
-      `SELECT id, stock_item_id, descripcion FROM purchase_order_items WHERE id=$1::uuid`,
-      [it.po_item_id]
-    );
+      `SELECT id, descripcion, unidad FROM purchase_order_items WHERE id=$1::uuid`, [it.po_item_id]);
     const row = poi.rows[0];
-    if (!row || !row.stock_item_id) continue; // ítem no vinculado a stock: no toca inventario
-    const upd = await client.query(
-      `UPDATE stock_items SET qty_current = qty_current + $1, updated_at = NOW()
-       WHERE id = $2::uuid AND active = TRUE
-       RETURNING id, name, qty_current, base_location, area, unit`,
-      [qty, row.stock_item_id]
-    );
-    if (!upd.rows[0]) {
-      warnings.push(`"${row.descripcion}": el artículo de stock vinculado no existe o está inactivo — no se ingresó.`);
-      continue;
+    if (!row) continue;
+
+    // 1) Resolver el artículo del catálogo: existente o nuevo.
+    let catalogId = null, artName = null, unit = row.unidad || 'un';
+    if (it.catalog_id) {
+      const c = await client.query(`SELECT id, name, unit FROM stock_catalog WHERE id=$1::uuid AND active=TRUE`, [it.catalog_id]);
+      if (!c.rows[0]) { warnings.push(`"${row.descripcion}": el artículo elegido no existe — no se ingresó.`); continue; }
+      catalogId = c.rows[0].id; artName = c.rows[0].name; unit = c.rows[0].unit || unit;
+    } else if (it.new_article && String(it.new_article.name || row.descripcion || '').trim()) {
+      const na = it.new_article || {};
+      const name = String(na.name || row.descripcion).trim();
+      const category = String(na.category || 'General').trim() || 'General';
+      const u = String(na.unit || unit || 'un').trim() || 'un';
+      const cost = Math.max(0, parseFloat(na.unit_cost) || 0);
+      try {
+        const code = await nextCatalogCode(client, category);
+        const ins = await client.query(
+          `INSERT INTO stock_catalog (code, name, category, unit, unit_cost) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, unit`,
+          [code, name, category, u, cost]);
+        catalogId = ins.rows[0].id; artName = ins.rows[0].name; unit = ins.rows[0].unit;
+      } catch (e) { warnings.push(`"${row.descripcion}": no se pudo crear el artículo (${e.message}).`); continue; }
+    } else {
+      warnings.push(`"${row.descripcion}": marcado para stock pero sin artículo — no se ingresó.`); continue;
     }
-    const si = upd.rows[0];
+
+    // 2) Sumar saldo en la ubicación elegida + movimiento + vínculo para reversa.
+    const base_location = String(it.base_location || 'Central').trim() || 'Central';
+    const area = String(it.area || 'Depósito').trim() || 'Depósito';
+    const upd = await client.query(
+      `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (catalog_id, base_location, area)
+       DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()
+       RETURNING qty_current`,
+      [catalogId, base_location, area, qty]);
     await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
+      `INSERT INTO stock_movements (catalog_id, type, qty, reason, user_id, base_location, area)
        VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-      [si.id, qty, `Recepción OC${destino ? ' · ' + destino : ''}`, userId, si.base_location, si.area]
-    );
-    ingresos.push({ stock_id: si.id, name: si.name, qty, new_qty: parseFloat(si.qty_current), unit: si.unit });
+      [catalogId, qty, `Recepción OC${destino ? ' · ' + destino : ''}`, userId, base_location, area]);
+    await client.query(
+      `UPDATE purchase_order_receipt_items SET catalog_id=$1, stock_base_location=$2, stock_area=$3
+       WHERE receipt_id=$4::uuid AND po_item_id=$5::uuid`,
+      [catalogId, base_location, area, receiptId, it.po_item_id]);
+    await client.query(`UPDATE purchase_order_items SET ingresado_stock = TRUE WHERE id=$1::uuid`, [it.po_item_id]).catch(() => {});
+    ingresos.push({ catalog_id: catalogId, name: artName, qty, new_qty: parseFloat(upd.rows[0].qty_current), unit, base_location, area });
   }
   return { ingresos, warnings };
 }
@@ -211,28 +282,25 @@ async function ingresarStockDeRecepcion(client, items, destino, userId) {
 // Reversa del stock al anular una recepción: descuenta lo ingresado y deja
 // un movimiento 'Egreso' de trazabilidad.
 async function revertirStockDeRecepcion(client, receiptId, userId) {
+  await ensureCatalogForReceipts();
   const its = await client.query(
-    `SELECT pori.cantidad, poi.stock_item_id
-     FROM purchase_order_receipt_items pori
-     JOIN purchase_order_items poi ON poi.id = pori.po_item_id
-     WHERE pori.receipt_id = $1::uuid AND poi.stock_item_id IS NOT NULL`,
+    `SELECT cantidad, catalog_id, stock_base_location, stock_area
+     FROM purchase_order_receipt_items
+     WHERE receipt_id = $1::uuid AND catalog_id IS NOT NULL`,
     [receiptId]
   );
   for (const r of its.rows) {
     const qty = parseFloat(r.cantidad);
     if (!(qty > 0)) continue;
-    const upd = await client.query(
-      `UPDATE stock_items SET qty_current = GREATEST(qty_current - $1, 0), updated_at = NOW()
-       WHERE id = $2::uuid
-       RETURNING id, base_location, area`,
-      [qty, r.stock_item_id]
-    );
-    if (!upd.rows[0]) continue;
-    const si = upd.rows[0];
     await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
+      `UPDATE stock_balances SET qty_current = GREATEST(qty_current - $1, 0), updated_at = NOW()
+       WHERE catalog_id = $2 AND base_location = $3 AND area = $4`,
+      [qty, r.catalog_id, r.stock_base_location, r.stock_area]
+    );
+    await client.query(
+      `INSERT INTO stock_movements (catalog_id, type, qty, reason, user_id, base_location, area)
        VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
-      [si.id, qty, 'Anulación de recepción de OC', userId, si.base_location, si.area]
+      [r.catalog_id, qty, 'Anulación de recepción de OC', userId, r.stock_base_location, r.stock_area]
     );
   }
 }
@@ -433,9 +501,9 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
       `, [receiptId, it.po_item_id, parseFloat(it.cantidad), (it.notes || '').trim() || null]);
     }
 
-    // Ingreso a stock (solo ítems vinculados a un artículo de stock)
+    // Ingreso a stock (solo ítems tildados "ingresar al stock")
     const { ingresos: stock_ingresos, warnings: stock_warnings } =
-      await ingresarStockDeRecepcion(client, items, destino.trim(), req.user.id);
+      await ingresarStockDeRecepcion(client, receiptId, items, destino.trim(), req.user.id);
 
     // Recalcular delivery_status
     const newStatus = await recalcDeliveryStatus(client, req.params.id);

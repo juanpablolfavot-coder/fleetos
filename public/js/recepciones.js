@@ -7,26 +7,41 @@
 
   window.abrirModalRecepciones = async function(poId) {
     try {
-      const [itemsRes, recsRes, destRes, ocRes] = await Promise.all([
+      const [itemsRes, recsRes, destRes, ocRes, catRes] = await Promise.all([
         apiFetch(`/api/purchase-orders/${poId}/items-pendientes`),
         apiFetch(`/api/purchase-orders/${poId}/recepciones`),
         apiFetch(`/api/purchase-orders/${poId}/recepciones/aux/destinos`),
         apiFetch(`/api/purchase-orders/${poId}`),
+        apiFetch(`/api/stock/catalog`).catch(() => null),
       ]);
       const items = itemsRes.ok ? await itemsRes.json() : [];
       const recepciones = recsRes.ok ? await recsRes.json() : [];
       const destinos = destRes.ok ? await destRes.json() : { fijos: [], sucursales: [] };
       const oc = ocRes.ok ? await ocRes.json() : {};
+      const catalogo = (catRes && catRes.ok) ? await catRes.json() : [];
       console.log('[recepciones] OC:', oc.code, 'is_open:', oc.is_open, 'items pend:', items.length);
-      renderModalRecepciones(poId, oc, items, recepciones, destinos);
+      renderModalRecepciones(poId, oc, items, recepciones, destinos, catalogo);
     } catch (err) {
       console.error('[recepciones]', err);
       showToast('error', 'No se pudieron cargar las recepciones');
     }
   };
 
-  function renderModalRecepciones(poId, oc, items, recepciones, destinos) {
+  function renderModalRecepciones(poId, oc, items, recepciones, destinos, catalogo) {
     document.querySelector('.modal-recepciones-overlay')?.remove();
+    // Opciones para "ingresar al stock": catálogo + sucursal/área del modelo nuevo.
+    const _cat = Array.isArray(catalogo) ? catalogo : [];
+    const catalogOpts = _cat.map(a => `<option value="${a.id}">${escapeHtml(a.code)} — ${escapeHtml(a.name)}</option>`).join('');
+    const userSuc = window.App?.currentUser?.sucursal || '';
+    const sucList = (typeof stockBaseOptions === 'function') ? stockBaseOptions() : (userSuc ? [userSuc] : ['Central']);
+    const sucOpts = sucList.map(b => `<option value="${escapeHtml(b)}"${b === userSuc ? ' selected' : ''}>${escapeHtml(b)}</option>`).join('');
+    const areaOptsFor = (suc) => {
+      const areas = (typeof stockAreaOptions === 'function') ? stockAreaOptions(suc) : ['Administración', 'Depósito', 'Taller'];
+      return areas.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
+    };
+    const areaOptsDefault = areaOptsFor(userSuc || sucList[0]);
+    // Expuesto para los onchange por ítem.
+    window._recepCtx = { catalogOpts, sucOpts, areaOptsFor };
     const overlay = document.createElement('div');
     overlay.className = 'modal-recepciones-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -119,11 +134,36 @@
               <div style="background:#fff;border:1px solid var(--border2);border-radius:6px;padding:10px;margin-top:4px">
                 ${items.filter(i => isOpen || parseFloat(i.pendiente) > 0.001).map(i => {
                   const max = isOpen ? '' : `max="${i.pendiente}"`;
+                  const unidad = i.unidad || 'un';
                   return `
-                  <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <div style="font-size:13px">${escapeHtml(i.descripcion)}</div>
-                    <input type="number" step="0.01" min="0" ${max} data-recep-item="${i.id}" placeholder="0" class="form-input" style="text-align:right">
-                    <div style="font-size:11px;color:var(--text3)">${isOpen ? 'libre' : '/ ' + parseFloat(i.pendiente).toFixed(2)} ${i.unidad || ''}</div>
+                  <div style="padding:6px 0;border-bottom:1px solid var(--border)">
+                    <div style="display:grid;grid-template-columns:1fr 110px 90px;gap:8px;align-items:center">
+                      <div style="font-size:13px">${escapeHtml(i.descripcion)}</div>
+                      <input type="number" step="0.01" min="0" ${max} data-recep-item="${i.id}" placeholder="0" class="form-input" style="text-align:right">
+                      <div style="font-size:11px;color:var(--text3)">${isOpen ? 'libre' : '/ ' + parseFloat(i.pendiente).toFixed(2)} ${unidad}</div>
+                    </div>
+                    <label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--text2);cursor:pointer">
+                      <input type="checkbox" id="recep-stk-${i.id}" onchange="recepToggleStock('${i.id}')" style="width:15px;height:15px;cursor:pointer"> 📦 Ingresar al stock
+                    </label>
+                    <div id="recep-stkbox-${i.id}" style="display:none;margin-top:8px;padding:10px;background:#fff;border:1px solid var(--border2);border-radius:6px">
+                      <label style="font-size:11px;color:var(--text3)">Artículo de stock</label>
+                      <select id="recep-art-${i.id}" class="form-select" onchange="recepArtChanged('${i.id}')">
+                        <option value="">— Elegir artículo del catálogo —</option>
+                        ${catalogOpts ? `<optgroup label="Catálogo">${catalogOpts}</optgroup>` : ''}
+                        <option value="__new__">➕ Crear artículo nuevo</option>
+                      </select>
+                      <div id="recep-new-${i.id}" style="display:none;margin-top:8px">
+                        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">
+                          <div><label style="font-size:11px;color:var(--text3)">Nombre nuevo</label><input id="recep-nname-${i.id}" class="form-input" value="${escapeHtml(i.descripcion)}"></div>
+                          <div><label style="font-size:11px;color:var(--text3)">Categoría</label><input id="recep-ncat-${i.id}" class="form-input" value="General"></div>
+                          <div><label style="font-size:11px;color:var(--text3)">Unidad</label><input id="recep-nunit-${i.id}" class="form-input" value="${escapeHtml(unidad)}"></div>
+                        </div>
+                      </div>
+                      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+                        <div><label style="font-size:11px;color:var(--text3)">Sucursal</label><select id="recep-suc-${i.id}" class="form-select" onchange="recepAreaRefresh('${i.id}')">${sucOpts}</select></div>
+                        <div><label style="font-size:11px;color:var(--text3)">Área</label><select id="recep-area-${i.id}" class="form-select">${areaOptsDefault}</select></div>
+                      </div>
+                    </div>
                   </div>`;
                 }).join('')}
               </div>
@@ -187,6 +227,27 @@
     }
   };
 
+  // Muestra/oculta el panel "ingresar al stock" de un ítem.
+  window.recepToggleStock = function(itemId) {
+    const cb = document.getElementById('recep-stk-' + itemId);
+    const box = document.getElementById('recep-stkbox-' + itemId);
+    if (box) box.style.display = (cb && cb.checked) ? '' : 'none';
+  };
+
+  // Muestra los campos del artículo nuevo solo si se eligió "Crear artículo nuevo".
+  window.recepArtChanged = function(itemId) {
+    const sel = document.getElementById('recep-art-' + itemId);
+    const nb = document.getElementById('recep-new-' + itemId);
+    if (nb) nb.style.display = (sel && sel.value === '__new__') ? '' : 'none';
+  };
+
+  // Repuebla el área según la sucursal elegida.
+  window.recepAreaRefresh = function(itemId) {
+    const suc = document.getElementById('recep-suc-' + itemId)?.value;
+    const areaSel = document.getElementById('recep-area-' + itemId);
+    if (areaSel && window._recepCtx) areaSel.innerHTML = window._recepCtx.areaOptsFor(suc);
+  };
+
   // Atajo: completar cada cantidad con lo pendiente (el "max" de cada input).
   window.recepRecibirTodo = function() {
     document.querySelectorAll('[data-recep-item]').forEach(inp => {
@@ -202,10 +263,36 @@
     const notes  = document.getElementById('recep-notes')?.value.trim();
     const inputs = document.querySelectorAll('[data-recep-item]');
     const items = [];
+    let stockError = null;
     inputs.forEach(inp => {
       const cant = parseFloat(inp.value);
-      if (cant > 0) items.push({ po_item_id: inp.dataset.recepItem, cantidad: cant });
+      if (!(cant > 0)) return;
+      const id = inp.dataset.recepItem;
+      const item = { po_item_id: id, cantidad: cant };
+      const stk = document.getElementById('recep-stk-' + id);
+      if (stk && stk.checked) {
+        item.to_stock = true;
+        const art = document.getElementById('recep-art-' + id)?.value;
+        if (art === '__new__') {
+          const name = document.getElementById('recep-nname-' + id)?.value.trim();
+          if (!name) { stockError = 'Falta el nombre del artículo nuevo a ingresar al stock'; return; }
+          item.new_article = {
+            name,
+            category: document.getElementById('recep-ncat-' + id)?.value.trim() || 'General',
+            unit: document.getElementById('recep-nunit-' + id)?.value.trim() || 'un',
+          };
+        } else if (art) {
+          item.catalog_id = art;
+        } else {
+          stockError = 'Elegí o creá el artículo para los ítems marcados "ingresar al stock"';
+          return;
+        }
+        item.base_location = document.getElementById('recep-suc-' + id)?.value || 'Central';
+        item.area = document.getElementById('recep-area-' + id)?.value || 'Depósito';
+      }
+      items.push(item);
     });
+    if (stockError) { showToast('error', stockError); return; }
     if (!items.length) { showToast('error', 'Indicá al menos una cantidad recibida'); return; }
     try {
       const res = await apiFetch(`/api/purchase-orders/${poId}/recepciones`, {

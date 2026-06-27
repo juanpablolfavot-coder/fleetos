@@ -274,6 +274,31 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
   }
 });
 
+// Descuenta un repuesto del catálogo NUEVO (stock_balances) para una OT, en la
+// ubicación elegida, y deja el movimiento. Devuelve { error } si no alcanza el
+// stock, o { unit_cost, name, base_location, area } si descontó OK. Espejo de
+// la lógica del endpoint POST /:id/parts, reutilizada en crear y cerrar OT.
+async function descontarCatalogoOT(client, { catalog_id, base_location, area, qty, reason, woId, userId }) {
+  const loc = base_location || 'Central';
+  const ar = area || 'Depósito';
+  const qtyNum = parseFloat(qty) || 0;
+  const cat = await client.query('SELECT name, unit_cost FROM stock_catalog WHERE id = $1', [catalog_id]);
+  if (!cat.rows[0]) return { error: 'Artículo de catálogo no encontrado' };
+  const bal = await client.query(
+    'SELECT qty_current FROM stock_balances WHERE catalog_id = $1 AND base_location = $2 AND area = $3 FOR UPDATE',
+    [catalog_id, loc, ar]);
+  const disp = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
+  if (disp < qtyNum) return { error: `Stock insuficiente en ${loc}/${ar}. Disponible: ${disp}` };
+  await client.query(
+    'UPDATE stock_balances SET qty_current = qty_current - $1, updated_at = NOW() WHERE catalog_id = $2 AND base_location = $3 AND area = $4',
+    [qtyNum, catalog_id, loc, ar]);
+  await client.query(
+    `INSERT INTO stock_movements (catalog_id, type, qty, reason, wo_id, base_location, area, user_id)
+     VALUES ($1,'Egreso',$2,$3,$4,$5,$6,$7)`,
+    [catalog_id, qtyNum, reason, woId, loc, ar, userId]);
+  return { unit_cost: parseFloat(cat.rows[0].unit_cost) || 0, name: cat.rows[0].name, base_location: loc, area: ar };
+}
+
 // POST /api/workorders
 router.post('/', authenticate, async (req, res) => {
   const client = await require('../db/pool').pool.connect();
@@ -333,7 +358,19 @@ router.post('/', authenticate, async (req, res) => {
     const externalItemsForPO = [];
     const externalPartIdsForPO = [];
     for (const p of parts) {
-      if (p.origin === 'stock' && p.stock_id) {
+      let pCatalogId = null, pLoc = null, pArea = null;
+      if (p.origin === 'stock' && p.catalog_id) {
+        // Modelo nuevo: descontar del saldo del catálogo en la ubicación elegida.
+        const d = await descontarCatalogoOT(client, {
+          catalog_id: p.catalog_id, base_location: p.base_location, area: p.area,
+          qty: p.qty, reason: `OT ${code}`, woId, userId: req.user.id });
+        if (d.error) { await client.query('ROLLBACK'); return res.status(409).json({ error: `${p.name || 'Repuesto'}: ${d.error}` }); }
+        p.unit_cost = d.unit_cost;
+        p.unit = p.unit || 'un';
+        p.name = (p.name && String(p.name).trim()) ? p.name : (d.name || 'Repuesto de pañol');
+        pCatalogId = p.catalog_id; pLoc = d.base_location; pArea = d.area;
+      } else if (p.origin === 'stock' && p.stock_id) {
+        // Modelo viejo (compat): descontar de stock_items.
         const stock = await client.query(
           'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
           [p.stock_id]
@@ -353,7 +390,7 @@ router.post('/', authenticate, async (req, res) => {
           [p.stock_id, p.qty, `OT ${code}`, woId, req.user.id]
         );
       }
-      const originClean = (p.origin === 'stock' && p.stock_id) ? 'stock' : 'externo';
+      const originClean = (p.origin === 'stock' && (p.stock_id || pCatalogId)) ? 'stock' : 'externo';
       if (originClean === 'externo') {
         if (!p.name || p.name.trim().length < 3) {
           await client.query('ROLLBACK');
@@ -361,8 +398,10 @@ router.post('/', authenticate, async (req, res) => {
         }
       }
       const inserted = await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, subtotal`,
-        [woId, originClean === 'stock' ? p.stock_id : null, p.name, originClean, p.qty, p.unit||'un', originClean === 'stock' ? (p.unit_cost||p.cost||0) : 0]
+        `INSERT INTO work_order_parts (wo_id, stock_id, catalog_id, base_location, area, name, origin, qty, unit, unit_cost)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, subtotal`,
+        [woId, (originClean === 'stock' && !pCatalogId) ? p.stock_id : null, pCatalogId, pLoc, pArea,
+         p.name, originClean, p.qty, p.unit||'un', originClean === 'stock' ? (p.unit_cost||p.cost||0) : 0]
       );
       if (originClean === 'externo') {
         const partId = inserted.rows[0].id;
@@ -463,11 +502,21 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
     const externalPartIds = [];
     for (const p of close_parts) {
       const qtyNum = parseFloat(p.qty) || 1;
-      const originClean = (p.origin === 'stock' && p.stock_id) ? 'stock' : 'externo';
+      const originClean = (p.origin === 'stock' && (p.stock_id || p.catalog_id)) ? 'stock' : 'externo';
       const nameClean = String(p.name || 'Repuesto / servicio externo').trim();
       let finalCost = originClean === 'stock' ? (parseFloat(p.unit_cost) || 0) : 0;
+      let pCatalogId = null, pLoc = null, pArea = null;
 
-      if (originClean === 'stock') {
+      if (p.origin === 'stock' && p.catalog_id) {
+        // Modelo nuevo: descontar del saldo del catálogo en la ubicación elegida.
+        const d = await descontarCatalogoOT(client, {
+          catalog_id: p.catalog_id, base_location: p.base_location, area: p.area,
+          qty: qtyNum, reason: `Cierre ${wo.rows[0].code}`, woId: req.params.id, userId: req.user.id });
+        if (d.error) { await client.query('ROLLBACK'); return res.status(409).json({ error: `${nameClean}: ${d.error}` }); }
+        if (!finalCost) finalCost = d.unit_cost;
+        pCatalogId = p.catalog_id; pLoc = d.base_location; pArea = d.area;
+      } else if (originClean === 'stock') {
+        // Modelo viejo (compat): descontar de stock_items.
         const stock = await client.query('SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE', [p.stock_id]);
         if (!stock.rows[0] || parseFloat(stock.rows[0].qty_current) < qtyNum) {
           await client.query('ROLLBACK');
@@ -482,8 +531,10 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
       }
 
       const ins = await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, subtotal`,
-        [req.params.id, originClean === 'stock' ? p.stock_id : null, nameClean, originClean, qtyNum, p.unit||'un', finalCost]
+        `INSERT INTO work_order_parts (wo_id, stock_id, catalog_id, base_location, area, name, origin, qty, unit, unit_cost)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, subtotal`,
+        [req.params.id, (originClean === 'stock' && !pCatalogId) ? p.stock_id : null, pCatalogId, pLoc, pArea,
+         nameClean, originClean, qtyNum, p.unit||'un', finalCost]
       );
       if (originClean !== 'stock') {
         const partId = ins.rows[0].id;
