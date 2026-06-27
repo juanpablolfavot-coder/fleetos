@@ -4337,7 +4337,10 @@ function _catDetailHtml(a) {
 
 function _toggleCatDetail(id) {
   const el = document.getElementById('cat-detail-' + id);
-  if (el) el.style.display = (el.style.display === 'none' || !el.style.display) ? '' : 'none';
+  // La fila arranca con display:none. Si está oculta la mostramos; si está
+  // visible (display === '') la ocultamos. No usar !el.style.display porque
+  // '' es falsy y volvería a abrirla en vez de cerrarla.
+  if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
 }
 
 function openStockArticulo(id) {
