@@ -144,23 +144,6 @@ function scopedLocation(req, base_location, area) {
   }
   return { base_location: loc, area: ar };
 }
-function normalizeStockPayload(body = {}, req = null) {
-  const code = cleanCode(body.code);
-  const name = cleanText(body.name);
-  const category = cleanText(body.category, 'General');
-  const unit = cleanText(body.unit, 'un');
-  const qty_current = Math.max(0, toNumber(body.qty_current, 0));
-  const qty_min = Math.max(0, toNumber(body.qty_min, 1));
-  const qty_reorder = Math.max(0, toNumber(body.qty_reorder, qty_min ? qty_min * 2 : 2));
-  const unit_cost = Math.max(0, toNumber(body.unit_cost, 0));
-  const supplier = cleanNullable(body.supplier);
-  let base_location = cleanText(body.base_location || body.sucursal || body.base, 'Central');
-  const forcedSucursal = req ? userSucursal(req) : null;
-  if (req?.user?.role === 'gerente_sucursal' && forcedSucursal) base_location = forcedSucursal;
-  const area = normalizeArea(body.area || body.stock_area || 'Depósito');
-  return { code, name, category, unit, qty_current, qty_min, qty_reorder, unit_cost, supplier, base_location, area };
-}
-
 router.use(async (req, res, next) => {
   try {
     await ensureStockSchema();
@@ -172,6 +155,14 @@ router.use(async (req, res, next) => {
 });
 
 // GET /api/stock?sucursal=...&area=...
+// Rutas de ESCRITURA del stock VIEJO (stock_items), deshabilitadas tras el
+// cutover al catálogo nuevo. Se mantienen las de LECTURA (GET / alimenta
+// App.data.stock para los nombres de sucursal/área). Cierra la puerta a que
+// algo mute la tabla vieja por error.
+function gone410(req, res) {
+  return res.status(410).json({ error: 'El stock viejo está deshabilitado. Usá Stock y Depósito (catálogo nuevo).' });
+}
+
 router.get('/', authenticate, async (req, res) => {
   try {
     let sql = `SELECT *, (qty_current <= qty_min) AS is_critical,
@@ -224,91 +215,10 @@ router.get('/movements', authenticate, async (req, res) => {
 });
 
 // POST /api/stock — nuevo ítem
-router.post('/', authenticate, requireRole(...ROLES_STOCK_ADMIN), async (req, res) => {
-  try {
-    const p = normalizeStockPayload(req.body, req);
-    if (!p.name) return res.status(400).json({ error: 'La descripción es requerida' });
-
-    const autoCode = !p.code; // si no vino código, lo genera el sistema
-    // Próximo código numérico libre en esa sucursal + área (ej: 01, 02, 03…)
-    async function nextCode() {
-      const r = await query(
-        `SELECT COALESCE(MAX(code::int),0)+1 AS next
-           FROM stock_items
-          WHERE base_location=$1 AND area=$2 AND active=TRUE AND code ~ '^[0-9]+$'`,
-        [p.base_location, p.area]
-      );
-      return String(parseInt(r.rows[0]?.next || 1, 10) || 1).padStart(2, '0');
-    }
-
-    let code = p.code || await nextCode();
-    let result = null;
-    for (let intento = 0; intento < 6; intento++) {
-      try {
-        result = await query(
-          `INSERT INTO stock_items (code, name, category, unit, qty_current, qty_min, qty_reorder, unit_cost, supplier, base_location, area)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           RETURNING *`,
-          [code, p.name, p.category, p.unit, p.qty_current, p.qty_min, p.qty_reorder, p.unit_cost, p.supplier, p.base_location, p.area]
-        );
-        break;
-      } catch (e) {
-        // Código repetido: si lo escribió el usuario avisamos; si es automático, reintentamos con el siguiente
-        if (e.code === '23505') {
-          if (!autoCode) return res.status(409).json({ error: 'Ya existe ese código en la misma sucursal y área' });
-          code = await nextCode();
-          continue;
-        }
-        throw e;
-      }
-    }
-    if (!result) return res.status(409).json({ error: 'No se pudo generar un código libre, probá de nuevo' });
-
-    if (p.qty_current > 0) {
-      await query(
-        `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-         VALUES ($1,'Ingreso',$2,'Alta de ítem nuevo',$3,$4,$5)`,
-        [result.rows[0].id, p.qty_current, req.user.id, p.base_location, p.area]
-      );
-    }
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe ese código en la misma sucursal y área' });
-    console.error('[stock POST]', err.message);
-    res.status(500).json({ error: 'Error al crear artículo de stock' });
-  }
-});
+router.post('/', authenticate, requireRole(...ROLES_STOCK_ADMIN), gone410);
 
 // PUT /api/stock/:id — editar ficha del artículo, sin tocar cantidad física
-router.put('/:id', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), async (req, res) => {
-  try {
-    const p = normalizeStockPayload(req.body, req);
-    if (!p.code || !p.name) return res.status(400).json({ error: 'Código y descripción son requeridos' });
-
-    let where = 'WHERE id=$11 AND active=TRUE';
-    const params = [p.code, p.name, p.category, p.unit, p.qty_min, p.qty_reorder, p.unit_cost, p.supplier, p.base_location, p.area, req.params.id];
-    const suc = userSucursal(req);
-    if (req.user?.role === 'gerente_sucursal' && suc) { params.push(suc); where += ` AND base_location = $${params.length}`; }
-
-    const result = await query(
-      `UPDATE stock_items
-       SET code=$1, name=$2, category=$3, unit=$4, qty_min=$5, qty_reorder=$6,
-           unit_cost=$7, supplier=$8, base_location=$9, area=$10, updated_at=NOW()
-       ${where}
-       RETURNING *`,
-      params
-    );
-    if (!result.rows[0]) return res.status(404).json({ error: 'Artículo no encontrado' });
-
-    res.locals.recordId = req.params.id;
-    res.locals.newValue = { code: p.code, name: p.name, category: p.category, unit: p.unit, qty_min: p.qty_min, qty_reorder: p.qty_reorder, unit_cost: p.unit_cost, supplier: p.supplier, base_location: p.base_location, area: p.area };
-    res.json(result.rows[0]);
-  } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe ese código en la misma sucursal y área' });
-    console.error('[stock PUT]', err.message);
-    res.status(500).json({ error: 'Error al editar artículo de stock' });
-  }
-});
+router.put('/:id', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), gone410);
 
 async function getScopedItemForUpdate(client, id, req) {
   const params = [id];
@@ -320,256 +230,20 @@ async function getScopedItemForUpdate(client, id, req) {
 }
 
 // POST /api/stock/:id/ingreso — ingreso manual de stock existente
-router.post('/:id/ingreso', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const qty = positiveNumber(req.body.qty, 0);
-    const reason = cleanNullable(req.body.reason) || 'Ingreso manual';
-    if (qty <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-
-    await client.query('BEGIN');
-    const item = await getScopedItemForUpdate(client, req.params.id, req);
-    if (!item.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
-
-    const upd = await client.query(
-      'UPDATE stock_items SET qty_current = qty_current + $1, updated_at=NOW() WHERE id = $2 RETURNING *',
-      [qty, req.params.id]
-    );
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-      [req.params.id, qty, reason, req.user.id, item.rows[0].base_location, item.rows[0].area]
-    );
-
-    await client.query('COMMIT');
-    res.json({ message: 'Ingreso registrado', item: upd.rows[0] });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[stock ingreso]', err.message);
-    res.status(500).json({ error: 'Error al registrar ingreso' });
-  } finally {
-    client.release();
-  }
-});
+router.post('/:id/ingreso', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), gone410);
 
 // POST /api/stock/:id/egreso — egreso de stock
-router.post('/:id/egreso', authenticate, requireRole(...ROLES_STOCK_EGRESO), validateUUID('id'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const qty = positiveNumber(req.body.qty, 0);
-    const reason = cleanNullable(req.body.reason) || 'Egreso manual';
-    const woId = cleanNullable(req.body.wo_id);
-    if (qty <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-
-    await client.query('BEGIN');
-    const item = await getScopedItemForUpdate(client, req.params.id, req);
-    if (!item.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
-    const stockItem = item.rows[0];
-    const actual = toNumber(stockItem.qty_current, 0);
-    if (actual < qty) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Stock insuficiente. Disponible: ${actual} ${stockItem.unit}` });
-    }
-
-    let linkedOT = null;
-    if (woId) {
-      const ot = await client.query(
-        `SELECT id, code, status FROM work_orders WHERE id = $1::uuid FOR UPDATE`,
-        [woId]
-      );
-      if (!ot.rows[0]) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'OT asociada no encontrada' });
-      }
-      if (String(ot.rows[0].status || '').toLowerCase() === 'cerrada') {
-        await client.query('ROLLBACK');
-        return res.status(409).json({ error: 'No se puede asociar stock a una OT cerrada' });
-      }
-      linkedOT = ot.rows[0];
-    }
-
-    await client.query('UPDATE stock_items SET qty_current = qty_current - $1, updated_at=NOW() WHERE id = $2', [qty, req.params.id]);
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id, base_location, area)
-       VALUES ($1,'Egreso',$2,$3,$4,$5,$6,$7)`,
-      [req.params.id, qty, linkedOT ? `${reason} · ${linkedOT.code}` : reason, linkedOT?.id || null, req.user.id, stockItem.base_location, stockItem.area]
-    );
-
-    if (linkedOT) {
-      await client.query(
-        `INSERT INTO work_order_parts (wo_id, stock_id, name, origin, qty, unit, unit_cost)
-         VALUES ($1,$2,$3,'stock',$4,$5,$6)`,
-        [linkedOT.id, stockItem.id, stockItem.name, qty, stockItem.unit || 'un', toNumber(stockItem.unit_cost, 0)]
-      );
-      await client.query(
-        `UPDATE work_orders
-         SET parts_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_parts WHERE wo_id = $1), 0)
-         WHERE id = $1`,
-        [linkedOT.id]
-      );
-    }
-
-    await client.query('COMMIT');
-    res.json({ message: linkedOT ? 'Egreso registrado y asociado a OT' : 'Egreso registrado', new_qty: actual - qty, linked_ot_id: linkedOT?.id || null, linked_ot_code: linkedOT?.code || null });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[stock egreso]', err.message);
-    res.status(500).json({ error: 'Error al registrar egreso' });
-  } finally {
-    client.release();
-  }
-});
+router.post('/:id/egreso', authenticate, requireRole(...ROLES_STOCK_EGRESO), validateUUID('id'), gone410);
 
 // POST /api/stock/:id/transfer — traslado interno entre sucursales/áreas
-router.post('/:id/transfer', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const qty = positiveNumber(req.body.qty, 0);
-    const destSucursal = cleanText(req.body.dest_sucursal || req.body.destination_sucursal || req.body.base_location, 'Central');
-    const destArea = normalizeArea(req.body.dest_area || req.body.destination_area || req.body.area || 'Depósito');
-    const responsible = cleanNullable(req.body.responsible);
-    const reason = cleanNullable(req.body.reason) || 'Traslado interno de stock';
-    if (qty <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-
-    await client.query('BEGIN');
-    const src = await getScopedItemForUpdate(client, req.params.id, req);
-    if (!src.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo origen no encontrado' }); }
-    const item = src.rows[0];
-    const actual = toNumber(item.qty_current, 0);
-    if (actual < qty) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Stock insuficiente. Disponible: ${actual} ${item.unit}` });
-    }
-    if (item.base_location === destSucursal && item.area === destArea) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'El destino debe ser distinto al origen' });
-    }
-
-    await client.query('UPDATE stock_items SET qty_current = qty_current - $1, updated_at=NOW() WHERE id=$2', [qty, item.id]);
-
-    const dst = await client.query(
-      `SELECT * FROM stock_items
-       WHERE UPPER(code)=UPPER($1) AND base_location=$2 AND area=$3 AND active=TRUE
-       FOR UPDATE`,
-      [item.code, destSucursal, destArea]
-    );
-
-    let destItem;
-    if (dst.rows[0]) {
-      const upd = await client.query(
-        `UPDATE stock_items SET qty_current = qty_current + $1, updated_at=NOW()
-         WHERE id=$2 RETURNING *`,
-        [qty, dst.rows[0].id]
-      );
-      destItem = upd.rows[0];
-    } else {
-      const ins = await client.query(
-        `INSERT INTO stock_items (code, name, category, unit, qty_current, qty_min, qty_reorder, unit_cost, supplier, base_location, area)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         RETURNING *`,
-        [item.code, item.name, item.category, item.unit, qty, item.qty_min, item.qty_reorder, item.unit_cost, item.supplier, destSucursal, destArea]
-      );
-      destItem = ins.rows[0];
-    }
-
-    const extra = responsible ? ` · Responsable: ${responsible}` : '';
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
-      [item.id, qty, `Traslado a ${destSucursal} / ${destArea}. ${reason}${extra}`, req.user.id, item.base_location, item.area]
-    );
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-      [destItem.id, qty, `Traslado desde ${item.base_location} / ${item.area}. ${reason}${extra}`, req.user.id, destSucursal, destArea]
-    );
-
-    await client.query('COMMIT');
-    res.json({ message: 'Traslado interno registrado', source_id: item.id, destination_id: destItem.id, qty, destination: { sucursal: destSucursal, area: destArea } });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    if (err.code === '23505') return res.status(409).json({ error: 'Ya existe ese artículo en el destino y no se pudo actualizar' });
-    console.error('[stock transfer]', err.message);
-    res.status(500).json({ error: 'Error al registrar traslado interno' });
-  } finally {
-    client.release();
-  }
-});
+router.post('/:id/transfer', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), gone410);
 
 // POST /api/stock/:id/baja — baja auditada por pérdida, daño, robo, vencimiento, etc.
 router.post('/:id/baja', authenticate, requireRole(...ROLES_STOCK_ADMIN), sensitiveLimiter, validateUUID('id'),
-  auditAction('BAJA_STOCK','stock_items'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const qty = positiveNumber(req.body.qty, 0);
-    const reason = cleanNullable(req.body.reason);
-    const motive = cleanText(req.body.motive, 'otro');
-    if (qty <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-    if (!reason || reason.trim().length < 10) {
-      return res.status(400).json({ error: 'El motivo debe tener al menos 10 caracteres' });
-    }
-
-    await client.query('BEGIN');
-    const item = await getScopedItemForUpdate(client, req.params.id, req);
-    if (!item.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
-    const actual = toNumber(item.rows[0].qty_current, 0);
-    if (actual < qty) {
-      await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Cantidad mayor al stock disponible (${actual})` });
-    }
-
-    const fullReason = `[${motive.toUpperCase()}] ${reason}`;
-    await client.query('UPDATE stock_items SET qty_current = qty_current - $1, updated_at=NOW() WHERE id = $2', [qty, req.params.id]);
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, requires_approval, approved_by, base_location, area)
-       VALUES ($1,'Baja',$2,$3,$4,TRUE,$4,$5,$6)`,
-      [req.params.id, qty, fullReason, req.user.id, item.rows[0].base_location, item.rows[0].area]
-    );
-
-    await client.query('COMMIT');
-    res.locals.recordId = req.params.id;
-    res.locals.newValue = { qty, reason: fullReason, user: req.user.name, base_location: item.rows[0].base_location, area: item.rows[0].area };
-    res.json({ message: 'Baja registrada y auditada', qty_removed: qty, new_qty: actual - qty });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[stock baja]', err.message);
-    res.status(500).json({ error: 'Error al registrar baja' });
-  } finally {
-    client.release();
-  }
-});
+  auditAction('BAJA_STOCK','stock_items'), gone410);
 
 // POST /api/stock/:id/ajuste — ajuste de inventario
-router.post('/:id/ajuste', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    const new_qty = toNumber(req.body.new_qty, NaN);
-    const reason = cleanNullable(req.body.reason) || 'Recuento físico';
-    if (!Number.isFinite(new_qty) || new_qty < 0) return res.status(400).json({ error: 'Cantidad real inválida' });
-
-    await client.query('BEGIN');
-    const item = await getScopedItemForUpdate(client, req.params.id, req);
-    if (!item.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Artículo no encontrado' }); }
-
-    const actual = toNumber(item.rows[0].qty_current, 0);
-    const diff = new_qty - actual;
-    await client.query('UPDATE stock_items SET qty_current = $1, updated_at=NOW() WHERE id = $2', [new_qty, req.params.id]);
-    await client.query(
-      `INSERT INTO stock_movements (stock_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Ajuste',$2,$3,$4,$5,$6)`,
-      [req.params.id, Math.abs(diff), `Ajuste: ${diff>=0?'+':''}${diff} · ${reason}`, req.user.id, item.rows[0].base_location, item.rows[0].area]
-    );
-
-    await client.query('COMMIT');
-    res.json({ message: 'Ajuste registrado', new_qty });
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[stock ajuste]', err.message);
-    res.status(500).json({ error: 'Error al ajustar inventario' });
-  } finally {
-    client.release();
-  }
-});
+router.post('/:id/ajuste', authenticate, requireRole(...ROLES_STOCK_ADMIN), validateUUID('id'), gone410);
 
 // ════════════════════════════════════════════════════════════════════
 //  CATÁLOGO ÚNICO + SALDOS POR SUCURSAL (Fase 2)

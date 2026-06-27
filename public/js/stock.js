@@ -6,10 +6,10 @@
 //  (escapeHtml, apiFetch, openModal, showToast, afterSave, userHasRole,
 //  stockLocationControls, stockCanManage, App.data, etc.).
 // ════════════════════════════════════════════════════════════════════
-// ════════════════════════════════════════════════════════════════════
-//  STOCK — Pantalla sobre el catálogo único + saldos por sucursal (Fase 2b)
-//  Reemplaza el modelo viejo (stock_items). La función vieja quedó como
-//  _renderStockOld() por las dudas, pero ya no se usa.
+//  STOCK — Pantalla sobre el catálogo único + saldos por sucursal/área.
+//  Reemplazó al modelo viejo (stock_items / _renderStockOld), que ya se
+//  eliminó. Helpers compartidos (stockLocationControls, stockCanManage,
+//  stockBaseOptions, etc.) siguen viviendo en app.js.
 // ════════════════════════════════════════════════════════════════════
 async function renderStock() {
   const page = document.getElementById('page-stock');
