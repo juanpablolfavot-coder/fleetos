@@ -7,7 +7,8 @@
     "start": "node server.js",
     "migrate": "node db/migrate.js",
     "backup": "node scripts/backup-email.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:ui": "NODE_PATH=\"$(npm root -g)\" node test/smoke.ui.cjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
