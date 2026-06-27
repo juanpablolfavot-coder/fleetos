@@ -809,6 +809,48 @@ router.get('/:id/compras-en-stock', authenticate, validateUUID('id'), async (req
   } catch (err) { console.error('[GET /compras-en-stock]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// POST /api/workorders/:id/consumir-compra
+// Confirmar el USO de un repuesto comprado para la OT (sin cerrarla): descuenta
+// del stock lo usado y la parte externa pasa a consumo de stock valorizado.
+// Lo que no se usa queda en stock. Idempotente: una parte ya consumida
+// (catalog_id seteado) no se vuelve a procesar.
+router.post('/:id/consumir-compra', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico','paniol'), validateUUID('id'), async (req, res) => {
+  const client = await require('../db/pool').pool.connect();
+  try {
+    const { work_order_part_id, catalog_id, base_location, area } = req.body;
+    const qtyUsada = parseFloat(req.body.qty_usada);
+    if (!work_order_part_id || !catalog_id) return res.status(400).json({ error: 'Faltan datos del repuesto' });
+    if (!(qtyUsada > 0)) return res.status(400).json({ error: 'Cantidad inválida' });
+
+    await client.query('BEGIN');
+    const wo = await client.query('SELECT code, status FROM work_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!wo.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'OT no encontrada' }); }
+    if (String(wo.rows[0].status || '').toLowerCase().includes('cerrad')) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'La OT está cerrada' }); }
+    const part = await client.query(
+      'SELECT id FROM work_order_parts WHERE id=$1 AND wo_id=$2 AND catalog_id IS NULL FOR UPDATE',
+      [work_order_part_id, req.params.id]);
+    if (!part.rows[0]) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Ese repuesto ya fue confirmado o no corresponde a la OT' }); }
+
+    const d = await descontarCatalogoOT(client, {
+      catalog_id, base_location, area, qty: qtyUsada,
+      reason: `Consumo OT ${wo.rows[0].code}`, woId: req.params.id, userId: req.user.id });
+    if (d.error) { await client.query('ROLLBACK'); return res.status(409).json({ error: d.error }); }
+
+    await client.query(
+      `UPDATE work_order_parts SET catalog_id=$1, base_location=$2, area=$3, qty=$4, unit_cost=$5, origin='stock'
+       WHERE id=$6 AND wo_id=$7`,
+      [catalog_id, d.base_location, d.area, qtyUsada, d.unit_cost, work_order_part_id, req.params.id]);
+    await client.query(
+      `UPDATE work_orders SET parts_cost = COALESCE((SELECT SUM(subtotal) FROM work_order_parts WHERE wo_id=$1), 0) WHERE id=$1`,
+      [req.params.id]);
+    await client.query('COMMIT');
+    res.json({ ok: true, qty_usada: qtyUsada });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[consumir-compra]', err.message); res.status(500).json({ error: 'Error al confirmar el uso' });
+  } finally { client.release(); }
+});
+
 // POST /api/workorders/:id/parts — AGREGAR repuesto a OT existente
 router.post('/:id/parts',
   authenticate,

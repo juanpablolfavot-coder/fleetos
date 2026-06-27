@@ -41,7 +41,7 @@
     };
     const areaOptsDefault = areaOptsFor(userSuc || sucList[0]);
     // Expuesto para los onchange por ítem.
-    window._recepCtx = { catalogOpts, sucOpts, areaOptsFor };
+    window._recepCtx = { catalogOpts, sucOpts, areaOptsFor, sucursales: Array.isArray(destinos.sucursales) ? destinos.sucursales : [] };
     const overlay = document.createElement('div');
     overlay.className = 'modal-recepciones-overlay';
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
@@ -114,11 +114,15 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
                 <label style="font-size:12px;color:var(--text3)">Destino *</label>
-                <select id="recep-destino" class="form-select">
+                <select id="recep-destino" class="form-select" onchange="recepDestinoChanged()">
                   <option value="">— Seleccionar —</option>
                   <optgroup label="Destinos">${destinos.fijos.map(d => `<option value="${d}">${d}</option>`).join('')}</optgroup>
                   ${destinos.sucursales.length ? `<optgroup label="Sucursales">${destinos.sucursales.map(s => `<option value="${s}">${s}</option>`).join('')}</optgroup>` : ''}
                 </select>
+                <div id="recep-destino-area-wrap" style="display:none;margin-top:8px">
+                  <label style="font-size:12px;color:var(--text3)">Área de la sucursal *</label>
+                  <select id="recep-destino-area" class="form-select"></select>
+                </div>
               </div>
               <div>
                 <label style="font-size:12px;color:var(--text3)">N° Remito (opcional)</label>
@@ -241,6 +245,17 @@
     if (nb) nb.style.display = (sel && sel.value === '__new__') ? '' : 'none';
   };
 
+  // Destino: si se elige una SUCURSAL, mostrar y poblar el selector de área.
+  window.recepDestinoChanged = function() {
+    const val = document.getElementById('recep-destino')?.value || '';
+    const wrap = document.getElementById('recep-destino-area-wrap');
+    const sel = document.getElementById('recep-destino-area');
+    const sucs = (window._recepCtx && window._recepCtx.sucursales) || [];
+    const isSuc = sucs.includes(val);
+    if (wrap) wrap.style.display = isSuc ? '' : 'none';
+    if (isSuc && sel && window._recepCtx) sel.innerHTML = window._recepCtx.areaOptsFor(val);
+  };
+
   // Repuebla el área según la sucursal elegida.
   window.recepAreaRefresh = function(itemId) {
     const suc = document.getElementById('recep-suc-' + itemId)?.value;
@@ -257,8 +272,15 @@
   };
 
   window.guardarRecepcion = async function(poId) {
-    const destino = document.getElementById('recep-destino')?.value;
+    let destino = document.getElementById('recep-destino')?.value;
     if (!destino) { showToast('error', 'Seleccioná un destino'); return; }
+    // Si el destino es una sucursal, sumar el área elegida (ej. "Río Tercero / Taller").
+    const destAreaWrap = document.getElementById('recep-destino-area-wrap');
+    if (destAreaWrap && destAreaWrap.style.display !== 'none') {
+      const dArea = document.getElementById('recep-destino-area')?.value;
+      if (!dArea) { showToast('error', 'Elegí el área de la sucursal destino'); return; }
+      destino = destino + ' / ' + dArea;
+    }
     const remito = document.getElementById('recep-remito')?.value.trim();
     const notes  = document.getElementById('recep-notes')?.value.trim();
     const inputs = document.querySelectorAll('[data-recep-item]');
