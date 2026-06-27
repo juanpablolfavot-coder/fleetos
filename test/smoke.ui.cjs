@@ -33,6 +33,29 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
+// Sirve index.html; si hay bundle (public/dist/manifest.json), reemplaza el
+// bloque de <script src="js/..."> por el bundle único — espeja lo que hace
+// server.js, para que el smoke valide TAMBIÉN la ruta de producción bundleada.
+// Sin bundle, sirve los scripts individuales (estado por defecto).
+function readIndexHtml() {
+  let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+  const manifestPath = path.join(PUBLIC_DIR, 'dist', 'manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const { bundle } = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (bundle && fs.existsSync(path.join(PUBLIC_DIR, bundle))) {
+        let replaced = false;
+        html = html.replace(/<script\s+src=["']js\/[^"']+["']>\s*<\/script>\s*/g, () => {
+          if (replaced) return '';
+          replaced = true;
+          return `<script src="${bundle}"></script>\n`;
+        });
+      }
+    } catch (_) { /* sin bundle: scripts individuales */ }
+  }
+  return html;
+}
+
 // ── Server estático mínimo (sin DB, sin server.js) ──
 function startStaticServer() {
   return new Promise((resolve) => {
@@ -43,7 +66,12 @@ function startStaticServer() {
       // Evitar path traversal y servir index.html como fallback de SPA.
       if (!filePath.startsWith(PUBLIC_DIR) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
         res.writeHead(200, { 'Content-Type': MIME['.html'] });
-        res.end(fs.readFileSync(path.join(PUBLIC_DIR, 'index.html')));
+        res.end(readIndexHtml());
+        return;
+      }
+      if (rel === '/index.html') {
+        res.writeHead(200, { 'Content-Type': MIME['.html'] });
+        res.end(readIndexHtml());
         return;
       }
       res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });

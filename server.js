@@ -61,6 +61,18 @@ const BUILD_VERSION = String(
   process.env.SOURCE_VERSION ||
   Date.now()
 ).slice(0, 12);
+
+// Bundle del frontend: se reconstruye al arrancar (Node puro, milisegundos) a
+// partir de los scripts actuales, así nunca queda desactualizado y no depende
+// de cómo Render haga el deploy. Si falla, FRONTEND_BUNDLE queda null y el
+// catch-all sirve los <script> individuales (comportamiento previo intacto).
+let FRONTEND_BUNDLE = null;
+try {
+  FRONTEND_BUNDLE = require('./scripts/build-frontend').buildFrontend().bundle;
+  console.log('[frontend] bundle activo:', FRONTEND_BUNDLE);
+} catch (e) {
+  console.warn('[frontend] build falló, sirviendo scripts individuales:', e.message);
+}
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -207,6 +219,17 @@ app.get(/^(?!\/api).*/, (req, res) => {
   const fs = require('fs');
   const filePath = require('path').join(__dirname, 'public', 'index.html');
   let html = fs.readFileSync(filePath, 'utf8');
+  // Si hay bundle, reemplazar el bloque de <script src="js/..."> por UNO solo.
+  // Reemplaza el primero por el bundle y elimina el resto. Si algo no matchea,
+  // quedan los individuales (fallback natural).
+  if (FRONTEND_BUNDLE) {
+    let replaced = false;
+    html = html.replace(/<script\s+src=["']js\/[^"']+["']>\s*<\/script>\s*/g, () => {
+      if (replaced) return '';
+      replaced = true;
+      return `<script src="${FRONTEND_BUNDLE}"></script>\n`;
+    });
+  }
   html = html.replace(/(src|href)=(['"])([^'"]+\.(?:js|css))(?:\?v=[^'"]*)?\2/g, (m, attr, quote, asset) => {
     if (/^https?:/i.test(asset)) return m;
     return `${attr}=${quote}${asset}?v=${BUILD_VERSION}${quote}`;
