@@ -1,11 +1,26 @@
 // ════════════════════════════════════════════════════════════════════
-//  MANTENIMIENTO PREVENTIVO — planes por vehículo y generación de OTs preventivas.
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde el dispatcher renderPage en
-//  app.js). Este archivo se carga DESPUÉS de app.js, así que usa sus
-//  helpers globales (escapeHtml, apiFetch, openModal, showToast, userHasRole,
-//  App.data, etc.).
+//  MANTENIMIENTO PREVENTIVO (ES module, Fase 3) — planes por vehículo y
+//  generación de OTs preventivas.
+//
+//  Migrado de maintenance.js. Dependencias del mundo legacy declaradas arriba
+//  con need() (fallan en el boot si faltan); las funciones públicas se
+//  re-exponen en window para el dispatcher (renderPage) y los onclick.
 // ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const escapeHtml = need('escapeHtml');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+const showToast = need('showToast');
+const apiFetch = need('apiFetch');
+const loadInitialData = need('loadInitialData');
+const isAutoelevador = need('isAutoelevador');
+const formatVehicleMeasure = need('formatVehicleMeasure');
+const vehicleMeasureUnit = need('vehicleMeasureUnit');
+const renderDashboard = need('renderDashboard');
+const renderWorkOrders = need('renderWorkOrders');
+
 function renderMaintenance() {
   const root = document.getElementById('page-maintenance');
   if (!root) return;
@@ -314,3 +329,15 @@ async function createPreventiveOT(vehicleCode, task) {
   showToast('ok', `OT preventiva ${escapeHtml(wo.code)} creada para ${vehicleCode}`);
   renderMaintenance();
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick).
+expose('renderMaintenance', renderMaintenance);
+expose('openMaintConfigModal', openMaintConfigModal);
+expose('saveMaintConfig', saveMaintConfig);
+expose('openNewMaintModal', openNewMaintModal);
+expose('updateNewMaintLabels', updateNewMaintLabels);
+expose('saveNewMaintTask', saveNewMaintTask);
+expose('_crearOTsPreventivas', _crearOTsPreventivas);
+expose('createPreventiveOT', createPreventiveOT);
+
+export { renderMaintenance, openMaintConfigModal, saveMaintConfig, openNewMaintModal, updateNewMaintLabels, saveNewMaintTask, _crearOTsPreventivas, createPreventiveOT };
