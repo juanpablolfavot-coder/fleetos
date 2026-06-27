@@ -1459,9 +1459,10 @@ async function saveNewOT() {
 
     const originEl = document.getElementById('otp-origin-' + idx);
     const origin = originEl?.value === 'stock' ? 'stock' : 'externo';
-    const stock_id = (origin === 'stock') ? (nameEl.dataset.stockId || null) : null;
+    const catalog_id = (origin === 'stock') ? (nameEl.dataset.catalogId || null) : null;
+    const stock_id = (origin === 'stock' && !catalog_id) ? (nameEl.dataset.stockId || null) : null;
 
-    if (origin === 'stock' && !stock_id) {
+    if (origin === 'stock' && !catalog_id && !stock_id) {
       stockSinSeleccion = true;
       nameEl.style.borderColor = 'var(--danger)';
       return;
@@ -1477,6 +1478,9 @@ async function saveNewOT() {
       unit_cost: unitCost,
       origin,
       stock_id:  origin === 'stock' ? stock_id : null,
+      catalog_id,
+      base_location: catalog_id ? (nameEl.dataset.baseLocation || null) : null,
+      area:          catalog_id ? (nameEl.dataset.area || null) : null,
     });
   });
   if (stockSinSeleccion) {
@@ -1663,14 +1667,22 @@ async function saveEditOT(id) {
 }
 
 
+// Opciones del select de cierre: artículo × ubicación con saldo del catálogo
+// nuevo. El value es el índice en window._closeStockList (así dos ubicaciones
+// del mismo artículo no colisionan).
+function _closeStockOptionsHTML() {
+  window._closeStockList = _catalogStockSuggestions('', 300);
+  return window._closeStockList.map((s, i) =>
+    `<option value="${i}" data-cost="${s.unit_cost}">${escapeHtml(s.code)} — ${escapeHtml(s.name)} · ${escapeHtml(s.base_location)}/${escapeHtml(s.area)} — ${s.qty} ${escapeHtml(s.unit)} — $${Math.round(s.unit_cost).toLocaleString('es-AR')}</option>`
+  ).join('');
+}
+
 function openCloseOTModal(id) {
   const ot = App.data.workOrders.find(o=>o.id===id);
   if (!ot) return;
   if (!ot.closeParts) ot.closeParts = [];
 
-  const stockOpts = App.data.stock.map(s=>
-    `<option value="${s.id}" data-cost="${s.cost}" data-name="${escapeHtml(s.name)}" data-unit="${escapeHtml(s.unit)}">${escapeHtml(s.name)} — Stock: ${s.qty} ${escapeHtml(s.unit)} — $${s.cost.toLocaleString()}</option>`
-  ).join('');
+  const stockOpts = _closeStockOptionsHTML();
 
   const existingPartsHTML = (ot.parts||[]).length > 0
     ? `<div style="font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Repuestos cargados al crear la OT</div>
@@ -1756,6 +1768,11 @@ function openCloseOTModal(id) {
     { label:'Cancelar',         cls:'btn-secondary', fn: closeModal }
   ]);
   renderCloseOTPartsList(id);
+  // El catálogo puede no estar cargado todavía: lo traemos y repoblamos el select.
+  _ensureStockCatalog().then(() => {
+    const sel = document.getElementById('cl-stock-id');
+    if (sel) sel.innerHTML = '<option value="">— Seleccioná —</option>' + _closeStockOptionsHTML();
+  });
 }
 
 function onClosePartOriginChange() {
@@ -1791,13 +1808,13 @@ function addCloseOTPart(otId) {
   const cost    = parseFloat(document.getElementById('cl-unit-cost').value) || 0;
 
   if (origin === 'stock') {
-    const sel     = document.getElementById('cl-stock-id');
-    const stockId = sel?.value || '';
-    if (!stockId) { showToast('warn','Seleccioná un ítem del stock'); return; }
-    const item    = App.data.stock.find(s=>String(s.id)===String(stockId));
-    if (!item)    return;
+    const sel    = document.getElementById('cl-stock-id');
+    const valIdx = sel?.value || '';
+    if (valIdx === '') { showToast('warn','Seleccioná un ítem del stock'); return; }
+    const item   = (window._closeStockList || [])[parseInt(valIdx, 10)];
+    if (!item)   return;
     if (item.qty < qty) { showToast('warn',`Stock insuficiente. Disponible: ${item.qty} ${escapeHtml(item.unit)}`); return; }
-    ot.closeParts.push({ name:item.name, origin:'stock', stockId:item.id, qty, cost:cost||item.cost, unit:item.unit });
+    ot.closeParts.push({ name:item.name, origin:'stock', catalog_id:item.catalog_id, base_location:item.base_location, area:item.area, qty, cost:cost||item.unit_cost, unit:item.unit });
     sel.value = '';
   } else {
     const name = document.getElementById('cl-part-name')?.value.trim();
@@ -1851,7 +1868,10 @@ async function closeOTConfirmed(id) {
 
   // Repuestos agregados al cerrar: pañol descuenta stock; externos generan OC para Compras.
   const parts = (ot.closeParts || []).map(p => ({
-    stock_id: p.origin === 'stock' ? p.stockId : null,
+    stock_id: null,
+    catalog_id: p.origin === 'stock' ? (p.catalog_id || null) : null,
+    base_location: p.origin === 'stock' ? (p.base_location || null) : null,
+    area: p.origin === 'stock' ? (p.area || null) : null,
     name: p.name,
     qty: parseFloat(p.qty) || 1,
     unit: p.unit || 'un',
@@ -7840,8 +7860,30 @@ function _otPopulateTarget(tipo, preselectedVehicle) {
   }
 }
 
+// Catálogo nuevo para los pickers de OT (crear/cerrar). Se asegura de tenerlo
+// cargado y arma sugerencias "artículo × ubicación con saldo > 0".
+async function _ensureStockCatalog() {
+  if (Array.isArray(App.data.stockCatalog) && App.data.stockCatalog.length) return App.data.stockCatalog;
+  try { const r = await apiFetch('/api/stock/catalog'); if (r.ok) App.data.stockCatalog = await r.json(); } catch (e) {}
+  return App.data.stockCatalog || [];
+}
+function _catalogStockSuggestions(q, limit) {
+  const ql = (q || '').toLowerCase();
+  const out = [];
+  (App.data.stockCatalog || []).forEach(a => {
+    if (ql && !((a.name || '').toLowerCase().includes(ql) || (a.code || '').toLowerCase().includes(ql))) return;
+    (a.balances || []).forEach(b => {
+      const qty = parseFloat(b.qty_current) || 0;
+      if (qty > 0) out.push({ catalog_id: a.id, code: a.code, name: a.name, unit: a.unit || 'un',
+        unit_cost: parseFloat(a.unit_cost) || 0, base_location: b.base_location, area: b.area, qty });
+    });
+  });
+  return out.slice(0, limit || 12);
+}
+
 function addOTPart() {
   if (!window._otParts) window._otParts = [];
+  _ensureStockCatalog();
   const idx = window._otParts.length;
   window._otParts.push({ name:'', qty:1, unit:'un', unit_cost:0, origin:'externo', stock_id:null });
 
@@ -7890,19 +7932,23 @@ function changeOTPartOrigin(idx, origin) {
   if (origin === 'externo') {
     // Limpiar vinculación al stock
     window._otParts[idx].stock_id = null;
+    window._otParts[idx].catalog_id = null;
     if (nameEl) {
       nameEl.placeholder = 'Descripción del repuesto (compra externa)';
       nameEl.style.borderLeft = '';
       nameEl.dataset.stockId = '';
+      nameEl.dataset.catalogId = '';
     }
     if (stockInfoEl) stockInfoEl.style.display = 'none';
     if (sugEl) sugEl.style.display = 'none';
   } else {
-    // Origen = stock: mostrar hint para buscar
+    // Origen = stock: asegurar catálogo cargado y mostrar hint para buscar
+    _ensureStockCatalog();
     if (nameEl) {
       nameEl.placeholder = 'Escribí para buscar en el pañol...';
       nameEl.value = '';
       nameEl.dataset.stockId = '';
+      nameEl.dataset.catalogId = '';
       nameEl.style.borderLeft = '';
     }
     if (stockInfoEl) {
@@ -7936,39 +7982,35 @@ function onOTPartNameInput(idx, val) {
 
   // Si el usuario modifica el texto después de haber seleccionado, desvincula
   const nameEl = document.getElementById('otp-name-' + idx);
-  if (nameEl && nameEl.dataset.stockId) {
+  if (nameEl && (nameEl.dataset.stockId || nameEl.dataset.catalogId)) {
     window._otParts[idx].stock_id = null;
+    window._otParts[idx].catalog_id = null;
     nameEl.dataset.stockId = '';
+    nameEl.dataset.catalogId = '';
     nameEl.style.borderLeft = '';
   }
 
   if (!val || val.length < 2) { sugEl.style.display = 'none'; return; }
-  const q = val.toLowerCase();
-  const stock = (App.data.stock || []).filter(s =>
-    (s.name||'').toLowerCase().includes(q) || (s.code||'').toLowerCase().includes(q)
-  ).slice(0, 8);
+  const sugg = _catalogStockSuggestions(val, 10);
 
-  if (!stock.length) {
-    sugEl.innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center">Sin resultados en el pañol. Cambiá a "Externo" si es una compra de afuera.</div>';
+  if (!sugg.length) {
+    sugEl.innerHTML = '<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center">Sin resultados con stock en el pañol. Cambiá a "Externo" si es una compra de afuera.</div>';
     sugEl.style.display = 'block';
     return;
   }
 
-  sugEl.innerHTML = stock.map(s => {
-    const qty = parseFloat(s.qty_current || 0);
-    const critical = qty <= parseFloat(s.qty_min || 0);
-    const color = critical ? 'var(--danger)' : (qty > 0 ? 'var(--ok)' : 'var(--text3)');
-    const safeName = String(s.name||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    return `<div onclick="selectOTStockItem(${idx},'${s.id}','${safeName}','${escapeJsArg(s.unit||'un')}',${parseFloat(s.unit_cost||0)},${qty})"
+  sugEl.innerHTML = sugg.map(s => {
+    const safeName = String(s.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return `<div onclick="selectOTCatalogItem(${idx},'${s.catalog_id}','${safeName}','${escapeJsArg(s.unit)}',${s.unit_cost},${s.qty},'${escapeJsArg(s.base_location)}','${escapeJsArg(s.area)}')"
       style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center"
       onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
       <div>
         <div style="font-weight:600">${escapeHtml(s.name)}</div>
-        <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(s.code||'—')}</div>
+        <div style="color:var(--text3);font-size:11px"><span style="font-family:monospace">${escapeHtml(s.code)}</span> · ${escapeHtml(s.base_location)} / ${escapeHtml(s.area)}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round((s.unit_cost ?? s.cost) || 0).toLocaleString('es-AR')}/${escapeHtml(s.unit||'un')}</div>
-        <div style="font-size:10px;color:${color};font-weight:700">Stock: ${qty} ${escapeHtml(s.unit||'un')}</div>
+        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost).toLocaleString('es-AR')}/${escapeHtml(s.unit)}</div>
+        <div style="font-size:10px;color:var(--ok);font-weight:700">Stock: ${s.qty} ${escapeHtml(s.unit)}</div>
       </div>
     </div>`;
   }).join('');
@@ -7976,25 +8018,26 @@ function onOTPartNameInput(idx, val) {
 }
 
 // Cuando eligen un ítem del autocompletado
-function selectOTStockItem(idx, stockId, name, unit, unitCost, qtyAvailable) {
+function selectOTCatalogItem(idx, catalogId, name, unit, unitCost, qtyAvailable, baseLocation, area) {
   if (!window._otParts[idx]) return;
-  window._otParts[idx].name = name;
-  window._otParts[idx].unit = unit;
-  window._otParts[idx].unit_cost = unitCost;
-  window._otParts[idx].stock_id = stockId;
-  window._otParts[idx].origin = 'stock';
+  const p = window._otParts[idx];
+  p.name = name; p.unit = unit; p.unit_cost = unitCost;
+  p.origin = 'stock'; p.stock_id = null;
+  p.catalog_id = catalogId; p.base_location = baseLocation; p.area = area;
 
   const nameEl = document.getElementById('otp-name-' + idx);
   const unitEl = document.getElementById('otp-unit-' + idx);
   const costEl = document.getElementById('otp-cost-' + idx);
-  const qtyEl = document.getElementById('otp-qty-' + idx);
   const sugEl = document.getElementById('otp-suggestions-' + idx);
   const msgEl = document.getElementById('otp-stock-msg-' + idx);
   const infoEl = document.getElementById('otp-stock-info-' + idx);
 
   if (nameEl) {
     nameEl.value = name;
-    nameEl.dataset.stockId = stockId;
+    nameEl.dataset.catalogId = catalogId;
+    nameEl.dataset.baseLocation = baseLocation;
+    nameEl.dataset.area = area;
+    nameEl.dataset.stockId = '';
     nameEl.dataset.stockAvailable = qtyAvailable;
     nameEl.style.borderLeft = '3px solid var(--ok)';
   }
@@ -8002,10 +8045,7 @@ function selectOTStockItem(idx, stockId, name, unit, unitCost, qtyAvailable) {
   if (costEl) { costEl.value = unitCost; costEl.readOnly = true; costEl.style.background = 'var(--bg3)'; }
   if (sugEl) sugEl.style.display = 'none';
   if (infoEl) infoEl.style.display = 'block';
-  if (msgEl) {
-    const color = qtyAvailable > 0 ? 'var(--ok)' : 'var(--danger)';
-    msgEl.innerHTML = `<span style="color:${color}">✓ Vinculado al pañol · Disponible: <b>${qtyAvailable} ${unit}</b></span>`;
-  }
+  if (msgEl) msgEl.innerHTML = `<span style="color:var(--ok)">✓ ${escapeHtml(baseLocation)}/${escapeHtml(area)} · Disponible: <b>${qtyAvailable} ${escapeHtml(unit)}</b></span>`;
   // Validar cantidad contra disponible
   onOTPartQtyChange(idx);
   updateOTTotal();
@@ -8021,7 +8061,7 @@ function onOTPartQtyChange(idx) {
   const qty = parseFloat(qtyEl?.value) || 0;
   window._otParts[idx].qty = qty;
 
-  if (window._otParts[idx].origin === 'stock' && nameEl?.dataset.stockId) {
+  if (window._otParts[idx].origin === 'stock' && (nameEl?.dataset.stockId || nameEl?.dataset.catalogId)) {
     const available = parseFloat(nameEl.dataset.stockAvailable || 0);
     if (qty > available) {
       if (qtyEl) qtyEl.style.borderColor = 'var(--danger)';
