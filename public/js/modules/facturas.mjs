@@ -108,8 +108,15 @@
 
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
-                <label style="font-size:12px;color:#94a3b8">IVA %</label>
-                <input id="fac-iva" type="number" step="0.01" value="${ivaFacturaDefault}" oninput="actualizarPreviewFacturaIVA()" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <label style="font-size:12px;color:#94a3b8">IVA</label>
+                <div style="display:flex;gap:6px;margin-top:4px">
+                  ${['Sin IVA','10.5%','21%'].map(v => {
+                    const pct = v==='21%' ? 21 : v==='10.5%' ? 10.5 : 0;
+                    const active = pct === ivaFacturaDefault;
+                    return `<button type="button" id="fac-iva-btn-${pct}" onclick="setFacIva(${pct})" style="flex:1;padding:8px;border-radius:6px;border:1px solid #334155;cursor:pointer;font-size:12px;font-weight:600;background:${active?'#3b82f6':'#1e293b'};color:${active?'#fff':'#94a3b8'}">${v}</button>`;
+                  }).join('')}
+                </div>
+                <input type="hidden" id="fac-iva" value="${ivaFacturaDefault}">
               </div>
               <div>
                 <label style="font-size:12px;color:#94a3b8">Forma de pago</label>
@@ -186,6 +193,18 @@
     document.body.appendChild(overlay);
     setTimeout(() => { if (typeof actualizarPreviewFacturaIVA === 'function') actualizarPreviewFacturaIVA(); }, 0);
   }
+
+  // Botones de alícuota (Sin IVA / 10.5% / 21%), espejo de la OC. Guardan el
+  // valor en el hidden #fac-iva que leen el preview y guardarFactura.
+  window.setFacIva = function(pct) {
+    const inp = document.getElementById('fac-iva');
+    if (inp) inp.value = pct;
+    [0, 10.5, 21].forEach(p => {
+      const b = document.getElementById('fac-iva-btn-' + p);
+      if (b) { b.style.background = (p === pct) ? '#3b82f6' : '#1e293b'; b.style.color = (p === pct) ? '#fff' : '#94a3b8'; }
+    });
+    if (typeof actualizarPreviewFacturaIVA === 'function') actualizarPreviewFacturaIVA();
+  };
 
   window.actualizarPreviewFacturaIVA = function() {
     const neto = parseFloat(document.getElementById('fac-monto')?.value || 0) || 0;
