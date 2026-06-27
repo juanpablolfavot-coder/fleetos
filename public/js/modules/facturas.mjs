@@ -56,6 +56,11 @@
 
     const subtotalOC = parseFloat(oc.total_estimado) || 0;
     const ivaOC = parseFloat(oc.iva_pct) || 0;
+    // Default de IVA para la factura: tomar el de la OC TAL CUAL. Si la OC es
+    // "Sin IVA" (iva_pct = 0) la factura arranca en 0% — antes caía a 21% por
+    // el `|| 21`, agregando IVA que la OC no tenía. Solo si la OC no tiene el
+    // campo cargado (OCs viejas) se usa 21% como fallback.
+    const ivaFacturaDefault = (oc.iva_pct === null || oc.iva_pct === undefined || oc.iva_pct === '') ? 21 : ivaOC;
     const totalOC = +(subtotalOC * (1 + ivaOC / 100)).toFixed(2);
     const totalFacturado = facturas.reduce((s, f) => s + totalConIvaFactura(f), 0);
     const pendienteFacturar = Math.max(0, +(totalOC - totalFacturado).toFixed(2));
@@ -103,8 +108,15 @@
 
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
               <div>
-                <label style="font-size:12px;color:#94a3b8">IVA %</label>
-                <input id="fac-iva" type="number" step="0.01" value="${ivaOC || 21}" oninput="actualizarPreviewFacturaIVA()" style="width:100%;background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;margin-top:4px">
+                <label style="font-size:12px;color:#94a3b8">IVA</label>
+                <div style="display:flex;gap:6px;margin-top:4px">
+                  ${['Sin IVA','10.5%','21%'].map(v => {
+                    const pct = v==='21%' ? 21 : v==='10.5%' ? 10.5 : 0;
+                    const active = pct === ivaFacturaDefault;
+                    return `<button type="button" id="fac-iva-btn-${pct}" onclick="setFacIva(${pct})" style="flex:1;padding:8px;border-radius:6px;border:1px solid #334155;cursor:pointer;font-size:12px;font-weight:600;background:${active?'#3b82f6':'#1e293b'};color:${active?'#fff':'#94a3b8'}">${v}</button>`;
+                  }).join('')}
+                </div>
+                <input type="hidden" id="fac-iva" value="${ivaFacturaDefault}">
               </div>
               <div>
                 <label style="font-size:12px;color:#94a3b8">Forma de pago</label>
@@ -122,7 +134,7 @@
               </div>
             </div>
 
-            <div id="fac-total-preview" style="background:#111827;border:1px solid #334155;border-radius:6px;padding:10px;margin-bottom:12px;font-size:13px;color:#cbd5e1">
+            <div id="fac-total-preview" data-pendiente="${pendienteFacturar}" style="background:#111827;border:1px solid #334155;border-radius:6px;padding:10px;margin-bottom:12px;font-size:13px;color:#cbd5e1">
               Total con IVA: <strong>$0,00</strong>
             </div>
 
@@ -182,12 +194,30 @@
     setTimeout(() => { if (typeof actualizarPreviewFacturaIVA === 'function') actualizarPreviewFacturaIVA(); }, 0);
   }
 
+  // Botones de alícuota (Sin IVA / 10.5% / 21%), espejo de la OC. Guardan el
+  // valor en el hidden #fac-iva que leen el preview y guardarFactura.
+  window.setFacIva = function(pct) {
+    const inp = document.getElementById('fac-iva');
+    if (inp) inp.value = pct;
+    [0, 10.5, 21].forEach(p => {
+      const b = document.getElementById('fac-iva-btn-' + p);
+      if (b) { b.style.background = (p === pct) ? '#3b82f6' : '#1e293b'; b.style.color = (p === pct) ? '#fff' : '#94a3b8'; }
+    });
+    if (typeof actualizarPreviewFacturaIVA === 'function') actualizarPreviewFacturaIVA();
+  };
+
   window.actualizarPreviewFacturaIVA = function() {
     const neto = parseFloat(document.getElementById('fac-monto')?.value || 0) || 0;
     const iva = parseFloat(document.getElementById('fac-iva')?.value || 0) || 0;
     const total = neto * (1 + iva / 100);
     const el = document.getElementById('fac-total-preview');
-    if (el) el.innerHTML = `Total con IVA: <strong>$${fmt(total)}</strong> <span style="color:#64748b">(neto $${fmt(neto)} + IVA ${fmt(iva)}%)</span>`;
+    if (!el) return;
+    // Aviso de probable doble IVA: si el total c/IVA supera lo pendiente de la
+    // OC, es señal de que se cargó el TOTAL con IVA en el campo "Importe neto".
+    const pendiente = parseFloat(el.dataset.pendiente || 0) || 0;
+    const excede = pendiente > 0.01 && total > pendiente * 1.01;
+    el.innerHTML = `Total con IVA: <strong>$${fmt(total)}</strong> <span style="color:#64748b">(neto $${fmt(neto)} + IVA ${fmt(iva)}%)</span>`
+      + (excede ? `<div style="margin-top:8px;color:#fca5a5;font-size:12px">⚠ El total con IVA ($${fmt(total)}) supera lo pendiente de la OC ($${fmt(pendiente)}). ¿Cargaste el <b>total con IVA</b> en "Importe neto" en vez del <b>neto</b>?</div>` : '');
   };
 
   // ─────────────────────────────────────────────────────────
@@ -207,6 +237,18 @@
     if (!body.invoice_nro) { showToast('error', 'Falta el N° de factura'); return; }
     if (!body.invoice_fecha) { showToast('error', 'Falta la fecha'); return; }
     if (!(parseFloat(body.invoice_monto) > 0)) { showToast('error', 'Monto inválido'); return; }
+
+    // Guardia contra doble IVA: invoice_monto es el NETO; el sistema le suma el
+    // IVA. Si el total c/IVA supera lo pendiente de la OC, probablemente se
+    // cargó el total con IVA en el campo neto. Avisar antes de guardar.
+    const netoVal = parseFloat(body.invoice_monto) || 0;
+    const ivaVal = parseFloat(body.iva_pct) || 0;
+    const totalVal = netoVal * (1 + ivaVal / 100);
+    const prevEl = document.getElementById('fac-total-preview');
+    const pend = prevEl ? (parseFloat(prevEl.dataset.pendiente || 0) || 0) : 0;
+    if (pend > 0.01 && totalVal > pend * 1.01) {
+      if (!confirm(`El total con IVA ($${fmt(totalVal)}) supera lo pendiente de la OC ($${fmt(pend)}).\n\nRecordá: en "Importe neto" va el NETO (sin IVA); el sistema le agrega el IVA. Si cargaste el total con IVA, se duplicaría.\n\n¿Cargar igual?`)) return;
+    }
 
     try {
       const res = await apiFetch(`/api/purchase-orders/${poId}/facturas`, {
