@@ -4143,12 +4143,20 @@ async function renderStock() {
   const page = document.getElementById('page-stock');
   if (!page) return;
   page.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Cargando catálogo…</div>';
-  let items = [];
+  let items = [], dispatches = [], movements = [];
   try {
-    const res = await apiFetch('/api/stock/catalog');
-    items = res.ok ? await res.json() : [];
+    const [rc, rd, rm] = await Promise.all([
+      apiFetch('/api/stock/catalog'),
+      apiFetch('/api/stock/dispatches').catch(() => null),
+      apiFetch('/api/stock/catalog/movements?limit=10').catch(() => null),
+    ]);
+    items = rc && rc.ok ? await rc.json() : [];
+    dispatches = rd && rd.ok ? await rd.json() : [];
+    movements = rm && rm.ok ? await rm.json() : [];
   } catch (e) { items = []; }
   App.data.stockCatalog = items;
+  App.data.stockDispatches = dispatches;
+  App.data.stockMovements = movements;
   _renderStockCatalog();
 }
 
@@ -4202,14 +4210,84 @@ function _renderStockCatalog() {
         <select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
         <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">
         ${_stockCanSend() ? '<button class="btn btn-secondary btn-sm" onclick="openDispatchNew()">🚚 Despachar</button>' : ''}
-        <button class="btn btn-secondary btn-sm" onclick="openDispatchesPanel()">📋 Despachos</button>
         ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
       </div>
     </div>
     <div class="card" style="padding:0"><div class="table-wrap"><table>
       <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div></div>`;
+    </table></div></div>
+    ${_stockInlinePanels()}`;
+}
+
+// Paneles que se ven directo al entrar a la página (no atrás de un botón):
+// despachos (en tránsito + recientes, con sus acciones) e historial (últimos 10).
+function _stockInlinePanels() {
+  return `<div class="stock-panels" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:20px">
+    <div class="card" style="padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="section-title" style="font-size:15px">🚚 Despachos entre sucursales</div>
+        ${_stockCanSend() ? '<button class="btn btn-secondary btn-sm" onclick="openDispatchNew()">+ Nuevo</button>' : ''}
+      </div>
+      <div id="stock-disp-inline">${_renderDispatchesInline(App.data.stockDispatches || [])}</div>
+    </div>
+    <div class="card" style="padding:14px 16px">
+      <div class="section-title" style="font-size:15px;margin-bottom:10px">🕑 Movimientos recientes <span style="font-size:12px;color:var(--text3);font-weight:400">(últimos 10)</span></div>
+      <div id="stock-mov-inline">${_renderMovementsInline(App.data.stockMovements || [])}</div>
+    </div>
+  </div>`;
+}
+
+// Lista de despachos para el panel inline: en tránsito arriba (con Recibir/Cancelar),
+// luego los últimos recibidos/cancelados. Reusa el mismo formato de tarjeta.
+function _renderDispatchesInline(list) {
+  const num = (v) => parseFloat(v) || 0;
+  const fmtDate = (s) => { try { return s ? new Date(s).toLocaleDateString('es-AR') : ''; } catch (e) { return ''; } };
+  const canRecv = _stockCanReceive();
+  const canSend = _stockCanSend();
+  const sideColor = (st) => st === 'en_transito' ? 'warn' : st === 'recibido' ? 'ok' : 'danger';
+  const card = (d) => {
+    const badge = d.status === 'en_transito' ? '<span class="badge badge-warn">🚚 En tránsito</span>'
+      : d.status === 'recibido' ? '<span class="badge badge-ok">✓ Recibido</span>'
+      : '<span class="badge badge-danger">Cancelado</span>';
+    const recvBtn = (d.status === 'en_transito' && canRecv) ? `<button class="btn btn-primary btn-sm" onclick="receiveDispatch('${d.id}',${num(d.qty_sent)})">✓ Recibir</button>` : '';
+    const cancBtn = (d.status === 'en_transito' && canSend) ? `<button class="btn btn-secondary btn-sm" onclick="cancelDispatch('${d.id}')">Cancelar</button>` : '';
+    const when = fmtDate(d.dispatched_at);
+    return `<div style="border:1px solid var(--border);border-left:3px solid var(--${sideColor(d.status)});border-radius:var(--radius);padding:9px 11px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px">
+        <div style="font-weight:600;font-size:13px"><span class="td-mono" style="font-size:11px">${escapeHtml(d.code)}</span> · ${escapeHtml(d.name)}</div>${badge}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap">
+        <span style="background:var(--bg3);padding:3px 8px;border-radius:8px">${escapeHtml(_stockShortLoc(d.from_location))} · ${escapeHtml(d.from_area)}</span>
+        <span style="color:var(--accent);font-weight:700;white-space:nowrap">→ ${num(d.qty_sent)} ${escapeHtml(d.unit)} →</span>
+        <span style="background:var(--bg3);padding:3px 8px;border-radius:8px">${escapeHtml(_stockShortLoc(d.to_location))} · ${escapeHtml(d.to_area)}</span>
+      </div>
+      <div style="color:var(--text3);font-size:11px;margin-top:5px">${when}${d.dispatched_by_name ? ' · ' + escapeHtml(d.dispatched_by_name) : ''}${d.status === 'recibido' ? ` · recibido <b>${num(d.qty_received)}</b>` : ''}</div>
+      ${(recvBtn || cancBtn) ? `<div style="display:flex;gap:6px;margin-top:7px">${recvBtn}${cancBtn}</div>` : ''}
+    </div>`;
+  };
+  const enTransito = (list || []).filter((d) => d.status === 'en_transito');
+  const otros = (list || []).filter((d) => d.status !== 'en_transito').slice(0, 5);
+  if (!enTransito.length && !otros.length) return '<div style="color:var(--text3);font-size:12px;text-align:center;padding:14px">No hay despachos.</div>';
+  return `${enTransito.length ? `<div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:6px">En tránsito (${enTransito.length})</div>${enTransito.map(card).join('')}` : ''}
+    ${otros.length ? `<div style="font-size:12px;font-weight:600;color:var(--text2);margin:10px 0 6px">Recientes</div>${otros.map(card).join('')}` : ''}`;
+}
+
+// Historial: últimos movimientos del catálogo (ingreso/egreso/ajuste).
+function _renderMovementsInline(list) {
+  const num = (v) => parseFloat(v) || 0;
+  const fmt = (s) => { try { return s ? new Date(s).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''; } catch (e) { return ''; } };
+  if (!list || !list.length) return '<div style="color:var(--text3);font-size:12px;text-align:center;padding:14px">Sin movimientos todavía.</div>';
+  const color = (t) => t === 'Ingreso' ? 'ok' : t === 'Egreso' ? 'danger' : 'warn';
+  const sign = (t) => t === 'Ingreso' ? '+' : t === 'Egreso' ? '−' : '±';
+  return list.map((m) => `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px">
+      <span class="badge badge-${color(m.type)}" style="min-width:62px;text-align:center">${sign(m.type)} ${num(m.qty)} ${escapeHtml(m.unit || '')}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="td-mono" style="font-size:11px">${escapeHtml(m.code)}</span> · ${escapeHtml(m.name)}</div>
+        <div style="color:var(--text3);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(_stockShortLoc(m.base_location))} · ${escapeHtml(m.area)}${m.user_name ? ' · ' + escapeHtml(m.user_name) : ''}</div>
+      </div>
+      <span style="color:var(--text3);font-size:11px;white-space:nowrap">${fmt(m.created_at)}</span>
+    </div>`).join('');
 }
 
 // Chips compactos con el saldo por ubicación para la columna "Por sucursal/área".
