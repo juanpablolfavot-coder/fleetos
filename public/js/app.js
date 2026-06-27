@@ -1710,6 +1710,8 @@ function openCloseOTModal(id) {
 
     ${existingPartsHTML}
 
+    <div id="cl-compras-wrap"></div>
+
     <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-bottom:14px">
       <div style="font-size:11px;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">
         Agregar repuestos usados al cerrar
@@ -1773,6 +1775,40 @@ function openCloseOTModal(id) {
     const sel = document.getElementById('cl-stock-id');
     if (sel) sel.innerHTML = '<option value="">— Seleccioná —</option>' + _closeStockOptionsHTML();
   });
+  // Repuestos comprados para esta OT que ya están en stock → consumir al cerrar.
+  _loadComprasEnStock(ot._uuid || ot.id);
+}
+
+// Trae los repuestos comprados para la OT que entraron al stock y arma la sección
+// "consumir al cerrar". Default usado = lo comprado (se puede bajar; el resto queda).
+async function _loadComprasEnStock(otUUID) {
+  const wrap = document.getElementById('cl-compras-wrap');
+  if (!wrap) return;
+  let list = [];
+  try { const r = await apiFetch(`/api/workorders/${otUUID}/compras-en-stock`); list = r.ok ? await r.json() : []; }
+  catch (e) { list = []; }
+  window._otComprasStock = list;
+  if (!list.length) { wrap.innerHTML = ''; return; }
+  const num = (v) => parseFloat(v) || 0;
+  const rows = list.map((c, i) => {
+    const comprada = num(c.qty_comprada), disp = num(c.qty_disponible);
+    const def = Math.min(comprada, disp);
+    return `<div style="display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:13px;font-weight:600">${escapeHtml(c.name)}</div>
+        <div style="font-size:11px;color:var(--text3)"><span style="font-family:var(--mono)">${escapeHtml(c.code)}</span> · comprado: <b>${comprada} ${escapeHtml(c.unit)}</b> · en stock: ${disp} · ${escapeHtml(typeof _stockShortLoc === 'function' ? _stockShortLoc(c.base_location) : c.base_location)}/${escapeHtml(c.area)}</div>
+      </div>
+      <div>
+        <label style="font-size:10px;color:var(--text3)">Usado</label>
+        <input class="form-input" type="number" min="0" max="${disp}" step="0.01" value="${def}" data-compra-idx="${i}" style="text-align:right;padding:6px">
+      </div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML = `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--radius);padding:12px;margin-bottom:14px">
+    <div style="font-size:11px;color:#1e40af;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📦 Repuestos comprados para esta OT (en stock)</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px">Al cerrar se descuenta del stock lo que usaste. Lo que no uses queda en stock.</div>
+    ${rows}
+  </div>`;
 }
 
 function onClosePartOriginChange() {
@@ -1881,10 +1917,24 @@ async function closeOTConfirmed(id) {
   let descuentos = parts.filter(p => p.origin === 'stock').length;
   let externos = parts.filter(p => p.origin !== 'stock').length;
 
+  // Consumo de los repuestos comprados para esta OT (sección "en stock").
+  const consumed_purchases = [];
+  (window._otComprasStock || []).forEach((c, i) => {
+    const inp = document.querySelector(`[data-compra-idx="${i}"]`);
+    const usada = parseFloat(inp?.value);
+    if (usada > 0) {
+      consumed_purchases.push({
+        work_order_part_id: c.work_order_part_id, catalog_id: c.catalog_id,
+        base_location: c.base_location, area: c.area, qty_usada: usada,
+      });
+    }
+  });
+  descuentos += consumed_purchases.length;
+
   const woUUID = ot._uuid || ot.id;
   const res = await apiFetch(`/api/workorders/${woUUID}/close`, {
     method: 'POST',
-    body: JSON.stringify({ root_cause: causa, labor_cost: labor, close_parts: parts })
+    body: JSON.stringify({ root_cause: causa, labor_cost: labor, close_parts: parts, consumed_purchases })
   });
   if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al cerrar OT'); return; }
 

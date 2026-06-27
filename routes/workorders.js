@@ -544,6 +544,26 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
       extraCost += parseFloat(ins.rows[0].subtotal);
     }
 
+    // Consumo de repuestos COMPRADOS para esta OT que ya están en stock: se
+    // descuenta del catálogo lo que se usó y la parte externa pasa a ser un
+    // consumo de stock valorizado. Lo que no se usó queda en stock.
+    const consumed = Array.isArray(req.body.consumed_purchases) ? req.body.consumed_purchases : [];
+    for (const c of consumed) {
+      const qtyUsada = parseFloat(c.qty_usada);
+      if (!(qtyUsada > 0) || !c.work_order_part_id || !c.catalog_id) continue;
+      const d = await descontarCatalogoOT(client, {
+        catalog_id: c.catalog_id, base_location: c.base_location, area: c.area,
+        qty: qtyUsada, reason: `Consumo OT ${wo.rows[0].code}`, woId: req.params.id, userId: req.user.id });
+      if (d.error) { await client.query('ROLLBACK'); return res.status(409).json({ error: d.error }); }
+      const upd = await client.query(
+        `UPDATE work_order_parts
+            SET catalog_id = $1, base_location = $2, area = $3, qty = $4, unit_cost = $5, origin = 'stock'
+          WHERE id = $6 AND wo_id = $7 AND catalog_id IS NULL
+          RETURNING subtotal`,
+        [c.catalog_id, d.base_location, d.area, qtyUsada, d.unit_cost, c.work_order_part_id, req.params.id]);
+      if (upd.rows[0]) extraCost += parseFloat(upd.rows[0].subtotal) || 0;
+    }
+
     let externalPOs = [];
     if (externalItemsForPO.length) {
       let sucursal = null;
@@ -758,6 +778,35 @@ router.get('/:id/parts', authenticate, validateUUID('id'), async (req, res) => {
     );
     res.json(r.rows);
   } catch(err) { console.error('[GET /parts]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// GET /api/workorders/:id/compras-en-stock
+// Repuestos que se COMPRARON para esta OT (parte externa → OC) y ya entraron al
+// stock (recepción con 📦). Al cerrar la OT se ofrece consumir de acá lo que se
+// usó; lo que no se usa queda en stock. Excluye los ya consumidos (wop.catalog_id).
+router.get('/:id/compras-en-stock', authenticate, validateUUID('id'), async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT wop.id AS work_order_part_id, pori.catalog_id,
+              sc.code, sc.name, sc.unit, COALESCE(sc.unit_cost, 0) AS unit_cost,
+              pori.stock_base_location AS base_location, pori.stock_area AS area,
+              SUM(pori.cantidad) AS qty_comprada,
+              COALESCE(MAX(sb.qty_current), 0) AS qty_disponible
+       FROM work_order_parts wop
+       JOIN purchase_order_items poi ON poi.work_order_part_id = wop.id
+       JOIN purchase_order_receipt_items pori ON pori.po_item_id = poi.id AND pori.catalog_id IS NOT NULL
+       JOIN stock_catalog sc ON sc.id = pori.catalog_id
+       LEFT JOIN stock_balances sb ON sb.catalog_id = pori.catalog_id
+              AND sb.base_location = pori.stock_base_location AND sb.area = pori.stock_area
+       WHERE wop.wo_id = $1 AND wop.origin = 'externo' AND wop.catalog_id IS NULL
+       GROUP BY wop.id, pori.catalog_id, sc.code, sc.name, sc.unit, sc.unit_cost,
+                pori.stock_base_location, pori.stock_area
+       HAVING SUM(pori.cantidad) > 0
+       ORDER BY sc.name`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch (err) { console.error('[GET /compras-en-stock]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // POST /api/workorders/:id/parts — AGREGAR repuesto a OT existente
