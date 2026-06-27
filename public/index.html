@@ -301,13 +301,15 @@ html, body {
 <script src="js/documents.js?v=1"></script>
 <script src="js/maintenance.js?v=1"></script>
 <script src="js/assets.js?v=1"></script>
-<script src="js/contador.js?v=1"></script>
 <script src="js/stock.js?v=1"></script>
 <script src="js/recepciones.js?v=5"></script>
 <script src="js/facturas.js?v=1777100000"></script>
 <script src="js/proveedor-panel.js?v=6"></script>
 <script src="js/pagos.js?v=1777100000"></script>
 <script src="js/timeline.js?v=3"></script>
+<!-- ES modules nuevos (Fase 3). En dev el navegador los carga nativo; el build
+     los bundlea con esbuild y el server reemplaza este tag por el bundle. -->
+<script type="module" src="js/modules/index.mjs?v=1"></script>
 
 <!-- PWA: registra el service worker (requisito para "Instalar app" en Android) -->
 <script>

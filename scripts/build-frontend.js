@@ -38,7 +38,44 @@ function orderedScriptFiles() {
   return files;
 }
 
-// Construye el bundle. Devuelve { bundle, hash, files, bytes } o lanza.
+// Lee de index.html el src del <script type="module" src="js/..."> (el entry de
+// los ES modules nuevos), sin el ?v=. Devuelve el path relativo o null.
+function moduleEntry() {
+  const html = fs.readFileSync(INDEX, 'utf8');
+  const m = html.match(/<script\s+type=["']module["']\s+src=["'](js\/[^"'?]+)(?:\?[^"']*)?["']>/);
+  return m ? m[1] : null;
+}
+
+// Bundlea el entry de módulos con esbuild a un IIFE clásico con hash. Devuelve
+// { bundle, entry, bytes } o null si no hay entry. Requiere esbuild (lanza si no).
+function buildModuleBundle({ quiet = true } = {}) {
+  const entry = moduleEntry();
+  if (!entry) return null;
+  const esbuild = require('esbuild');
+  const res = esbuild.buildSync({
+    entryPoints: [path.join(PUBLIC_DIR, entry)],
+    bundle: true,
+    format: 'iife',
+    charset: 'utf8',
+    minifyWhitespace: true,
+    minifySyntax: true,
+    minifyIdentifiers: false, // coherente con el legacy: nombres intactos
+    legalComments: 'none',
+    write: false,
+  });
+  const code = res.outputFiles[0].text;
+  const h = crypto.createHash('sha256').update(code).digest('hex').slice(0, 12);
+  const name = `modules.${h}.js`;
+  for (const f of fs.readdirSync(DIST_DIR)) {
+    if (/^modules\.[0-9a-f]+\.js$/.test(f) && f !== name) {
+      try { fs.unlinkSync(path.join(DIST_DIR, f)); } catch (_) { /* noop */ }
+    }
+  }
+  fs.writeFileSync(path.join(DIST_DIR, name), code);
+  return { bundle: `dist/${name}`, entry, bytes: Buffer.byteLength(code) };
+}
+
+// Construye el bundle. Devuelve { bundle, hash, files, bytes, moduleBundle } o lanza.
 function buildFrontend({ quiet = true } = {}) {
   const files = orderedScriptFiles();
   if (!files.length) throw new Error('No se encontraron <script src="js/..."> en index.html');
@@ -84,16 +121,30 @@ function buildFrontend({ quiet = true } = {}) {
   }
 
   fs.writeFileSync(path.join(DIST_DIR, bundleName), bundleSrc);
-  fs.writeFileSync(path.join(DIST_DIR, 'manifest.json'), JSON.stringify({ bundle: bundleRel, files, hash, minified }, null, 2));
+
+  // ── Bundle de los ES modules nuevos (Fase 3) ──
+  // Se bundlea con esbuild (resuelve import/export) a un IIFE clásico. Si
+  // esbuild no está o falla, moduleBundle queda null y el server deja el
+  // <script type="module"> nativo (el navegador lo carga igual).
+  let moduleBundle = null;
+  try {
+    const mod = buildModuleBundle({ quiet });
+    if (mod) moduleBundle = mod.bundle;
+  } catch (e) {
+    if (!quiet) console.warn('[build-frontend] module bundle omitido (' + e.message + '), se usa <script type=module> nativo');
+  }
+
+  fs.writeFileSync(path.join(DIST_DIR, 'manifest.json'), JSON.stringify({ bundle: bundleRel, files, hash, minified, moduleBundle }, null, 2));
 
   const bytes = Buffer.byteLength(bundleSrc);
   if (!quiet) {
     console.log(`[build-frontend] ${files.length} archivos → ${bundleRel} (${(bytes / 1024).toFixed(0)} KB${minified ? ', minificado' : ', sin minificar'})`);
+    if (moduleBundle) console.log(`[build-frontend] ES modules → ${moduleBundle}`);
   }
-  return { bundle: bundleRel, hash, files, bytes, minified };
+  return { bundle: bundleRel, hash, files, bytes, minified, moduleBundle };
 }
 
-module.exports = { buildFrontend, orderedScriptFiles };
+module.exports = { buildFrontend, orderedScriptFiles, moduleEntry, buildModuleBundle };
 
 // Ejecutado directo (npm run build): construir y reportar.
 if (require.main === module) {

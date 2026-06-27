@@ -162,6 +162,9 @@ const App = {
   currentUser: null,
   data: {}
 };
+// Puente para los ES modules nuevos (Fase 3): App es `const`, así que no queda
+// en el global object; lo exponemos explícitamente para que los módulos lo lean.
+window.App = App;
 // Helper para verificar rol del usuario actual
 function userHasRole(...roles) {
   const role = App.currentUser?.role;

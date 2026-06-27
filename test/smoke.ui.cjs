@@ -26,6 +26,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
@@ -42,7 +43,7 @@ function readIndexHtml() {
   const manifestPath = path.join(PUBLIC_DIR, 'dist', 'manifest.json');
   if (fs.existsSync(manifestPath)) {
     try {
-      const { bundle } = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      const { bundle, moduleBundle } = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       if (bundle && fs.existsSync(path.join(PUBLIC_DIR, bundle))) {
         let replaced = false;
         html = html.replace(/<script\s+src=["']js\/[^"']+["']>\s*<\/script>\s*/g, () => {
@@ -50,6 +51,10 @@ function readIndexHtml() {
           replaced = true;
           return `<script src="${bundle}"></script>\n`;
         });
+      }
+      if (moduleBundle && fs.existsSync(path.join(PUBLIC_DIR, moduleBundle))) {
+        html = html.replace(/<script\s+type=["']module["']\s+src=["']js\/modules\/[^"']+["']>\s*<\/script>/,
+          `<script src="${moduleBundle}"></script>`);
       }
     } catch (_) { /* sin bundle: scripts individuales */ }
   }
