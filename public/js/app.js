@@ -12690,12 +12690,18 @@ async function _partsLoadList() {
   const container = document.getElementById('eo-parts-list');
   if (!otId || !container) return;
   try {
-    const r = await apiFetch(`/api/workorders/${otId}/parts`);
+    const [r, rc] = await Promise.all([
+      apiFetch(`/api/workorders/${otId}/parts`),
+      apiFetch(`/api/workorders/${otId}/compras-en-stock`).catch(() => null),
+    ]);
     if (!r.ok) {
       container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error al cargar repuestos</div>`;
       return;
     }
     const parts = await r.json();
+    const compras = (rc && rc.ok) ? await rc.json() : [];
+    window._otComprasMap = {};
+    compras.forEach(c => { window._otComprasMap[c.work_order_part_id] = c; });
     _partsRender(parts);
   } catch(err) {
     container.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Error: ${err.message}</div>`;
@@ -12741,7 +12747,7 @@ function _partsRender(parts) {
       ${window._labCurrentOtClosed ? '<span></span>' : `<button type="button" onclick="_partsDelete('${p.id}', ${p.origin === 'stock' ? 'true' : 'false'})"
         title="${p.origin === 'stock' ? 'Eliminar y devolver al stock' : 'Eliminar repuesto'}"
         style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0 6px;height:28px">✕</button>`}
-    </div>`;
+    </div>${_partsConsumibleSubrow(p)}`;
   }).join('');
 
   const totalM = parts.reduce((a,p) => a + parseFloat(p.subtotal || (p.qty * p.unit_cost) || 0), 0);
@@ -12750,6 +12756,54 @@ function _partsRender(parts) {
   if (eoParts)  eoParts.value = totalM.toFixed(2);
 }
 
+
+// Sub-fila "Confirmar uso" para los repuestos comprados para esta OT que están
+// en stock (vinieron por OC y se recibieron). Permite descontar del stock lo
+// usado SIN cerrar la OT. Lo que no se usa queda en stock.
+function _partsConsumibleSubrow(p) {
+  const c = (window._otComprasMap || {})[p.id];
+  if (!c || window._labCurrentOtClosed) return '';
+  const disp = parseFloat(c.qty_disponible) || 0;
+  return `<div style="margin:-2px 0 8px;padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;flex-wrap:wrap">
+    <span style="color:#1e40af">📦 Comprado para esta OT · en stock: <b>${disp} ${escapeHtml(c.unit || '')}</b></span>
+    <button type="button" class="btn btn-primary btn-sm" style="padding:3px 10px;font-size:11px" onclick="_openConsumirCompra('${p.id}')">✓ Confirmar uso / dar de baja</button>
+  </div>`;
+}
+
+function _openConsumirCompra(partId) {
+  const c = (window._otComprasMap || {})[partId];
+  if (!c) return;
+  const num = (v) => parseFloat(v) || 0;
+  const disp = num(c.qty_disponible), comprada = num(c.qty_comprada);
+  openModal('Confirmar uso del repuesto', `
+    <div style="font-size:13px;font-weight:600;margin-bottom:4px">${escapeHtml(c.name)} <span style="color:var(--text3);font-weight:400;font-family:var(--mono);font-size:11px">${escapeHtml(c.code || '')}</span></div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Comprado: <b>${comprada} ${escapeHtml(c.unit || '')}</b> · En stock: <b>${disp}</b> · ${escapeHtml(c.base_location || '')}/${escapeHtml(c.area || '')}</div>
+    <div class="form-group"><label class="form-label">¿Cuánto usaste? *</label>
+      <input class="form-input" id="cc-qty" type="number" min="0" max="${disp}" step="0.01" value="${Math.min(comprada, disp)}"></div>
+    <div style="font-size:11px;color:var(--text3)">Se descuenta del stock. Lo que no uses queda en stock.</div>
+  `, [
+    { label: 'Cancelar', cls: 'btn-secondary', fn: () => { closeModal(); openEditOTModal(window._labCurrentOtId); } },
+    { label: 'Confirmar uso', cls: 'btn-primary', fn: () => _saveConsumirCompra(partId) },
+  ]);
+}
+
+async function _saveConsumirCompra(partId) {
+  const c = (window._otComprasMap || {})[partId];
+  const otId = window._labCurrentOtId;
+  if (!c || !otId) return;
+  const qty = parseFloat(document.getElementById('cc-qty')?.value);
+  if (!(qty > 0)) { showToast('warn', 'Ingresá cuánto usaste'); return; }
+  try {
+    const r = await apiFetch(`/api/workorders/${otId}/consumir-compra`, {
+      method: 'POST',
+      body: JSON.stringify({ work_order_part_id: partId, catalog_id: c.catalog_id, base_location: c.base_location, area: c.area, qty_usada: qty }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); showToast('error', e.error || 'Error al confirmar el uso'); return; }
+    closeModal();
+    showToast('ok', 'Uso confirmado · descontado del stock');
+    openEditOTModal(otId);
+  } catch (err) { showToast('error', err.message); }
+}
 
 function _partsAddExternalLabor() {
   if (!window._labCurrentOtId) return showToast('error', 'Abrí una OT primero');
