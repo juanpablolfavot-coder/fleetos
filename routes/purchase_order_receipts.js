@@ -425,6 +425,10 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
       if (!(parseFloat(it.cantidad) > 0)) return res.status(400).json({ error: 'Cantidad inválida' });
     }
 
+    // IMPORTANTE: asegurar el esquema del catálogo (ALTER TABLE) ANTES del BEGIN.
+    // Si corre dentro de la transacción, el ALTER sobre purchase_order_receipt_items
+    // choca con el lock que la propia transacción tiene sobre esa tabla y se cuelga.
+    await ensureCatalogForReceipts();
     await client.query('BEGIN');
     await ensurePOReceiptStateColumns(client);
 
@@ -537,6 +541,10 @@ router.post('/:id/recepciones', authenticate, requireRole(...ROLES_RECIBIR), asy
 router.delete('/:id/recepciones/:rid', authenticate, requireRole(...ROLES_RECIBIR), async (req, res) => {
   const client = await pool.connect();
   try {
+    // IMPORTANTE: asegurar el esquema del catálogo (ALTER TABLE) ANTES del BEGIN.
+    // Si corre dentro de la transacción, el ALTER sobre purchase_order_receipt_items
+    // choca con el lock que la propia transacción tiene sobre esa tabla y se cuelga.
+    await ensureCatalogForReceipts();
     await client.query('BEGIN');
     await ensurePOReceiptStateColumns(client);
 
