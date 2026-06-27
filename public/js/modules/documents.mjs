@@ -1,11 +1,21 @@
 // ════════════════════════════════════════════════════════════════════
-//  DOCUMENTACIÓN — vencimientos de documentos (vehículos y entidades): alta, edición, renovación.
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde el dispatcher renderPage en
-//  app.js). Este archivo se carga DESPUÉS de app.js, así que usa sus
-//  helpers globales (escapeHtml, apiFetch, openModal, showToast, userHasRole,
-//  App.data, etc.).
+//  DOCUMENTACIÓN (ES module, Fase 3) — vencimientos de documentos de
+//  vehículos y choferes: alta, edición, renovación.
+//
+//  Migrado de documents.js. Dependencias del mundo legacy declaradas arriba
+//  con need() (fallan en el boot si faltan); las funciones públicas se
+//  re-exponen en window para el dispatcher (renderPage) y los onclick.
 // ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const escapeHtml = need('escapeHtml');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+const showToast = need('showToast');
+const apiFetch = need('apiFetch');
+const afterSave = need('afterSave');
+
 function renderDocuments() {
   const docs = App.data.documents || [];
   const expired = docs.filter(d=>d.status==='danger').length;
@@ -338,3 +348,15 @@ async function saveNewDoc() {
     showToast('error', err.message);
   }
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick).
+expose('renderDocuments', renderDocuments);
+expose('openRenewDocModal', openRenewDocModal);
+expose('saveRenewDoc', saveRenewDoc);
+expose('openEditDocModal', openEditDocModal);
+expose('saveEditDoc', saveEditDoc);
+expose('openNewDocModal', openNewDocModal);
+expose('_docToggleEntityType', _docToggleEntityType);
+expose('saveNewDoc', saveNewDoc);
+
+export { renderDocuments, openRenewDocModal, saveRenewDoc, openEditDocModal, saveEditDoc, openNewDocModal, _docToggleEntityType, saveNewDoc };

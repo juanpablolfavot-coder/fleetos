@@ -20,7 +20,32 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const { chromium } = require('playwright');
+const { execSync } = require('node:child_process');
+
+// Playwright es una herramienta de DEV/CI, NO una dependencia del proyecto (no
+// se agrega a package.json para no disparar la descarga de navegadores en el
+// deploy de Render). Se resuelve desde node_modules local o desde el global; si
+// no está, se explica cómo instalarlo en vez de tirar un stack trace.
+function loadPlaywright() {
+  try { return require('playwright'); } catch (_) { /* probar global */ }
+  try {
+    const gRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+    return require(path.join(gRoot, 'playwright'));
+  } catch (_) { /* no está */ }
+  console.error([
+    '',
+    '✗ No se encontró Playwright. Este smoke test es una herramienta de DEV/CI:',
+    '  NO se corre en el server de Render (producción), sino en tu máquina o en CI.',
+    '',
+    '  Para correrlo:',
+    '    npm i -g playwright        # o:  npm i -D playwright',
+    '    npx playwright install chromium',
+    '    npm run test:ui',
+    '',
+  ].join('\n'));
+  process.exit(2);
+}
+const { chromium } = loadPlaywright();
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MIME = {
@@ -146,7 +171,14 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
   const port = server.address().port;
   const base = `http://127.0.0.1:${port}`;
 
-  const browser = await chromium.launch({ headless: true });
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (e) {
+    server.close();
+    console.error('\n✗ No se pudo lanzar Chromium. Instalá el navegador:\n    npx playwright install chromium\n  (' + e.message + ')\n');
+    process.exit(2);
+  }
   const page = await browser.newPage();
 
   let current = 'boot';

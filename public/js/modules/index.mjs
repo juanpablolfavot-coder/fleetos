@@ -6,3 +6,5 @@
 //  para convivir con el código legacy global.
 // ════════════════════════════════════════════════════════════════════
 import './contador.mjs';
+import './documents.mjs';
+import './maintenance.mjs';

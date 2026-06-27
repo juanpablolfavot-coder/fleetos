@@ -17,6 +17,16 @@ export const g = (name) => window[name];
 // window.App = App. Se accede siempre por acá para no depender de ese detalle.
 export const app = () => window.App;
 
+// Como g(), pero FALLA (al cargar el módulo) si el global no existe. Conviene
+// para declarar las dependencias de un módulo arriba de todo: si falta o está
+// mal escrita una, revienta en el boot —que el smoke ejecuta— y no recién al
+// interactuar con la pantalla.
+export function need(name) {
+  const v = window[name];
+  if (v === undefined) throw new Error('[modules] dependencia global faltante: ' + name);
+  return v;
+}
+
 // Re-exponer una función del módulo en window, para que el dispatcher legacy
 // (renderPage) y los handlers onclick="fn()" la resuelvan.
 export function expose(name, fn) { window[name] = fn; }
