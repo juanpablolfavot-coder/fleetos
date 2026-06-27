@@ -1,11 +1,19 @@
 // ════════════════════════════════════════════════════════════════════
-//  PANEL DEL AUDITOR — solo lectura, con IA integrada.
-//  Extraído de app.js para mantenerlo manejable. Todas las funciones son
-//  globales (se llaman desde onclick= y desde el dispatcher renderPage en
-//  app.js). Este archivo se carga DESPUÉS de app.js, así que puede usar sus
-//  helpers globales (escapeHtml, apiFetch, openModal, showToast, userHasRole,
-//  App.data, etc.). Entra por renderAuditorPanel().
+//  PANEL DEL AUDITOR (ES module, Fase 3) — solo lectura, tabs, gráficos
+//  (Chart.js) y asistente IA. Migrado de auditor.js.
+//
+//  Chart viene de CDN: NO se declara con need() (si el CDN falla no debe
+//  tumbar el boot); se referencia como global lazy (resuelve a window.Chart)
+//  y su uso ya está protegido con try/catch.
 // ════════════════════════════════════════════════════════════════════
+import { need, expose } from './dom.mjs';
+
+const App = need('App');
+const apiFetch = need('apiFetch');
+const escapeHtml = need('escapeHtml');
+const openModal = need('openModal');
+const closeModal = need('closeModal');
+
 async function renderAuditorPanel() {
   const root = document.getElementById('page-auditor_panel');
   if (!root) return;
@@ -862,3 +870,21 @@ Si no hay datos suficientes, indicalo claramente. Si detectás algo preocupante,
     chat.innerHTML += `<div style="align-self:flex-start;background:rgba(239,68,68,.1);color:var(--danger);padding:8px 12px;border-radius:12px;font-size:12px">Error al consultar la IA: ${e.message}</div>`;
   }
 }
+
+// Puente con el mundo legacy (dispatcher renderPage + onclick).
+expose('renderAuditorPanel', renderAuditorPanel);
+expose('showAuditorTab', showAuditorTab);
+expose('renderAuditorResumen', renderAuditorResumen);
+expose('renderAuditorVisual', renderAuditorVisual);
+expose('renderAuditorVisualTimeline', renderAuditorVisualTimeline);
+expose('_renderAuditorHeatmap', _renderAuditorHeatmap);
+expose('_renderAuditorGauge', _renderAuditorGauge);
+expose('_renderAuditorStacked', _renderAuditorStacked);
+expose('renderAuditorCombustible', renderAuditorCombustible);
+expose('renderAuditorOTs', renderAuditorOTs);
+expose('renderAuditorTrazabilidad', renderAuditorTrazabilidad);
+expose('loadAuditorTrazabilidad', loadAuditorTrazabilidad);
+expose('renderAuditorComparativo', renderAuditorComparativo);
+expose('renderAuditorLog', renderAuditorLog);
+expose('openAuditorIA', openAuditorIA);
+expose('sendAuditorIA', sendAuditorIA);
