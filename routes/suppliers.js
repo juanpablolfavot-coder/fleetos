@@ -310,4 +310,66 @@ router.delete('/:id', authenticate, requireRole('dueno','gerencia'), validateUUI
   } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  GET /:id/cuenta — resumen de cuenta del proveedor:
+//  totales (comprado / facturado / pagado / saldo) + OCs + movimientos.
+//  saldo = facturado − pagado (>0 = le debemos; <0 = saldo a favor).
+// ─────────────────────────────────────────────────────────────
+router.get('/:id/cuenta', authenticate, requireRole('dueno','gerencia','compras','contador','tesoreria'), validateUUID('id'), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const sup = await query('SELECT id, name, cuit, email FROM suppliers WHERE id=$1', [id]);
+    if (!sup.rows[0]) return res.status(404).json({ error: 'Proveedor no encontrado' });
+
+    const ocsRes = await query(`
+      SELECT po.id, po.code, po.created_at, po.status,
+        ROUND(po.total_estimado * (1 + COALESCE(po.iva_pct,0)/100.0), 2) AS total_oc,
+        COALESCE((SELECT SUM(ROUND(f.invoice_monto*(1+COALESCE(f.iva_pct,0)/100.0),2))
+                  FROM purchase_order_invoices f WHERE f.po_id=po.id),0) AS facturado,
+        COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p
+                  JOIN purchase_order_invoices f ON f.id=p.invoice_id WHERE f.po_id=po.id),0) AS pagado
+      FROM purchase_orders po
+      WHERE po.supplier_id=$1
+      ORDER BY po.created_at DESC`, [id]);
+
+    const movRes = await query(`
+      SELECT * FROM (
+        SELECT 'factura' AS tipo, f.invoice_fecha AS fecha, f.invoice_nro AS ref, po.code AS oc_code, NULL AS metodo,
+               ROUND(f.invoice_monto*(1+COALESCE(f.iva_pct,0)/100.0),2) AS monto
+        FROM purchase_order_invoices f JOIN purchase_orders po ON po.id=f.po_id
+        WHERE po.supplier_id=$1
+        UNION ALL
+        SELECT 'pago' AS tipo, p.paid_at::date AS fecha, NULL AS ref, po.code AS oc_code, p.metodo AS metodo, p.monto AS monto
+        FROM purchase_order_payments p
+        JOIN purchase_order_invoices f ON f.id=p.invoice_id
+        JOIN purchase_orders po ON po.id=f.po_id
+        WHERE po.supplier_id=$1
+      ) m
+      ORDER BY fecha ASC, (tipo='pago')`, [id]);
+
+    const n = (v) => parseFloat(v) || 0;
+    const ocs = ocsRes.rows;
+    const comprado  = ocs.reduce((s, o) => s + n(o.total_oc), 0);
+    const facturado = ocs.reduce((s, o) => s + n(o.facturado), 0);
+    const pagado    = ocs.reduce((s, o) => s + n(o.pagado), 0);
+
+    // Movimientos con saldo acumulado (facturado − pagado, cronológico).
+    let acum = 0;
+    const movimientos = movRes.rows.map((m) => {
+      acum += m.tipo === 'factura' ? n(m.monto) : -n(m.monto);
+      return { ...m, monto: n(m.monto), saldo_acum: +acum.toFixed(2) };
+    });
+
+    res.json({
+      supplier: sup.rows[0],
+      totals: { comprado, facturado, pagado, saldo: +(facturado - pagado).toFixed(2) },
+      ocs,
+      movimientos,
+    });
+  } catch (err) {
+    console.error('[supplier cuenta]', err.message);
+    res.status(500).json({ error: 'Error al cargar la cuenta del proveedor' });
+  }
+});
+
 module.exports = router;

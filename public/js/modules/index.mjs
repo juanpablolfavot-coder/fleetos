@@ -19,3 +19,4 @@ import './pagos.mjs';
 import './timeline.mjs';
 import './chofer-panel.mjs';
 import './recibos.mjs';
+import './cuenta-proveedor.mjs';

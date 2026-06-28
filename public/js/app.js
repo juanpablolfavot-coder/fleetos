@@ -9401,6 +9401,8 @@ function _supRenderRow(s) {
 
     <td style="padding:10px 12px;white-space:nowrap;text-align:right">
       <button class="btn btn-secondary btn-sm" onclick="openSupplierDetail('${s.id}')">Ver</button>
+      ${['dueno','gerencia','compras','contador','tesoreria'].includes(App.currentUser?.role) ?
+        `<button class="btn btn-secondary btn-sm" onclick="verCuentaProveedor('${s.id}')" style="margin-left:4px">📒 Cuenta</button>` : ''}
       ${['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role) ?
         `<button class="btn btn-secondary btn-sm" onclick="openEditSupplierModal('${s.id}')" style="margin-left:4px">Editar</button>` : ''}
     </td>
