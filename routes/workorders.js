@@ -141,39 +141,56 @@ async function createPOFromOT(client, { woId, woCode, reqUserId, vehicleId, asse
   return po.rows[0];
 }
 
-// Crea una OC separada por cada ítem externo de una OT.
-// Permite comprar distintos repuestos/servicios en proveedores distintos.
-async function createSeparatePOsFromOTItems(client, baseData, items) {
+// Consolida los ítems externos de una OT en UNA sola OC pendiente (Etapa 1 del
+// circuito). Si la OT ya tiene una OC consolidada pendiente de cotización, le
+// anexa los ítems nuevos (p. ej. al ir agregando repuestos de a uno); si no,
+// crea una. Más adelante Compras le asigna proveedor por ítem y la divide en
+// una OC por proveedor (etapas 2 y 3). Devuelve un array con la OC (1 elemento)
+// para mantener la forma que esperan los callers.
+async function createOrAppendOTPurchaseOrder(client, baseData, items) {
+  await ensureExternalPOFields(client);
   const cleanItems = (items || []).filter(i => String(i.descripcion || i.name || '').trim());
-  const created = [];
+  if (!cleanItems.length) return [];
 
-  for (const item of cleanItems) {
-    const desc = String(item.descripcion || item.name || 'Compra externa').trim();
-    const po = await createPOFromOT(client, {
-      ...baseData,
-      notes: `${baseData.notes || `Solicitud generada desde ${baseData.woCode}`} | Ítem externo: ${desc}`,
-      items: [item]
-    });
+  const linkPart = async (poId, item) => {
+    const partId = item.work_order_part_id || item.part_id || null;
+    if (partId) await client.query('UPDATE work_order_parts SET po_id=$1 WHERE id=$2', [poId, partId]);
+  };
 
-    if (po) {
-      created.push(po);
-      const partId = item.work_order_part_id || item.part_id || null;
-      if (partId) {
-        await client.query('UPDATE work_order_parts SET po_id=$1 WHERE id=$2', [po.id, partId]);
-      }
+  // ¿Ya hay una OC consolidada pendiente para esta OT? (las OCs ya divididas o
+  // cotizadas no se tocan: cambian de estado y un repuesto nuevo abre otra).
+  const existing = await client.query(
+    `SELECT id FROM purchase_orders WHERE ot_id=$1 AND status='pendiente_cotizacion'
+     ORDER BY created_at ASC LIMIT 1`,
+    [baseData.woId]
+  );
+
+  let po;
+  if (existing.rows[0]) {
+    const poId = existing.rows[0].id;
+    for (const it of cleanItems) {
+      await client.query(
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id)
+         VALUES ($1,$2,$3,$4,0,$5,$6)`,
+        [poId, String(it.descripcion || it.name).trim(),
+         parseFloat(it.cantidad || it.qty || 1) || 1, it.unidad || it.unit || 'un',
+         it.stock_item_id || it.stock_id || null, it.work_order_part_id || it.part_id || null]
+      );
+      await linkPart(poId, it);
     }
+    po = (await client.query('SELECT * FROM purchase_orders WHERE id=$1', [poId])).rows[0];
+  } else {
+    po = await createPOFromOT(client, { ...baseData, items: cleanItems });
+    if (po) for (const it of cleanItems) await linkPart(po.id, it);
   }
 
-  if (created.length) {
-    // Campo legacy: conserva la primera OC para pantallas/código viejo.
-    // El vínculo real múltiple queda en purchase_orders.ot_id y work_order_parts.po_id.
+  if (po) {
     await client.query(
       'UPDATE work_orders SET external_po_id=COALESCE(external_po_id,$1), external_required=TRUE WHERE id=$2',
-      [created[0].id, baseData.woId]
+      [po.id, baseData.woId]
     );
   }
-
-  return created;
+  return po ? [po] : [];
 }
 
 function _woUserSucursal(req) {
@@ -433,7 +450,7 @@ router.post('/', authenticate, async (req, res) => {
         const vbase = await client.query('SELECT base FROM vehicles WHERE id=$1', [vehicle_id]);
         sucursal = vbase.rows[0]?.base || null;
       }
-      externalPOs = await createSeparatePOsFromOTItems(client, {
+      externalPOs = await createOrAppendOTPurchaseOrder(client, {
         woId, woCode: code, reqUserId: req.user.id,
         vehicleId: ot_tipo === 'vehiculo' ? vehicle_id : null,
         assetId: ot_tipo !== 'vehiculo' ? asset_id : null,
@@ -571,7 +588,7 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
         const vbase = await client.query('SELECT base FROM vehicles WHERE id=$1', [wo.rows[0].vehicle_id]);
         sucursal = vbase.rows[0]?.base || null;
       }
-      externalPOs = await createSeparatePOsFromOTItems(client, {
+      externalPOs = await createOrAppendOTPurchaseOrder(client, {
         woId: req.params.id, woCode: wo.rows[0].code, reqUserId: req.user.id,
         vehicleId: wo.rows[0].vehicle_id, assetId: wo.rows[0].asset_id,
         sucursal, area: 'Taller', tipo: wo.rows[0].vehicle_id ? 'flota' : 'otro',
@@ -955,7 +972,7 @@ router.post('/:id/parts',
           const vbase = await client.query('SELECT base FROM vehicles WHERE id=$1', [wo.rows[0].vehicle_id]);
           sucursal = vbase.rows[0]?.base || null;
         }
-        const externalPOs = await createSeparatePOsFromOTItems(client, {
+        const externalPOs = await createOrAppendOTPurchaseOrder(client, {
           woId: req.params.id, woCode: otCode, reqUserId: req.user.id,
           vehicleId: wo.rows[0].vehicle_id, assetId: wo.rows[0].asset_id,
           sucursal, area: 'Taller', tipo: wo.rows[0].vehicle_id ? 'flota' : 'otro',
