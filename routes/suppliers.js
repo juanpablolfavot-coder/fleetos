@@ -178,6 +178,53 @@ router.get('/', authenticate, async (req, res) => {
   } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// ─────────────────────────────────────────────────────────────
+//  GET /ranking/gastos — ranking de proveedores por gasto (mayor a menor).
+//  Por cada proveedor: comprado (total OC c/IVA), facturado (c/IVA) y pagado.
+//  Se ordena por facturado desc (el gasto real comprometido) y se omiten los
+//  proveedores sin actividad. Debe ir ANTES de /:id para no chocar con esa ruta.
+// ─────────────────────────────────────────────────────────────
+router.get('/ranking/gastos', authenticate, requireRole('dueno','gerencia','compras','contador','tesoreria'), async (req, res) => {
+  try {
+    const r = await query(`
+      SELECT s.id, s.name, s.cuit,
+        COALESCE((SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id=s.id),0) AS oc_count,
+        COALESCE((SELECT SUM(ROUND(po.total_estimado*(1+COALESCE(po.iva_pct,0)/100.0),2))
+                  FROM purchase_orders po WHERE po.supplier_id=s.id),0) AS comprado,
+        COALESCE((SELECT SUM(ROUND(f.invoice_monto*(1+COALESCE(f.iva_pct,0)/100.0),2))
+                  FROM purchase_order_invoices f JOIN purchase_orders po ON po.id=f.po_id
+                  WHERE po.supplier_id=s.id),0) AS facturado,
+        COALESCE((SELECT SUM(p.monto) FROM purchase_order_payments p
+                  JOIN purchase_order_invoices f ON f.id=p.invoice_id
+                  JOIN purchase_orders po ON po.id=f.po_id
+                  WHERE po.supplier_id=s.id),0) AS pagado
+      FROM suppliers s
+      WHERE s.active = TRUE`);
+
+    const n = (v) => parseFloat(v) || 0;
+    const ranking = r.rows
+      .map((s) => ({
+        id: s.id, name: s.name, cuit: s.cuit,
+        oc_count: parseInt(s.oc_count, 10) || 0,
+        comprado: n(s.comprado), facturado: n(s.facturado), pagado: n(s.pagado),
+        saldo: +(n(s.facturado) - n(s.pagado)).toFixed(2),
+      }))
+      .filter((s) => s.comprado > 0 || s.facturado > 0 || s.pagado > 0)
+      .sort((a, b) => b.facturado - a.facturado || b.comprado - a.comprado);
+
+    const totales = ranking.reduce((t, s) => ({
+      comprado: t.comprado + s.comprado,
+      facturado: t.facturado + s.facturado,
+      pagado: t.pagado + s.pagado,
+    }), { comprado: 0, facturado: 0, pagado: 0 });
+
+    res.json({ ranking, totales });
+  } catch (err) {
+    console.error('[supplier ranking]', err.message);
+    res.status(500).json({ error: 'Error al cargar el ranking de proveedores' });
+  }
+});
+
 // GET /api/suppliers/:id
 router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
   try {
