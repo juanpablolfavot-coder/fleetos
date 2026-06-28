@@ -331,10 +331,15 @@ router.get('/catalog/movements', authenticate, async (req, res) => {
     let limit = parseInt(req.query.limit || '10', 10);
     if (!Number.isFinite(limit) || limit <= 0) limit = 10;
     if (limit > 100) limit = 100;
+    let offset = parseInt(req.query.offset || '0', 10);
+    if (!Number.isFinite(offset) || offset < 0) offset = 0;
     const params = [];
     const sc = [];
     applyBalanceScope(req, params, sc, 'sm');
     params.push(limit);
+    const limitParam = `$${params.length}`;
+    params.push(offset);
+    const offsetParam = `$${params.length}`;
     const sql = `
       SELECT sm.id, sm.type, sm.qty, sm.reason, sm.base_location, sm.area, sm.created_at,
              c.code, c.name, c.unit, u.name AS user_name
@@ -343,7 +348,7 @@ router.get('/catalog/movements', authenticate, async (req, res) => {
       LEFT JOIN users u ON u.id = sm.user_id
       WHERE sm.catalog_id IS NOT NULL ${sc.join('')}
       ORDER BY sm.created_at DESC
-      LIMIT $${params.length}`;
+      LIMIT ${limitParam} OFFSET ${offsetParam}`;
     res.json((await query(sql, params)).rows);
   } catch (err) { console.error('[stock catalog movements]', err.message); res.status(500).json({ error: 'Error historial' }); }
 });

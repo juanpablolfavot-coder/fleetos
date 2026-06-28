@@ -2187,6 +2187,9 @@ async function printOT(id) {
 
 // ── COMBUSTIBLE ──
 function renderFuel() {
+  // Reset de paginación al entrar a la pantalla (el "Ver más" trae del backend).
+  window._fuelPageSize = 10;
+  window._fuelAllLoaded = false;
   // ── Cisternas desde API ──
   const tanks = App.data.tanks || [];
   const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || { current_l:0, capacity_l:47000 };
@@ -6463,6 +6466,8 @@ App.poTable = App.poTable || {
   sortKey: 'created_at',
   sortDir: 'desc',
   rawData: [],     // cache local de la lista traída del server
+  pageSize: 100,   // cuántas OCs trae cada página del backend
+  lastCount: 0,    // cuántas devolvió la última página (para saber si hay más)
 };
 
 async function renderPurchaseOrders() {
@@ -6527,31 +6532,35 @@ async function renderPurchaseOrders() {
   await loadPOList();
 }
 
-async function loadPOList() {
+async function loadPOList(append = false) {
   try {
     // Cache-busting para que el navegador siempre traiga datos frescos del server
     const ts = Date.now();
-    const res = await apiFetch('/api/purchase-orders?limit=100&_t=' + ts);
+    const pageSize = App.poTable.pageSize || 100;
+    const offset = append ? (App.poTable.rawData?.length || 0) : 0;
+    const res = await apiFetch(`/api/purchase-orders?limit=${pageSize}&offset=${offset}&_t=${ts}`);
     if (!res.ok) {
       const tbody = document.getElementById('po-tbody');
-      if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar OCs</td></tr>`;
+      if (tbody && !append) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error al cargar OCs</td></tr>`;
       return;
     }
-    App.poTable.rawData = await res.json();
+    const rows = await res.json();
+    App.poTable.lastCount = rows.length;
+    App.poTable.rawData = append ? (App.poTable.rawData || []).concat(rows) : rows;
 
-    // Populate los filtros de sucursal y área con valores reales
+    // Populate los filtros de sucursal y área con valores reales (preservando la selección)
     const sucs = [...new Set(App.poTable.rawData.map(p=>p.sucursal).filter(Boolean))];
     const areas = [...new Set(App.poTable.rawData.map(p=>p.area).filter(Boolean))];
     const sucSel = document.getElementById('po-f-sucursal');
     const areaSel = document.getElementById('po-f-area');
-    if (sucSel) sucSel.innerHTML = `<option value="all">Sucursal: Todas</option>` + sucs.map(s=>`<option value="${s}">${s}</option>`).join('');
-    if (areaSel) areaSel.innerHTML = `<option value="all">Área: Todas</option>` + areas.map(a=>`<option value="${a}">${a}</option>`).join('');
+    if (sucSel) { sucSel.innerHTML = `<option value="all">Sucursal: Todas</option>` + sucs.map(s=>`<option value="${s}">${s}</option>`).join(''); sucSel.value = App.poTable.sucursal || 'all'; }
+    if (areaSel) { areaSel.innerHTML = `<option value="all">Área: Todas</option>` + areas.map(a=>`<option value="${a}">${a}</option>`).join(''); areaSel.value = App.poTable.area || 'all'; }
 
     _poRenderKPIs();
     _poRenderRows();
   } catch(err) {
     const tbody = document.getElementById('po-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error: ${err.message}</td></tr>`;
+    if (tbody && !append) tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--danger)">Error: ${err.message}</td></tr>`;
   }
 }
 
@@ -6675,8 +6684,13 @@ function _poRenderRows() {
 
   if (footer) {
     const totalMonto = rows.reduce((a,p) => { const tr = parseFloat(p.total_real||0); return a + (tr > 0 ? tr : parseFloat(p.total_estimado||0)); }, 0);
+    // Si la última página vino completa, probablemente haya más OCs viejas para traer.
+    const hayMas = (App.poTable.lastCount || 0) >= (App.poTable.pageSize || 100);
+    const cargarMas = hayMas
+      ? ` · <a onclick="loadPOList(true)" style="color:var(--accent);cursor:pointer;font-weight:600">Cargar más →</a>`
+      : '';
     footer.innerHTML = `
-      <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OCs</span>
+      <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} cargadas${cargarMas}</span>
       <span>Monto total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalMonto).toLocaleString('es-AR')}</b></span>
     `;
   }
@@ -11046,8 +11060,10 @@ function _filterFuelLogs() {
     const total = (App.data.fuelLogs || []).length;
     const totalLitros = filtered.reduce((a,b) => a + (b.liters||0), 0);
     const totalPesos  = filtered.reduce((a,b) => a + (b.total||0), 0);
-    const verMasBtn = (filtered.length > window._fuelPageSize)
-      ? ` · <a onclick="_fuelLoadMore()" style="color:var(--accent);cursor:pointer;font-weight:600">Ver ${Math.min(10, filtered.length - window._fuelPageSize)} más →</a>`
+    // Mostramos "Ver más" si quedan filas cargadas por revelar, o si el backend
+    // todavía puede tener más cargas para traer (historial completo).
+    const verMasBtn = (filtered.length > window._fuelPageSize || !window._fuelAllLoaded)
+      ? ` · <a onclick="_fuelLoadMore()" style="color:var(--accent);cursor:pointer;font-weight:600">Ver más →</a>`
       : '';
 
     if (filtered.length === total) {
@@ -11058,10 +11074,29 @@ function _filterFuelLogs() {
   }
 }
 
-// Cargar 10 más en la tabla de combustible
-function _fuelLoadMore() {
+// Cargar 10 más en la tabla de combustible. Si ya revelamos casi todo lo que
+// hay en memoria y el backend puede tener más, traemos la próxima página.
+async function _fuelLoadMore() {
   window._fuelPageSize = (window._fuelPageSize || 10) + 10;
+  if (window._fuelPageSize >= (App.data.fuelLogs || []).length && !window._fuelAllLoaded) {
+    await _fuelFetchMore();
+  }
   _filterFuelLogs();
+}
+
+// Trae la próxima página de cargas desde el backend (offset = lo ya cargado).
+async function _fuelFetchMore() {
+  try {
+    const offset = (App.data.fuelLogs || []).length;
+    const res = await apiFetch(`/api/fuel?limit=100&offset=${offset}`);
+    if (!res.ok) { window._fuelAllLoaded = true; return; }
+    const more = await res.json();
+    if (!Array.isArray(more) || more.length < 100) window._fuelAllLoaded = true;
+    if (Array.isArray(more) && more.length) {
+      App.data.fuelLogs = (App.data.fuelLogs || []).concat(more);
+      App.data.fuel = App.data.fuelLogs;
+    }
+  } catch (e) { /* no rompemos la UI si falla la página extra */ }
 }
 
 // Exportar cargas filtradas a PDF

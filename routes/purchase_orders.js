@@ -536,8 +536,19 @@ router.get('/', authenticate, async (req, res) => {
       where.push(`po.status = $${params.length}`);
     }
 
+    // Búsqueda libre: por código de OC o nombre de proveedor (para encontrar OCs viejas).
+    const search = (req.query.search || '').trim();
+    if (search) {
+      params.push(`%${search}%`);
+      where.push(`(po.code ILIKE $${params.length} OR po.proveedor ILIKE $${params.length})`);
+    }
+
     params.push(safeLimit);
     const limitParam = `$${params.length}`;
+    const requestedOffset = parseInt(req.query.offset || '0', 10);
+    const safeOffset = Math.max(Number.isFinite(requestedOffset) ? requestedOffset : 0, 0);
+    params.push(safeOffset);
+    const offsetParam = `$${params.length}`;
 
     const sql = `
       WITH base AS (
@@ -588,7 +599,7 @@ router.get('/', authenticate, async (req, res) => {
         FROM purchase_orders po
         WHERE ${where.join(' AND ')}
         ORDER BY po.created_at DESC
-        LIMIT ${limitParam}
+        LIMIT ${limitParam} OFFSET ${offsetParam}
       )
       SELECT base.*,
         u.name  AS solicitante_nombre, u.role AS solicitante_rol,

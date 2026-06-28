@@ -38,6 +38,9 @@ async function renderStock() {
   App.data.stockCatalog = items;
   App.data.stockDispatches = dispatches;
   App.data.stockMovements = movements;
+  // Estado de paginación de movimientos: offset = lo ya cargado; allLoaded si vino
+  // menos de una página entera (no hay más para traer del backend).
+  App.stockMov = { offset: movements.length, pageSize: 10, allLoaded: movements.length < 10 };
   _renderStockCatalog();
 }
 
@@ -113,10 +116,37 @@ function _stockInlinePanels() {
       <div id="stock-disp-inline">${_renderDispatchesInline(App.data.stockDispatches || [])}</div>
     </div>
     <div class="card" style="padding:14px 16px">
-      <div class="section-title" style="font-size:15px;margin-bottom:10px">🕑 Movimientos recientes <span style="font-size:12px;color:var(--text3);font-weight:400">(últimos 10)</span></div>
-      <div id="stock-mov-inline">${_renderMovementsInline(App.data.stockMovements || [])}</div>
+      <div class="section-title" style="font-size:15px;margin-bottom:10px">🕑 Movimientos recientes</div>
+      <div id="stock-mov-section">${_renderMovementsSection()}</div>
     </div>
   </div>`;
+}
+
+// Lista de movimientos + enlace "Cargar más" (trae la próxima página del backend).
+function _renderMovementsSection() {
+  const st = App.stockMov || { allLoaded: true };
+  const cargarMas = !st.allLoaded
+    ? `<div style="padding:10px;text-align:center"><a onclick="cargarMasStockMov()" style="color:var(--accent);cursor:pointer;font-weight:600">Cargar más →</a></div>`
+    : '';
+  return `<div id="stock-mov-inline">${_renderMovementsInline(App.data.stockMovements || [])}</div>${cargarMas}`;
+}
+
+async function cargarMasStockMov() {
+  const st = App.stockMov = App.stockMov || { offset: 0, pageSize: 10, allLoaded: false };
+  try {
+    const res = await apiFetch(`/api/stock/catalog/movements?limit=${st.pageSize}&offset=${st.offset}`);
+    if (!res.ok) { st.allLoaded = true; }
+    else {
+      const more = await res.json();
+      if (!Array.isArray(more) || more.length < st.pageSize) st.allLoaded = true;
+      if (Array.isArray(more) && more.length) {
+        App.data.stockMovements = (App.data.stockMovements || []).concat(more);
+        st.offset += more.length;
+      }
+    }
+  } catch (e) { st.allLoaded = true; }
+  const cont = document.getElementById('stock-mov-section');
+  if (cont) cont.innerHTML = _renderMovementsSection();
 }
 
 // Lista de despachos para el panel inline: en tránsito arriba (con Recibir/Cancelar),
@@ -479,6 +509,8 @@ expose('_renderStockCatalog', _renderStockCatalog);
 expose('_stockInlinePanels', _stockInlinePanels);
 expose('_renderDispatchesInline', _renderDispatchesInline);
 expose('_renderMovementsInline', _renderMovementsInline);
+expose('_renderMovementsSection', _renderMovementsSection);
+expose('cargarMasStockMov', cargarMasStockMov);
 expose('_stockShortLoc', _stockShortLoc);
 expose('_stockBalChips', _stockBalChips);
 expose('_catDetailHtml', _catDetailHtml);

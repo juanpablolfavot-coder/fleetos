@@ -744,28 +744,63 @@ async function renderAuditorComparativo(el) {
 }
 
 // ── Tab 6: Log de acciones ────────────────────────────────
-async function renderAuditorLog(el) {
-  const res = await apiFetch('/api/auditor/log-acciones?limit=100');
-  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
-  const d = await res.json();
+// Estado de paginación del log (trae de a páginas del backend con "Cargar más").
+let _auditLog = { rows: [], offset: 0, pageSize: 100, allLoaded: false, el: null, nota: null, error: false };
 
-  if (d.nota) {
+async function renderAuditorLog(el) {
+  _auditLog = { rows: [], offset: 0, pageSize: 100, allLoaded: false, el, nota: null, error: false };
+  el.innerHTML = `<div class="card" style="padding:24px;text-align:center;color:var(--text3)">⏳ Cargando…</div>`;
+  await _auditLogFetch();
+  _auditLogRender();
+}
+
+async function _auditLogFetch() {
+  try {
+    const res = await apiFetch(`/api/auditor/log-acciones?limit=${_auditLog.pageSize}&offset=${_auditLog.offset}`);
+    if (!res.ok) { _auditLog.error = true; return; }
+    const d = await res.json();
+    if (d.nota) { _auditLog.nota = d.nota; _auditLog.allLoaded = true; return; }
+    const log = d.log || [];
+    if (log.length < _auditLog.pageSize) _auditLog.allLoaded = true;
+    _auditLog.rows = _auditLog.rows.concat(log);
+    _auditLog.offset += log.length;
+  } catch (e) { _auditLog.error = true; }
+}
+
+async function cargarMasAuditLog() {
+  await _auditLogFetch();
+  _auditLogRender();
+}
+
+function _auditLogRender() {
+  const el = _auditLog.el;
+  if (!el) return;
+
+  if (_auditLog.nota) {
     el.innerHTML = `<div class="card" style="text-align:center;padding:32px">
       <div style="font-size:24px;margin-bottom:12px">🗂</div>
-      <div style="font-weight:600">${escapeHtml(d.nota)}</div>
+      <div style="font-weight:600">${escapeHtml(_auditLog.nota)}</div>
       <div style="font-size:13px;color:var(--text3);margin-top:8px">Las acciones críticas (crear/cerrar OTs, bajas de stock, dar de baja vehículos) quedan registradas con usuario y timestamp.</div>
     </div>`; return;
   }
+  if (_auditLog.error && !_auditLog.rows.length) {
+    el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return;
+  }
+
+  const rows = _auditLog.rows;
+  const cargarMas = !_auditLog.allLoaded
+    ? `<div style="padding:12px;text-align:center;border-top:1px solid var(--border2)"><a onclick="cargarMasAuditLog()" style="color:var(--accent);cursor:pointer;font-weight:600">Cargar más →</a></div>`
+    : '';
 
   el.innerHTML = `
     <div class="card" style="padding:0">
       <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2)">
-        <div class="card-title" style="margin:0">Log de acciones — últimas ${d.log.length}</div>
+        <div class="card-title" style="margin:0">Log de acciones — ${rows.length} cargadas${_auditLog.allLoaded ? '' : '+'}</div>
       </div>
       <div class="table-wrap">
         <table style="font-size:12px">
           <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Tabla</th><th>Registro</th></tr></thead>
-          <tbody>${d.log.map(l=>`<tr>
+          <tbody>${rows.map(l=>`<tr>
             <td class="td-mono">${new Date(l.created_at).toLocaleString('es-AR')}</td>
             <td>${l.user_name||'—'}</td>
             <td><span class="badge role-${l.user_role}">${l.user_role||'—'}</span></td>
@@ -775,6 +810,7 @@ async function renderAuditorLog(el) {
           </tr>`).join('')}</tbody>
         </table>
       </div>
+      ${cargarMas}
     </div>`;
 }
 
@@ -886,5 +922,6 @@ expose('renderAuditorTrazabilidad', renderAuditorTrazabilidad);
 expose('loadAuditorTrazabilidad', loadAuditorTrazabilidad);
 expose('renderAuditorComparativo', renderAuditorComparativo);
 expose('renderAuditorLog', renderAuditorLog);
+expose('cargarMasAuditLog', cargarMasAuditLog);
 expose('openAuditorIA', openAuditorIA);
 expose('sendAuditorIA', sendAuditorIA);

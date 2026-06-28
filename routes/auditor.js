@@ -409,7 +409,9 @@ auditorRouter.get('/trazabilidad/:vehicleId', authenticate, canAudit, async (req
 // ── 5. Log de acciones del sistema ───────────────────────
 auditorRouter.get('/log-acciones', authenticate, canAudit, async (req, res) => {
   try {
-    const { limit = 100, desde, hasta } = req.query;
+    const { desde, hasta } = req.query;
+    const limit  = Math.min(Math.max(parseInt(req.query.limit  || '100', 10) || 100, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
     let sql = `
       SELECT al.*, u.name as user_name, u.role as user_role
       FROM audit_log al
@@ -418,8 +420,8 @@ auditorRouter.get('/log-acciones', authenticate, canAudit, async (req, res) => {
     const params = [];
     if (desde) { params.push(desde); sql += ` AND al.created_at >= $${params.length}`; }
     if (hasta) { params.push(hasta); sql += ` AND al.created_at <= $${params.length}`; }
-    sql += ` ORDER BY al.created_at DESC LIMIT $${params.length+1}`;
-    params.push(parseInt(limit));
+    sql += ` ORDER BY al.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
+    params.push(limit, offset);
     
     // Verificar si existe la tabla audit_log
     const tableCheck = await query(`SELECT to_regclass('public.audit_log') as exists`);
