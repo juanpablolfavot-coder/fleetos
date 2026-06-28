@@ -387,25 +387,11 @@ router.post('/', authenticate, async (req, res) => {
         p.name = (p.name && String(p.name).trim()) ? p.name : (d.name || 'Repuesto de pañol');
         pCatalogId = p.catalog_id; pLoc = d.base_location; pArea = d.area;
       } else if (p.origin === 'stock' && p.stock_id) {
-        // Modelo viejo (compat): descontar de stock_items.
-        const stock = await client.query(
-          'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
-          [p.stock_id]
-        );
-        if (!stock.rows[0] || stock.rows[0].qty_current < p.qty) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: `Stock insuficiente para: ${p.name}` });
-        }
-        // La valorización de la OT debe salir del costo real del pañol,
-        // no del valor enviado por el navegador.
-        p.unit_cost = parseFloat(stock.rows[0].unit_cost) || 0;
-        p.unit = p.unit || stock.rows[0].unit || 'un';
-        p.name = (p.name && String(p.name).trim()) ? p.name : (stock.rows[0].name || 'Repuesto de pañol');
-        await client.query('UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2', [p.qty, p.stock_id]);
-        await client.query(
-          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
-          [p.stock_id, p.qty, `OT ${code}`, woId, req.user.id]
-        );
+        // Modelo de stock viejo (stock_items) retirado: ya no se descuenta de él.
+        // Un stock_id solo puede venir de un front cacheado; pedimos recargar
+        // para que cargue el repuesto desde el catálogo (modelo nuevo).
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'El stock viejo fue discontinuado. Recargá la página (F5) y volvé a cargar el repuesto desde el catálogo.' });
       }
       const originClean = (p.origin === 'stock' && (p.stock_id || pCatalogId)) ? 'stock' : 'externo';
       if (originClean === 'externo') {
@@ -533,18 +519,9 @@ router.post('/:id/close', authenticate, requireRole('dueno','gerencia','jefe_man
         if (!finalCost) finalCost = d.unit_cost;
         pCatalogId = p.catalog_id; pLoc = d.base_location; pArea = d.area;
       } else if (originClean === 'stock') {
-        // Modelo viejo (compat): descontar de stock_items.
-        const stock = await client.query('SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE', [p.stock_id]);
-        if (!stock.rows[0] || parseFloat(stock.rows[0].qty_current) < qtyNum) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: `Stock insuficiente: ${nameClean}` });
-        }
-        if (!finalCost) finalCost = parseFloat(stock.rows[0].unit_cost) || 0;
-        await client.query('UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2', [qtyNum, p.stock_id]);
-        await client.query(
-          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id) VALUES ($1,'Egreso',$2,$3,$4,$5)`,
-          [p.stock_id, qtyNum, `Cierre ${wo.rows[0].code}`, req.params.id, req.user.id]
-        );
+        // Modelo de stock viejo (stock_items) retirado — ver nota en creación de OT.
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'El stock viejo fue discontinuado. Recargá la página (F5) y volvé a cargar el repuesto desde el catálogo.' });
       }
 
       const ins = await client.query(
@@ -931,30 +908,9 @@ router.post('/:id/parts',
         finalUnitCost = parseFloat(cat.rows[0].unit_cost) || 0;
         finalCatalogId = catalog_id; finalLoc = loc; finalArea = ar;
       } else if (originClean === 'stock') {
-        // Modelo viejo (compat): descontar de stock_items.
-        const stock = await client.query(
-          'SELECT qty_current, unit_cost, unit, name FROM stock_items WHERE id = $1 FOR UPDATE',
-          [stock_id]
-        );
-        if (!stock.rows[0]) {
-          await client.query('ROLLBACK');
-          return res.status(404).json({ error: 'Ítem de stock no encontrado' });
-        }
-        if (parseFloat(stock.rows[0].qty_current) < qtyNum) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({ error: `Stock insuficiente. Disponible: ${stock.rows[0].qty_current}` });
-        }
-        await client.query(
-          'UPDATE stock_items SET qty_current = qty_current - $1 WHERE id = $2',
-          [qtyNum, stock_id]
-        );
-        await client.query(
-          `INSERT INTO stock_movements (stock_id, type, qty, reason, wo_id, user_id)
-           VALUES ($1, 'Egreso', $2, $3, $4, $5)`,
-          [stock_id, qtyNum, `OT ${otCode} (agregado después de crear)`, req.params.id, req.user.id]
-        );
-        finalUnitCost = parseFloat(stock.rows[0].unit_cost) || 0;
-        finalStockId = stock_id;
+        // Modelo de stock viejo (stock_items) retirado — ver nota en creación de OT.
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'El stock viejo fue discontinuado. Recargá la página (F5) y volvé a cargar el repuesto desde el catálogo.' });
       }
 
       // Insertar el repuesto en work_order_parts
