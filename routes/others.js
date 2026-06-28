@@ -225,7 +225,9 @@ async function ensureFuelDriverCol() {
 fuelRouter.get('/', authenticate, async (req, res) => {
   try {
     await ensureFuelDriverCol();
-    const { vehicle_id, limit = 50 } = req.query;
+    const { vehicle_id } = req.query;
+    const limit  = Math.min(Math.max(parseInt(req.query.limit  || '50', 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
     let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate,
         COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name,
         u.name AS cargado_por
@@ -236,7 +238,8 @@ fuelRouter.get('/', authenticate, async (req, res) => {
     if (req.user.role === 'chofer') { params.push(req.user.id); ref.value += ` AND fl.driver_id=$${params.length}`; }
     _addVehicleBranchFilter(req, params, ref, 'v');
     if (vehicle_id) { params.push(vehicle_id); ref.value += ` AND fl.vehicle_id=$${params.length}`; }
-    ref.value += ` ORDER BY fl.logged_at DESC LIMIT $${params.length+1}`; params.push(parseInt(limit));
+    ref.value += ` ORDER BY fl.logged_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`;
+    params.push(limit, offset);
     res.json((await query(ref.value, params)).rows);
   } catch (err) { console.error('[fuel GET]', err.message); res.status(500).json({ error: 'Error combustible' }); }
 });
