@@ -7906,6 +7906,12 @@ async function openPODetail(id) {
         btns.push({ label:'Cerrar', cls:'btn-secondary', fn: closeModal });
         btns.push({ label:'🖨 Imprimir', cls:'btn-secondary', fn: () => { closeModal(); printPO(id); } });
 
+        // 📎 Presupuesto adjunto — se trae aparte (carga diferida) para no
+        // ralentizar la apertura de la OC con el base64.
+        if (po.tiene_presupuesto) {
+          btns.push({ label:'📎 Ver presupuesto', cls:'btn-secondary', fn: () => verPresupuestoOC(id) });
+        }
+
         // OC cerrada: dueño/gerencia pueden reabrirla (para corregir, ej. anular una recepción).
         if (po.status === 'cerrada' && ['dueno','gerencia'].includes(role)) {
           btns.push({ label:'🔓 Reabrir OC', cls:'btn-warn', fn: () => reabrirOC(id) });
@@ -8033,6 +8039,34 @@ async function openPODetail(id) {
     }
   } catch(err) { showToast('error', err.message); }
 }
+// 📎 Ver el presupuesto adjunto de una OC (carga diferida). El base64 ya no
+// viaja en el detalle; se pide acá solo cuando el usuario quiere verlo.
+async function verPresupuestoOC(id) {
+  try {
+    showToast?.('info', 'Cargando presupuesto…');
+    const res = await apiFetch(`/api/purchase-orders/${id}/presupuesto`);
+    if (!res.ok) { const e = await res.json().catch(()=>({})); showToast('error', e.error || 'No se pudo cargar el presupuesto'); return; }
+    const { presupuesto_imagen } = await res.json();
+    if (!presupuesto_imagen) { showToast('error', 'Esta OC no tiene presupuesto adjunto'); return; }
+
+    // data URL → Blob → URL de objeto (más robusto que abrir el data URL directo,
+    // sobre todo con PDFs y archivos grandes).
+    const coma = presupuesto_imagen.indexOf(',');
+    const head = presupuesto_imagen.slice(0, coma);
+    const b64  = presupuesto_imagen.slice(coma + 1);
+    const mime = (head.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream';
+    const bin  = atob(b64);
+    const arr  = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([arr], { type: mime }));
+
+    const w = window.open(url, '_blank');
+    if (!w) { showToast('error', 'Habilitá las ventanas emergentes para ver el presupuesto'); }
+    // Liberar la URL después de un rato (ya se abrió en la otra pestaña).
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (err) { showToast('error', err.message); }
+}
+
 async function savePODetail(id) {
   try {
     const body = {};
