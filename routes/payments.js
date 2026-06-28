@@ -12,6 +12,8 @@ const express = require('express');
 const router  = express.Router({ mergeParams: true });
 const { pool, query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { mailEnabled, sendMail } = require('../services/mailer');
+const { buildReciboPdf } = require('../services/recibo-pdf');
 
 const ROLES_PAGAR = ['dueno','gerencia','tesoreria'];
 const METODOS = ['efectivo','transferencia','cheque','echeq','tarjeta','otro'];
@@ -717,6 +719,86 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
     res.status(500).json({ error: 'Error al anular pago' });
   } finally {
     client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/facturas/:fid/recibo-email — enviar comprobante de pago
+//  (consolidado por factura) por mail al proveedor, con PDF adjunto.
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/facturas/:fid/recibo-email', authenticate, requireRole(...ROLES_PAGAR), async (req, res) => {
+  try {
+    if (!mailEnabled()) {
+      return res.json({ sent: false, reason: 'SMTP no configurado en el servidor.' });
+    }
+
+    const fr = await query(
+      `SELECT
+         f.invoice_nro, f.invoice_fecha, f.invoice_monto, f.iva_pct,
+         ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) AS invoice_total,
+         po.code, po.proveedor,
+         s.name AS supplier_name, s.email AS supplier_email, s.cuit AS supplier_cuit
+       FROM purchase_order_invoices f
+       JOIN purchase_orders po ON po.id = f.po_id
+       LEFT JOIN suppliers s ON s.id = po.supplier_id
+       WHERE f.id=$1::uuid AND f.po_id=$2::uuid`,
+      [req.params.fid, req.params.id]
+    );
+    const row = fr.rows[0];
+    if (!row) return res.status(404).json({ error: 'Factura no encontrada' });
+
+    const to = (row.supplier_email || '').trim();
+    if (!to) {
+      return res.json({ sent: false, reason: 'El proveedor no tiene email cargado.' });
+    }
+
+    const pagosRes = await query(
+      `SELECT
+         p.paid_at, p.monto, p.metodo, p.comprobante_nro,
+         p.banco_origen, p.banco_destino, p.cbu_alias_destino,
+         p.cheque_nro, p.cheque_banco, p.cheque_fecha_cobro, p.cheque_a_nombre,
+         p.echeq_nro, p.echeq_banco, p.echeq_fecha_pago,
+         p.tarjeta_aprobacion, p.tarjeta_cuotas,
+         u.name AS paid_by_name
+       FROM purchase_order_payments p
+       LEFT JOIN users u ON u.id = p.paid_by
+       WHERE p.invoice_id = $1::uuid
+       ORDER BY p.paid_at ASC`,
+      [req.params.fid]
+    );
+    const pagos = pagosRes.rows;
+    if (!pagos.length) {
+      return res.json({ sent: false, reason: 'La factura todavía no tiene pagos.' });
+    }
+
+    const oc = { code: row.code, proveedor: row.proveedor };
+    const factura = {
+      invoice_nro: row.invoice_nro, invoice_fecha: row.invoice_fecha,
+      invoice_monto: row.invoice_monto, iva_pct: row.iva_pct, invoice_total: row.invoice_total,
+    };
+    const supplier = { name: row.supplier_name, email: to, cuit: row.supplier_cuit };
+
+    const pdf = await buildReciboPdf(oc, factura, pagos, supplier);
+    const pagado = pagos.reduce((s, p) => s + (Number(p.monto) || 0), 0);
+    const pagadoFmt = '$' + pagado.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    await sendMail({
+      to,
+      bcc: process.env.OC_EMAIL_BCC || undefined,
+      replyTo: process.env.OC_EMAIL_REPLYTO || undefined,
+      subject: `Comprobante de pago — Factura ${row.invoice_nro} — Expreso Biletta`,
+      text:
+        `Estimados de ${row.supplier_name || 'proveedor'},\n\n` +
+        `Adjuntamos el comprobante de pago de la Factura ${row.invoice_nro} (OC ${row.code}).\n` +
+        `Total pagado: ${pagadoFmt} · ${pagos.length} pago(s).\n\n` +
+        `Este es un correo automático, por favor no responder a esta dirección.\n\nExpreso Biletta S.R.L.`,
+      attachments: [{ filename: `Comprobante-pago-${row.invoice_nro}.pdf`, content: pdf, contentType: 'application/pdf' }],
+    });
+
+    res.json({ sent: true, to });
+  } catch (err) {
+    console.error('[recibo-email]', err.message);
+    res.status(500).json({ error: 'Error al enviar el comprobante por mail' });
   }
 });
 
