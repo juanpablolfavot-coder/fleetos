@@ -175,6 +175,9 @@ async function ensureTables() {
   // Proveedor por ítem (Compras lo asigna en la OC consolidada de una OT, para
   // después dividir en una OC por proveedor — etapas 2 y 3 del circuito).
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS supplier_id UUID`).catch(()=>{});
+  // OC madre de la que salió esta OC al dividir por proveedor (etapa 3). La OC
+  // madre queda en estado 'dividida' y cada hija apunta a ella para trazabilidad.
+  await query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS split_parent_id UUID`).catch(()=>{});
 
   // Índices para que el listado de OC no se vuelva lento cuando crecen las órdenes.
   await query(`CREATE INDEX IF NOT EXISTS idx_po_created_at ON purchase_orders(created_at DESC)`).catch(()=>{});
@@ -451,7 +454,7 @@ function normalizarPrioridad(v) {
 function estadosQueVe(role) {
   if (role === 'dueno' || role === 'gerencia') return null; // null = todos
   if (role === 'compras') {
-    return ['pendiente_cotizacion','en_cotizacion','aprobada_compras','enviada_proveedor','pagada','recibida','cerrada','rechazada'];
+    return ['pendiente_cotizacion','en_cotizacion','dividida','aprobada_compras','enviada_proveedor','pagada','recibida','cerrada','rechazada'];
   }
   if (role === 'tesoreria') {
     return ['aprobada_compras','enviada_proveedor','pagada','recibida','cerrada','rechazada'];
@@ -677,8 +680,28 @@ router.get('/:id', authenticate, async (req, res) => {
     // Rol proveedores: personal interno que carga facturas de cualquier proveedor.
     // No se valida supplier_id.
 
-    const items = await query('SELECT * FROM purchase_order_items WHERE po_id = $1 ORDER BY created_at', [req.params.id]);
+    const items = await query(
+      `SELECT poi.*, s.name AS supplier_name
+       FROM purchase_order_items poi
+       LEFT JOIN suppliers s ON s.id = poi.supplier_id
+       WHERE poi.po_id = $1 ORDER BY poi.created_at`, [req.params.id]);
     const resultado = { ...oc, items: items.rows };
+
+    // Trazabilidad de la división por proveedor (etapa 3):
+    //  - si es una OC hija, exponemos la OC madre de la que salió.
+    //  - si es la OC madre (estado 'dividida'), exponemos las OC hijas.
+    if (oc.split_parent_id) {
+      const padre = await query('SELECT id, code, status FROM purchase_orders WHERE id=$1', [oc.split_parent_id]);
+      resultado.split_parent = padre.rows[0] || null;
+    }
+    const hijas = await query(
+      `SELECT po.id, po.code, po.status, po.supplier_id, s.name AS supplier_name
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s.id = po.supplier_id
+       WHERE po.split_parent_id = $1
+       ORDER BY po.code`, [req.params.id]);
+    if (hijas.rows.length) resultado.split_children = hijas.rows;
+
     res.json(ocultarPreciosSiCorresponde(resultado, role));
   } catch(err) {
     console.error('[OC detalle]', err.message);
@@ -1031,6 +1054,119 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[OC items]', err.message);
     res.status(500).json({ error: 'Error al actualizar items' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  POST /:id/dividir — Dividir una OC consolidada por proveedor (etapa 3)
+//  Agrupa los ítems por el supplier_id que asignó Compras y genera una OC
+//  hija por proveedor (con trazabilidad a la OC madre y la OT). La OC madre
+//  queda en estado 'dividida'. Si todos los ítems son de un solo proveedor,
+//  no se divide: solo se le asigna ese proveedor a la propia OC.
+// ─────────────────────────────────────────────────────────────
+router.post('/:id/dividir', authenticate, requireRole('dueno','gerencia','compras'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const cur = await client.query('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (!cur.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'OC no encontrada' });
+    }
+    const madre = cur.rows[0];
+
+    const estadosDivisibles = ['pendiente_cotizacion','en_cotizacion'];
+    if (!estadosDivisibles.includes(madre.status)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Solo se puede dividir una OC pendiente o en cotización' });
+    }
+
+    const itemsRes = await client.query(
+      'SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at, id', [req.params.id]);
+    const items = itemsRes.rows;
+    if (!items.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'La OC no tiene ítems para dividir' });
+    }
+
+    // Todos los ítems deben tener proveedor asignado.
+    const sinProveedor = items.filter(it => !it.supplier_id);
+    if (sinProveedor.length) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Asigná un proveedor a cada ítem antes de dividir',
+        items_sin_proveedor: sinProveedor.map(it => it.descripcion)
+      });
+    }
+
+    // Agrupar ítems por proveedor (preservando el orden de aparición).
+    const grupos = new Map();
+    for (const it of items) {
+      if (!grupos.has(it.supplier_id)) grupos.set(it.supplier_id, []);
+      grupos.get(it.supplier_id).push(it);
+    }
+
+    // Un solo proveedor: no tiene sentido crear una hija idéntica. Le asignamos
+    // el proveedor a la propia OC y la dejamos lista para cotizar.
+    if (grupos.size === 1) {
+      const supplierId = [...grupos.keys()][0];
+      const sup = await client.query('SELECT name FROM suppliers WHERE id=$1', [supplierId]);
+      await client.query(
+        'UPDATE purchase_orders SET supplier_id=$1, proveedor=$2 WHERE id=$3',
+        [supplierId, sup.rows[0]?.name || null, req.params.id]);
+      await client.query('COMMIT');
+      return res.json({ dividida: false, supplier_id: supplierId, hijas: [] });
+    }
+
+    // Varios proveedores: una OC hija por proveedor.
+    const hijas = [];
+    for (const [supplierId, grupoItems] of grupos) {
+      const sup = await client.query('SELECT name FROM suppliers WHERE id=$1', [supplierId]);
+      const supName = sup.rows[0]?.name || null;
+      const code = await nextOCCode();
+      const nueva = await client.query(
+        `INSERT INTO purchase_orders
+           (code, status, requested_by, sucursal, area, tipo, vehicle_id, ot_id, asset_id,
+            notes, prioridad, supplier_id, proveedor, split_parent_id)
+         VALUES ($1,'pendiente_cotizacion',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         RETURNING *`,
+        [code, madre.requested_by, madre.sucursal, madre.area, madre.tipo,
+         madre.vehicle_id, madre.ot_id, madre.asset_id,
+         madre.notes, madre.prioridad || 'Normal', supplierId, supName, madre.id]);
+      const hijaId = nueva.rows[0].id;
+
+      for (const it of grupoItems) {
+        await client.query(
+          `INSERT INTO purchase_order_items
+             (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id, supplier_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [hijaId, it.descripcion, it.cantidad, it.unidad, it.precio_unit || 0,
+           it.stock_item_id, it.work_order_part_id, supplierId]);
+        // Reapuntar el repuesto externo de la OT a la OC hija (la que se va a pagar).
+        if (it.work_order_part_id) {
+          await client.query('UPDATE work_order_parts SET po_id=$1 WHERE id=$2', [hijaId, it.work_order_part_id]);
+        }
+      }
+
+      const t = await client.query(
+        'SELECT COALESCE(SUM(cantidad * precio_unit),0) AS total FROM purchase_order_items WHERE po_id=$1', [hijaId]);
+      await client.query('UPDATE purchase_orders SET total_estimado=$1 WHERE id=$2', [t.rows[0].total, hijaId]);
+
+      hijas.push({ id: hijaId, code, supplier_id: supplierId, supplier_name: supName });
+    }
+
+    // La OC madre queda como registro histórico de la división.
+    await client.query("UPDATE purchase_orders SET status='dividida' WHERE id=$1", [madre.id]);
+
+    await client.query('COMMIT');
+    res.json({ dividida: true, hijas });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[OC dividir]', err.message);
+    res.status(500).json({ error: 'Error al dividir la OC por proveedor' });
   } finally {
     client.release();
   }

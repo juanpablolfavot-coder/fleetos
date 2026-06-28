@@ -4317,7 +4317,8 @@ const OC_ESTADOS = {
   pagada:               { label: 'Pagada',               icon: '💰', bg: 'rgba(34,197,94,.15)',  fg: '#4ade80', border: 'rgba(34,197,94,.4)' },
   recibida:             { label: 'Recibida',             icon: '📦', bg: 'rgba(16,185,129,.2)',  fg: '#10b981', border: 'rgba(16,185,129,.5)' },
   cerrada:              { label: 'Cerrada',              icon: '🔒', bg: 'rgba(100,116,139,.18)', fg: '#94a3b8', border: 'rgba(100,116,139,.45)' },
-  rechazada:            { label: 'Rechazada',            icon: '❌', bg: 'rgba(239,68,68,.15)',  fg: '#f87171', border: 'rgba(239,68,68,.4)' }
+  rechazada:            { label: 'Rechazada',            icon: '❌', bg: 'rgba(239,68,68,.15)',  fg: '#f87171', border: 'rgba(239,68,68,.4)' },
+  dividida:             { label: 'Dividida por proveedor', icon: '🔀', bg: 'rgba(168,85,247,.15)', fg: '#c084fc', border: 'rgba(168,85,247,.4)' }
 };
 
 // Genera el badge HTML del estado (usa el ícono + label + color)
@@ -6860,6 +6861,7 @@ function _poExportPDF() {
     pagada:               'Pagada',
     recibida:             'Recibida',
     rechazada:            'Rechazada',
+    dividida:             'Dividida por proveedor',
   };
   const tableData = rows.map(p => [
     p.code || '—',
@@ -7665,7 +7667,8 @@ async function openPODetail(id) {
       aprobada_compras:     { label:'APROBADA POR COMPRAS', color:'#38bdf8', icon:'✅' },
       pagada:               { label:'PAGADA',               color:'#10b981', icon:'💰' },
       recibida:             { label:'RECIBIDA',             color:'#10b981', icon:'📦' },
-      rechazada:            { label:'RECHAZADA',            color:'#ef4444', icon:'❌' }
+      rechazada:            { label:'RECHAZADA',            color:'#ef4444', icon:'❌' },
+      dividida:             { label:'DIVIDIDA POR PROVEEDOR', color:'#c084fc', icon:'🔀' }
     };
     const st = estadoInfo[po.status] || { label:(po.status||'').toUpperCase(), color:'#6b7280', icon:'📋' };
     const esTerminal = ['rechazada','cerrada'].includes(po.status);
@@ -7871,6 +7874,26 @@ async function openPODetail(id) {
         ` : ''}
       </div>
 
+      ${(po.split_parent || (po.split_children && po.split_children.length)) ? `
+      <div class="card" style="padding:12px 16px;margin-bottom:16px">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔀 Trazabilidad de división por proveedor</div>
+        ${po.split_parent ? `
+          <div style="font-size:13px;margin-bottom:6px">
+            Esta OC nació al dividir la OC madre
+            <a href="#" onclick="closeModal();openPODetail('${po.split_parent.id}');return false;" style="color:var(--accent);font-weight:600">${escapeHtml(po.split_parent.code)}</a>.
+          </div>` : ''}
+        ${(po.split_children && po.split_children.length) ? `
+          <div style="font-size:13px;margin-bottom:6px">Se dividió en ${po.split_children.length} OC, una por proveedor:</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${po.split_children.map(h => `
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px">
+                <a href="#" onclick="closeModal();openPODetail('${h.id}');return false;" style="color:var(--accent);font-weight:600">${escapeHtml(h.code)}</a>
+                <span style="color:var(--text3)">→ ${escapeHtml(h.supplier_name || 'sin proveedor')}</span>
+                ${_ocEstadoBadge(h.status)}
+              </div>`).join('')}
+          </div>` : ''}
+      </div>` : ''}
+
       <div class="card" style="padding:12px 16px;margin-bottom:4px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Observaciones</div>
         <textarea class="form-textarea" id="pod-notes" rows="2" ${canEdit && !esTerminal?'':'readonly'} placeholder="—">${escapeHtml(po.notes||'')}</textarea>
@@ -7898,6 +7921,13 @@ async function openPODetail(id) {
         // (Los artículos ya son editables inline cuando canEdit, no hace falta botón aparte)
         if (canEdit) {
           btns.push({ label:'💾 Guardar cambios', cls:'btn-primary', fn: () => savePODetail(id) });
+        }
+
+        // 🔀 Dividir por proveedor — OC consolidada de una OT. Compras asigna un
+        // proveedor por ítem y genera una OC por proveedor (con trazabilidad).
+        if (window._podFromOT && ['pendiente_cotizacion','en_cotizacion'].includes(po.status)
+            && (role === 'compras' || ['dueno','gerencia'].includes(role))) {
+          btns.push({ label:'🔀 Dividir por proveedor', cls:'btn-warn', fn: () => dividirOCPorProveedor(id) });
         }
 
         // ══════════════════════════════════════════════
@@ -8075,6 +8105,58 @@ async function savePODetail(id) {
     // Reabrir el modal con datos frescos (no sacar al usuario del contexto)
     await openPODetail(id);
     // Refrescar listado en paralelo
+    loadPOList();
+  } catch(err) { showToast('error', err.message); }
+}
+
+// 🔀 Dividir una OC consolidada (de una OT) en una OC por proveedor.
+// Compras asigna un proveedor a cada ítem; al dividir, se generan N OCs hijas
+// (una por proveedor) con trazabilidad a la OC madre y a la OT.
+async function dividirOCPorProveedor(id) {
+  try {
+    // 1) Guardar primero los proveedores asignados por ítem (si está editable),
+    //    para que el backend divida con los datos actuales en pantalla.
+    let items = null;
+    if (window._poItemsEditable && document.querySelector('[id^="podi-desc-"]')) {
+      items = readPODetailItems();
+      if (!items.length) { showToast('warn', 'Debe haber al menos un artículo'); return; }
+      const sinProv = items.filter(it => !it.supplier_id);
+      if (sinProv.length) {
+        showToast('warn', `Asigná un proveedor a cada ítem antes de dividir (faltan ${sinProv.length})`);
+        return;
+      }
+      const resItems = await apiFetch(`/api/purchase-orders/${id}/items`, {
+        method: 'PUT', body: JSON.stringify({ items })
+      });
+      if (!resItems.ok) { const e = await resItems.json(); showToast('error', e.error||'Error al guardar artículos'); return; }
+    }
+
+    // ¿Cuántos proveedores distintos hay? Para el mensaje de confirmación.
+    const provs = items ? [...new Set(items.map(it => it.supplier_id))] : [];
+    const msg = provs.length > 1
+      ? `Se generarán ${provs.length} órdenes de compra, una por proveedor. La OC actual quedará como registro de la división. ¿Continuar?`
+      : '¿Dividir esta OC por proveedor?';
+    if (!confirm(msg)) return;
+
+    // 2) Dividir
+    const res = await apiFetch(`/api/purchase-orders/${id}/dividir`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (data.items_sin_proveedor?.length) {
+        showToast('error', `Falta proveedor en: ${data.items_sin_proveedor.join(', ')}`);
+      } else {
+        showToast('error', data.error || 'Error al dividir la OC');
+      }
+      return;
+    }
+
+    if (data.dividida) {
+      const codes = (data.hijas || []).map(h => h.code).join(', ');
+      showToast('ok', `✅ OC dividida en: ${codes}`);
+    } else {
+      showToast('ok', '✅ Proveedor asignado a la OC');
+    }
+    await openPODetail(id);
     loadPOList();
   } catch(err) { showToast('error', err.message); }
 }
