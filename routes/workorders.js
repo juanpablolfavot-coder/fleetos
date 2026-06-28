@@ -317,7 +317,7 @@ async function descontarCatalogoOT(client, { catalog_id, base_location, area, qt
 }
 
 // POST /api/workorders
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico','chofer','paniol','gerente_sucursal'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
     const { vehicle_id, asset_id, ot_tipo = 'vehiculo', type, priority, description, mechanic_id, parts = [], external_required = false, external_description = '' } = req.body;
