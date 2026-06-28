@@ -103,14 +103,15 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
         FROM fac`).catch(()=>({rows:[{}]})),
       // Compras del mes desglosadas por categoría del artículo (vía stock vinculado)
       query(`
-        SELECT COALESCE(si.category,'Sin categoría') AS categoria,
+        SELECT COALESCE(si.category, sc.category, 'Sin categoría') AS categoria,
                COUNT(DISTINCT poi.po_id) AS ocs,
                COALESCE(SUM(poi.subtotal),0) AS monto
           FROM purchase_order_items poi
           JOIN purchase_orders po ON po.id = poi.po_id
-          LEFT JOIN stock_items si ON si.id = poi.stock_item_id
+          LEFT JOIN stock_items si   ON si.id = poi.stock_item_id
+          LEFT JOIN stock_catalog sc ON sc.id = poi.stock_item_id
          WHERE po.created_at BETWEEN $1 AND $2
-         GROUP BY COALESCE(si.category,'Sin categoría')
+         GROUP BY COALESCE(si.category, sc.category, 'Sin categoría')
          ORDER BY monto DESC`, [desde, hasta + ' 23:59:59']).catch(()=>({rows:[]})),
     ]);
 
@@ -342,7 +343,7 @@ auditorRouter.get('/anomalias-ots', authenticate, canAudit, async (req, res) => 
       FROM work_order_parts wop
       JOIN work_orders wo ON wo.id = wop.wo_id
       JOIN vehicles v ON v.id = wo.vehicle_id
-      WHERE wop.stock_id IS NULL AND wop.unit_cost > 50000
+      WHERE wop.stock_id IS NULL AND wop.catalog_id IS NULL AND wop.unit_cost > 50000
       ORDER BY wop.unit_cost DESC LIMIT 20`);
 
     if (externos.rows.length > 0) {

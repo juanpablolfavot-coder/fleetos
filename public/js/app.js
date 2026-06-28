@@ -1452,7 +1452,8 @@ async function saveNewOT() {
   const labor_cost = 0;
   const notes      = (document.getElementById('ot-notes')?.value || '').trim();
 
-  // Repuestos — leer directo del DOM (incluye origin + stock_id si aplica)
+  // Repuestos — leer directo del DOM. El stock sale siempre del catálogo
+  // (modelo nuevo, catalog_id); el modelo viejo (stock_id) fue retirado.
   const parts = [];
   let stockSinSeleccion = false;
   document.querySelectorAll('[id^="otp-name-"]').forEach(nameEl => {
@@ -1463,9 +1464,8 @@ async function saveNewOT() {
     const originEl = document.getElementById('otp-origin-' + idx);
     const origin = originEl?.value === 'stock' ? 'stock' : 'externo';
     const catalog_id = (origin === 'stock') ? (nameEl.dataset.catalogId || null) : null;
-    const stock_id = (origin === 'stock' && !catalog_id) ? (nameEl.dataset.stockId || null) : null;
 
-    if (origin === 'stock' && !catalog_id && !stock_id) {
+    if (origin === 'stock' && !catalog_id) {
       stockSinSeleccion = true;
       nameEl.style.borderColor = 'var(--danger)';
       return;
@@ -1480,7 +1480,7 @@ async function saveNewOT() {
       unit:      document.getElementById('otp-unit-' + idx)?.value || 'un',
       unit_cost: unitCost,
       origin,
-      stock_id:  origin === 'stock' ? stock_id : null,
+      stock_id:  null,
       catalog_id,
       base_location: catalog_id ? (nameEl.dataset.baseLocation || null) : null,
       area:          catalog_id ? (nameEl.dataset.area || null) : null,
