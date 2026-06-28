@@ -299,6 +299,7 @@
   function renderModalPago(poId, facId, factura, pagos, oc) {
     window._pagoFacturaActual = factura;
     window._pagoOcActual = oc;
+    window._pagoPagosActual = pagos; // para el comprobante imprimible (recibos.mjs)
     document.querySelector('.modal-pago-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'modal-pago-overlay';
@@ -443,7 +444,10 @@
 
           ${pagos.length ? `
           <div>
-            <div style="font-weight:600;margin-bottom:8px">Historial de pagos (${pagos.length})</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-weight:600">Historial de pagos (${pagos.length})</div>
+              <button onclick="imprimirReciboPago()" class="btn btn-secondary btn-sm">🖨 Imprimir comprobante</button>
+            </div>
             ${pagos.map(p => {
               const role = window.App?.currentUser?.role;
               const userId = window.App?.currentUser?.id;
