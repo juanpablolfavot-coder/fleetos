@@ -125,3 +125,18 @@ window.imprimirReciboPago = function () {
   w.document.write(comprobanteHtml(factura, oc, pagos));
   w.document.close();
 };
+
+// Envía el comprobante por mail al proveedor (PDF adjunto, lo arma el backend).
+window.enviarReciboPagoMail = async function () {
+  const ids = window._pagoIds || {};
+  if (!ids.poId || !ids.facId) { window.showToast?.('error', 'No hay factura activa'); return; }
+  try {
+    const res = await window.apiFetch(`/api/purchase-orders/${ids.poId}/facturas/${ids.facId}/recibo-email`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { window.showToast?.('error', data.error || 'Error al enviar el mail'); return; }
+    if (data.sent) window.showToast?.('ok', 'Comprobante enviado a ' + data.to);
+    else window.showToast?.('warn', data.reason || 'No se pudo enviar el mail');
+  } catch (e) {
+    window.showToast?.('error', e.message);
+  }
+};

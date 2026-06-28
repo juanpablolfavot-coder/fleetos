@@ -300,6 +300,7 @@
     window._pagoFacturaActual = factura;
     window._pagoOcActual = oc;
     window._pagoPagosActual = pagos; // para el comprobante imprimible (recibos.mjs)
+    window._pagoIds = { poId, facId }; // para enviar el comprobante por mail
     document.querySelector('.modal-pago-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'modal-pago-overlay';
@@ -446,7 +447,10 @@
           <div>
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
               <div style="font-weight:600">Historial de pagos (${pagos.length})</div>
-              <button onclick="imprimirReciboPago()" class="btn btn-secondary btn-sm">🖨 Imprimir comprobante</button>
+              <div style="display:flex;gap:6px">
+                <button onclick="imprimirReciboPago()" class="btn btn-secondary btn-sm">🖨 Imprimir comprobante</button>
+                <button onclick="enviarReciboPagoMail()" class="btn btn-secondary btn-sm">✉ Enviar al proveedor</button>
+              </div>
             </div>
             ${pagos.map(p => {
               const role = window.App?.currentUser?.role;
