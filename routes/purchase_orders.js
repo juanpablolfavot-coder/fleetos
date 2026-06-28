@@ -665,6 +665,13 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const oc = po.rows[0];
 
+    // El presupuesto adjunto (base64, hasta 5MB) NO viaja en el detalle: haría
+    // lenta cada apertura de OC. Solo exponemos un flag y, si hace falta verlo,
+    // se pide aparte con GET /:id/presupuesto (carga diferida).
+    const tienePresupuesto = !!(oc.presupuesto_imagen && String(oc.presupuesto_imagen).trim());
+    delete oc.presupuesto_imagen;
+    oc.tiene_presupuesto = tienePresupuesto;
+
     // Verificar acceso
     const estVis = estadosQueVe(role);
     if (estVis !== null && !estVis.includes(oc.status)) {
@@ -706,6 +713,46 @@ router.get('/:id', authenticate, async (req, res) => {
   } catch(err) {
     console.error('[OC detalle]', err.message);
     res.status(500).json({ error: 'Error al obtener OC' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+//  GET /:id/presupuesto — Archivo de presupuesto (carga diferida).
+//  Se separa del detalle para no arrastrar el base64 (hasta 5MB) en cada
+//  apertura de OC. Mismas reglas de visibilidad que el detalle.
+// ─────────────────────────────────────────────────────────────
+router.get('/:id/presupuesto', authenticate, async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    const role = req.user.role;
+    const userId = req.user.id;
+
+    const r = await query(
+      'SELECT status, requested_by, sucursal, presupuesto_imagen FROM purchase_orders WHERE id=$1',
+      [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+    const oc = r.rows[0];
+
+    // Mismo control de acceso que el detalle.
+    const estVis = estadosQueVe(role);
+    if (estVis !== null && !estVis.includes(oc.status)) {
+      return res.status(403).json({ error: 'No tenés permiso para ver esta OC' });
+    }
+    if (role === 'gerente_sucursal') {
+      if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
+        return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
+      }
+    } else if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
+      return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
+    }
+
+    if (!oc.presupuesto_imagen || !String(oc.presupuesto_imagen).trim()) {
+      return res.status(404).json({ error: 'Esta OC no tiene presupuesto adjunto' });
+    }
+    res.json({ presupuesto_imagen: oc.presupuesto_imagen });
+  } catch(err) {
+    console.error('[OC presupuesto]', err.message);
+    res.status(500).json({ error: 'Error al obtener el presupuesto' });
   }
 });
 
