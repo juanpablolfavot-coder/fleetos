@@ -172,6 +172,9 @@ async function ensureTables() {
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS stock_item_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
   await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS ingresado_stock BOOLEAN DEFAULT FALSE`).catch(()=>{});
+  // Proveedor por ítem (Compras lo asigna en la OC consolidada de una OT, para
+  // después dividir en una OC por proveedor — etapas 2 y 3 del circuito).
+  await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS supplier_id UUID`).catch(()=>{});
 
   // Índices para que el listado de OC no se vuelva lento cuando crecen las órdenes.
   await query(`CREATE INDEX IF NOT EXISTS idx_po_created_at ON purchase_orders(created_at DESC)`).catch(()=>{});
@@ -1007,11 +1010,11 @@ router.put('/:id/items', authenticate, requireRole('dueno','gerencia','compras')
       if (!item.descripcion?.trim()) continue;
       const linkedPartId = item.work_order_part_id || item.part_id || oldItems.rows[itemIdx]?.work_order_part_id || oldParts.rows[itemIdx]?.id || null;
       await client.query(
-        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO purchase_order_items (po_id, descripcion, cantidad, unidad, precio_unit, stock_item_id, work_order_part_id, supplier_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [req.params.id, item.descripcion.trim(), parseFloat(item.cantidad||1),
          item.unidad||'un', parseFloat(item.precio_unit||0), item.stock_item_id||null,
-         linkedPartId]
+         linkedPartId, item.supplier_id || null]
       );
       itemIdx += 1;
     }

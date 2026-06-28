@@ -7615,6 +7615,10 @@ async function openPODetail(id) {
     // facturas/pagos de OTRA OC.
     if (window.App) App.currentPODetailId = id;
 
+    // ¿OC consolidada generada desde una OT? Solo en ese caso mostramos el
+    // selector de proveedor por ítem (Compras lo usa antes de dividir la OC).
+    window._podFromOT = !!po.ot_id;
+
     const role    = App.currentUser?.role;
     const puedeVerPrecios = _ocPuedeVerPrecios(role);
     const esCreador = po.requested_by === App.currentUser?.id;
@@ -8472,6 +8476,21 @@ function buildPODetailItemRow(idx, item) {
   if (idx >= (window._podItemNextIdx || 0)) window._podItemNextIdx = idx + 1;
   const stockItemId = (item.stock_item_id || '').replace(/"/g, '&quot;');
   const woPartId = (item.work_order_part_id || '').replace(/"/g, '&quot;');
+  // Selector de proveedor por ítem — solo para OCs consolidadas de una OT.
+  let supRow = '';
+  if (window._podFromOT) {
+    const sel = item.supplier_id || '';
+    const opts = (App.data.suppliers || [])
+      .filter(s => s.status !== 'blacklist')
+      .map(s => `<option value="${s.id}" ${s.id === sel ? 'selected' : ''}>${escapeHtml(s.name)}</option>`)
+      .join('');
+    supRow = `<div style="grid-column:1 / -1;display:flex;align-items:center;gap:6px;margin-top:2px">
+      <span style="font-size:11px;color:var(--text3);white-space:nowrap">🏢 Proveedor:</span>
+      <select class="form-select" id="podi-sup-${idx}" style="font-size:12px;flex:1;max-width:360px;padding:3px 6px">
+        <option value="">— Sin asignar —</option>${opts}
+      </select>
+    </div>`;
+  }
   return `<div id="podi-row-${idx}" data-stock-item-id="${stockItemId}" data-work-order-part-id="${woPartId}" style="display:grid;grid-template-columns:1fr 70px 65px 110px 100px 30px;gap:6px;margin-bottom:6px;align-items:center">
     <input class="form-input" id="podi-desc-${idx}" value="${desc}" placeholder="Descripción" style="font-size:12px" oninput="updatePODetailItemsTotal()">
     <input class="form-input" type="number" id="podi-qty-${idx}" value="${qty}" min="0.01" step="0.01" style="font-size:12px;text-align:center" oninput="updatePODetailItemsTotal()">
@@ -8480,6 +8499,7 @@ function buildPODetailItemRow(idx, item) {
     <div id="podi-sub-${idx}" style="font-size:12px;text-align:right;font-family:monospace;color:var(--text2);padding:4px 8px">$${sub.toLocaleString('es-AR')}</div>
     <button onclick="removePODetailItem(${idx})" title="Quitar"
       style="background:none;border:1px solid var(--border2);border-radius:6px;cursor:pointer;color:var(--danger);font-size:14px;padding:0;width:28px;height:28px">✕</button>
+    ${supRow}
   </div>`;
 }
 
@@ -8525,7 +8545,8 @@ function readPODetailItems() {
       unidad:                 document.getElementById('podi-unit-'  + idx)?.value || 'un',
       precio_unit: parseFloat(document.getElementById('podi-price-' + idx)?.value) || 0,
       stock_item_id: rowEl?.dataset?.stockItemId || null,
-      work_order_part_id: rowEl?.dataset?.workOrderPartId || null
+      work_order_part_id: rowEl?.dataset?.workOrderPartId || null,
+      supplier_id: document.getElementById('podi-sup-' + idx)?.value || null
     });
   });
   return items;
