@@ -9303,6 +9303,8 @@ async function renderSuppliers() {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-secondary btn-sm" onclick="_supExportPDF()">📄 PDF</button>
+        ${['dueno','gerencia','compras','contador','tesoreria'].includes(App.currentUser?.role) ?
+          `<button class="btn btn-secondary btn-sm" onclick="verRankingProveedores()">🏆 Ranking de gasto</button>` : ''}
         ${canCreate ? `<button class="btn btn-primary" onclick="openNewSupplierModal()">+ Nuevo proveedor</button>` : ''}
       </div>
     </div>

@@ -20,3 +20,4 @@ import './timeline.mjs';
 import './chofer-panel.mjs';
 import './recibos.mjs';
 import './cuenta-proveedor.mjs';
+import './ranking-proveedores.mjs';
