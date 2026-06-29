@@ -236,7 +236,7 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
 });
 
 // PATCH /api/vehicles/:id/km — actualizar odómetro / horas
-router.patch('/:id/km', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico','chofer','paniol','encargado_combustible','gerente_sucursal'), validateUUID('id'), async (req, res) => {
+router.patch('/:id/km', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','mecanico'), validateUUID('id'), async (req, res) => {
   try {
     const km = toIntOrNull(req.body.km);
     if (km === null) return res.status(400).json({ error: 'Km / horas inválido' });
