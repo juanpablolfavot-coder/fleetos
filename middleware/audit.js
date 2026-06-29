@@ -86,9 +86,12 @@ const auditMutations = (req, res, next) => {
 //  poder reconstruir de qué a qué cambió y detectar manipulaciones—.
 //  Marca res.locals._audited para que el logger global no duplique.
 // ───────────────────────────────────────────────────────────
-async function auditChange(req, res, { action, table, recordId = null, oldValue = null, newValue = null }) {
+async function auditChange(req, res, { action, table, recordId = null, oldValue = null, newValue = null, markAudited = true }) {
   try {
-    if (res && res.locals) res.locals._audited = true;
+    // markAudited=false: para eventos SECUNDARIOS (p.ej. el bump de km dentro de
+    // una carga de combustible) — así el logger global sigue registrando la
+    // acción principal (la carga) además de este detalle.
+    if (markAudited && res && res.locals) res.locals._audited = true;
     await query(
       `INSERT INTO audit_log (user_id, user_name, action, table_name, record_id, old_value, new_value, ip_address, user_agent)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
