@@ -338,6 +338,14 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         return res.status(403).json({ error: 'Solo podés crear OTs sobre vehículos de tu sucursal' });
       }
     }
+    // Chofer: solo puede abrir OTs sobre SU unidad asignada (igual que en combustible).
+    if (req.user.role === 'chofer' && ot_tipo === 'vehiculo') {
+      const veh = await client.query('SELECT code FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
+      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+      if (veh.rows[0].code !== req.user.vehicle_code) {
+        return res.status(403).json({ error: 'Solo podés crear OTs sobre tu unidad asignada (' + (req.user.vehicle_code || 'sin asignar') + ')' });
+      }
+    }
 
     await client.query('BEGIN');
 

@@ -1269,6 +1269,15 @@ router.delete('/:id', authenticate, requireRole('dueno','gerencia','jefe_manteni
         return res.status(400).json({ error: 'Solo se pueden borrar OCs en estado inicial' });
       }
     }
+    // Gerente de sucursal: solo borra OCs de SU sucursal y en estado inicial.
+    if (req.user.role === 'gerente_sucursal') {
+      if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
+        return res.status(403).json({ error: 'Solo podés borrar OCs de tu sucursal' });
+      }
+      if (oc.status !== 'pendiente_cotizacion') {
+        return res.status(400).json({ error: 'Solo se pueden borrar OCs pendientes de cotizar' });
+      }
+    }
     await query('DELETE FROM purchase_orders WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
   } catch(err) {
@@ -1750,6 +1759,14 @@ router.post('/:id/devolver', authenticate, requireRole('dueno','gerencia','compr
 router.post('/:id/toggle-open', authenticate, requireRole('dueno','gerencia','compras','jefe_mantenimiento','paniol','contador','gerente_sucursal'), async (req, res) => {
   try {
     const { is_open } = req.body;
+    // Gerente de sucursal: solo puede tocar OCs de su sucursal.
+    if (req.user.role === 'gerente_sucursal') {
+      const own = await query('SELECT sucursal FROM purchase_orders WHERE id=$1', [req.params.id]);
+      if (!own.rows[0]) return res.status(404).json({ error: 'OC no encontrada' });
+      if (!req.user.sucursal || own.rows[0].sucursal !== req.user.sucursal) {
+        return res.status(403).json({ error: 'Solo podés modificar OCs de tu sucursal' });
+      }
+    }
     const r = await query(
       'UPDATE purchase_orders SET is_open = $1 WHERE id = $2 AND status IN (\'aprobada_compras\',\'enviada_proveedor\',\'pagada\',\'recibida\') RETURNING id, code, is_open',
       [!!is_open, req.params.id]
