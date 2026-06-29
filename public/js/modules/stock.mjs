@@ -82,6 +82,11 @@ function _renderStockCatalog() {
   const catOpts = [`<option value="all"${f.cat === 'all' ? ' selected' : ''}>Categoría: todas</option>`]
     .concat(cats.map((c) => `<option value="${escapeHtml(c)}"${f.cat === c ? ' selected' : ''}>${escapeHtml(c)}</option>`)).join('');
 
+  // Vista activa: catálogo (por artículo) o por sucursal (cada sucursal con su stock).
+  const view = (App.stockView === 'sucursal') ? 'sucursal' : 'catalogo';
+  const tabBtn = (id, label) => `<button onclick="App.stockView='${id}';_renderStockCatalog()" style="padding:6px 14px;border:none;cursor:pointer;font-size:13px;font-weight:600;background:${view === id ? 'var(--accent)' : 'transparent'};color:${view === id ? '#fff' : 'var(--text3)'}">${label}</button>`;
+  const toggle = `<div style="display:inline-flex;border:1px solid var(--border2);border-radius:8px;overflow:hidden">${tabBtn('catalogo', 'Catálogo')}${tabBtn('sucursal', 'Por sucursal')}</div>`;
+
   page.innerHTML = `
     <div class="kpi-row kpi-row-3" style="margin-bottom:20px">
       <div class="kpi-card ${criticos ? 'danger' : 'ok'}"><div class="kpi-label">Críticos</div><div class="kpi-value ${criticos ? 'danger' : 'ok'}">${criticos}</div><div class="kpi-trend">debajo del mínimo</div></div>
@@ -89,19 +94,58 @@ function _renderStockCatalog() {
       <div class="kpi-card ok"><div class="kpi-label">Valorización</div><div class="kpi-value ok">$${Math.round(valor).toLocaleString('es-AR')}</div><div class="kpi-trend">al costo actual</div></div>
     </div>
     <div class="section-header">
-      <div><div class="section-title">Catálogo de artículos</div><div class="section-sub">Un artículo = un código único · saldo por sucursal/área</div></div>
+      <div><div class="section-title">${view === 'sucursal' ? 'Stock por sucursal' : 'Catálogo de artículos'}</div><div class="section-sub">${view === 'sucursal' ? 'Cada sucursal con su stock' : 'Un artículo = un código único · saldo por sucursal/área'}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
-        <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">
+        ${toggle}
+        ${view === 'catalogo' ? `<select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
+        <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">` : ''}
         ${_stockCanSend() ? '<button class="btn btn-secondary btn-sm" onclick="openDispatchNew()">🚚 Despachar</button>' : ''}
         ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
       </div>
     </div>
-    <div class="card" style="padding:0"><div class="table-wrap"><table>
+    ${view === 'sucursal'
+      ? _renderStockPorSucursal(all, num)
+      : `<div class="card" style="padding:0"><div class="table-wrap"><table>
       <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
-    </table></div></div>
+    </table></div></div>`}
     ${_stockInlinePanels()}`;
+}
+
+// Vista "Por sucursal": agrupa los saldos del catálogo por sucursal (base_location),
+// mostrando cada sucursal con sus artículos. Respeta el scope del rol (la API ya
+// devuelve solo lo que el usuario puede ver, p. ej. su área).
+function _renderStockPorSucursal(all, num) {
+  const bySuc = {};
+  (all || []).forEach((a) => {
+    (a.balances || []).forEach((b) => {
+      const qty = num(b.qty_current);
+      if (qty <= 0) return;
+      const suc = b.base_location || '—';
+      (bySuc[suc] = bySuc[suc] || []).push({ code: a.code, name: a.name, area: b.area, qty, unit: a.unit, unit_cost: num(a.unit_cost) });
+    });
+  });
+  const sucs = Object.keys(bySuc).sort();
+  if (!sucs.length) return '<div class="card" style="padding:24px;text-align:center;color:var(--text3)">Sin stock cargado por sucursal.</div>';
+  return sucs.map((suc) => {
+    const rows = bySuc[suc].sort((x, y) => String(x.code || '').localeCompare(String(y.code || '')));
+    const totalVal = rows.reduce((s, r) => s + r.qty * r.unit_cost, 0);
+    return `<div class="card" style="padding:0;margin-bottom:16px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center">
+        <div class="section-title" style="font-size:15px;margin:0">🏢 ${escapeHtml(suc)}</div>
+        <div style="font-size:12px;color:var(--text3)">${rows.length} artículo${rows.length === 1 ? '' : 's'} · $${Math.round(totalVal).toLocaleString('es-AR')}</div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Código</th><th>Artículo</th><th>Área</th><th style="text-align:right">Cantidad</th></tr></thead>
+        <tbody>${rows.map((r) => `<tr>
+          <td class="td-mono td-main">${escapeHtml(r.code)}</td>
+          <td>${escapeHtml(r.name)}</td>
+          <td>${escapeHtml(r.area || '—')}</td>
+          <td class="td-mono" style="text-align:right;font-weight:600">${r.qty} ${escapeHtml(r.unit || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }).join('');
 }
 
 // Paneles que se ven directo al entrar a la página (no atrás de un botón):

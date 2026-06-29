@@ -347,19 +347,19 @@ function logout() {
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
-    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
-    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
-    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
-    chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
-    encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
-    paniol:                { label:'Stock / Depósito',                 badge:'role-stock',      modules:['stock','purchase_orders'], canEdit:['stock'] },
-    contador:              { label:'Administración',           badge:'role-contador',   modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel'], canEdit:['stock','purchase_orders'] },
-    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
-    compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
-    tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
-    gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'], canEdit:['stock','purchase_orders'] },
-    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
+    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['home','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['home','encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
+    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['home','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
+    mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['home','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
+    chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['home','chofer_panel'], canEdit:[] },
+    encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['home','encargado_panel','fuel'], canEdit:['fuel'] },
+    paniol:                { label:'Stock / Depósito',                 badge:'role-stock',      modules:['home','stock','purchase_orders'], canEdit:['stock'] },
+    contador:              { label:'Administración',           badge:'role-contador',   modules:['home','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel'], canEdit:['stock','purchase_orders'] },
+    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['home','auditor_panel'], canEdit:[] },
+    compras:               { label:'Compras',                  badge:'role-compras',    modules:['home','purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
+    tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['home','tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
+    gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['home','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'], canEdit:['stock','purchase_orders'] },
+    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['home','proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
   };
   return roles[role] || roles['auditor'];
 }
@@ -413,24 +413,10 @@ function bootApp() {
 
   // Cargar datos iniciales desde la API
   loadInitialData().then(() => {
-    if      (u.role === 'chofer')             navigate('chofer_panel');
-    // Contador ahora arranca en 'costs' (unificado con el antiguo panel contable)
-    else if (u.role === 'contador')           navigate('costs');
-    else if (u.role === 'auditor')            navigate('auditor_panel');
-    else if (u.role === 'compras')            navigate('purchase_orders');
-    else if (u.role === 'tesoreria')          navigate('tesoreria_panel');
-    else if (u.role === 'proveedores')        navigate('proveedor_panel');
-    // Stock/Depósito arranca en su pantalla de Stock (no ve el panel ejecutivo,
-    // que muestra gastos y datos que no le corresponden).
-    else if (u.role === 'paniol')             navigate('stock');
-    // Los roles que antes iban a 'encargado_panel' ahora van a 'dashboard'
-    // (el panel unificado incluye la actividad del día al final).
-    else if (u.role === 'mecanico')           navigate('dashboard');
-    else if (u.role === 'jefe_mantenimiento') navigate('dashboard');
-    else if (u.role === 'gerente_sucursal')   navigate('dashboard');
-    else if (u.role === 'gerencia')           navigate('dashboard');
-    else if (u.role === 'dueno')              navigate('dashboard');
-    else                                      navigate('dashboard');
+    // Todos aterrizan en la pantalla de Inicio (logo EB, sin datos sensibles).
+    // Desde ahí cada uno entra a su sección. El "Panel ejecutivo" (gastos/
+    // totales) quedó solo para Dueño/Gerencia.
+    navigate('home');
 
     // Aviso automático para Compras cuando la cisterna de gasoil queda baja.
     setTimeout(() => {

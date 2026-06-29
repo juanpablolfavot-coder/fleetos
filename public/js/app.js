@@ -259,17 +259,39 @@ function navigate(page) {
 }
 
 function getPageTitle(p) {
-  const t = { dashboard:'Panel general', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y Depósito', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales', proveedor_panel:'Mis Órdenes de Compra', tesoreria_panel:'Pagos / Tesorería' };
+  const t = { home:'Inicio', dashboard:'Panel ejecutivo', fleet:'Flota y vehículos', workorders:'Órdenes de trabajo', fuel:'Combustible y urea', tires:'Cubiertas y neumáticos', stock:'Stock y Depósito', documents:'Documentación', costs:'Costos operativos', maintenance:'Mantenimiento', chofer_panel:'Mi panel', encargado_panel:'Operativo del día', contador_panel:'Panel contable', auditor_panel:'Panel de auditoría', assets:'Activos patrimoniales', proveedor_panel:'Mis Órdenes de Compra', tesoreria_panel:'Pagos / Tesorería' };
   return t[p] || 'FleetOS';
 }
 function getPageSub(p) {
-  const s = { dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Stock por sucursal y área · pañoles propios', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs', auditor_panel:'Anomalías · trazabilidad · log de acciones', assets:'Edificios · herramientas · equipos · informática', proveedor_panel:'OCs aprobadas · Cargá las facturas correspondientes', tesoreria_panel:'Facturas pendientes de pago · Vencimientos' };
+  const s = { home:'', dashboard:`Vista ejecutiva · Flota ${(App.data.vehicles||[]).length} unidades`, fleet:'Administración y ficha técnica de activos', workorders:'Gestión de intervenciones técnicas', fuel:'Control de cisternas y consumo', tires:'Mapa por eje · trazabilidad', stock:'Stock por sucursal y área · pañoles propios', documents:'Vencimientos y cumplimiento', costs:'Análisis financiero por unidad', maintenance:'Preventivo · predictivo · correctivo', chofer_panel:'Novedades y cargas', encargado_panel:'Checklists · novedades · combustible', contador_panel:'Costos · reportes · KPIs', auditor_panel:'Anomalías · trazabilidad · log de acciones', assets:'Edificios · herramientas · equipos · informática', proveedor_panel:'OCs aprobadas · Cargá las facturas correspondientes', tesoreria_panel:'Facturas pendientes de pago · Vencimientos' };
   return s[p] || '';
 }
 
 function renderPage(page) {
-  const fns = { dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, auditor_panel: renderAuditorPanel, users: renderUsers, config: renderConfig, purchase_orders: renderPurchaseOrders, suppliers: renderSuppliers, assets: renderAssets, proveedor_panel: function(){ if (typeof renderProveedorPanelInline==='function') renderProveedorPanelInline(); }, tesoreria_panel: function(){ if (typeof renderTesoreriaPanelInline==='function') renderTesoreriaPanelInline(); } };
+  const fns = { home: renderHome, dashboard: renderDashboard, fleet: renderFleet, workorders: renderWorkOrders, fuel: renderFuel, tires: renderTires, stock: renderStock, documents: renderDocuments, costs: renderCosts, maintenance: renderMaintenance, chofer_panel: renderChoferPanel, encargado_panel: renderEncargadoPanel, contador_panel: renderContadorPanel, auditor_panel: renderAuditorPanel, users: renderUsers, config: renderConfig, purchase_orders: renderPurchaseOrders, suppliers: renderSuppliers, assets: renderAssets, proveedor_panel: function(){ if (typeof renderProveedorPanelInline==='function') renderProveedorPanelInline(); }, tesoreria_panel: function(){ if (typeof renderTesoreriaPanelInline==='function') renderTesoreriaPanelInline(); } };
   if (fns[page]) fns[page]();
+}
+
+// ── INICIO ──
+// Pantalla de bienvenida neutra (logo EB grande, centrado). Es el aterrizaje de
+// todos los roles al entrar; no muestra datos sensibles. El panel con gastos/
+// totales pasó a llamarse "Panel ejecutivo" (solo Dueño/Gerencia).
+function renderHome() {
+  const el = document.getElementById('page-home');
+  if (!el) return;
+  const nombre = (App.currentUser?.name || '').trim();
+  el.innerHTML = `
+    <div style="min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px">
+      <div style="width:140px;height:140px;border-radius:28px;background:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 16px 48px rgba(234,88,12,.35)">
+        <span style="font-size:64px;font-weight:800;color:#fff;letter-spacing:1px">EB</span>
+      </div>
+      <div>
+        <div style="font-size:30px;font-weight:800;color:var(--text)">Expreso Biletta</div>
+        <div style="font-size:14px;color:var(--text3);margin-top:6px">Sistema de gestión de flota — FleetOS</div>
+      </div>
+      ${nombre ? `<div style="font-size:15px;color:var(--text2);margin-top:4px">👋 Hola, <b>${escapeHtml(nombre)}</b></div>` : ''}
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">Elegí una sección en el menú de la izquierda para empezar.</div>
+    </div>`;
 }
 
 // ── DASHBOARD ──
