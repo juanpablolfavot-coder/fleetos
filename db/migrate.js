@@ -49,14 +49,23 @@ async function migrate() {
       console.log('✓ Usuario admin ya existe');
     }
 
-    // Crear cisternas iniciales
+    // Crear cisternas iniciales SOLO si la base no tiene ya una de ese tipo.
+    // IMPORTANTE: antes esto usaba `ON CONFLICT DO NOTHING`, pero la tabla tanks
+    // NO tiene índice único, así que no había contra qué "conflictuar" y CADA
+    // corrida de `npm run migrate` insertaba cisternas nuevas duplicadas en 0 L,
+    // que en la pantalla tapaban a las reales (el nivel parecía haberse perdido).
+    // Con `WHERE NOT EXISTS` el seed es idempotente: solo siembra en una base nueva.
     await client.query(`
       INSERT INTO tanks (type, capacity_l, current_l, location)
-      VALUES ('fuel', 47000, 0, 'Base Central'),
-             ('urea', 2000, 0,  'Base Central')
-      ON CONFLICT DO NOTHING
+      SELECT 'fuel', 47000, 0, 'Base Central'
+      WHERE NOT EXISTS (SELECT 1 FROM tanks WHERE type = 'fuel')
     `);
-    console.log('✓ Cisternas iniciales creadas');
+    await client.query(`
+      INSERT INTO tanks (type, capacity_l, current_l, location)
+      SELECT 'urea', 2000, 0, 'Base Central'
+      WHERE NOT EXISTS (SELECT 1 FROM tanks WHERE type = 'urea')
+    `);
+    console.log('✓ Cisternas iniciales verificadas');
 
     await client.query('COMMIT');
     console.log('\n✅ Migración completada exitosamente');
