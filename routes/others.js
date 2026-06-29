@@ -8,6 +8,7 @@ const docRouter  = express.Router();
 const userRouter = express.Router();
 const { query }  = require('../db/pool');
 const { authenticate, requireRole, requireOwner, auditAction } = require('../middleware/auth');
+const { auditChange } = require('../middleware/audit');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 const bcrypt     = require('bcryptjs');
 
@@ -740,7 +741,18 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
        RETURNING *`,
       [vehicle_id,req.user.id,driverName,tank_id||null,fuel_type||'diesel',liters,ppuFinal,kmToSave,location||null,notes||null,ticket_image||null,ticketEstado]
     );
-    if (kmToSave) await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND COALESCE(km_current,0)<$1',[kmToSave,vehicle_id]);
+    if (kmToSave) {
+      // Auditoría del km: guardamos el anterior y solo registramos si realmente subió.
+      const prevKm = await client.query('SELECT km_current FROM vehicles WHERE id=$1', [vehicle_id]);
+      const updKm = await client.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND COALESCE(km_current,0)<$1 RETURNING km_current',[kmToSave,vehicle_id]);
+      if (updKm.rows[0]) {
+        await auditChange(req, res, {
+          action: 'km_update', table: 'vehicles', recordId: vehicle_id, markAudited: false,
+          oldValue: { km_current: prevKm.rows[0]?.km_current ?? null, origen: 'combustible' },
+          newValue: { km_current: kmToSave },
+        });
+      }
+    }
     await client.query('COMMIT'); res.status(201).json(r.rows[0]);
   } catch (err) {
     await client.query('ROLLBACK').catch(()=>{});
@@ -1203,9 +1215,19 @@ checklistRouter.post('/', authenticate, async (req, res) => {
         console.error('[checklist] fallo al crear OT automática:', otErr.message);
       }
     }
-    // Actualizar km del vehículo
+    // Actualizar km del vehículo (y auditar si realmente subió).
     if (km_at_check && vehicle_id) {
-      await query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1',[km_at_check,vehicle_id]).catch(()=>{});
+      try {
+        const prevKm = await query('SELECT km_current FROM vehicles WHERE id=$1', [vehicle_id]);
+        const updKm = await query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND km_current<$1 RETURNING km_current',[km_at_check,vehicle_id]);
+        if (updKm.rows[0]) {
+          await auditChange(req, res, {
+            action: 'km_update', table: 'vehicles', recordId: vehicle_id, markAudited: false,
+            oldValue: { km_current: prevKm.rows[0]?.km_current ?? null, origen: 'checklist' },
+            newValue: { km_current: km_at_check },
+          });
+        }
+      } catch(e) { /* no romper el guardado del checklist por el km */ }
     }
     res.status(201).json(r.rows[0]);
   } catch(err) { console.error('POST checklist:', err.message); res.status(500).json({error:'Error guardar checklist'}); }
