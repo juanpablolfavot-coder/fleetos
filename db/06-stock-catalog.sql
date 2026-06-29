@@ -65,3 +65,14 @@ CREATE TABLE IF NOT EXISTS stock_dispatches (
   received_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_stock_disp_status ON stock_dispatches(status);
+
+-- Vínculos del modelo nuevo con OT y recepción de OC (hasta ahora se agregaban
+-- solo desde las rutas). Las tablas base se crean en schema.sql / 01-compras.sql,
+-- así que estos ALTER corren después y son seguros e idempotentes.
+ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS catalog_id UUID;
+ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS base_location VARCHAR(200);
+ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS area VARCHAR(100);
+
+ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS catalog_id UUID;
+ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS stock_base_location VARCHAR(200);
+ALTER TABLE purchase_order_receipt_items ADD COLUMN IF NOT EXISTS stock_area VARCHAR(100);
