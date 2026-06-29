@@ -420,6 +420,9 @@ function bootApp() {
     else if (u.role === 'compras')            navigate('purchase_orders');
     else if (u.role === 'tesoreria')          navigate('tesoreria_panel');
     else if (u.role === 'proveedores')        navigate('proveedor_panel');
+    // Stock/Depósito arranca en su pantalla de Stock (no ve el panel ejecutivo,
+    // que muestra gastos y datos que no le corresponden).
+    else if (u.role === 'paniol')             navigate('stock');
     // Los roles que antes iban a 'encargado_panel' ahora van a 'dashboard'
     // (el panel unificado incluye la actividad del día al final).
     else if (u.role === 'mecanico')           navigate('dashboard');
