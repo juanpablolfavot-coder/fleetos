@@ -666,6 +666,20 @@ router.post('/:id/facturas/:fid/pagos-multiple', authenticate, requireRole(...RO
 
     const pagado = +(pagadoActual + totalInstrumentos).toFixed(2);
     const saldoRestante = Math.max(0, +(totalFactura - pagado).toFixed(2));
+
+    // Auditoría fuerte: pago combinado — saldo antes/después, instrumentos y montos.
+    await auditChange(req, res, {
+      action: 'pago_combinado', table: 'payments', recordId: req.params.fid,
+      oldValue: { invoice_id: req.params.fid, pagado_antes: pagadoActual, total_factura: totalFactura },
+      newValue: {
+        instrumentos: instrumentos.length,
+        metodos: instrumentos.map(it => it.metodo),
+        monto_total: totalInstrumentos,
+        pagado_despues: pagado,
+        saldo_restante: saldoRestante,
+      },
+    });
+
     res.status(201).json({
       factura_pagada: saldoRestante <= 0.01,
       instrumentos_registrados: instrumentos.length,
@@ -694,7 +708,7 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
     await ensurePaymentEngine();
     await client.query('BEGIN');
     const p = await client.query(
-      'SELECT id, paid_by FROM purchase_order_payments WHERE id=$1::uuid AND invoice_id=$2::uuid FOR UPDATE',
+      'SELECT id, paid_by, monto, metodo FROM purchase_order_payments WHERE id=$1::uuid AND invoice_id=$2::uuid FOR UPDATE',
       [req.params.pid, req.params.fid]
     );
     if (!p.rows[0]) {
@@ -717,9 +731,25 @@ router.delete('/:id/facturas/:fid/pagos/:pid', authenticate, requireRole(...ROLE
         : 'La OC está rechazada: no admite cambios de pago.' });
     }
 
+    // Saldo pagado antes de anular (para la auditoría: de qué a qué queda).
+    const antes = await client.query(
+      'SELECT COALESCE(SUM(monto),0) AS pagado FROM purchase_order_payments WHERE invoice_id=$1::uuid',
+      [req.params.fid]
+    );
+    const pagadoAntes = parseFloat(antes.rows[0]?.pagado) || 0;
+    const montoAnulado = parseFloat(p.rows[0].monto) || 0;
+
     await client.query('DELETE FROM purchase_order_payments WHERE id=$1::uuid', [req.params.pid]);
     await recalcPagoFacturaYOC(client, req.params.fid);
     await client.query('COMMIT');
+
+    // Auditoría fuerte: anulación de pago — instrumento, monto y saldo antes/después.
+    await auditChange(req, res, {
+      action: 'pago_anulado', table: 'payments', recordId: req.params.fid,
+      oldValue: { pago_id: req.params.pid, monto: montoAnulado, metodo: p.rows[0].metodo, pagado_antes: pagadoAntes },
+      newValue: { pagado_despues: +(pagadoAntes - montoAnulado).toFixed(2) },
+    });
+
     res.json({ ok: true, message: 'Pago anulado' });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
