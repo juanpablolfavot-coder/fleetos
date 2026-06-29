@@ -16,7 +16,7 @@ async function migrate() {
     // triggers de pagos y de auto-estado de entrega) quedaban afuera y faltaban en
     // una base recién creada. Todos son idempotentes (IF NOT EXISTS / CREATE OR REPLACE
     // / DROP TRIGGER IF EXISTS), así que es seguro correrlos sobre una base ya viva.
-    const sqlFiles = ['schema.sql', '01-compras.sql', '02-pagos.sql', '03-status-auto.sql', '04-workflow.sql', '05-workflow-cerrada.sql', '06-stock-catalog.sql', '07-fks-indexes.sql', '08-oc-status-check.sql'];
+    const sqlFiles = ['schema.sql', '01-compras.sql', '02-pagos.sql', '03-status-auto.sql', '04-workflow.sql', '05-workflow-cerrada.sql', '06-stock-catalog.sql', '07-fks-indexes.sql', '08-oc-status-check.sql', '09-oc-status-triggers.sql'];
     for (const file of sqlFiles) {
       const full = path.join(__dirname, file);
       if (!fs.existsSync(full)) { console.log(`  (omitido, no existe: ${file})`); continue; }

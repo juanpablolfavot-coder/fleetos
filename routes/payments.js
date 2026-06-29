@@ -73,6 +73,41 @@ function ensurePaymentEngine() {
     FROM ultimo_pago u
     WHERE p.id = u.id;
 
+    -- Función ÚNICA de transición de estado OC (auditoría P1, Opción B).
+    -- Ambos triggers (pago + entrega) y el recálculo masivo de abajo delegan acá,
+    -- así no hay dos CASE divergentes. Se define en cada boot porque migrate.js no
+    -- corre automáticamente en el deploy; la copia canónica está en
+    -- db/09-oc-status-triggers.sql para bases nuevas.
+    CREATE OR REPLACE FUNCTION po_resolve_status(
+      p_current  VARCHAR,
+      p_payment  VARCHAR,
+      p_delivery VARCHAR,
+      p_is_open  BOOLEAN
+    ) RETURNS VARCHAR AS $$
+    DECLARE
+      v_payment  VARCHAR := COALESCE(p_payment,  'pendiente');
+      v_delivery VARCHAR := COALESCE(p_delivery, 'pendiente');
+      v_is_open  BOOLEAN := COALESCE(p_is_open,  FALSE);
+    BEGIN
+      IF p_current IN ('rechazada','cerrada','dividida') THEN
+        RETURN p_current;
+      END IF;
+      IF v_payment = 'total' AND v_delivery = 'total' AND v_is_open = FALSE THEN
+        RETURN 'cerrada';
+      END IF;
+      IF v_delivery = 'total' THEN
+        RETURN 'recibida';
+      END IF;
+      IF v_payment = 'total' AND p_current IN ('aprobada_compras','enviada_proveedor','pagada','recibida') THEN
+        RETURN 'pagada';
+      END IF;
+      IF p_current IN ('pagada','recibida') THEN
+        RETURN 'enviada_proveedor';
+      END IF;
+      RETURN p_current;
+    END;
+    $$ LANGUAGE plpgsql IMMUTABLE;
+
     CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
     DECLARE
       v_invoice_id UUID;
@@ -83,6 +118,7 @@ function ensurePaymentEngine() {
       v_total_facturas_pagadas NUMERIC;
       v_po_status VARCHAR;
       v_delivery_status VARCHAR;
+      v_is_open BOOLEAN;
       v_payment_status VARCHAR;
     BEGIN
       IF TG_OP = 'DELETE' THEN
@@ -127,21 +163,14 @@ function ensurePaymentEngine() {
         ELSE 'parcial'
       END;
 
-      SELECT status, delivery_status INTO v_po_status, v_delivery_status
+      SELECT status, delivery_status, COALESCE(is_open, FALSE)
+        INTO v_po_status, v_delivery_status, v_is_open
       FROM purchase_orders
       WHERE id = v_po_id;
 
       UPDATE purchase_orders
       SET payment_status = v_payment_status,
-          status = CASE
-            WHEN v_po_status IN ('rechazada','cerrada') THEN v_po_status
-            WHEN v_payment_status = 'total' AND COALESCE(v_delivery_status,'pendiente') = 'total' AND COALESCE(is_open,FALSE) = FALSE THEN 'cerrada'
-            WHEN v_po_status = 'recibida' THEN 'recibida'
-            WHEN v_payment_status = 'total' AND v_po_status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
-            WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' AND COALESCE(v_delivery_status,'pendiente') = 'total' THEN 'recibida'
-            WHEN v_payment_status <> 'total' AND v_po_status = 'pagada' THEN 'enviada_proveedor'
-            ELSE status
-          END,
+          status = po_resolve_status(v_po_status, v_payment_status, v_delivery_status, v_is_open),
           pagado_at = CASE WHEN v_payment_status='total' THEN COALESCE(pagado_at, NOW()) ELSE NULL END,
           pagado_por = CASE WHEN v_payment_status='total' THEN COALESCE(pagado_por, (
             SELECT paid_by
@@ -160,6 +189,78 @@ function ensurePaymentEngine() {
     CREATE TRIGGER trg_recalc_invoice_payment
     AFTER INSERT OR UPDATE OR DELETE ON purchase_order_payments
     FOR EACH ROW EXECUTE FUNCTION recalc_invoice_payment();
+
+    -- El eje de ENTREGA también delega en po_resolve_status. Se recrea acá (no solo
+    -- en 03-status-auto.sql) para que la máquina de estados quede unificada en cada
+    -- boot, ya que migrate.js no corre automáticamente en el deploy.
+    CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
+    DECLARE
+      v_po_id UUID;
+      v_receipt_id UUID;
+      v_po_status VARCHAR;
+      v_payment_status VARCHAR;
+      v_total_pedido NUMERIC;
+      v_total_recibido NUMERIC;
+      v_delivery_status VARCHAR;
+      v_is_open BOOLEAN;
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        v_receipt_id := OLD.receipt_id;
+      ELSE
+        v_receipt_id := NEW.receipt_id;
+      END IF;
+
+      SELECT po_id INTO v_po_id
+      FROM purchase_order_receipts
+      WHERE id = v_receipt_id;
+
+      IF v_po_id IS NULL THEN
+        RETURN COALESCE(NEW, OLD);
+      END IF;
+
+      SELECT
+        COALESCE(SUM(poi.cantidad), 0),
+        COALESCE(SUM(rec.recibida), 0)
+      INTO v_total_pedido, v_total_recibido
+      FROM purchase_order_items poi
+      LEFT JOIN (
+        SELECT po_item_id, SUM(cantidad) AS recibida
+        FROM purchase_order_receipt_items
+        GROUP BY po_item_id
+      ) rec ON rec.po_item_id = poi.id
+      WHERE poi.po_id = v_po_id;
+
+      v_delivery_status := CASE
+        WHEN v_total_recibido <= 0 THEN 'pendiente'
+        WHEN v_total_pedido > 0 AND v_total_recibido >= v_total_pedido * 0.999 THEN 'total'
+        ELSE 'parcial'
+      END;
+
+      SELECT status, payment_status, COALESCE(is_open, FALSE)
+        INTO v_po_status, v_payment_status, v_is_open
+      FROM purchase_orders WHERE id = v_po_id;
+
+      -- OC abierta: nunca marca entrega 'total' automáticamente (se cierra a mano).
+      IF v_is_open AND v_delivery_status = 'total' THEN
+        v_delivery_status := 'parcial';
+      END IF;
+
+      UPDATE purchase_orders
+      SET delivery_status = v_delivery_status,
+          status = po_resolve_status(v_po_status, v_payment_status, v_delivery_status, v_is_open),
+          recibido_at = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_at, NOW()) ELSE recibido_at END,
+          recibido_en = CASE WHEN v_delivery_status = 'total' THEN COALESCE(recibido_en, NOW()) ELSE recibido_en END
+      WHERE id = v_po_id;
+
+      RETURN COALESCE(NEW, OLD);
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_recalc_delivery ON purchase_order_receipt_items;
+    DROP TRIGGER IF EXISTS trg_recalc_delivery_status_ins ON purchase_order_receipt_items;
+    CREATE TRIGGER trg_recalc_delivery_status_ins
+    AFTER INSERT OR UPDATE OR DELETE ON purchase_order_receipt_items
+    FOR EACH ROW EXECUTE FUNCTION recalc_delivery_status();
 
     -- Recalcular facturas existentes con pagos reales y total con IVA.
     WITH pagos AS (
@@ -202,15 +303,7 @@ function ensurePaymentEngine() {
     )
     UPDATE purchase_orders po
     SET payment_status = e.payment_status,
-        status = CASE
-          WHEN po.status IN ('rechazada','cerrada') THEN po.status
-          WHEN e.payment_status = 'total' AND COALESCE(po.delivery_status,'pendiente') = 'total' AND COALESCE(po.is_open,FALSE) = FALSE THEN 'cerrada'
-          WHEN po.status = 'recibida' THEN 'recibida'
-          WHEN e.payment_status = 'total' AND po.status IN ('aprobada_compras','enviada_proveedor','pagada') THEN 'pagada'
-          WHEN e.payment_status <> 'total' AND po.status = 'pagada' AND COALESCE(po.delivery_status,'pendiente') = 'total' THEN 'recibida'
-          WHEN e.payment_status <> 'total' AND po.status = 'pagada' THEN 'enviada_proveedor'
-          ELSE po.status
-        END
+        status = po_resolve_status(po.status, e.payment_status, po.delivery_status, COALESCE(po.is_open, FALSE))
     FROM estados e
     WHERE po.id = e.po_id;
   `).catch(err => {
