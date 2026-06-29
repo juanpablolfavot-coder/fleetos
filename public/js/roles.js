@@ -353,7 +353,7 @@ function getRoleData(role) {
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
-    paniol:                { label:'Stock / Depósito',                 badge:'role-stock',      modules:['stock','workorders','suppliers'], canEdit:['stock'] },
+    paniol:                { label:'Stock / Depósito',                 badge:'role-stock',      modules:['stock','purchase_orders'], canEdit:['stock'] },
     contador:              { label:'Administración',           badge:'role-contador',   modules:['dashboard','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel'], canEdit:['stock','purchase_orders'] },
     auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['auditor_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },

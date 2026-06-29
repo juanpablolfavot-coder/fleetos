@@ -526,7 +526,12 @@ router.get('/', authenticate, async (req, res) => {
       if (!req.user.sucursal) return res.json([]);
       params.push(req.user.sucursal);
       where.push(`po.sucursal = $${params.length}`);
-    } else if (['jefe_mantenimiento','paniol','contador'].includes(role)) {
+    } else if (role === 'paniol') {
+      // Stock/Depósito recibe mercadería: ve sus propias OCs + las que están por
+      // recibir (de cualquiera) para poder recibirlas y asignar el área. Sin precios.
+      params.push(userId);
+      where.push(`(po.requested_by = $${params.length} OR po.status = ANY('{enviada_proveedor,pagada,recibida}'))`);
+    } else if (['jefe_mantenimiento','contador'].includes(role)) {
       params.push(userId);
       where.push(`po.requested_by = $${params.length}`);
     }
@@ -692,7 +697,13 @@ router.get('/:id', authenticate, async (req, res) => {
       if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
         return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
       }
-    } else if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
+    } else if (role === 'paniol') {
+      // Stock/Depósito: ve sus propias OCs o las que están por recibir (para recibir).
+      const recibibles = ['enviada_proveedor','pagada','recibida'];
+      if (oc.requested_by !== userId && !recibibles.includes(oc.status)) {
+        return res.status(403).json({ error: 'Solo podés ver tus OCs o las que están por recibir' });
+      }
+    } else if (['jefe_mantenimiento','contador'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
     }
     // Rol proveedores: personal interno que carga facturas de cualquier proveedor.
