@@ -507,7 +507,7 @@ router.get('/', authenticate, async (req, res) => {
     const role = req.user.role;
     const userId = req.user.id;
 
-    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores','gerente_sucursal'];
+    const rolesPermitidos = ['dueno','gerencia','jefe_mantenimiento','compras','tesoreria','contador','auditor','proveedores','gerente_sucursal','paniol'];
     if (!rolesPermitidos.includes(role)) {
       return res.status(403).json({ error: 'No tenés permiso para ver órdenes de compra' });
     }
@@ -764,7 +764,13 @@ router.get('/:id/presupuesto', authenticate, async (req, res) => {
       if (!req.user.sucursal || oc.sucursal !== req.user.sucursal) {
         return res.status(403).json({ error: 'Solo podés ver OCs de tu sucursal' });
       }
-    } else if (['jefe_mantenimiento','paniol','contador'].includes(role) && oc.requested_by !== userId) {
+    } else if (role === 'paniol') {
+      // Mismo criterio que el detalle: sus propias OCs o las que están por recibir.
+      const recibibles = ['enviada_proveedor','pagada','recibida'];
+      if (oc.requested_by !== userId && !recibibles.includes(oc.status)) {
+        return res.status(403).json({ error: 'Solo podés ver tus OCs o las que están por recibir' });
+      }
+    } else if (['jefe_mantenimiento','contador'].includes(role) && oc.requested_by !== userId) {
       return res.status(403).json({ error: 'Solo podés ver las OCs que creaste vos' });
     }
 
