@@ -233,7 +233,7 @@
                     else if (f.por_vencer) { vencColor = 'color:var(--warn);font-weight:700'; }
                     const condicionOC = formaPagoLabel(f.oc_forma_pago || f.condicion_forma_pago || f.forma_pago, f.oc_cc_dias ?? f.condicion_cc_dias ?? f.cc_dias);
                     const condicionFactura = formaPagoLabel(f.forma_pago || f.oc_forma_pago, f.cc_dias ?? f.oc_cc_dias);
-                    const accion = estadoPagoFactura(f) === 'pagadas' ? 'Ver pagos' : '💳 Pagar';
+                    const tieneSaldo = saldoFactura(f) > 0.01;
                     return `
                     <tr>
                       <td>${badgeEstadoPago(f)}</td>
@@ -257,8 +257,9 @@
                       <td style="text-align:right">$${fmt(totalFacturaConIva(f))}</td>
                       <td style="text-align:right;color:${pagadoFactura(f)>0?'var(--ok)':'var(--text3)'}">$${fmt(pagadoFactura(f))}</td>
                       <td style="text-align:right;color:${saldoFactura(f)>0.01?'var(--warn)':'var(--ok)'};font-weight:700">$${fmt(saldoFactura(f))}</td>
-                      <td style="text-align:center">
-                        <button class="btn btn-primary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">${accion}</button>
+                      <td style="text-align:center;white-space:nowrap">
+                        <button class="btn btn-secondary btn-sm" onclick="abrirModalPago('${f.po_id}','${f.id}')">👁 Ver detalle</button>
+                        ${tieneSaldo ? `<button class="btn btn-primary btn-sm" style="margin-left:6px" onclick="abrirModalPago('${f.po_id}','${f.id}')">💳 Pagar</button>` : ''}
                       </td>
                     </tr>`;
                   }).join('')}
