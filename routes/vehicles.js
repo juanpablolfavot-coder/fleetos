@@ -133,6 +133,12 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
       [req.params.id]
     );
     if (!v.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+    // Gerente de sucursal: solo puede ver vehículos de su sucursal (mismo criterio
+    // que el listado, que filtra por v.base = su sucursal).
+    const sucursalAsignada = String(req.user?.sucursal || '').trim();
+    if (req.user?.role === 'gerente_sucursal' && sucursalAsignada && v.rows[0].base !== sucursalAsignada) {
+      return res.status(403).json({ error: 'Solo podés ver vehículos de tu sucursal' });
+    }
     res.json(v.rows[0]);
   } catch (err) {
     console.error('GET vehicle error:', err.message);
