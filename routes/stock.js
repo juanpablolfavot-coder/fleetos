@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { pool, query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
+const { auditChange } = require('../middleware/audit');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 
 // Depósito por sucursal y área.
@@ -443,6 +444,12 @@ router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO)
       `INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [req.params.id, tipo, tipo === 'Ajuste' ? nueva : qty, reason || `${tipo} de stock`, base_location, area, req.user.id]);
     await client.query('COMMIT');
+    // Auditoría fuerte: saldo de la ubicación antes→después + tipo de movimiento.
+    await auditChange(req, res, {
+      action: `stock_${tipo.toLowerCase()}`, table: 'stock', recordId: req.params.id,
+      oldValue: { base_location, area, qty_current: actual },
+      newValue: { base_location, area, qty_current: nueva, qty: qty, reason: reason || null },
+    });
     res.json({ ok: true, catalog_id: req.params.id, base_location, area, qty_current: nueva });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

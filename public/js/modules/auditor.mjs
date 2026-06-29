@@ -772,6 +772,26 @@ async function cargarMasAuditLog() {
   _auditLogRender();
 }
 
+// Formatea la columna "Cambio": valor anterior → posterior (auditoría fuerte),
+// o solo el nuevo valor si no hay anterior (auditoría global).
+function _auditCambio(l) {
+  const fmt = (v) => {
+    if (v == null) return '';
+    let o = v;
+    if (typeof v === 'string') { try { o = JSON.parse(v); } catch (e) { return escapeHtml(v); } }
+    if (o && typeof o === 'object') {
+      return Object.entries(o).map(([k, val]) => `${escapeHtml(k)}: ${escapeHtml(String(val))}`).join(', ');
+    }
+    return escapeHtml(String(o));
+  };
+  const oldV = l.old_value, newV = l.new_value;
+  if (oldV != null && newV != null) {
+    return `<span style="color:var(--text3)">${fmt(oldV)}</span> → <span style="color:var(--text)">${fmt(newV)}</span>`;
+  }
+  if (newV != null) return fmt(newV);
+  return '—';
+}
+
 function _auditLogRender() {
   const el = _auditLog.el;
   if (!el) return;
@@ -799,7 +819,7 @@ function _auditLogRender() {
       </div>
       <div class="table-wrap">
         <table style="font-size:12px">
-          <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Tabla</th><th>Registro</th></tr></thead>
+          <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Tabla</th><th>Registro</th><th>Cambio</th></tr></thead>
           <tbody>${rows.map(l=>`<tr>
             <td class="td-mono">${new Date(l.created_at).toLocaleString('es-AR')}</td>
             <td>${l.user_name||'—'}</td>
@@ -807,6 +827,7 @@ function _auditLogRender() {
             <td style="color:${l.action==='DELETE'||l.action==='DEACTIVATE'?'var(--danger)':l.action==='CREATE'?'var(--ok)':'var(--text)'}">${l.action}</td>
             <td class="td-mono">${l.table_name||'—'}</td>
             <td class="td-mono" style="color:var(--text3)">${l.record_id?.slice(0,8)||'—'}</td>
+            <td style="font-size:11px;color:var(--text2);max-width:340px">${_auditCambio(l)}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>

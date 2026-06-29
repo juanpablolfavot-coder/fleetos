@@ -12,6 +12,7 @@ const express = require('express');
 const router  = express.Router({ mergeParams: true });
 const { pool, query } = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { auditChange } = require('../middleware/audit');
 const { mailEnabled, sendMail } = require('../services/mailer');
 const { buildReciboPdf } = require('../services/recibo-pdf');
 
@@ -526,6 +527,13 @@ router.post('/:id/facturas/:fid/pagos', authenticate, requireRole(...ROLES_PAGAR
     const total = parseFloat(factData.invoice_total) || 0;
     const pagado = parseFloat(factData.monto_pagado) || 0;
     const saldoRestante = Math.max(0, +(total - pagado).toFixed(2));
+
+    // Auditoría fuerte: cuánto estaba pagado antes y después (detecta doble pago).
+    await auditChange(req, res, {
+      action: 'pago_registrado', table: 'payments', recordId: ins.rows[0].id,
+      oldValue: { invoice_id: req.params.fid, pagado_antes: pagadoActual, total_factura: totalFactura },
+      newValue: { monto, metodo: b.metodo, pagado_despues: pagado, saldo_restante: saldoRestante },
+    });
 
     res.status(201).json({
       ...ins.rows[0],

@@ -131,6 +131,9 @@ const auditOnly = (req, res, next) => {
       user_agent VARCHAR(200),
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    // Auditoría fuerte: valor anterior (para saber DE QUÉ a qué cambió, no solo
+    // el cuerpo del request). Lo usa auditChange() en mutaciones sensibles.
+    await query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS old_value JSONB`).catch(()=>{});
   } catch(e) { /* tabla ya existe */ }
 })();
 
