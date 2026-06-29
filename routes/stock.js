@@ -467,7 +467,11 @@ router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO)
 //  origen, queda "en tránsito") → la sucursal confirma la recepción (suma al
 //  destino, puede ajustar la cantidad recibida).
 // ════════════════════════════════════════════════════════════════════
-const ROLES_DISPATCH_SEND = ['dueno', 'gerencia', 'jefe_mantenimiento'];
+// Despachar entre sucursales: además de los roles centrales, lo pueden hacer los
+// que manejan el depósito de una sucursal (pañolero, gerente_sucursal) y contaduría.
+// El origen siempre sale del stock que el usuario ya ve (la API scopea por sucursal/área),
+// así que cada uno solo puede despachar lo que tiene.
+const ROLES_DISPATCH_SEND = ['dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'gerente_sucursal', 'contador'];
 const ROLES_DISPATCH_RECV = ['dueno', 'gerencia', 'gerente_sucursal', 'paniol'];
 
 let dispatchReady = false;
