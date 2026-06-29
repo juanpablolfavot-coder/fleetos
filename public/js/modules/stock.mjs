@@ -479,7 +479,7 @@ async function saveEditCatalogItem(id) {
 }
 
 // ── Despacho Central → Sucursal con recepción (Fase 3) ──
-function _stockCanSend() { return userHasRole('dueno', 'gerencia', 'jefe_mantenimiento'); }
+function _stockCanSend() { return userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'gerente_sucursal', 'contador'); }
 function _stockCanReceive() { return userHasRole('dueno', 'gerencia', 'gerente_sucursal', 'paniol'); }
 
 function openDispatchModal(catalogId, fromLoc, fromArea, available) {
