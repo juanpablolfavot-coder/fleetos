@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
+const { auditChange } = require('../middleware/audit');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 
 const VEHICLE_TYPES = ['camion','tractor','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
@@ -233,11 +234,19 @@ router.patch('/:id/km', authenticate, requireRole('dueno','gerencia','jefe_mante
   try {
     const km = toIntOrNull(req.body.km);
     if (km === null) return res.status(400).json({ error: 'Km / horas inválido' });
+    // Auditoría fuerte: guardamos el km anterior para dejar rastro de DE QUÉ a qué cambió.
+    const prev = await query('SELECT km_current FROM vehicles WHERE id = $1', [req.params.id]);
+    if (!prev.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+    const kmAnterior = prev.rows[0].km_current;
     const result = await query(
       'UPDATE vehicles SET km_current = $1 WHERE id = $2 RETURNING id, code, km_current',
       [km, req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
+    await auditChange(req, res, {
+      action: 'km_update', table: 'vehicles', recordId: req.params.id,
+      oldValue: { km_current: kmAnterior }, newValue: { km_current: km },
+    });
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Error al actualizar km / horas' });

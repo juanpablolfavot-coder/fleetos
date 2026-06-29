@@ -79,4 +79,34 @@ const auditMutations = (req, res, next) => {
   next();
 };
 
-module.exports = { auditMutations, redactBody };
+// ───────────────────────────────────────────────────────────
+//  Auditoría FUERTE para mutaciones sensibles (km, stock, pagos, OC).
+//  A diferencia del logger global (que guarda el cuerpo del request como
+//  new_value), esto registra el VALOR ANTERIOR y el posterior reales —para
+//  poder reconstruir de qué a qué cambió y detectar manipulaciones—.
+//  Marca res.locals._audited para que el logger global no duplique.
+// ───────────────────────────────────────────────────────────
+async function auditChange(req, res, { action, table, recordId = null, oldValue = null, newValue = null }) {
+  try {
+    if (res && res.locals) res.locals._audited = true;
+    await query(
+      `INSERT INTO audit_log (user_id, user_name, action, table_name, record_id, old_value, new_value, ip_address, user_agent)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        req.user?.id || null,
+        req.user?.name || null,
+        String(action).slice(0, 50),
+        String(table).slice(0, 100),
+        recordId,
+        oldValue != null ? JSON.stringify(oldValue) : null,
+        newValue != null ? JSON.stringify(newValue) : null,
+        req.ip,
+        (req.headers['user-agent'] || '').substring(0, 200),
+      ]
+    );
+  } catch (e) {
+    console.error('[auditChange]', e.message);
+  }
+}
+
+module.exports = { auditMutations, redactBody, auditChange };
