@@ -9194,7 +9194,7 @@ async function renderSuppliers() {
   const root = document.getElementById('page-suppliers');
   if (!root) return;
 
-  const canCreate = ['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role);
+  const canCreate = ['dueno','gerencia','paniol','proveedores'].includes(App.currentUser?.role);
 
   root.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
@@ -9409,7 +9409,7 @@ function _supRenderRow(s) {
       <button class="btn btn-secondary btn-sm" onclick="openSupplierDetail('${s.id}')">Ver</button>
       ${['dueno','gerencia','compras','contador','tesoreria'].includes(App.currentUser?.role) ?
         `<button class="btn btn-secondary btn-sm" onclick="verCuentaProveedor('${s.id}')" style="margin-left:4px">📒 Cuenta</button>` : ''}
-      ${['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role) ?
+      ${['dueno','gerencia','paniol','proveedores'].includes(App.currentUser?.role) ?
         `<button class="btn btn-secondary btn-sm" onclick="openEditSupplierModal('${s.id}')" style="margin-left:4px">Editar</button>` : ''}
     </td>
   </tr>`;
@@ -9799,7 +9799,7 @@ async function openSupplierDetail(id) {
     body,
     [
       { label: 'Cerrar', cls: 'btn-secondary', fn: closeModal },
-      ...(['dueno','gerencia','jefe_mantenimiento','paniol','proveedores'].includes(App.currentUser?.role) ?
+      ...(['dueno','gerencia','paniol','proveedores'].includes(App.currentUser?.role) ?
         [{ label: '✎ Editar', cls: 'btn-primary', fn: () => { closeModal(); openEditSupplierModal(id); } }] : []),
     ]
   );
