@@ -97,11 +97,11 @@ function _renderStockCatalog() {
         // sin filtro, el total global se colorea según el estado.
         const totalColor = locActive ? 'var(--text1)' : `var(--${st})`;
         const ubis = _stockBalChips(a, num, locActive ? matchLoc : null);
-        return `<tr>
-          <td class="td-mono td-main">${escapeHtml(a.code)}</td>
-          <td>${escapeHtml(a.name)}</td>
+        return `<tr class="sc-row sc-${st}">
+          <td><span class="sc-code">${escapeHtml(a.code)}</span></td>
+          <td><span class="sc-name">${escapeHtml(a.name)}</span></td>
           <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${escapeHtml(a.category)}</span></td>
-          <td class="td-mono" style="color:${totalColor};font-weight:600;white-space:nowrap">${total} ${escapeHtml(a.unit)}</td>
+          <td><span class="sc-qty" style="color:${totalColor}">${total}<small>${escapeHtml(a.unit)}</small></span></td>
           <td>${ubis}</td>
           <td><span class="badge badge-${st}">${stLbl}</span></td>
           <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="_toggleCatDetail('${a.id}')">Mover ▾</button></td>
@@ -150,7 +150,7 @@ function _renderStockCatalog() {
     </div>
     ${view === 'sucursal'
       ? _renderStockPorSucursal(all, num)
-      : `<div class="card" style="padding:0"><div class="table-wrap"><table>
+      : `<div class="card" style="padding:0"><div class="table-wrap"><table class="stock-cat-table">
       <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>${locActive ? 'Stock acá' : 'Stock total'}</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`}
@@ -302,12 +302,12 @@ function _stockBalChips(a, num, locFilter) {
   // Con filtro de ubicación activo, mostrar solo los chips que entran en el scope.
   if (typeof locFilter === 'function') conStock = conStock.filter(locFilter);
   conStock = conStock.sort((x, y) => num(y.qty_current) - num(x.qty_current));
-  if (!conStock.length) return '<span style="color:var(--text3);font-size:12px">sin stock</span>';
-  const chips = conStock.map((b) => `<span style="display:inline-flex;align-items:baseline;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:2px 8px;font-size:11px;line-height:1.5;white-space:nowrap">
+  if (!conStock.length) return '<span class="sc-nostock">sin stock</span>';
+  const chips = conStock.map((b) => `<span class="sc-chip">
       <span style="color:var(--text3)">${escapeHtml(_stockShortLoc(b.base_location))} · ${escapeHtml(b.area)}</span>
-      <b style="color:var(--text1)">${num(b.qty_current)}</b>
+      <b>${num(b.qty_current)}</b>
     </span>`).join('');
-  return `<div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>`;
 }
 
 // Detalle por sucursal/área (saldos + acciones) que se despliega INLINE en la
