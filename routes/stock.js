@@ -118,6 +118,10 @@ function applyStockScope(req, params, sqlParts, tableAlias = '') {
   }
 }
 function userArea(req) {
+  // El jefe de mantenimiento gestiona exclusivamente el stock del Taller,
+  // sin importar el área que tenga cargada su usuario. Esto lo scopea parejo
+  // en lecturas (catálogo/movimientos) y escrituras (ingresos/egresos/ajustes).
+  if (req.user?.role === 'jefe_mantenimiento') return 'Taller';
   return cleanNullable(req.user?.area);
 }
 // Scope de saldos por sucursal + área:

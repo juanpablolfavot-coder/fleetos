@@ -235,7 +235,7 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
 });
 
 // POST /api/suppliers — crear
-router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','paniol','proveedores'), auditAction('CREATE','suppliers'), async (req, res) => {
+router.post('/', authenticate, requireRole('dueno','gerencia','paniol','proveedores'), auditAction('CREATE','suppliers'), async (req, res) => {
   try {
     const b = normalizeSupplierPayload(req.body);
     if (!b.name) return res.status(400).json({ error: 'El nombre es obligatorio' });
@@ -285,7 +285,7 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
 });
 
 // PUT /api/suppliers/:id — actualizar
-router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','paniol','proveedores'), validateUUID('id'), auditAction('UPDATE','suppliers'), async (req, res) => {
+router.put('/:id', authenticate, requireRole('dueno','gerencia','paniol','proveedores'), validateUUID('id'), auditAction('UPDATE','suppliers'), async (req, res) => {
   try {
     const b = normalizeSupplierPayload(req.body);
 

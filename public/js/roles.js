@@ -349,7 +349,7 @@ function getRoleData(role) {
   const roles = {
     dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
     gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
-    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
+    jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['dashboard','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['encargado_panel','dashboard','fuel'], canEdit:['fuel'] },
