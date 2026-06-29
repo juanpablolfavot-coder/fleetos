@@ -651,3 +651,32 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 .page .fleet-unit.danger, .page .tire-pos.danger { color: var(--danger); }
 .page .kpi-value.info, .page .badge-info { color: var(--info); }
 .page .badge-purple { color: var(--purple); }
+
+/* ─────────────────────────────────────────
+   STOCK — catálogo con look de tarjetas
+   Filas con más aire, acento de estado a la izquierda, código en chip
+   y cantidad con tipografía clara. Scopeado a .stock-cat-table para no
+   afectar al resto de las tablas.
+   ───────────────────────────────────────── */
+.stock-cat-table td { padding: 14px 12px; vertical-align: middle; }
+.stock-cat-table tr.sc-row td:first-child { box-shadow: inset 4px 0 0 var(--border2); }
+.stock-cat-table tr.sc-row.sc-ok     td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
+.stock-cat-table tr.sc-row.sc-warn   td:first-child { box-shadow: inset 4px 0 0 var(--warn); }
+.stock-cat-table tr.sc-row.sc-danger td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.stock-cat-table tr.sc-row:hover td { background: var(--bg3); }
+.sc-code {
+  display: inline-block; font-family: var(--mono); font-size: 12px; font-weight: 600;
+  color: var(--text2); background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px; white-space: nowrap;
+}
+.sc-name { color: var(--text); font-weight: 600; font-size: 13.5px; }
+.sc-qty { font-family: var(--mono); font-weight: 700; font-size: 15px; white-space: nowrap; }
+.sc-qty small { font-weight: 500; color: var(--text3); font-size: 11px; margin-left: 3px; }
+.sc-nostock { color: var(--text3); font-size: 12px; font-style: italic; }
+/* Chips de ubicación (sucursal · área) */
+.sc-chip {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 10px; font-size: 11px; line-height: 1.5; white-space: nowrap;
+}
+.sc-chip b { color: var(--text); font-family: var(--mono); }
