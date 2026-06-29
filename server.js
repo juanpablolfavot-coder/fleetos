@@ -29,6 +29,9 @@ process.on('uncaughtException', (e) => {
 });
 
 require('dotenv').config();
+// P0 — validar variables de entorno ANTES de cargar módulos que las usan
+// (db/pool lee DATABASE_URL al requerirse; auth usa JWT_SECRET).
+require('./config/env').validateEnv();
 const express=require('express');
 const helmet=require('helmet');
 const cors=require('cors');
@@ -269,4 +272,17 @@ httpServer = app.listen(PORT, () => {
   console.log('FleetOS OK port', PORT);
   // Iniciar sync GPS con Powerfleet cada 5 minutos
   startGPSSync(5);
+
+  // P7 — limpieza global periódica de refresh tokens vencidos. El refresh por
+  // usuario solo borra los suyos; los de dispositivos abandonados quedaban
+  // acumulándose. Corre al arranque y cada 6 horas. Aditivo y seguro: los
+  // tokens vencidos ya no validan, solo se purga la tabla.
+  const { query } = require('./db/pool');
+  const purgeExpiredTokens = () => {
+    query('DELETE FROM refresh_tokens WHERE expires_at < NOW()')
+      .then((r) => { if (r.rowCount) console.log(`[tokens] purgados ${r.rowCount} refresh tokens vencidos`); })
+      .catch((e) => console.error('[tokens] purga falló:', e.message));
+  };
+  purgeExpiredTokens();
+  setInterval(purgeExpiredTokens, 6 * 60 * 60 * 1000);
 });
