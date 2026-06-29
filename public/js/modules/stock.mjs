@@ -48,30 +48,60 @@ function _renderStockCatalog() {
   const page = document.getElementById('page-stock');
   if (!page) return;
   const all = App.data.stockCatalog || [];
-  const f = (App.stockCatFilter = App.stockCatFilter || { cat: 'all', q: '' });
+  const f = (App.stockCatFilter = App.stockCatFilter || { cat: 'all', q: '', suc: 'all', area: 'all' });
+  // Compatibilidad con estados viejos sin suc/area.
+  if (f.suc === undefined) f.suc = 'all';
+  if (f.area === undefined) f.area = 'all';
   const num = (v) => parseFloat(v) || 0;
   const cats = [...new Set(all.map((a) => a.category).filter(Boolean))].sort();
+
+  // Sucursales y áreas disponibles (derivadas de los saldos que el usuario ve).
+  // El backend ya scopea por rol; acá solo armamos las opciones del filtro visual.
+  const sucs = [...new Set(all.flatMap((a) => (a.balances || []).map((b) => b.base_location)).filter(Boolean))].sort();
+  const areasForSel = [...new Set(all.flatMap((a) => (a.balances || [])
+    .filter((b) => f.suc === 'all' || b.base_location === f.suc)
+    .map((b) => b.area)).filter(Boolean))].sort();
+
+  // Filtro por ubicación: ¿este saldo entra en la sucursal/área elegida?
+  const matchLoc = (b) => {
+    if (f.suc !== 'all' && b.base_location !== f.suc) return false;
+    if (f.area !== 'all' && b.area !== f.area) return false;
+    return true;
+  };
+  const locActive = f.suc !== 'all' || f.area !== 'all';
+  // Stock dentro del scope elegido (cuando hay filtro de ubicación); si no, el total global.
+  const scopedTotalOf = (a) => locActive
+    ? (a.balances || []).filter(matchLoc).reduce((s, b) => s + num(b.qty_current), 0)
+    : num(a.total);
+
   const items = all.filter((a) => {
     if (f.cat !== 'all' && a.category !== f.cat) return false;
     if (f.q) { const q = f.q.toLowerCase(); if (!((a.code || '').toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q) || (a.supplier || '').toLowerCase().includes(q))) return false; }
+    // Con filtro de ubicación, solo se listan los artículos que TIENEN stock ahí.
+    if (locActive && !(a.balances || []).some((b) => matchLoc(b) && num(b.qty_current) > 0)) return false;
     return true;
   });
   const criticos = items.filter((a) => a.is_critical).length;
-  const valor = items.reduce((s, a) => s + num(a.total) * num(a.unit_cost), 0);
+  const valor = items.reduce((s, a) => s + scopedTotalOf(a) * num(a.unit_cost), 0);
   const canManage = typeof stockCanManage === 'function' ? stockCanManage() : userHasRole('dueno', 'gerencia', 'jefe_mantenimiento', 'paniol', 'contador', 'gerente_sucursal');
 
   const rows = items.length === 0
     ? '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--text3)">Sin artículos con esos filtros.' + (canManage ? ' Usá <b>+ Nuevo artículo</b>.' : '') + '</td></tr>'
     : items.map((a) => {
-        const total = num(a.total);
-        const st = a.is_critical ? 'danger' : (num(a.qty_min) > 0 && total <= num(a.qty_min) * 1.5 ? 'warn' : 'ok');
+        // El badge de Estado refleja la salud GLOBAL del artículo (vs su mínimo),
+        // no la del área filtrada — así no aparecen falsos "Crítico" por área.
+        const st = a.is_critical ? 'danger' : (num(a.qty_min) > 0 && num(a.total) <= num(a.qty_min) * 1.5 ? 'warn' : 'ok');
         const stLbl = st === 'danger' ? 'Crítico' : st === 'warn' ? 'Bajo' : 'Normal';
-        const ubis = _stockBalChips(a, num);
+        const total = scopedTotalOf(a);
+        // Con filtro de ubicación el número es "lo que hay acá" → color neutro;
+        // sin filtro, el total global se colorea según el estado.
+        const totalColor = locActive ? 'var(--text1)' : `var(--${st})`;
+        const ubis = _stockBalChips(a, num, locActive ? matchLoc : null);
         return `<tr>
           <td class="td-mono td-main">${escapeHtml(a.code)}</td>
           <td>${escapeHtml(a.name)}</td>
           <td><span class="tag" style="background:var(--bg4);color:var(--text2)">${escapeHtml(a.category)}</span></td>
-          <td class="td-mono" style="color:var(--${st});font-weight:600;white-space:nowrap">${total} ${escapeHtml(a.unit)}</td>
+          <td class="td-mono" style="color:${totalColor};font-weight:600;white-space:nowrap">${total} ${escapeHtml(a.unit)}</td>
           <td>${ubis}</td>
           <td><span class="badge badge-${st}">${stLbl}</span></td>
           <td style="white-space:nowrap"><button class="btn btn-secondary btn-sm" onclick="_toggleCatDetail('${a.id}')">Mover ▾</button></td>
@@ -81,6 +111,21 @@ function _renderStockCatalog() {
 
   const catOpts = [`<option value="all"${f.cat === 'all' ? ' selected' : ''}>Categoría: todas</option>`]
     .concat(cats.map((c) => `<option value="${escapeHtml(c)}"${f.cat === c ? ' selected' : ''}>${escapeHtml(c)}</option>`)).join('');
+
+  // Filtros de Sucursal y Área: solo se muestran si hay más de una opción
+  // (un pañolero que ve una sola área no necesita el desplegable).
+  const sucSelect = sucs.length > 1
+    ? `<select class="form-select" style="width:180px" onchange="App.stockCatFilter.suc=this.value;App.stockCatFilter.area='all';_renderStockCatalog()">
+        <option value="all"${f.suc === 'all' ? ' selected' : ''}>Sucursal: todas</option>
+        ${sucs.map((s) => `<option value="${escapeHtml(s)}"${f.suc === s ? ' selected' : ''}>${escapeHtml(_stockShortLoc(s))}</option>`).join('')}
+      </select>` : '';
+  const areaSelect = areasForSel.length > 1
+    ? `<select class="form-select" style="width:160px" onchange="App.stockCatFilter.area=this.value;_renderStockCatalog()">
+        <option value="all"${f.area === 'all' ? ' selected' : ''}>Área: todas</option>
+        ${areasForSel.map((s) => `<option value="${escapeHtml(s)}"${f.area === s ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+      </select>` : '';
+  // Texto del scope activo, para el subtítulo (ej. "Río Tercero · Taller").
+  const scopeLabel = [f.suc !== 'all' ? _stockShortLoc(f.suc) : null, f.area !== 'all' ? f.area : null].filter(Boolean).join(' · ');
 
   // Vista activa: catálogo (por artículo) o por sucursal (cada sucursal con su stock).
   const view = (App.stockView === 'sucursal') ? 'sucursal' : 'catalogo';
@@ -94,10 +139,10 @@ function _renderStockCatalog() {
       <div class="kpi-card ok"><div class="kpi-label">Valorización</div><div class="kpi-value ok">$${Math.round(valor).toLocaleString('es-AR')}</div><div class="kpi-trend">al costo actual</div></div>
     </div>
     <div class="section-header">
-      <div><div class="section-title">${view === 'sucursal' ? 'Stock por sucursal' : 'Catálogo de artículos'}</div><div class="section-sub">${view === 'sucursal' ? 'Cada sucursal con su stock' : 'Un artículo = un código único · saldo por sucursal/área'}</div></div>
+      <div><div class="section-title">${view === 'sucursal' ? 'Stock por sucursal' : 'Catálogo de artículos'}</div><div class="section-sub">${view === 'sucursal' ? 'Cada sucursal con su stock' : (locActive ? 'Mostrando solo: ' + escapeHtml(scopeLabel) : 'Un artículo = un código único · saldo por sucursal/área')}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${toggle}
-        ${view === 'catalogo' ? `<select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
+        ${view === 'catalogo' ? `${sucSelect}${areaSelect}<select class="form-select" style="width:200px" onchange="App.stockCatFilter.cat=this.value;_renderStockCatalog()">${catOpts}</select>
         <input class="form-input" style="max-width:240px" placeholder="Buscar código, artículo…" value="${escapeHtml(f.q || '')}" oninput="App.stockCatFilter.q=this.value;_renderStockCatalog()">` : ''}
         ${_stockCanSend() ? '<button class="btn btn-secondary btn-sm" onclick="openDispatchNew()">🚚 Despachar</button>' : ''}
         ${canManage ? '<button class="btn btn-primary btn-sm" onclick="openNewCatalogItem()">+ Nuevo artículo</button>' : ''}
@@ -106,7 +151,7 @@ function _renderStockCatalog() {
     ${view === 'sucursal'
       ? _renderStockPorSucursal(all, num)
       : `<div class="card" style="padding:0"><div class="table-wrap"><table>
-      <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>Stock total</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Código</th><th>Artículo</th><th>Categoría</th><th>${locActive ? 'Stock acá' : 'Stock total'}</th><th>Por sucursal/área</th><th>Estado</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div></div>`}
     ${_stockInlinePanels()}`;
@@ -252,9 +297,11 @@ function _renderMovementsInline(list) {
 function _stockShortLoc(s) {
   return String(s || '').replace(/\s*\([^)]*\)\s*/g, ' ').trim() || String(s || '');
 }
-function _stockBalChips(a, num) {
-  const conStock = (a.balances || []).filter((b) => num(b.qty_current) > 0)
-    .sort((x, y) => num(y.qty_current) - num(x.qty_current));
+function _stockBalChips(a, num, locFilter) {
+  let conStock = (a.balances || []).filter((b) => num(b.qty_current) > 0);
+  // Con filtro de ubicación activo, mostrar solo los chips que entran en el scope.
+  if (typeof locFilter === 'function') conStock = conStock.filter(locFilter);
+  conStock = conStock.sort((x, y) => num(y.qty_current) - num(x.qty_current));
   if (!conStock.length) return '<span style="color:var(--text3);font-size:12px">sin stock</span>';
   const chips = conStock.map((b) => `<span style="display:inline-flex;align-items:baseline;gap:5px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:2px 8px;font-size:11px;line-height:1.5;white-space:nowrap">
       <span style="color:var(--text3)">${escapeHtml(_stockShortLoc(b.base_location))} · ${escapeHtml(b.area)}</span>
