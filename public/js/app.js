@@ -282,7 +282,7 @@ function renderHome() {
   const nombre = (App.currentUser?.name || '').trim();
   el.innerHTML = `
     <div style="min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px">
-      <div style="width:140px;height:140px;border-radius:28px;background:var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 16px 48px rgba(234,88,12,.35)">
+      <div style="width:140px;height:140px;border-radius:28px;background:#ea580c;display:flex;align-items:center;justify-content:center;box-shadow:0 16px 48px rgba(234,88,12,.35)">
         <span style="font-size:64px;font-weight:800;color:#fff;letter-spacing:1px">EB</span>
       </div>
       <div>
