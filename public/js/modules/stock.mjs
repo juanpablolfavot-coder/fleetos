@@ -280,14 +280,23 @@ function _renderMovementsInline(list) {
   if (!list || !list.length) return '<div style="color:var(--text3);font-size:12px;text-align:center;padding:14px">Sin movimientos todavía.</div>';
   const color = (t) => t === 'Ingreso' ? 'ok' : t === 'Egreso' ? 'danger' : 'warn';
   const sign = (t) => t === 'Ingreso' ? '+' : t === 'Egreso' ? '−' : '±';
-  return list.map((m) => `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px">
+  return list.map((m) => {
+    // Detalle del movimiento: a dónde fue (OT vinculada o motivo del despacho/egreso)
+    // y el valor al costo actual. Así el historial dice "qué pasó" de un vistazo.
+    const cost = num(m.qty) * num(m.unit_cost);
+    const dest = m.wo_code ? ('🔧 OT ' + escapeHtml(m.wo_code)) : (m.reason ? escapeHtml(m.reason) : '');
+    const costStr = cost > 0 ? ('$' + Math.round(cost).toLocaleString('es-AR')) : '';
+    const detail = [dest, costStr].filter(Boolean).join(' · ');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px">
       <span class="badge badge-${color(m.type)}" style="min-width:62px;text-align:center">${sign(m.type)} ${num(m.qty)} ${escapeHtml(m.unit || '')}</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="td-mono" style="font-size:11px">${escapeHtml(m.code)}</span> · ${escapeHtml(m.name)}</div>
         <div style="color:var(--text3);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(_stockShortLoc(m.base_location))} · ${escapeHtml(m.area)}${m.user_name ? ' · ' + escapeHtml(m.user_name) : ''}</div>
+        ${detail ? `<div style="color:var(--text2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${detail}</div>` : ''}
       </div>
       <span style="color:var(--text3);font-size:11px;white-space:nowrap">${fmt(m.created_at)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // Chips compactos con el saldo por ubicación para la columna "Por sucursal/área".
