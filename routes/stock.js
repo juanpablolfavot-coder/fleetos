@@ -347,10 +347,12 @@ router.get('/catalog/movements', authenticate, async (req, res) => {
     const offsetParam = `$${params.length}`;
     const sql = `
       SELECT sm.id, sm.type, sm.qty, sm.reason, sm.base_location, sm.area, sm.created_at,
-             c.code, c.name, c.unit, u.name AS user_name
+             c.code, c.name, c.unit, c.unit_cost, u.name AS user_name,
+             wo.code AS wo_code
       FROM stock_movements sm
       JOIN stock_catalog c ON c.id = sm.catalog_id
       LEFT JOIN users u ON u.id = sm.user_id
+      LEFT JOIN work_orders wo ON wo.id = sm.wo_id
       WHERE sm.catalog_id IS NOT NULL ${sc.join('')}
       ORDER BY sm.created_at DESC
       LIMIT ${limitParam} OFFSET ${offsetParam}`;
