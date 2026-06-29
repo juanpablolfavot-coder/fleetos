@@ -771,9 +771,10 @@ fuelRouter.patch('/tanks/:id',authenticate,requireRole('dueno','gerencia','encar
 
 // ======= CUBIERTAS =======
 tireRouter.get('/',authenticate,async(req,res)=>{
-  try{const{status,vehicle_id}=req.query;let sql=`SELECT t.*,v.code AS vehicle_code FROM tires t LEFT JOIN vehicles v ON v.id=t.current_vehicle_id WHERE 1=1`;
-  const p=[];if(status){p.push(status);sql+=` AND t.status=$${p.length}`;}if(vehicle_id){p.push(vehicle_id);sql+=` AND t.current_vehicle_id=$${p.length}`;}
-  sql+=' ORDER BY t.serial_no';res.json((await query(sql,p)).rows);}catch(err){res.status(500).json({error:'Error cubiertas'});}
+  try{const{status,vehicle_id}=req.query;const ref={value:`SELECT t.*,v.code AS vehicle_code FROM tires t LEFT JOIN vehicles v ON v.id=t.current_vehicle_id WHERE 1=1`};
+  const p=[];if(status){p.push(status);ref.value+=` AND t.status=$${p.length}`;}if(vehicle_id){p.push(vehicle_id);ref.value+=` AND t.current_vehicle_id=$${p.length}`;}
+  _addVehicleBranchFilter(req,p,ref,'v'); // gerente de sucursal: solo cubiertas de vehículos de su sucursal
+  ref.value+=' ORDER BY t.serial_no';res.json((await query(ref.value,p)).rows);}catch(err){res.status(500).json({error:'Error cubiertas'});}
 });
 tireRouter.post('/',authenticate,requireRole('dueno','gerencia','jefe_mantenimiento'),async(req,res)=>{
   try{const{serial_no,brand,model,size,purchase_price,purchase_date,tread_depth}=req.body;
@@ -931,6 +932,11 @@ docRouter.get('/', authenticate, async (req, res) => {
     if (entity_type) { p.push(entity_type); sql += ` AND d.entity_type = $${p.length}`; }
     if (entity_id)   { p.push(entity_id);   sql += ` AND d.entity_id = $${p.length}`; }
     if (status)      { p.push(status);      sql += ` AND d.status = $${p.length}`; }
+    // Gerente de sucursal: solo documentos de vehículos de su sucursal o de
+    // usuarios de su sucursal (no-op para el resto de los roles).
+    const _ref = { value: sql };
+    _addTextBranchFilter(req, p, _ref, ['v.base', 'u.sucursal']);
+    sql = _ref.value;
     sql += ' ORDER BY d.expiry_date ASC';
     res.json((await query(sql, p)).rows);
   } catch(err) {
@@ -1210,13 +1216,15 @@ checklistRouter.get('/', authenticate, async (req, res) => {
   try {
     await ensureChecklistTable();
     const { date, vehicle_id, limit=50 } = req.query;
-    let sql = `SELECT * FROM checklists WHERE 1=1`;
+    const ref = { value: `SELECT c.* FROM checklists c LEFT JOIN vehicles v ON v.id = c.vehicle_id WHERE 1=1` };
     const params = [];
-    if (date) { params.push(date); sql += ` AND DATE(created_at)=$${params.length}`; }
-    if (vehicle_id) { params.push(vehicle_id); sql += ` AND vehicle_id=$${params.length}`; }
-    sql += ` ORDER BY created_at DESC LIMIT $${params.length+1}`;
+    if (date) { params.push(date); ref.value += ` AND DATE(c.created_at)=$${params.length}`; }
+    if (vehicle_id) { params.push(vehicle_id); ref.value += ` AND c.vehicle_id=$${params.length}`; }
+    // Gerente de sucursal: solo checklists de vehículos de su sucursal (no-op para el resto).
+    _addVehicleBranchFilter(req, params, ref, 'v');
+    ref.value += ` ORDER BY c.created_at DESC LIMIT $${params.length+1}`;
     params.push(parseInt(limit));
-    const r = await query(sql, params);
+    const r = await query(ref.value, params);
     res.json(r.rows);
   } catch(err) { res.status(500).json({error:'Error obtener checklists'}); }
 });
