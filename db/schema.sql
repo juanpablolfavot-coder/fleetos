@@ -853,6 +853,10 @@ FROM ultimo_pago u
 WHERE p.id = u.id;
 
 -- Trigger: recalcula el estado de pago sin pisar una OC ya recibida.
+-- ⚠ COPIA VIEJA de la máquina de estados: queda solo por compatibilidad histórica.
+-- La versión CANÓNICA vive en db/09-oc-status-triggers.sql (po_resolve_status) y
+-- migrate.js la aplica AL FINAL, pisando esta. NO correr este archivo suelto con
+-- psql: revivirías la lógica vieja (que además rompe el estado dividida).
 CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
 DECLARE
   v_invoice_id UUID;
@@ -998,6 +1002,10 @@ WHERE po.id = e.po_id;
 
 
 -- Trigger: recalcula estado de entrega. La entrega no espera pago.
+-- ⚠ COPIA VIEJA de la máquina de estados: queda solo por compatibilidad histórica.
+-- La versión CANÓNICA vive en db/09-oc-status-triggers.sql (po_resolve_status) y
+-- migrate.js la aplica AL FINAL, pisando esta. NO correr este archivo suelto con
+-- psql: revivirías la lógica vieja (que además rompe el estado dividida).
 CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
 DECLARE
   v_po_id UUID;

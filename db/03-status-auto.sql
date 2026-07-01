@@ -8,6 +8,10 @@
 -- ══════════════════════════════════════════════════════════════════════
 
 
+-- ⚠ COPIA VIEJA de la máquina de estados: queda solo por compatibilidad histórica.
+-- La versión CANÓNICA vive en db/09-oc-status-triggers.sql (po_resolve_status) y
+-- migrate.js la aplica AL FINAL, pisando esta. NO correr este archivo suelto con
+-- psql: revivirías la lógica vieja (que además rompe el estado dividida).
 CREATE OR REPLACE FUNCTION recalc_invoice_payment() RETURNS TRIGGER AS $$
 DECLARE
   v_invoice_id UUID;
@@ -148,6 +152,10 @@ SET payment_status = e.payment_status,
 FROM estados e
 WHERE po.id = e.po_id;
 
+-- ⚠ COPIA VIEJA de la máquina de estados: queda solo por compatibilidad histórica.
+-- La versión CANÓNICA vive en db/09-oc-status-triggers.sql (po_resolve_status) y
+-- migrate.js la aplica AL FINAL, pisando esta. NO correr este archivo suelto con
+-- psql: revivirías la lógica vieja (que además rompe el estado dividida).
 CREATE OR REPLACE FUNCTION recalc_delivery_status() RETURNS TRIGGER AS $$
 DECLARE
   v_po_id UUID;
