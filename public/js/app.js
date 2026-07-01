@@ -2227,11 +2227,8 @@ function _fuelMonthLabel(ym) {
 // elegido. El recorrido = diferencia entre la primera y la última lectura del
 // odómetro/horómetro de las cargas del mes (mismo método que el costo por km).
 // Hacen falta ≥2 lecturas para poder calcularlo.
-function _renderFuelKmTable() {
-  const cont = document.getElementById('fuel-km-body');
-  if (!cont) return;
-  const ym = App.fuelKmMonth;
-  if (!ym) { cont.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Sin cargas registradas.</div>'; return; }
+function _fuelKmRows(ym) {
+  if (!ym) return [];
   const [yy, mm] = ym.split('-').map(Number);
   const inSel = (d) => { const x = new Date(d); return !isNaN(x) && x.getFullYear() === yy && x.getMonth() + 1 === mm; };
   const logs = (App.data.fuelLogs || []).filter(f => inSel(f.date) && String(f.fuel_type || '').toLowerCase() !== 'urea');
@@ -2241,13 +2238,20 @@ function _renderFuelKmTable() {
     g.litros += (f.liters || 0); g.cargas++;
     if (f.km > 0) g.kms.push(f.km);
   });
-  const rows = Object.entries(byVeh).map(([code, g]) => {
+  return Object.entries(byVeh).map(([code, g]) => {
     const veh = (App.data.vehicles || []).find(v => v.code === code);
     const unit = (typeof isAutoelevador === 'function' && veh && isAutoelevador(veh)) ? 'h' : 'km';
     const kms = g.kms.slice().sort((a, b) => a - b);
     const recorrido = kms.length >= 2 ? (kms[kms.length - 1] - kms[0]) : null;
     return { code, unit, recorrido, litros: g.litros, cargas: g.cargas };
   }).sort((a, b) => (b.recorrido || 0) - (a.recorrido || 0) || String(a.code).localeCompare(String(b.code)));
+}
+function _renderFuelKmTable() {
+  const cont = document.getElementById('fuel-km-body');
+  if (!cont) return;
+  const ym = App.fuelKmMonth;
+  if (!ym) { cont.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Sin cargas registradas.</div>'; return; }
+  const rows = _fuelKmRows(ym);
   if (!rows.length) { cont.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Sin cargas de combustible en ' + _fuelMonthLabel(ym) + '.</div>'; return; }
   const totKm = rows.filter(r => r.unit === 'km').reduce((a, r) => a + (r.recorrido || 0), 0);
   const totLt = rows.reduce((a, r) => a + r.litros, 0);
@@ -2269,6 +2273,34 @@ function _renderFuelKmTable() {
     <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
       Total recorrido (vehículos): <b>${totKm.toLocaleString('es-AR')} km</b> · Litros del mes: <b>${Math.round(totLt).toLocaleString('es-AR')} L</b> · Las autoelevadoras se miden en horas (h).
     </div>`;
+}
+// Exporta a PDF la tabla de km/horas por unidad del mes elegido.
+function exportFuelKmPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { showToast?.('error', 'jsPDF no cargado. Refrescá la página.'); return; }
+  const ym = App.fuelKmMonth;
+  const rows = _fuelKmRows(ym);
+  if (!rows.length) { showToast('warn', 'No hay cargas en ' + _fuelMonthLabel(ym)); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const startY = _pdfHeader(doc, 'Km / horas por unidad — ' + _fuelMonthLabel(ym), `${rows.length} unidad${rows.length === 1 ? '' : 'es'} con cargas`);
+  const totKm = rows.filter(r => r.unit === 'km').reduce((a, r) => a + (r.recorrido || 0), 0);
+  const totLt = rows.reduce((a, r) => a + r.litros, 0);
+  const body = rows.map(r => [
+    r.code,
+    r.recorrido != null ? (r.recorrido.toLocaleString('es-AR') + ' ' + r.unit) : '— (1 lectura)',
+    Math.round(r.litros).toLocaleString('es-AR') + ' L',
+    String(r.cargas),
+  ]);
+  doc.autoTable({
+    startY,
+    head: [['Unidad', 'Km / Horas del mes', 'Litros', 'Cargas']],
+    body,
+    ..._pdfTableStyle(),
+    columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
+    foot: [['TOTAL (vehículos)', totKm.toLocaleString('es-AR') + ' km', Math.round(totLt).toLocaleString('es-AR') + ' L', '']],
+  });
+  doc.save(`Km-por-unidad-Biletta-${ym}.pdf`);
+  showToast('ok', 'PDF descargado');
 }
 function renderFuel() {
   // Reset de paginación al entrar a la pantalla (el "Ver más" trae del backend).
@@ -2427,17 +2459,6 @@ function renderFuel() {
       `}
     </div>
 
-    <div class="card" style="margin-bottom:20px;padding:0;overflow:hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-        <div>
-          <div class="card-title" style="margin:0">📏 Km / horas por unidad en el mes</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:3px">Recorrido del mes según el odómetro (o horómetro, en autoelevadoras) de las cargas de combustible.</div>
-        </div>
-        <select class="form-select" id="fuel-km-month" onchange="App.fuelKmMonth=this.value;_renderFuelKmTable()" style="width:170px;font-size:13px">${kmMonthOpts}</select>
-      </div>
-      <div id="fuel-km-body"></div>
-    </div>
-
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -2475,6 +2496,20 @@ function renderFuel() {
       <div id="fuel-count-info" style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
         Mostrando <b>${Math.min(10, App.data.fuelLogs.length)}</b> de ${App.data.fuelLogs.length} cargas${App.data.fuelLogs.length > 10 ? ` · <a onclick="_fuelLoadMore()" style="color:var(--accent);cursor:pointer;font-weight:600">Ver más →</a>` : ''}
       </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin:0">📏 Km / horas por unidad en el mes</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Recorrido del mes según el odómetro (o horómetro, en autoelevadoras) de las cargas de combustible.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select class="form-select" id="fuel-km-month" onchange="App.fuelKmMonth=this.value;_renderFuelKmTable()" style="width:170px;font-size:13px">${kmMonthOpts}</select>
+          <button class="btn btn-secondary btn-sm" onclick="exportFuelKmPDF()">📄 PDF</button>
+        </div>
+      </div>
+      <div id="fuel-km-body"></div>
     </div>
   `;
   _renderFuelKmTable();
