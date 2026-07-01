@@ -45,7 +45,7 @@ async function recalcInvoiceStatus(client, poId) {
 
   let status;
   if (facturado <= 0) status = 'pendiente';
-  else if (totalOC > 0 && facturado >= totalOC * 0.999) status = 'total';
+  else if (totalOC > 0 && facturado >= totalOC - 1) status = 'total';
   else status = 'parcial';
 
   await client.query(`UPDATE purchase_orders SET invoice_status = $1 WHERE id = $2`, [status, poId]);
@@ -116,15 +116,15 @@ router.get('/:id/facturas', authenticate, requireRole(...ROLES_VER_FACTURAS), as
         f.uploaded_at, f.uploaded_by,
         COALESCE(p.total_pagado,0) AS monto_pagado,
         COALESCE(p.total_pagado,0) AS total_pagado,
-        (COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999) AS pagada,
+        (COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1) AS pagada,
         GREATEST(ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - COALESCE(p.total_pagado,0), 0) AS saldo,
         CASE
-          WHEN COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN 'pagada'
+          WHEN COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1 THEN 'pagada'
           WHEN COALESCE(p.total_pagado,0) > 0 THEN 'parcial'
           ELSE 'pendiente'
         END AS estado_pago_calculado,
-        CASE WHEN f.vencimiento < CURRENT_DATE AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN TRUE ELSE FALSE END AS vencida,
-        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999 THEN TRUE ELSE FALSE END AS por_vencer,
+        CASE WHEN f.vencimiento < CURRENT_DATE AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1 THEN TRUE ELSE FALSE END AS vencida,
+        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1 THEN TRUE ELSE FALSE END AS por_vencer,
         CASE WHEN f.vencimiento IS NOT NULL THEN (f.vencimiento - CURRENT_DATE) ELSE NULL END AS dias_vencimiento,
         f.notes,
         u.name AS uploaded_by_name,

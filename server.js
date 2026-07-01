@@ -83,7 +83,10 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "cdnjs.cloudflare.com"],
+      // 'unsafe-eval' eliminado: el frontend no usa eval/new Function (verificado) y
+      // Chart.js/jsPDF de CDN tampoco lo necesitan. 'unsafe-inline' queda porque la
+      // app usa handlers onclick= inline en todo el HTML generado.
+      scriptSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com"],
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com"],
       fontSrc: ["'self'", "fonts.gstatic.com"],

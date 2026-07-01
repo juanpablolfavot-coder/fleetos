@@ -298,9 +298,13 @@ function categoryPrefix(cat) {
 }
 async function nextCatalogCode(category) {
   const prefix = categoryPrefix(category);
-  const r = await query(`SELECT code FROM stock_catalog WHERE code LIKE $1 ORDER BY code DESC LIMIT 1`, [prefix + '-%']);
-  let n = 0;
-  if (r.rows[0]) { const m = /(\d+)$/.exec(r.rows[0].code); if (m) n = parseInt(m[1], 10); }
+  // MAX NUMÉRICO del sufijo. Antes se tomaba el máximo por orden alfabético
+  // (ORDER BY code DESC): al pasar de 999 a 1000, 'GEN-999' > 'GEN-1000' como
+  // texto, así que generaba 'GEN-1000' para siempre (colisión eterna).
+  const r = await query(
+    `SELECT COALESCE(MAX((substring(code FROM '[0-9]+$'))::int), 0) AS n
+     FROM stock_catalog WHERE code LIKE $1 AND code ~ '[0-9]+$'`, [prefix + '-%']);
+  const n = parseInt(r.rows[0].n, 10) || 0;
   return `${prefix}-${String(n + 1).padStart(3, '0')}`;
 }
 
@@ -372,11 +376,22 @@ router.post('/catalog', authenticate, requireRole(...ROLES_STOCK_ADMIN), async (
     const qty_reorder = Math.max(0, toNumber(req.body.qty_reorder, 0));
     const unit_cost = Math.max(0, toNumber(req.body.unit_cost, 0));
     const supplier = cleanNullable(req.body.supplier);
-    const code = req.body.code ? cleanCode(req.body.code) : await nextCatalogCode(category);
-    const r = await query(
-      `INSERT INTO stock_catalog (code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier]);
+    // Código autogenerado: reintentar ante colisión (dos altas concurrentes pueden
+    // calcular el mismo próximo número). Si el código lo escribió el usuario, la
+    // colisión es un 409 legítimo y no se reintenta.
+    let r = null;
+    for (let intento = 0; intento < 5 && !r; intento++) {
+      const code = req.body.code ? cleanCode(req.body.code) : await nextCatalogCode(category);
+      try {
+        r = await query(
+          `INSERT INTO stock_catalog (code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+          [code, name, category, unit, qty_min, qty_reorder, unit_cost, supplier]);
+      } catch (e) {
+        if (e.code === '23505' && !req.body.code && intento < 4) continue;
+        throw e;
+      }
+    }
     const initQty = Math.max(0, toNumber(req.body.qty_current, 0));
     if (initQty > 0) {
       const scoped = scopedLocation(req, cleanText(req.body.base_location || 'Central', 'Central'), normalizeArea(req.body.area || 'Depósito'));
@@ -437,15 +452,34 @@ router.post('/catalog/:id/mov', authenticate, requireRole(...ROLES_STOCK_EGRESO)
     const bal = await client.query('SELECT qty_current FROM stock_balances WHERE catalog_id=$1 AND base_location=$2 AND area=$3 FOR UPDATE', [req.params.id, base_location, area]);
     const actual = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
     let nueva;
-    if (tipo === 'Ingreso') nueva = actual + qty;
-    else if (tipo === 'Egreso') {
+    if (tipo === 'Ingreso') {
+      // Upsert INCREMENTAL: si la fila no existía, el FOR UPDATE de arriba no
+      // bloqueó nada y dos ingresos simultáneos se pisaban (5+5 quedaba en 5).
+      // Sumar dentro del ON CONFLICT es atómico y no depende del valor leído.
+      const up = await client.query(
+        `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (catalog_id, base_location, area)
+         DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()
+         RETURNING qty_current`,
+        [req.params.id, base_location, area, qty]);
+      nueva = parseFloat(up.rows[0].qty_current);
+    } else if (tipo === 'Egreso') {
       if (qty > actual) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Stock insuficiente en ${base_location}/${area} (hay ${actual})` }); }
-      nueva = actual - qty;
-    } else { nueva = Math.max(0, toNumber(req.body.qty, actual)); } // Ajuste: cantidad absoluta
-    await client.query(
-      `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current=$4, updated_at=NOW()`,
-      [req.params.id, base_location, area, nueva]);
+      // La fila existe (si no, actual=0 y ya rechazamos) y está bloqueada por el
+      // FOR UPDATE: el decremento es seguro.
+      const up = await client.query(
+        `UPDATE stock_balances SET qty_current = qty_current - $1, updated_at = NOW()
+         WHERE catalog_id=$2 AND base_location=$3 AND area=$4 RETURNING qty_current`,
+        [qty, req.params.id, base_location, area]);
+      nueva = up.rows[0] ? parseFloat(up.rows[0].qty_current) : 0;
+    } else {
+      // Ajuste: cantidad ABSOLUTA (conteo físico) — acá sí corresponde pisar el valor.
+      nueva = Math.max(0, toNumber(req.body.qty, actual));
+      await client.query(
+        `INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current=$4, updated_at=NOW()`,
+        [req.params.id, base_location, area, nueva]);
+    }
     await client.query(
       `INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
       [req.params.id, tipo, tipo === 'Ajuste' ? nueva : qty, reason || `${tipo} de stock`, base_location, area, req.user.id]);

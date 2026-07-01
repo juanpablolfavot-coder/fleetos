@@ -404,7 +404,7 @@ function renderTireHistory() {
       <td class="td-mono">${h.vehicle}</td>
       <td class="td-mono">${h.km.toLocaleString()}</td>
       <td style="font-size:12px">${h.user}</td>
-      <td style="font-size:11px;color:var(--text3);max-width:160px">${h.obs}</td>
+      <td style="font-size:11px;color:var(--text3);max-width:160px">${escapeHtml(h.obs||'')}</td>
     </tr>`).join('')}
     </tbody></table></div>`;
 }
@@ -628,7 +628,7 @@ function openTireDetail(serial) {
               <td style="padding:6px 8px;font-family:var(--mono);color:var(--accent)">→ ${h.toPos}</td>
               <td style="padding:6px 8px"><span class="badge ${h.type.includes('Rotación')?'badge-info':h.type==='Montaje'?'badge-ok':'badge-gray'}">${h.type}</span></td>
               <td style="padding:6px 8px;font-family:var(--mono)">${(h.km||0).toLocaleString()}</td>
-              <td style="padding:6px 8px;color:var(--text3);font-size:11px">${h.obs||''}</td>
+              <td style="padding:6px 8px;color:var(--text3);font-size:11px">${escapeHtml(h.obs||'')}</td>
             </tr>`).join('')}</tbody>
           </table>`
         : '<div style="color:var(--text3);font-size:13px;padding:8px 0">Sin movimientos previos registrados.</div>'

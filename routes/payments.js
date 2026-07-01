@@ -54,8 +54,8 @@ function ensurePaymentEngine() {
       LEFT JOIN pagos p ON p.invoice_id = f.id
       WHERE f.pagada = TRUE
         AND COALESCE(f.iva_pct,0) > 0
-        AND COALESCE(p.total_pagado,0) >= f.invoice_monto * 0.999
-        AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999
+        AND COALESCE(p.total_pagado,0) >= f.invoice_monto - 1
+        AND COALESCE(p.total_pagado,0) < ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1
         AND EXISTS (SELECT 1 FROM purchase_order_payments pp WHERE pp.invoice_id = f.id)
     ), ultimo_pago AS (
       SELECT DISTINCT ON (p.invoice_id)
@@ -142,7 +142,7 @@ function ensurePaymentEngine() {
 
       UPDATE purchase_order_invoices
       SET monto_pagado = v_total_pagado,
-          pagada = (v_total_pagado >= v_invoice_total * 0.999)
+          pagada = (v_total_pagado >= v_invoice_total - 1)
       WHERE id = v_invoice_id;
 
       SELECT
@@ -159,7 +159,7 @@ function ensurePaymentEngine() {
 
       v_payment_status := CASE
         WHEN v_total_facturas_pagadas <= 0 THEN 'pendiente'
-        WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas * 0.999 THEN 'total'
+        WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas - 1 THEN 'total'
         ELSE 'parcial'
       END;
 
@@ -270,7 +270,7 @@ function ensurePaymentEngine() {
     )
     UPDATE purchase_order_invoices f
     SET monto_pagado = COALESCE(p.total_pagado, 0),
-        pagada = COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) * 0.999
+        pagada = COALESCE(p.total_pagado,0) >= ROUND(f.invoice_monto * (1 + COALESCE(f.iva_pct,0) / 100.0), 2) - 1
     FROM pagos p
     WHERE f.id = p.invoice_id;
 
@@ -296,7 +296,7 @@ function ensurePaymentEngine() {
         po_id,
         CASE
           WHEN total_pagado <= 0 THEN 'pendiente'
-          WHEN total_facturas > 0 AND total_pagado >= total_facturas * 0.999 THEN 'total'
+          WHEN total_facturas > 0 AND total_pagado >= total_facturas - 1 THEN 'total'
           ELSE 'parcial'
         END AS payment_status
       FROM po_totals
@@ -342,7 +342,7 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
   await client.query(`
     UPDATE purchase_order_invoices
     SET monto_pagado=$2::numeric,
-        pagada=($2::numeric >= $3::numeric * 0.999)
+        pagada=($2::numeric >= $3::numeric - 1)
     WHERE id=$1::uuid
   `, [invoiceId, totalPagado, totalFactura]);
 
@@ -361,7 +361,7 @@ async function recalcPagoFacturaYOC(client, invoiceId) {
 
   const totalFacturas = parseFloat(tot.rows[0]?.total_facturas || 0);
   const totalPagadoOC = parseFloat(tot.rows[0]?.total_pagado || 0);
-  const paymentStatus = totalPagadoOC <= 0 ? 'pendiente' : (totalFacturas > 0 && totalPagadoOC >= totalFacturas * 0.999 ? 'total' : 'parcial');
+  const paymentStatus = totalPagadoOC <= 0 ? 'pendiente' : (totalFacturas > 0 && totalPagadoOC >= totalFacturas - 1 ? 'total' : 'parcial');
 
   await client.query(`
     UPDATE purchase_orders
@@ -419,7 +419,7 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
         f.forma_pago, f.cc_dias, f.vencimiento,
         COALESCE(p.total_pagado,0) AS monto_pagado,
         COALESCE(p.total_pagado,0) AS total_pagado,
-        (COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} * 0.999) AS pagada,
+        (COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} - 1) AS pagada,
         f.uploaded_at, f.notes,
         po.code AS po_code, po.proveedor, po.supplier_id,
         po.forma_pago AS oc_forma_pago, po.cc_dias AS oc_cc_dias,
@@ -428,20 +428,20 @@ router.get('/pendientes', authenticate, requireRole(...ROLES_PAGAR), async (req,
         s.bank_cbu AS supplier_cbu, s.bank_alias AS supplier_alias, s.bank_name AS supplier_bank,
         GREATEST(${INVOICE_TOTAL_SQL} - COALESCE(p.total_pagado,0), 0) AS saldo,
         CASE
-          WHEN COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} * 0.999 THEN 'pagada'
+          WHEN COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} - 1 THEN 'pagada'
           WHEN COALESCE(p.total_pagado,0) > 0 THEN 'parcial'
           ELSE 'pendiente'
         END AS estado_pago_calculado,
-        CASE WHEN f.vencimiento < CURRENT_DATE AND COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} * 0.999 THEN TRUE ELSE FALSE END AS vencida,
-        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} * 0.999 THEN TRUE ELSE FALSE END AS por_vencer,
+        CASE WHEN f.vencimiento < CURRENT_DATE AND COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} - 1 THEN TRUE ELSE FALSE END AS vencida,
+        CASE WHEN f.vencimiento BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days' AND COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} - 1 THEN TRUE ELSE FALSE END AS por_vencer,
         CASE WHEN f.vencimiento IS NOT NULL THEN (f.vencimiento - CURRENT_DATE) ELSE NULL END AS dias_vencimiento
       FROM purchase_order_invoices f
       JOIN purchase_orders po ON po.id = f.po_id
       LEFT JOIN suppliers s ON s.id = po.supplier_id
       LEFT JOIN pagos p ON p.invoice_id = f.id
-      WHERE ($1::boolean = TRUE OR COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} * 0.999)
+      WHERE ($1::boolean = TRUE OR COALESCE(p.total_pagado,0) < ${INVOICE_TOTAL_SQL} - 1)
       ORDER BY
-        CASE WHEN COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} * 0.999 THEN 1 ELSE 0 END,
+        CASE WHEN COALESCE(p.total_pagado,0) >= ${INVOICE_TOTAL_SQL} - 1 THEN 1 ELSE 0 END,
         f.vencimiento ASC NULLS LAST,
         f.invoice_fecha ASC,
         f.uploaded_at DESC
