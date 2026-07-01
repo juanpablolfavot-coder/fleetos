@@ -3876,7 +3876,27 @@ function exportCostPDF() {
 // Wrapper para mantener compatibilidad con botones viejos que llaman exportCostCSV
 function exportCostCSV() { exportCostPDF(); }
 
+// Trae TODAS las páginas de cargas de combustible (no solo las primeras 100 del
+// arranque). Necesario para que los km y costos del mes se sumen completos.
+async function _ensureAllFuelLoaded() {
+  let guard = 0;
+  while (!window._fuelAllLoaded && guard++ < 50) {
+    const before = (App.data.fuelLogs || []).length;
+    await _fuelFetchMore();
+    if ((App.data.fuelLogs || []).length === before) break; // no avanzó → cortar
+  }
+}
 function renderCosts() {
+  // Asegurar que estén TODAS las cargas antes de calcular. Al entrar solo se
+  // trajeron las últimas 100; si un mes tiene más, los km/costos salían cortos.
+  // Se cargan una sola vez y se vuelve a renderizar cuando termina.
+  if (!window._fuelAllLoaded && !window._costsLoadingAll) {
+    window._costsLoadingAll = true;
+    _ensureAllFuelLoaded().then(() => {
+      window._costsLoadingAll = false;
+      if (document.getElementById('page-costs')) renderCosts();
+    });
+  }
   // Inicializar mes seleccionado (persiste entre re-renders)
   if (!window._costsMes) {
     const now = new Date();
