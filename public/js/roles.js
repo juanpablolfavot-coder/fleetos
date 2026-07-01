@@ -824,6 +824,9 @@ async function loadInitialData() {
     App.data.vehicles   = App.data.vehicles.map(_mapVehicle);
     App.data.workOrders = App.data.workOrders.map(_mapWorkOrder);
     App.data.fuelLogs   = App.data.fuelLogs.map(_mapFuelLog);
+    // Se recargó la primera página de cargas (100): marcar que falta traer el resto,
+    // para que Combustible/Costos vuelvan a cargar TODO antes de calcular rendimiento/km.
+    if (typeof window !== 'undefined') window._fuelAllLoaded = false;
     App.data.tankEntries = (App.data.tankEntries || []).map(_mapTankEntry);
     App.data.fuelDispatches = (App.data.fuelDispatches || []).map(_mapFuelDispatch);
     App.data.stock      = App.data.stock.map(_mapStockItem);

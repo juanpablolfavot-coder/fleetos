@@ -2303,9 +2303,18 @@ function exportFuelKmPDF() {
   showToast('ok', 'PDF descargado');
 }
 function renderFuel() {
-  // Reset de paginación al entrar a la pantalla (el "Ver más" trae del backend).
+  // Reset del tamaño de página del listado (el "Ver más" muestra de a más).
   window._fuelPageSize = 10;
-  window._fuelAllLoaded = false;
+  // Asegurar TODAS las cargas antes de calcular rendimiento/litros. Si no, los KPIs
+  // cambiaban según cuántas páginas se hubieran traído (100 al entrar → 200 tras
+  // pasar por Costos), y el rendimiento "saltaba" al recargar o navegar.
+  if (!window._fuelAllLoaded && !window._fuelLoadingAll) {
+    window._fuelLoadingAll = true;
+    _ensureAllFuelLoaded().then(() => {
+      window._fuelLoadingAll = false;
+      if (document.getElementById('page-fuel')) renderFuel();
+    });
+  }
   // ── Cisternas desde API ──
   const tanks = App.data.tanks || [];
   const gasoilTank = tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || { current_l:0, capacity_l:47000 };
