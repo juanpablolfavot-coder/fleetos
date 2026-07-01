@@ -196,7 +196,10 @@ async function _marcarEnviado(ym) {
 async function generarYEnviarReporteMensual({ force = false } = {}) {
   const { anterior } = mesesAR();
   const to = process.env.REPORTE_EMAIL_TO || process.env.BACKUP_EMAIL_TO;
-  if (!mailEnabled() || !to) return { skipped: 'mail no configurado (SMTP_USER/SMTP_PASS + BACKUP_EMAIL_TO o REPORTE_EMAIL_TO)' };
+  // Motivos separados: dicen exactamente qué variable falta en ESTE servicio
+  // (los backups pueden salir de un Cron Job aparte con sus propias variables).
+  if (!mailEnabled()) return { skipped: 'SMTP no configurado en este servicio — setear SMTP_USER y SMTP_PASS en el Environment del servicio web' };
+  if (!to) return { skipped: 'sin casilla destino — setear REPORTE_EMAIL_TO (o BACKUP_EMAIL_TO) en el Environment del servicio web' };
   if (!force && await _yaEnviado(anterior)) return { skipped: 'ya enviado ' + anterior };
 
   const d = await datosDelMes(anterior);
@@ -233,7 +236,12 @@ async function generarYEnviarReporteMensual({ force = false } = {}) {
 // —arranque de mes o server dormido el día 1— se genera y envía una sola vez.
 function programarReporteMensual() {
   const tick = () => generarYEnviarReporteMensual()
-    .then((r) => { if (r.sent) console.log('[reporte-mensual] OK', r.sent); })
+    .then((r) => {
+      if (r.sent) console.log('[reporte-mensual] OK, enviado', r.sent);
+      // El motivo del salteo SIEMPRE al log: sin esto, un mail mal configurado
+      // hacía que el reporte no saliera y no quedara ni un rastro para diagnosticar.
+      else if (r.skipped) console.log('[reporte-mensual] omitido:', r.skipped);
+    })
     .catch((e) => console.error('[reporte-mensual]', e.message));
   setTimeout(tick, 45 * 1000);
   setInterval(tick, 6 * 60 * 60 * 1000);
