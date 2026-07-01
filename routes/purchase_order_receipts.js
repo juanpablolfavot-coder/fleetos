@@ -186,9 +186,13 @@ function categoryPrefix(cat) {
 }
 async function nextCatalogCode(client, category) {
   const prefix = categoryPrefix(category);
-  const r = await client.query(`SELECT code FROM stock_catalog WHERE code LIKE $1 ORDER BY code DESC LIMIT 1`, [prefix + '-%']);
-  let n = 0;
-  if (r.rows[0]) { const m = /(\d+)$/.exec(r.rows[0].code); if (m) n = parseInt(m[1], 10); }
+  // MAX NUMÉRICO del sufijo. Antes se tomaba el máximo por orden alfabético
+  // (ORDER BY code DESC): al pasar de 999 a 1000, 'GEN-999' > 'GEN-1000' como
+  // texto, así que generaba 'GEN-1000' para siempre (colisión eterna).
+  const r = await client.query(
+    `SELECT COALESCE(MAX((substring(code FROM '[0-9]+$'))::int), 0) AS n
+     FROM stock_catalog WHERE code LIKE $1 AND code ~ '[0-9]+$'`, [prefix + '-%']);
+  const n = parseInt(r.rows[0].n, 10) || 0;
   return `${prefix}-${String(n + 1).padStart(3, '0')}`;
 }
 
@@ -246,13 +250,28 @@ async function ingresarStockDeRecepcion(client, receiptId, items, destino, userI
       const u = String(na.unit || unit || 'un').trim() || 'un';
       // Costo del artículo nuevo: el que cargó el usuario, o si no, el precio de la OC.
       const cost = Math.max(0, parseFloat(na.unit_cost) > 0 ? parseFloat(na.unit_cost) : (parseFloat(row.precio_unit) || 0));
-      try {
+      // SAVEPOINT + retry: si dos recepciones concurrentes generan el mismo código,
+      // la violación de UNIQUE dentro de la transacción la dejaba ABORTADA (todas
+      // las queries siguientes fallaban y la recepción entera moría con un error
+      // críptico). Con el savepoint se revierte solo el INSERT fallido y se
+      // reintenta con el código siguiente.
+      let ins = null, lastErr = null;
+      for (let intento = 0; intento < 5 && !ins; intento++) {
         const code = await nextCatalogCode(client, category);
-        const ins = await client.query(
-          `INSERT INTO stock_catalog (code, name, category, unit, unit_cost) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, unit`,
-          [code, name, category, u, cost]);
-        catalogId = ins.rows[0].id; artName = ins.rows[0].name; unit = ins.rows[0].unit;
-      } catch (e) { warnings.push(`"${row.descripcion}": no se pudo crear el artículo (${e.message}).`); continue; }
+        await client.query('SAVEPOINT sp_nuevo_articulo');
+        try {
+          ins = await client.query(
+            `INSERT INTO stock_catalog (code, name, category, unit, unit_cost) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, unit`,
+            [code, name, category, u, cost]);
+          await client.query('RELEASE SAVEPOINT sp_nuevo_articulo');
+        } catch (e) {
+          await client.query('ROLLBACK TO SAVEPOINT sp_nuevo_articulo');
+          lastErr = e;
+          if (e.code !== '23505') break; // solo la colisión de código se reintenta
+        }
+      }
+      if (!ins) { warnings.push(`"${row.descripcion}": no se pudo crear el artículo (${lastErr ? lastErr.message : 'colisión de código'}).`); continue; }
+      catalogId = ins.rows[0].id; artName = ins.rows[0].name; unit = ins.rows[0].unit;
     } else {
       warnings.push(`"${row.descripcion}": marcado para stock pero sin artículo — no se ingresó.`); continue;
     }
