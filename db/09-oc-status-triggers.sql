@@ -101,7 +101,7 @@ BEGIN
 
   UPDATE purchase_order_invoices
   SET monto_pagado = v_total_pagado,
-      pagada = (v_total_pagado >= v_invoice_total * 0.999)
+      pagada = (v_total_pagado >= v_invoice_total - 1)
   WHERE id = v_invoice_id;
 
   SELECT
@@ -118,7 +118,7 @@ BEGIN
 
   v_payment_status := CASE
     WHEN v_total_facturas_pagadas <= 0 THEN 'pendiente'
-    WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas * 0.999 THEN 'total'
+    WHEN v_total_facturas > 0 AND v_total_facturas_pagadas >= v_total_facturas - 1 THEN 'total'
     ELSE 'parcial'
   END;
 

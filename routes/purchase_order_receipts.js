@@ -293,16 +293,34 @@ async function revertirStockDeRecepcion(client, receiptId, userId) {
   for (const r of its.rows) {
     const qty = parseFloat(r.cantidad);
     if (!(qty > 0)) continue;
-    await client.query(
-      `UPDATE stock_balances SET qty_current = GREATEST(qty_current - $1, 0), updated_at = NOW()
-       WHERE catalog_id = $2 AND base_location = $3 AND area = $4`,
-      [qty, r.catalog_id, r.stock_base_location, r.stock_area]
+    // Descontar solo lo que realmente hay y registrar el movimiento por ESE monto.
+    // Antes el saldo se recortaba con GREATEST(...,0) pero el Egreso se anotaba por
+    // la cantidad completa: si parte del stock ya se había consumido, los saldos y
+    // los movimientos dejaban de cuadrar en silencio.
+    const bal = await client.query(
+      `SELECT qty_current FROM stock_balances
+       WHERE catalog_id = $1 AND base_location = $2 AND area = $3 FOR UPDATE`,
+      [r.catalog_id, r.stock_base_location, r.stock_area]
     );
-    await client.query(
-      `INSERT INTO stock_movements (catalog_id, type, qty, reason, user_id, base_location, area)
-       VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
-      [r.catalog_id, qty, 'Anulación de recepción de OC', userId, r.stock_base_location, r.stock_area]
-    );
+    const disponible = bal.rows[0] ? parseFloat(bal.rows[0].qty_current) : 0;
+    const descontado = Math.min(disponible, qty);
+    if (descontado > 0) {
+      await client.query(
+        `UPDATE stock_balances SET qty_current = qty_current - $1, updated_at = NOW()
+         WHERE catalog_id = $2 AND base_location = $3 AND area = $4`,
+        [descontado, r.catalog_id, r.stock_base_location, r.stock_area]
+      );
+      const faltante = qty - descontado;
+      await client.query(
+        `INSERT INTO stock_movements (catalog_id, type, qty, reason, user_id, base_location, area)
+         VALUES ($1,'Egreso',$2,$3,$4,$5,$6)`,
+        [r.catalog_id, descontado,
+         faltante > 0.001
+           ? `Anulación de recepción de OC (recibidas ${qty}, en stock solo ${descontado}: el resto ya se consumió)`
+           : 'Anulación de recepción de OC',
+         userId, r.stock_base_location, r.stock_area]
+      );
+    }
   }
 }
 
