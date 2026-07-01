@@ -717,6 +717,8 @@ async function renderAuditorComparativo(el) {
             <th>Período</th>
             <th style="color:#3b82f6">Combustible</th>
             <th style="color:#3b82f6">Litros</th>
+            <th>Km</th>
+            <th>Rendimiento</th>
             <th style="color:#06b6d4">Urea</th>
             <th style="color:#f59e0b">Mantenimiento</th>
             <th style="color:#f59e0b">OTs</th>
@@ -727,10 +729,21 @@ async function renderAuditorComparativo(el) {
             const prev = i > 0 ? d.meses[i-1].total : null;
             const varPct = prev && prev > 0 ? ((m.total - prev) / prev * 100).toFixed(1) : null;
             const varColor = varPct === null ? 'var(--text3)' : parseFloat(varPct) > 10 ? 'var(--danger)' : parseFloat(varPct) > 0 ? 'var(--warn)' : 'var(--ok)';
+            const km = m.km || 0, l = m.litros || 0;
+            const f1 = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+            const kmCell = km > 0 ? Math.round(km).toLocaleString('es-AR') + ' km' : '—';
+            const rendCell = (km > 0 && l > 0)
+              ? `${f1(km / l)} km/L<div style="font-size:10px;color:var(--text3)">${f1(l / km * 100)} L/100km</div>`
+              : '—';
+            const litrosBreak = (l > 0 && ((m.litros_cisterna || 0) > 0 || (m.litros_estacion || 0) > 0))
+              ? `<div style="font-size:10px;color:var(--text3)">cist. ${Math.round(m.litros_cisterna || 0).toLocaleString()} · est. ${Math.round(m.litros_estacion || 0).toLocaleString()}</div>`
+              : '';
             return `<tr>
               <td class="td-mono" style="font-weight:600">${m.label.toUpperCase()}</td>
               <td class="td-mono" style="color:#3b82f6">${m.costo_combustible>0?'$'+Math.round(m.costo_combustible).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#3b82f6">${m.litros>0?Math.round(m.litros).toLocaleString()+' L':'—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${m.litros>0?Math.round(m.litros).toLocaleString()+' L':'—'}${litrosBreak}</td>
+              <td class="td-mono">${kmCell}</td>
+              <td class="td-mono">${rendCell}</td>
               <td class="td-mono" style="color:#06b6d4">${m.costo_urea>0?'$'+Math.round(m.costo_urea).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono" style="color:#f59e0b">${m.costo_mantenimiento>0?'$'+Math.round(m.costo_mantenimiento).toLocaleString('es-AR'):'—'}</td>
               <td class="td-mono">${m.ots||'—'}</td>

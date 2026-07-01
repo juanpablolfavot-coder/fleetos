@@ -448,15 +448,32 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
       const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-      const [fuel, ots] = await Promise.all([
+      const [fuel, ots, km] = await Promise.all([
         query(`SELECT
                  COALESCE(SUM(liters*price_per_l) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as costo_fuel,
                  COALESCE(SUM(liters)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as litros,
                  COUNT(*)                         FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea')    as cargas,
                  COALESCE(SUM(liters*price_per_l) FILTER (WHERE LOWER(fuel_type) = 'urea'),0)              as costo_urea,
-                 COALESCE(SUM(liters)             FILTER (WHERE LOWER(fuel_type) = 'urea'),0)              as litros_urea
+                 COALESCE(SUM(liters)             FILTER (WHERE LOWER(fuel_type) = 'urea'),0)              as litros_urea,
+                 COALESCE(SUM(liters) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea' AND tank_id IS NOT NULL),0) as litros_cisterna,
+                 COALESCE(SUM(liters) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea' AND tank_id IS NULL),0)     as litros_estacion,
+                 COUNT(*)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea' AND tank_id IS NOT NULL)    as cargas_cisterna,
+                 COUNT(*)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea' AND tank_id IS NULL)        as cargas_estacion
                FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
         query(`SELECT COALESCE(SUM(labor_cost+parts_cost),0) as costo_mant, COUNT(*) as ots FROM work_orders WHERE opened_at BETWEEN $1 AND $2`, [desde, hasta+' 23:59:59']),
+        // Km del mes: por unidad, diferencia entre la última y la primera lectura de
+        // odómetro de sus cargas (misma lógica que el costo/km). Excluye autoelevadoras
+        // (van en horas) y urea. Requiere ≥2 lecturas para calcular el recorrido.
+        query(`SELECT COALESCE(SUM(km_veh),0) as km_total FROM (
+                 SELECT fl.vehicle_id, MAX(fl.odometer_km) - MIN(fl.odometer_km) as km_veh
+                 FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+                 WHERE fl.logged_at BETWEEN $1 AND $2
+                   AND fl.odometer_km IS NOT NULL AND fl.odometer_km > 0
+                   AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+                   AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'
+                 GROUP BY fl.vehicle_id
+                 HAVING COUNT(*) >= 2
+               ) t`, [desde, hasta+' 23:59:59']),
       ]);
 
       meses.push({
@@ -467,6 +484,11 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         cargas:            parseInt(fuel.rows[0].cargas),
         costo_urea:        parseFloat(fuel.rows[0].costo_urea),
         litros_urea:       parseFloat(fuel.rows[0].litros_urea),
+        litros_cisterna:   parseFloat(fuel.rows[0].litros_cisterna),
+        litros_estacion:   parseFloat(fuel.rows[0].litros_estacion),
+        cargas_cisterna:   parseInt(fuel.rows[0].cargas_cisterna),
+        cargas_estacion:   parseInt(fuel.rows[0].cargas_estacion),
+        km:                parseFloat(km.rows[0].km_total),
         costo_mantenimiento: parseFloat(ots.rows[0].costo_mant),
         ots:               parseInt(ots.rows[0].ots),
         total:             parseFloat(fuel.rows[0].costo_fuel) + parseFloat(fuel.rows[0].costo_urea) + parseFloat(ots.rows[0].costo_mant),
