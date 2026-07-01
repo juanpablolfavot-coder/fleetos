@@ -2383,7 +2383,13 @@ function renderFuel() {
       <div class="kpi-card ${gasoilClass}"><div class="kpi-label">${fuelTitlePrefix} gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${tankLevel<10000?' · ⚠ Pedir gasoil / cotizar compra':gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
       <div class="kpi-card ${ureaClass}"><div class="kpi-label">${fuelTitlePrefix} urea</div><div class="kpi-value ${ureaClass}">${ureaLevel.toLocaleString()} L</div><div class="kpi-trend">${ureaPct}% de capacidad (${ureaCap.toLocaleString()} L)${ureaPct<20?' · ⚠ Solicitar reposición':''}</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Litros cargados hoy</div><div class="kpi-value ok">${litrosHoy.toLocaleString()}</div><div class="kpi-trend">en ${logsHoy.length} cargas · ${App.data.fuelLogs.length} total historial</div></div>
-      <div class="kpi-card ${rendimiento==='—'?'':'ok'}"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value ${rendimiento==='—'?'white':'ok'}">${rendimiento}</div><div class="kpi-trend">${rendTrend}</div></div>
+      ${(() => {
+        // Mientras falta traer el historial completo, el promedio saldría de una
+        // porción de las cargas y "bailaría" al completarse (p. ej. 7.2 → 5.2).
+        // Mejor mostrar que se está calculando y pintar el número una sola vez.
+        if (!window._fuelAllLoaded) return `<div class="kpi-card"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value white">…</div><div class="kpi-trend">calculando con el historial completo…</div></div>`;
+        return `<div class="kpi-card ${rendimiento==='—'?'':'ok'}"><div class="kpi-label">Rendimiento promedio</div><div class="kpi-value ${rendimiento==='—'?'white':'ok'}">${rendimiento}</div><div class="kpi-trend">${rendTrend}</div></div>`;
+      })()}
     </div>
     <div class="two-col" style="margin-bottom:20px">
       <div class="card">
