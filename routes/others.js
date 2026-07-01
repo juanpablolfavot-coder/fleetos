@@ -1003,6 +1003,10 @@ userRouter.post('/',authenticate,requireRole('dueno','gerencia'),async(req,res)=
     await ensureUserOrgSchema();
     const{name,email,password,role,vehicle_code,supplier_id,sucursal,area}=req.body;
     if(!name||!email||!password||!role) return res.status(400).json({error:'name,email,password,role requeridos'});
+    // Mismo control que en la edición (PUT): solo el dueño puede crear cuentas con
+    // rol dueño. Sin esto, gerencia podía fabricarse un dueño nuevo por el alta.
+    if(role==='dueno' && req.user.role!=='dueno') return res.status(403).json({error:'Solo el dueño puede crear un usuario con rol dueño'});
+    if(password.length<8) return res.status(400).json({error:'La contraseña debe tener al menos 8 caracteres'});
     const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
     const r=await query(`INSERT INTO users(name,email,password_hash,role,vehicle_code,supplier_id,sucursal,area) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,name,email,role,active,supplier_id,sucursal,area`,[name,email.toLowerCase(),hash,role,vehicle_code||null,supplier_id||null,sucursal||null,area||null]);
     res.status(201).json(r.rows[0]);
