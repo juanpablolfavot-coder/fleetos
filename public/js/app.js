@@ -11084,7 +11084,12 @@ async function _fuelFetchMore() {
     const more = await res.json();
     if (!Array.isArray(more) || more.length < 100) window._fuelAllLoaded = true;
     if (Array.isArray(more) && more.length) {
-      App.data.fuelLogs = (App.data.fuelLogs || []).concat(more);
+      // Las páginas siguientes vienen CRUDAS del backend: hay que pasarlas por el
+      // mismo mapper que la carga inicial (roles.js), si no quedan sin unidad/fecha/
+      // precio y los litros como texto (rompía la suma → "NaN L"). Los datos en la
+      // base están completos; esto es solo el formateo del frontend.
+      const mapped = (typeof _mapFuelLog === 'function') ? more.map(_mapFuelLog) : more;
+      App.data.fuelLogs = (App.data.fuelLogs || []).concat(mapped);
       App.data.fuel = App.data.fuelLogs;
     }
   } catch (e) { /* no rompemos la UI si falla la página extra */ }
