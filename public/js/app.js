@@ -2208,6 +2208,68 @@ async function printOT(id) {
 }
 
 // ── COMBUSTIBLE ──
+// Meses (YYYY-MM) presentes en el historial de cargas, del más nuevo al más viejo.
+function _fuelKmMonths() {
+  const set = new Set();
+  (App.data.fuelLogs || []).forEach(f => {
+    const d = new Date(f.date);
+    if (!isNaN(d)) set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  });
+  return [...set].sort().reverse();
+}
+function _fuelMonthLabel(ym) {
+  if (!ym) return '—';
+  const [y, m] = ym.split('-').map(Number);
+  const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  return `${meses[m - 1] || m} ${y}`;
+}
+// Tabla de km recorridos (u horas, en autoelevadoras) por cada unidad en el mes
+// elegido. El recorrido = diferencia entre la primera y la última lectura del
+// odómetro/horómetro de las cargas del mes (mismo método que el costo por km).
+// Hacen falta ≥2 lecturas para poder calcularlo.
+function _renderFuelKmTable() {
+  const cont = document.getElementById('fuel-km-body');
+  if (!cont) return;
+  const ym = App.fuelKmMonth;
+  if (!ym) { cont.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Sin cargas registradas.</div>'; return; }
+  const [yy, mm] = ym.split('-').map(Number);
+  const inSel = (d) => { const x = new Date(d); return !isNaN(x) && x.getFullYear() === yy && x.getMonth() + 1 === mm; };
+  const logs = (App.data.fuelLogs || []).filter(f => inSel(f.date) && String(f.fuel_type || '').toLowerCase() !== 'urea');
+  const byVeh = {};
+  logs.forEach(f => {
+    const g = byVeh[f.vehicle] = byVeh[f.vehicle] || { litros: 0, kms: [], cargas: 0 };
+    g.litros += (f.liters || 0); g.cargas++;
+    if (f.km > 0) g.kms.push(f.km);
+  });
+  const rows = Object.entries(byVeh).map(([code, g]) => {
+    const veh = (App.data.vehicles || []).find(v => v.code === code);
+    const unit = (typeof isAutoelevador === 'function' && veh && isAutoelevador(veh)) ? 'h' : 'km';
+    const kms = g.kms.slice().sort((a, b) => a - b);
+    const recorrido = kms.length >= 2 ? (kms[kms.length - 1] - kms[0]) : null;
+    return { code, unit, recorrido, litros: g.litros, cargas: g.cargas };
+  }).sort((a, b) => (b.recorrido || 0) - (a.recorrido || 0) || String(a.code).localeCompare(String(b.code)));
+  if (!rows.length) { cont.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text3);font-size:12px">Sin cargas de combustible en ' + _fuelMonthLabel(ym) + '.</div>'; return; }
+  const totKm = rows.filter(r => r.unit === 'km').reduce((a, r) => a + (r.recorrido || 0), 0);
+  const totLt = rows.reduce((a, r) => a + r.litros, 0);
+  cont.innerHTML = `
+    <div class="table-wrap"><table>
+      <thead><tr><th>Unidad</th><th style="text-align:right">Km / Horas del mes</th><th style="text-align:right">Litros</th><th style="text-align:right">Cargas</th></tr></thead>
+      <tbody>
+        ${rows.map(r => {
+          const rec = r.recorrido != null ? (r.recorrido.toLocaleString('es-AR') + ' ' + r.unit) : '<span style="color:var(--text3)">— (1 lectura)</span>';
+          return `<tr>
+            <td class="td-mono td-main">${escapeHtml(r.code)}</td>
+            <td class="td-mono" style="text-align:right;font-weight:600">${rec}</td>
+            <td class="td-mono" style="text-align:right">${Math.round(r.litros).toLocaleString('es-AR')} L</td>
+            <td class="td-mono" style="text-align:right">${r.cargas}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+    <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
+      Total recorrido (vehículos): <b>${totKm.toLocaleString('es-AR')} km</b> · Litros del mes: <b>${Math.round(totLt).toLocaleString('es-AR')} L</b> · Las autoelevadoras se miden en horas (h).
+    </div>`;
+}
 function renderFuel() {
   // Reset de paginación al entrar a la pantalla (el "Ver más" trae del backend).
   window._fuelPageSize = 10;
@@ -2268,6 +2330,13 @@ function renderFuel() {
       rendTrend = `km/litro · basado en ${count} cargas`;
     }
   }
+  // Resumen mensual de km/horas por unidad (selector de mes por defecto = el más reciente con cargas).
+  const kmMonths = _fuelKmMonths();
+  if (!App.fuelKmMonth || !kmMonths.includes(App.fuelKmMonth)) App.fuelKmMonth = kmMonths[0] || '';
+  const kmMonthOpts = kmMonths.length
+    ? kmMonths.map(m => `<option value="${m}"${m === App.fuelKmMonth ? ' selected' : ''}>${_fuelMonthLabel(m)}</option>`).join('')
+    : '<option>Sin datos</option>';
+
   document.getElementById('page-fuel').innerHTML = `
     <div class="kpi-row" style="margin-bottom:20px">
       <div class="kpi-card ${gasoilClass}"><div class="kpi-label">${fuelTitlePrefix} gasoil</div><div class="kpi-value ${gasoilClass}">${tankLevel.toLocaleString()} L</div><div class="kpi-trend">${gasoilPct}% de capacidad (${tankCap.toLocaleString()} L)${tankLevel<10000?' · ⚠ Pedir gasoil / cotizar compra':gasoilPct<20?' · ⚠ Solicitar reposición':''}</div></div>
@@ -2358,6 +2427,17 @@ function renderFuel() {
       `}
     </div>
 
+    <div class="card" style="margin-bottom:20px;padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin:0">📏 Km / horas por unidad en el mes</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Recorrido del mes según el odómetro (o horómetro, en autoelevadoras) de las cargas de combustible.</div>
+        </div>
+        <select class="form-select" id="fuel-km-month" onchange="App.fuelKmMonth=this.value;_renderFuelKmTable()" style="width:170px;font-size:13px">${kmMonthOpts}</select>
+      </div>
+      <div id="fuel-km-body"></div>
+    </div>
+
     <div class="section-header">
       <div><div class="section-title">Registro de cargas</div></div>
       <div style="display:flex;gap:8px;align-items:center">
@@ -2397,6 +2477,7 @@ function renderFuel() {
       </div>
     </div>
   `;
+  _renderFuelKmTable();
   setTimeout(() => {
     const ctx = document.getElementById('fuelChart');
     if (!ctx) return;
