@@ -288,4 +288,10 @@ httpServer = app.listen(PORT, () => {
   };
   purgeExpiredTokens();
   setInterval(purgeExpiredTokens, 6 * 60 * 60 * 1000);
+
+  // Reporte gerencial mensual automático: si el del mes anterior todavía no
+  // salió (arranque de mes o server dormido el día 1), se genera y envía por
+  // email una sola vez. Usa el mismo SMTP de los backups.
+  try { require('./services/reporte-mensual').programarReporteMensual(); }
+  catch (e) { console.error('[reporte-mensual] no se pudo programar:', e.message); }
 });
