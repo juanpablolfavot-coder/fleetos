@@ -4254,7 +4254,9 @@ function fmtMontoCorto(n) {
   return '$' + Math.round(n).toLocaleString('es-AR');
 }
 function openCostDrillDown(vehicleCode) {
-  const d = getCostDetail(vehicleCode);
+  // Respetar el mes elegido en Costos (si no, el detalle mostraba siempre el mes
+  // actual, que a principio de mes está vacío → "0 km · $0").
+  const d = getCostDetail(vehicleCode, window._costsMes);
   if (!d) return;
 
   const unidad = d.measureUnit || 'km';
@@ -10855,8 +10857,8 @@ function openVehicleHistoryModal(vehicleCode) {
             ${fuels.map(f => `<tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px">${(f.date || f.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.liters || '—'}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round(f.price_per_l || 0).toLocaleString('es-AR')}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono);color:var(--accent);font-weight:600">$${Math.round((f.liters||0)*(f.price_per_l||0)).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round((f.ppu != null ? f.ppu : f.price_per_l) || 0).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono);color:var(--accent);font-weight:600">$${Math.round(f.total != null ? f.total : (f.liters||0)*((f.ppu != null ? f.ppu : f.price_per_l)||0)).toLocaleString('es-AR')}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.km ? f.km.toLocaleString('es-AR') : '—'}</td>
             </tr>`).join('')}
           </tbody>
