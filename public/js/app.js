@@ -1283,7 +1283,7 @@ function showVehicleFicha(id, tab) {
             ${App.data.workOrders.filter(o=>o.vehicle===v.code&&o.type==='Preventivo').slice(0,6).map(o=>`
               <tr>
                 <td class="td-mono">${o.id}</td>
-                <td style="color:var(--text2)">${o.desc}</td>
+                <td style="color:var(--text2)">${escapeHtml(o.desc)}</td>
                 <td><span class="badge ${o.status==='Cerrada'?'badge-ok':'badge-info'}">${o.status}</span></td>
                 <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
               </tr>`).join('')}
@@ -1297,7 +1297,7 @@ function showVehicleFicha(id, tab) {
           <tbody>${vOT.map(o=>`<tr>
             <td class="td-mono td-main">${o.id}</td>
             <td><span class="badge ${o.type==='Preventivo'?'badge-ok':'badge-danger'}">${o.type}</span></td>
-            <td style="max-width:200px;color:var(--text2)">${o.desc}</td>
+            <td style="max-width:200px;color:var(--text2)">${escapeHtml(o.desc)}</td>
             <td>${o.mechanic}</td>
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
             <td class="td-mono">${(o.parts_cost)>0?'$'+Math.round(o.parts_cost).toLocaleString('es-AR'):'—'}</td>
@@ -1730,7 +1730,7 @@ function openCloseOTModal(id) {
   openModal(`Cerrar OT — ${id}`, `
     <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;margin-bottom:14px;font-size:13px">
       <div style="color:var(--text2);margin-bottom:3px;font-family:var(--mono);font-size:11px">${ot.vehicle} · ${ot.type} · ${ot.priority}</div>
-      <div style="color:var(--text);font-weight:500">${ot.desc}</div>
+      <div style="color:var(--text);font-weight:500">${escapeHtml(ot.desc)}</div>
     </div>
 
     ${existingPartsHTML}
@@ -2414,7 +2414,7 @@ function renderFuel() {
               ${tankEntries.slice(0,5).map(e => `
                 <div style="display:flex;align-items:center;gap:8px;background:var(--bg3);border-radius:var(--radius);padding:8px 10px;font-size:12px">
                   <span style="font-family:var(--mono);color:var(--accent);font-weight:700">${_fuelTankEntryCode(e)}</span>
-                  <span style="flex:1">${_fuelTankTypeLabel(e.type)} · <b>${Math.round(e.liters).toLocaleString('es-AR')} L</b> ${e.supplier ? '· '+e.supplier : ''}</span>
+                  <span style="flex:1">${_fuelTankTypeLabel(e.type)} · <b>${Math.round(e.liters).toLocaleString('es-AR')} L</b> ${e.supplier ? '· '+escapeHtml(e.supplier) : ''}</span>
                   <button class="btn btn-secondary btn-sm" onclick="openFuelTankEntryTicket('${e.id}')">Ver ticket</button>
                 </div>
               `).join('')}
@@ -2986,8 +2986,8 @@ function openFuelTankEntryTicket(entryOrId) {
         <div><b>Producto</b><br>${_fuelTankTypeLabel(entry.type)}</div>
         <div><b>Litros ingresados</b><br>${litros} L</div>
         <div><b>Cisterna</b><br>${entry.tank_location || 'Cisterna'}</div>
-        <div><b>Proveedor</b><br>${entry.supplier || '—'}</div>
-        <div><b>Remito</b><br>${entry.remito || '—'}</div>
+        <div><b>Proveedor</b><br>${escapeHtml(entry.supplier || "—")}</div>
+        <div><b>Remito</b><br>${escapeHtml(entry.remito || '—')}</div>
         <div><b>Precio/L</b><br>${ppu}</div>
         <div><b>Total estimado</b><br>${total}</div>
         <div><b>Registró</b><br>${escapeHtml(entry.created_by_name || App.currentUser?.name || '—')}</div>
@@ -3030,8 +3030,8 @@ function printFuelTankEntryTicket(entryId) {
         <div class="head"><div><div class="brand">Expreso Biletta SRL</div><div class="sub">Ingreso a cisterna</div></div><div><div class="code">${ticketCode}</div><div class="sub">${fecha}</div></div></div>
         <div class="grid">
           <div><b>Producto</b>${_fuelTankTypeLabel(entry.type)}</div><div><b>Litros ingresados</b>${litros} L</div>
-          <div><b>Cisterna</b>${entry.tank_location || 'Cisterna'}</div><div><b>Proveedor</b>${entry.supplier || '—'}</div>
-          <div><b>Remito</b>${entry.remito || '—'}</div><div><b>Precio/L</b>${ppu}</div>
+          <div><b>Cisterna</b>${escapeHtml(entry.tank_location || 'Cisterna')}</div><div><b>Proveedor</b>${escapeHtml(entry.supplier || '—')}</div>
+          <div><b>Remito</b>${escapeHtml(entry.remito || '—')}</div><div><b>Precio/L</b>${ppu}</div>
           <div><b>Total estimado</b>${total}</div><div><b>Registró</b>${escapeHtml(entry.created_by_name || App.currentUser?.name || '—')}</div>
         </div>
         <div class="box">Nivel anterior: <b style="display:inline">${Math.round(parseFloat(entry.previous_l)||0).toLocaleString('es-AR')} L</b> · Nivel nuevo: <b style="display:inline">${Math.round(parseFloat(entry.new_l)||0).toLocaleString('es-AR')} L</b></div>
@@ -4391,8 +4391,8 @@ function toggleCostRubro(vehicleCode, rubroId) {
           ${rubro.items.map(item=>`
             <tr>
               <td style="padding:7px 8px;color:var(--text3);font-family:var(--mono);white-space:nowrap">${item.fecha}</td>
-              <td style="padding:7px 8px;color:var(--text);font-weight:500">${item.desc}</td>
-              <td style="padding:7px 8px;color:var(--text3);font-size:11px;max-width:200px">${item.detalle}</td>
+              <td style="padding:7px 8px;color:var(--text);font-weight:500">${escapeHtml(item.desc)}</td>
+              <td style="padding:7px 8px;color:var(--text3);font-size:11px;max-width:200px">${escapeHtml(item.detalle)}</td>
               <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:600;color:${rubro.color}">$${item.monto.toLocaleString()}</td>
               <td style="padding:7px 8px;text-align:right;font-family:var(--mono);color:var(--text3)">
                 ${rubro.total>0?Math.round(item.monto/rubro.total*100):0}%

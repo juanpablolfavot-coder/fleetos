@@ -687,8 +687,8 @@ async function loadAuditorTrazabilidad() {
             return `<tr>
               <td class="td-mono" style="font-size:11px">${new Date(e.fecha).toLocaleString('es-AR')}</td>
               <td><span style="color:${colores[e.tipo]||'var(--text3)'};">${iconos[e.tipo]||'•'} ${e.tipo.replace(/_/g,' ')}</span></td>
-              <td style="font-size:12px">${e.detalle}</td>
-              <td style="font-size:12px;color:var(--text3)">${e.usuario||'—'}</td>
+              <td style="font-size:12px">${escapeHtml(e.detalle)}</td>
+              <td style="font-size:12px;color:var(--text3)">${escapeHtml(e.usuario||'—')}</td>
               <td class="td-mono" style="font-size:12px;color:${e.monto>0?'var(--danger)':'var(--text3)'}">${e.monto>0?'$'+Math.round(e.monto).toLocaleString('es-AR'):'—'}</td>
             </tr>`;
           }).join('')}</tbody>
@@ -835,7 +835,7 @@ function _auditLogRender() {
           <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Rol</th><th>Acción</th><th>Tabla</th><th>Registro</th><th>Cambio</th></tr></thead>
           <tbody>${rows.map(l=>`<tr>
             <td class="td-mono">${new Date(l.created_at).toLocaleString('es-AR')}</td>
-            <td>${l.user_name||'—'}</td>
+            <td>${escapeHtml(l.user_name||'—')}</td>
             <td><span class="badge role-${l.user_role}">${l.user_role||'—'}</span></td>
             <td style="color:${l.action==='DELETE'||l.action==='DEACTIVATE'?'var(--danger)':l.action==='CREATE'?'var(--ok)':'var(--text)'}">${l.action}</td>
             <td class="td-mono">${l.table_name||'—'}</td>
