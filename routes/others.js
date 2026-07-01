@@ -6,7 +6,7 @@ const fuelRouter = express.Router();
 const tireRouter = express.Router();
 const docRouter  = express.Router();
 const userRouter = express.Router();
-const { query }  = require('../db/pool');
+const { pool, query } = require('../db/pool');
 const { authenticate, requireRole, requireOwner, auditAction } = require('../middleware/auth');
 const { auditChange } = require('../middleware/audit');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
@@ -1040,13 +1040,35 @@ userRouter.put('/:id',authenticate,requireRole('dueno','gerencia'),validateUUID(
     await ensureUserOrgSchema();
     const{name,role,vehicle_code,active,password,supplier_id,sucursal,area}=req.body;
     if(req.params.id===req.user.id&&active===false) return res.status(400).json({error:'No puedes desactivarte'});
-    // Si viene contraseña nueva la hasheamos
-    if(password && password.length>=8){
+
+    const targetQ = await query('SELECT id, role FROM users WHERE id=$1',[req.params.id]);
+    if(!targetQ.rows[0]) return res.status(404).json({error:'Usuario no encontrado'});
+    const target = targetQ.rows[0];
+    const soyDueno = req.user.role === 'dueno';
+    const esMiCuenta = req.params.id === req.user.id;
+
+    // Escalación de privilegios: sin estos controles, gerencia podía asignarse el rol
+    // dueño o cambiarle la contraseña al dueño y tomar control total del sistema.
+    if(!soyDueno){
+      if(target.role === 'dueno') return res.status(403).json({error:'Solo el dueño puede modificar una cuenta de dueño'});
+      if(role === 'dueno') return res.status(403).json({error:'Solo el dueño puede asignar el rol dueño'});
+      if(password && !esMiCuenta) return res.status(403).json({error:'Solo el dueño puede cambiar la contraseña de otro usuario'});
+    }
+
+    if(password && password.length<8) return res.status(400).json({error:'La contraseña debe tener al menos 8 caracteres'});
+    if(password){
       const hash=await bcrypt.hash(password,parseInt(process.env.BCRYPT_ROUNDS)||12);
       await query('UPDATE users SET password_hash=$1,updated_at=NOW() WHERE id=$2',[hash,req.params.id]);
+      // Cerrar las sesiones abiertas de ese usuario: con la clave cambiada, ningún
+      // refresh token previo debe seguir sirviendo.
+      await query('DELETE FROM refresh_tokens WHERE user_id=$1',[req.params.id]);
     }
     const r=await query('UPDATE users SET name=$1,role=$2,vehicle_code=$3,active=$4,supplier_id=$6,sucursal=$7,area=$8,updated_at=NOW() WHERE id=$5 RETURNING id,name,email,role,active,supplier_id,sucursal,area',[name,role,vehicle_code||null,active!==false,req.params.id,supplier_id||null,sucursal||null,area||null]);
     if(!r.rows[0]) return res.status(404).json({error:'Usuario no encontrado'});
+    // Usuario desactivado o degradado de rol: sus sesiones tampoco deben sobrevivir.
+    if(active===false || (role && role!==target.role)){
+      await query('DELETE FROM refresh_tokens WHERE user_id=$1',[req.params.id]).catch(()=>{});
+    }
     res.json(r.rows[0]);
   }catch(err){console.error('PUT user error:',err.message);res.status(500).json({error:'Error actualizar'});}
 });
@@ -1375,19 +1397,39 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 // ── Cargas pendientes de verificación ────────────────────
 // DELETE /api/fuel/:id — solo dueño puede eliminar cargas
 fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id'), async (req, res) => {
+  // Transacción con DELETE primero (RETURNING): antes se acreditaban los litros al
+  // tanque y DESPUÉS se borraba, en dos queries sueltas — dos requests simultáneos
+  // (doble clic / reintento) acreditaban los litros dos veces, y un fallo a mitad
+  // dejaba el tanque inflado. Con el DELETE atómico, el segundo request encuentra
+  // 0 filas y recibe 404; el crédito y el borrado quedan en la misma transacción.
+  const client = await pool.connect();
   try {
-    const fuel = await query('SELECT * FROM fuel_logs WHERE id=$1', [req.params.id]);
-    if (!fuel.rows[0]) return res.status(404).json({ error: 'Carga no encontrada' });
-    
-    // Si tenía cisterna, devolver los litros
-    const fl = fuel.rows[0];
+    await client.query('BEGIN');
+    const del = await client.query('DELETE FROM fuel_logs WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!del.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Carga no encontrada' }); }
+    const fl = del.rows[0];
+    let devueltos = 0;
     if (fl.tank_id && fl.liters) {
-      await query('UPDATE tanks SET current_l = current_l + $1 WHERE id = $2', [fl.liters, fl.tank_id]);
+      const t = await client.query('UPDATE tanks SET current_l = current_l + $1, updated_at = NOW() WHERE id = $2 RETURNING id', [fl.liters, fl.tank_id]);
+      if (t.rows[0]) devueltos = parseFloat(fl.liters) || 0;
     }
-    
-    await query('DELETE FROM fuel_logs WHERE id=$1', [req.params.id]);
-    res.json({ ok: true, liters_devueltos: fl.tank_id ? fl.liters : 0 });
-  } catch(err) { console.error('[fuel DELETE]', err.message); res.status(500).json({ error: 'Error al eliminar carga' }); }
+    await client.query('COMMIT');
+    // Auditoría con el CONTENIDO borrado (antes quedaba solo "DELETE fuel {}" y era
+    // imposible reconstruir qué carga se eliminó).
+    await auditChange(req, res, {
+      action: 'fuel_delete', table: 'fuel', recordId: req.params.id,
+      oldValue: {
+        vehicle_id: fl.vehicle_id, fuel_type: fl.fuel_type, liters: fl.liters,
+        price_per_l: fl.price_per_l, odometer_km: fl.odometer_km, location: fl.location,
+        logged_at: fl.logged_at, driver_name: fl.driver_name, tank_id: fl.tank_id,
+      },
+      newValue: { deleted: true, liters_devueltos: devueltos },
+    });
+    res.json({ ok: true, liters_devueltos: devueltos });
+  } catch(err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel DELETE]', err.message); res.status(500).json({ error: 'Error al eliminar carga' });
+  } finally { client.release(); }
 });
 
 fuelRouter.get('/pendientes-verificacion', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','mecanico','gerente_sucursal'), async (req, res) => {
