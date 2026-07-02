@@ -490,10 +490,13 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
       return res.status(400).json({ error: 'No hay litros válidos para ingresar al tanque destino' });
     }
 
-    // La recepción suma combustible al tanque/stock propio de la sucursal destino.
-    // Para gerente_sucursal, siempre usa su sucursal asignada. Para roles centrales,
-    // se puede indicar destination_sucursal o se toma el texto del despacho.
-    const destinoSucursal = branch || String(destination_sucursal || dispatch.destination || '').trim();
+    // La recepción suma combustible al tanque/stock propio de la sucursal DESTINO.
+    // La sucursal del usuario solo manda si es gerente_sucursal (recibe para SU
+    // sucursal). Para roles centrales vale el destino del despacho: antes `branch`
+    // pisaba al destino para CUALQUIER rol, y un usuario central con sucursal
+    // asignada que clickeaba "Recibir" mandaba los litros a su propia sucursal
+    // (despacho a Santa Rosa terminó sumado en Río Tercero).
+    const destinoSucursal = (_isGerenteSucursal(req) ? branch : '') || String(destination_sucursal || dispatch.destination || '').trim();
     const tankType = _fuelTankType(dispatch.type || dispatch.origin_type);
     const destinoTank = await _addFuelToDestinationTank(client, {
       destinoSucursal,
@@ -577,7 +580,9 @@ fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('due
       return res.status(400).json({ error: 'No hay litros válidos para sumar al tanque' });
     }
 
-    const destinoSucursal = branch || String(req.body?.destination_sucursal || dispatch.destination || '').trim();
+    // Mismo criterio que en /receive: la sucursal del usuario solo manda para
+    // gerente_sucursal; para roles centrales vale el destino del despacho.
+    const destinoSucursal = (_isGerenteSucursal(req) ? branch : '') || String(req.body?.destination_sucursal || dispatch.destination || '').trim();
     const tankType = _fuelTankType(dispatch.type || dispatch.origin_type);
     const destinoTank = await _addFuelToDestinationTank(client, {
       destinoSucursal,
