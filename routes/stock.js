@@ -101,10 +101,21 @@ function positiveNumber(value, fallback = 0) {
   const n = toNumber(value, fallback);
   return n > 0 ? n : fallback;
 }
+// Canoniza ubicaciones/áreas: normaliza acentos a Unicode NFC, colapsa espacios y
+// recorta. Sin esto, "Depósito" tipeado con dos normalizaciones distintas (p.ej. el
+// acento precompuesto vs. combinante, un espacio de más o distinta mayúscula) se
+// guardaba como DOS filas de saldo separadas: el área aparecía "duplicada" y un
+// Ingreso creaba una fila nueva en vez de sumar a la existente.
+function canonLoc(value) {
+  return String(value == null ? '' : value).normalize('NFC').replace(/\s+/g, ' ').trim();
+}
 function normalizeArea(value) {
-  const v = cleanText(value, 'Depósito');
-  const found = STOCK_AREAS.find(a => a.toLowerCase() === v.toLowerCase());
-  return found || v;
+  const v = canonLoc(cleanText(value, 'Depósito'));
+  const found = STOCK_AREAS.find(a => canonLoc(a).toLowerCase() === v.toLowerCase());
+  return found ? canonLoc(found) : v;
+}
+function normalizeLoc(value) {
+  return canonLoc(cleanText(value, 'Central'));
 }
 function userSucursal(req) {
   return cleanNullable(req.user?.sucursal || req.user?.base || req.user?.branch);
@@ -132,10 +143,10 @@ function applyBalanceScope(req, params, sqlParts, alias = 'b') {
   const role = req.user?.role;
   if (role === 'dueno' || role === 'gerencia') return;
   const suc = userSucursal(req);
-  if (suc) { params.push(suc); sqlParts.push(` AND ${alias}.base_location = $${params.length}`); }
+  if (suc) { params.push(canonLoc(suc)); sqlParts.push(` AND ${alias}.base_location = $${params.length}`); }
   if (role !== 'gerente_sucursal') {
     const ar = userArea(req);
-    if (ar) { params.push(ar); sqlParts.push(` AND ${alias}.area = $${params.length}`); }
+    if (ar) { params.push(canonLoc(ar)); sqlParts.push(` AND ${alias}.area = $${params.length}`); }
   }
 }
 // Fuerza la ubicación (sucursal/área) de un movimiento según el scope del usuario.
@@ -147,7 +158,7 @@ function scopedLocation(req, base_location, area) {
     if (suc) loc = suc;
     if (role !== 'gerente_sucursal') { const ua = userArea(req); if (ua) ar = ua; }
   }
-  return { base_location: loc, area: ar };
+  return { base_location: canonLoc(loc), area: canonLoc(ar) };
 }
 router.use(async (req, res, next) => {
   try {
@@ -286,7 +297,63 @@ async function ensureCatalogSchema() {
   await query(`ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(() => {});
   await query(`ALTER TABLE stock_movements ALTER COLUMN stock_id DROP NOT NULL`).catch(() => {});
   await query(`CREATE INDEX IF NOT EXISTS idx_stock_mov_catalog ON stock_movements(catalog_id)`).catch(() => {});
+  await ensureStockBalancesCanonical();
   catalogReady = true;
+}
+
+// Reparación (idempotente, una vez por proceso): fusiona saldos que representan la
+// MISMA ubicación pero quedaron guardados con textos distintos (acentos NFC/NFD,
+// espacios o mayúsculas). Suma las cantidades en una fila canónica y borra las
+// sobrantes. Es segura: sólo une filas que canonizan a la misma clave, así que no
+// puede perder ni mezclar stock de áreas distintas.
+let balancesCanonced = false;
+async function ensureStockBalancesCanonical() {
+  if (balancesCanonced) return;
+  balancesCanonced = true;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      'SELECT id, catalog_id, base_location, area, qty_current FROM stock_balances ORDER BY id FOR UPDATE');
+    const groups = new Map();
+    for (const r of rows) {
+      const key = `${r.catalog_id}||${canonLoc(r.base_location)}||${canonLoc(r.area)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    let merged = 0, normed = 0;
+    for (const list of groups.values()) {
+      const cloc = canonLoc(list[0].base_location);
+      const carea = canonLoc(list[0].area);
+      if (list.length === 1) {
+        const r = list[0];
+        if (r.base_location !== cloc || r.area !== carea) {
+          await client.query('UPDATE stock_balances SET base_location=$1, area=$2, updated_at=NOW() WHERE id=$3',
+            [cloc, carea, r.id]);
+          normed++;
+        }
+        continue;
+      }
+      // Varias filas para la misma ubicación canónica: sumar y dejar una sola.
+      // Borrar las sobrantes ANTES de canonizar la que se conserva, para no chocar
+      // con la restricción UNIQUE si alguna sobrante ya tenía el texto canónico.
+      const total = list.reduce((a, r) => a + (parseFloat(r.qty_current) || 0), 0);
+      const keep = list[0].id;
+      const drop = list.slice(1).map(r => r.id);
+      await client.query('DELETE FROM stock_balances WHERE id = ANY($1)', [drop]);
+      await client.query('UPDATE stock_balances SET base_location=$1, area=$2, qty_current=$3, updated_at=NOW() WHERE id=$4',
+        [cloc, carea, total, keep]);
+      merged += drop.length;
+    }
+    await client.query('COMMIT');
+    if (merged || normed) console.log(`[stock] saldos canonizados: ${merged} fila(s) duplicada(s) fusionada(s), ${normed} normalizada(s)`);
+    // Garantizar el ancla UNIQUE (por si la tabla precede a la restricción inline):
+    // ya sin duplicados, el índice se puede crear y el ON CONFLICT siempre resuelve.
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_stock_balances_loc ON stock_balances (catalog_id, base_location, area)`).catch(() => {});
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[stock canon balances]', e.message);
+  } finally { client.release(); }
 }
 
 // Prefijo de código por categoría (mismo criterio que la migración Fase 1).
@@ -544,9 +611,9 @@ router.post('/dispatches', authenticate, requireRole(...ROLES_DISPATCH_SEND), as
     const qtyNum = positiveNumber(req.body.qty, 0);
     if (!catalog_id) return res.status(400).json({ error: 'Falta el artículo' });
     if (qtyNum <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
-    const fromLoc = cleanText(req.body.from_location || 'Central', 'Central');
+    const fromLoc = canonLoc(cleanText(req.body.from_location || 'Central', 'Central'));
     const fromAr = normalizeArea(req.body.from_area || 'Depósito');
-    const toLoc = cleanText(req.body.to_location, '');
+    const toLoc = canonLoc(cleanText(req.body.to_location, ''));
     const toAr = normalizeArea(req.body.to_area || 'Depósito');
     if (!toLoc) return res.status(400).json({ error: 'Elegí la sucursal destino' });
     if (toLoc === fromLoc && toAr === fromAr) return res.status(400).json({ error: 'El destino debe ser distinto del origen' });
@@ -605,11 +672,12 @@ router.post('/dispatches/:id/recibir', authenticate, requireRole(...ROLES_DISPAT
     const suc = userSucursal(req);
     if (req.user?.role === 'gerente_sucursal' && suc && disp.to_location !== suc) { await client.query('ROLLBACK'); return res.status(403).json({ error: 'Solo podés recibir despachos de tu sucursal' }); }
     const qtyRecv = req.body.qty_received != null ? Math.max(0, toNumber(req.body.qty_received, parseFloat(disp.qty_sent))) : parseFloat(disp.qty_sent);
+    const toLoc = canonLoc(disp.to_location), toAr = canonLoc(disp.to_area);
     await client.query(`INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
        ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
-      [disp.catalog_id, disp.to_location, disp.to_area, qtyRecv]);
+      [disp.catalog_id, toLoc, toAr, qtyRecv]);
     await client.query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-      [disp.catalog_id, qtyRecv, `Recepción de despacho desde ${disp.from_location}/${disp.from_area}`, disp.to_location, disp.to_area, req.user.id]);
+      [disp.catalog_id, qtyRecv, `Recepción de despacho desde ${disp.from_location}/${disp.from_area}`, toLoc, toAr, req.user.id]);
     await client.query(`UPDATE stock_dispatches SET status='recibido', qty_received=$1, receive_notes=$2, received_by=$3, received_at=NOW() WHERE id=$4`,
       [qtyRecv, cleanNullable(req.body.receive_notes), req.user.id, req.params.id]);
     await client.query('COMMIT');
@@ -630,11 +698,12 @@ router.post('/dispatches/:id/cancelar', authenticate, requireRole(...ROLES_DISPA
     if (!d.rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Despacho no encontrado' }); }
     const disp = d.rows[0];
     if (disp.status !== 'en_transito') { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Solo se cancela un despacho en tránsito' }); }
+    const fromLoc = canonLoc(disp.from_location), fromAr = canonLoc(disp.from_area);
     await client.query(`INSERT INTO stock_balances (catalog_id, base_location, area, qty_current) VALUES ($1,$2,$3,$4)
        ON CONFLICT (catalog_id, base_location, area) DO UPDATE SET qty_current = stock_balances.qty_current + EXCLUDED.qty_current, updated_at = NOW()`,
-      [disp.catalog_id, disp.from_location, disp.from_area, disp.qty_sent]);
+      [disp.catalog_id, fromLoc, fromAr, disp.qty_sent]);
     await client.query(`INSERT INTO stock_movements (catalog_id, type, qty, reason, base_location, area, user_id) VALUES ($1,'Ingreso',$2,$3,$4,$5,$6)`,
-      [disp.catalog_id, disp.qty_sent, `Cancelación de despacho a ${disp.to_location}/${disp.to_area}`, disp.from_location, disp.from_area, req.user.id]);
+      [disp.catalog_id, disp.qty_sent, `Cancelación de despacho a ${disp.to_location}/${disp.to_area}`, fromLoc, fromAr, req.user.id]);
     await client.query(`UPDATE stock_dispatches SET status='cancelado' WHERE id=$1`, [req.params.id]);
     await client.query('COMMIT');
     res.json({ ok: true });
