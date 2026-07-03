@@ -561,6 +561,90 @@ auditorRouter.get('/uso-flota', authenticate, canAudit, async (req, res) => {
   }
 });
 
+// ── 8. Rendimiento histórico por unidad (km/L, L/100km, $/km) ──
+// Agrega, por vehículo, litros y costo de combustible (excluye urea) y el
+// recorrido (MAX-MIN de odómetro con ≥2 lecturas). Excluye autoelevadoras del
+// cálculo de km (van por horas, no km). ?meses=N limita a los últimos N meses;
+// meses=0 o sin parámetro = histórico completo.
+auditorRouter.get('/eficiencia-unidades', authenticate, canAudit, async (req, res) => {
+  try {
+    await ensureAuditorSchema();
+
+    const meses = Math.max(0, parseInt(req.query.meses || '0', 10) || 0);
+    const params = [];
+    let filtroFecha = '';
+    if (meses > 0) {
+      params.push(meses);
+      filtroFecha = `AND fl.logged_at >= (date_trunc('month', CURRENT_DATE) - ($1::int - 1) * INTERVAL '1 month')`;
+    }
+
+    const r = await query(`
+      SELECT fl.vehicle_id, v.code, v.plate, v.type, v.base,
+        COALESCE(LOWER(v.type),'') LIKE '%autoelev%' AS es_autoelev,
+        COUNT(*)                    FILTER (WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea')                          AS cargas,
+        COALESCE(SUM(fl.liters)     FILTER (WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea'),0)                       AS litros,
+        COALESCE(SUM(fl.liters*fl.price_per_l) FILTER (WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea'),0)           AS costo,
+        MIN(fl.odometer_km)         FILTER (WHERE fl.odometer_km > 0 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea')   AS km_min,
+        MAX(fl.odometer_km)         FILTER (WHERE fl.odometer_km > 0 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea')   AS km_max,
+        COUNT(*)                    FILTER (WHERE fl.odometer_km > 0 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea')   AS lecturas_odo,
+        MIN(fl.logged_at)           AS primera_carga,
+        MAX(fl.logged_at)           AS ultima_carga
+      FROM fuel_logs fl
+      JOIN vehicles v ON v.id = fl.vehicle_id
+      WHERE v.active = TRUE ${filtroFecha}
+      GROUP BY fl.vehicle_id, v.code, v.plate, v.type, v.base
+      HAVING COUNT(*) FILTER (WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea') > 0
+      ORDER BY v.code ASC`, params);
+
+    const unidades = r.rows.map(row => {
+      const litros = parseFloat(row.litros) || 0;
+      const costo  = parseFloat(row.costo) || 0;
+      const esAutoelev = row.es_autoelev === true;
+      const lecturas = parseInt(row.lecturas_odo) || 0;
+      // Km sólo si hay ≥2 lecturas de odómetro y no es autoelevadora (van por horas)
+      const km = (!esAutoelev && lecturas >= 2 && row.km_max != null && row.km_min != null)
+        ? Math.max(0, parseInt(row.km_max) - parseInt(row.km_min))
+        : 0;
+      return {
+        code: row.code,
+        plate: row.plate,
+        type: row.type,
+        base: row.base,
+        es_autoelev: esAutoelev,
+        cargas: parseInt(row.cargas) || 0,
+        litros,
+        costo,
+        km,
+        km_l:      km > 0 && litros > 0 ? km / litros : null,
+        l_100km:   km > 0 && litros > 0 ? litros / km * 100 : null,
+        costo_km:  km > 0 && costo  > 0 ? costo / km : null,
+        primera_carga: row.primera_carga,
+        ultima_carga:  row.ultima_carga,
+      };
+    });
+
+    // Promedio de flota (sólo unidades con km calculable, para no ensuciar el ratio)
+    const conKm = unidades.filter(u => u.km > 0 && u.litros > 0);
+    const kmTotal     = conKm.reduce((a,u)=>a+u.km,0);
+    const litrosTotal = conKm.reduce((a,u)=>a+u.litros,0);
+    const costoTotal  = conKm.reduce((a,u)=>a+u.costo,0);
+
+    res.json({
+      meses,
+      unidades,
+      resumen: {
+        unidades_con_km: conKm.length,
+        km_total:      kmTotal,
+        litros_total:  litrosTotal,
+        costo_total:   costoTotal,
+        km_l:      litrosTotal > 0 ? kmTotal / litrosTotal : null,
+        l_100km:   kmTotal > 0 ? litrosTotal / kmTotal * 100 : null,
+        costo_km:  kmTotal > 0 ? costoTotal / kmTotal : null,
+      },
+    });
+  } catch(err) { console.error('auditor eficiencia-unidades:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
 module.exports = auditorRouter;
 
 // ── 7. Datos GPS del día para contexto IA ───────────────
