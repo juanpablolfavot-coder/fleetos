@@ -37,6 +37,7 @@ async function renderAuditorPanel() {
         ['ots',        '🔧 Anomalías OTs'],
         ['trazabilidad','📋 Trazabilidad'],
         ['comparativo','📈 Comparativo mensual'],
+        ['eficiencia', '⚡ Rendimiento por unidad'],
         ['log',        '🗂 Log de acciones'],
       ].map(([id,label]) => `
         <button id="atab-${id}" onclick="showAuditorTab('${id}')"
@@ -76,6 +77,7 @@ async function showAuditorTab(tab) {
     if (tab === 'ots')          await renderAuditorOTs(content);
     if (tab === 'trazabilidad') await renderAuditorTrazabilidad(content);
     if (tab === 'comparativo')  await renderAuditorComparativo(content);
+    if (tab === 'eficiencia')   await renderAuditorEficiencia(content);
     if (tab === 'log')          await renderAuditorLog(content);
   } catch(e) {
     content.innerHTML = `<div class="card" style="color:var(--danger);padding:24px">Error: ${e.message}</div>`;
@@ -756,6 +758,210 @@ async function renderAuditorComparativo(el) {
     </div>`;
 }
 
+// ── Tab: Rendimiento por unidad (km/L, L/100km, $/km histórico) ──
+// Estado del período elegido y última respuesta (para ordenar/exportar sin re-pedir).
+let _efi = { meses: 0, unidades: [], resumen: {}, sortKey: 'code', sortDir: 1 };
+
+const _EFI_PERIODOS = [
+  [0,  'Histórico completo'],
+  [12, 'Últimos 12 meses'],
+  [6,  'Últimos 6 meses'],
+  [3,  'Últimos 3 meses'],
+];
+
+async function renderAuditorEficiencia(el) {
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:600;color:var(--text3)">Período</span>
+          <select class="form-select" id="efi-periodo" style="max-width:220px;padding:6px 10px;font-size:12px" onchange="loadAuditorEficiencia()">
+            ${_EFI_PERIODOS.map(([v,l]) => `<option value="${v}" ${v===_efi.meses?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exportEficienciaPDF()">📄 Descargar PDF</button>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
+        Rendimiento por unidad calculado con las cargas de combustible. Los km surgen de la diferencia de odómetro
+        (primera y última lectura del período, ≥2 cargas). Se excluye la urea. Las autoelevadoras operan por horas,
+        por eso no muestran km/L.
+      </div>
+    </div>
+    <div id="efi-result"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div></div>`;
+  await loadAuditorEficiencia();
+}
+
+async function loadAuditorEficiencia() {
+  const sel = document.getElementById('efi-periodo');
+  _efi.meses = sel ? (parseInt(sel.value, 10) || 0) : _efi.meses;
+  const wrap = document.getElementById('efi-result');
+  if (wrap) wrap.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div>`;
+
+  const res = await apiFetch(`/api/auditor/eficiencia-unidades?meses=${_efi.meses}`);
+  if (!res.ok) { if (wrap) wrap.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar rendimiento</div>`; return; }
+  const d = await res.json();
+  _efi.unidades = d.unidades || [];
+  _efi.resumen  = d.resumen || {};
+  _renderEficienciaTable();
+}
+
+function sortAuditorEficiencia(key) {
+  if (_efi.sortKey === key) { _efi.sortDir *= -1; }
+  else { _efi.sortKey = key; _efi.sortDir = (key === 'code') ? 1 : -1; }
+  _renderEficienciaTable();
+}
+
+function _renderEficienciaTable() {
+  const wrap = document.getElementById('efi-result');
+  if (!wrap) return;
+
+  if (!_efi.unidades.length) {
+    wrap.innerHTML = `<div class="card" style="text-align:center;padding:40px;color:var(--text3)">
+      <div style="font-size:32px;margin-bottom:12px">⛽</div>
+      Sin cargas de combustible en el período seleccionado.
+    </div>`;
+    return;
+  }
+
+  const r = _efi.resumen;
+  const f1 = n => Number(n).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+
+  // Orden
+  const k = _efi.sortKey, dir = _efi.sortDir;
+  const rows = [..._efi.unidades].sort((a,b) => {
+    let va = a[k], vb = b[k];
+    if (k === 'code' || k === 'base') { va = (va||''); vb = (vb||''); return va.localeCompare(vb) * dir; }
+    // nulls al final siempre
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (va - vb) * dir;
+  });
+
+  const arrow = key => _efi.sortKey === key ? (_efi.sortDir === 1 ? ' ▲' : ' ▼') : '';
+  const th = (key, label, extra='') => `<th class="efi-th" style="cursor:pointer;white-space:nowrap;${extra}" onclick="sortAuditorEficiencia('${key}')">${label}${arrow(key)}</th>`;
+
+  // Color del km/L: bueno (>=3), medio (2-3), malo (<2) — referencia camión pesado
+  const rendColor = v => v == null ? 'var(--text3)' : v >= 3 ? 'var(--ok)' : v >= 2 ? 'var(--warn)' : 'var(--danger)';
+
+  wrap.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card info">
+        <div class="kpi-label">🛣 Km recorridos (flota)</div>
+        <div class="kpi-value white">${Math.round(r.km_total||0).toLocaleString('es-AR')}</div>
+        <div class="kpi-trend">${r.unidades_con_km||0} unidades con km calculable</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
+        <div class="kpi-label">⚡ Rendimiento promedio</div>
+        <div class="kpi-value" style="color:#3b82f6">${r.km_l!=null?f1(r.km_l)+' km/L':'—'}</div>
+        <div class="kpi-trend">${r.l_100km!=null?f1(r.l_100km)+' L/100km':'—'}</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">💵 Costo por km (flota)</div>
+        <div class="kpi-value" style="color:#f59e0b">${r.costo_km!=null?fAr(r.costo_km):'—'}</div>
+        <div class="kpi-trend">${fAr(r.costo_total)} en combustible</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(6,182,212,.4)">
+        <div class="kpi-label">⛽ Litros consumidos</div>
+        <div class="kpi-value" style="color:#06b6d4">${Math.round(r.litros_total||0).toLocaleString('es-AR')} L</div>
+        <div class="kpi-trend">unidades con recorrido medible</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Rendimiento por unidad — ${_efi.unidades.length} unidades</div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr>
+            ${th('code','Unidad')}
+            ${th('base','Base')}
+            ${th('cargas','Cargas','text-align:right')}
+            ${th('km','Km','text-align:right')}
+            ${th('litros','Litros','text-align:right')}
+            ${th('costo','Combustible','text-align:right')}
+            ${th('km_l','km/L','text-align:right')}
+            ${th('l_100km','L/100km','text-align:right')}
+            ${th('costo_km','$/km','text-align:right')}
+          </tr></thead>
+          <tbody>${rows.map(u => `<tr>
+            <td class="td-mono" style="font-weight:600">${escapeHtml(u.code)}${u.es_autoelev?' <span style="font-size:9px;color:var(--text3)">(hs)</span>':''}</td>
+            <td style="color:var(--text3)">${escapeHtml(u.base||'—')}</td>
+            <td class="td-mono" style="text-align:right">${u.cargas}</td>
+            <td class="td-mono" style="text-align:right">${u.km>0?u.km.toLocaleString('es-AR'):'—'}</td>
+            <td class="td-mono" style="text-align:right">${Math.round(u.litros).toLocaleString('es-AR')} L</td>
+            <td class="td-mono" style="text-align:right">${fAr(u.costo)}</td>
+            <td class="td-mono" style="text-align:right;font-weight:700;color:${rendColor(u.km_l)}">${u.km_l!=null?f1(u.km_l):'—'}</td>
+            <td class="td-mono" style="text-align:right">${u.l_100km!=null?f1(u.l_100km):'—'}</td>
+            <td class="td-mono" style="text-align:right">${u.costo_km!=null?fAr(u.costo_km):'—'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
+        Tocá cualquier encabezado para ordenar. <span style="color:var(--ok)">Verde</span> ≥ 3 km/L ·
+        <span style="color:var(--warn)">amarillo</span> 2–3 · <span style="color:var(--danger)">rojo</span> &lt; 2.
+        "—" = sin recorrido medible en el período (falta ≥2 lecturas de odómetro).
+      </div>
+    </div>`;
+}
+
+function exportEficienciaPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { window.showToast?.('error', 'jsPDF no cargado. Refrescá la página.'); return; }
+  if (!_efi.unidades.length) { window.showToast?.('warn', 'No hay datos para exportar'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const periodoLabel = (_EFI_PERIODOS.find(p => p[0] === _efi.meses) || [0,'Histórico'])[1];
+  const startY = (window._pdfHeader
+    ? window._pdfHeader(doc, 'Rendimiento por unidad', periodoLabel + ' · Expreso Biletta SRL')
+    : 60);
+
+  const f1 = n => n == null ? '—' : Number(n).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+
+  // Mismo orden que se ve en pantalla
+  const k = _efi.sortKey, dir = _efi.sortDir;
+  const rows = [..._efi.unidades].sort((a,b) => {
+    let va = a[k], vb = b[k];
+    if (k === 'code' || k === 'base') return String(va||'').localeCompare(String(vb||'')) * dir;
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (va - vb) * dir;
+  });
+
+  const body = rows.map(u => [
+    u.code + (u.es_autoelev ? ' (hs)' : ''),
+    u.base || '—',
+    String(u.cargas),
+    u.km > 0 ? u.km.toLocaleString('es-AR') : '—',
+    Math.round(u.litros).toLocaleString('es-AR') + ' L',
+    fAr(u.costo),
+    f1(u.km_l),
+    f1(u.l_100km),
+    u.costo_km != null ? fAr(u.costo_km) : '—',
+  ]);
+  const r = _efi.resumen || {};
+  const style = window._pdfTableStyle ? window._pdfTableStyle() : {};
+  doc.autoTable({
+    startY,
+    head: [['Unidad','Base','Cargas','Km','Litros','Combustible','km/L','L/100km','$/km']],
+    body,
+    ...style,
+    columnStyles: { 0:{fontStyle:'bold'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}, 8:{halign:'right'} },
+    foot: [[
+      'FLOTA', '', '',
+      Math.round(r.km_total||0).toLocaleString('es-AR'),
+      Math.round(r.litros_total||0).toLocaleString('es-AR') + ' L',
+      fAr(r.costo_total),
+      f1(r.km_l), f1(r.l_100km),
+      r.costo_km != null ? fAr(r.costo_km) : '—',
+    ]],
+  });
+  doc.save(`Rendimiento-por-unidad-Biletta-${_efi.meses || 'historico'}.pdf`);
+  window.showToast?.('ok', 'PDF descargado');
+}
+
 // ── Tab 6: Log de acciones ────────────────────────────────
 // Estado de paginación del log (trae de a páginas del backend con "Cargar más").
 let _auditLog = { rows: [], offset: 0, pageSize: 100, allLoaded: false, el: null, nota: null, error: false };
@@ -955,6 +1161,10 @@ expose('renderAuditorOTs', renderAuditorOTs);
 expose('renderAuditorTrazabilidad', renderAuditorTrazabilidad);
 expose('loadAuditorTrazabilidad', loadAuditorTrazabilidad);
 expose('renderAuditorComparativo', renderAuditorComparativo);
+expose('renderAuditorEficiencia', renderAuditorEficiencia);
+expose('loadAuditorEficiencia', loadAuditorEficiencia);
+expose('sortAuditorEficiencia', sortAuditorEficiencia);
+expose('exportEficienciaPDF', exportEficienciaPDF);
 expose('renderAuditorLog', renderAuditorLog);
 expose('cargarMasAuditLog', cargarMasAuditLog);
 expose('openAuditorIA', openAuditorIA);
