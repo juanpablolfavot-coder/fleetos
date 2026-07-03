@@ -3496,7 +3496,19 @@ function stockAreaOptions(sucursal) {
   const cfg = App.config?.areas || {};
   const fromCfg = Array.isArray(cfg[sucursal]) ? cfg[sucursal].map(a => typeof a === 'string' ? a : (a.nombre || a.area || '')).filter(Boolean) : [];
   const fromData = (App.data.stock || []).filter(s => !sucursal || s.sucursal === sucursal || s.base_location === sucursal).map(s => s.area).filter(Boolean);
-  return [...new Set([...fixed, ...fromCfg, ...fromData])].filter(Boolean);
+  // Deduplicar por forma canónica (NFC + sin espacios de más): así "Depósito" escrito
+  // con distinta codificación de acento no aparece dos veces en el desplegable. El
+  // servidor guarda con esta misma forma, de modo que la opción coincide con el saldo.
+  const canon = v => String(v == null ? '' : v).normalize('NFC').replace(/\s+/g, ' ').trim();
+  const seen = new Set(); const out = [];
+  for (const raw of [...fixed, ...fromCfg, ...fromData]) {
+    const v = canon(raw);
+    if (!v) continue;
+    const k = v.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(v);
+  }
+  return out;
 }
 
 function stockCurrentFilters() {
