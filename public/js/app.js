@@ -291,7 +291,69 @@ function renderHome() {
       </div>
       ${nombre ? `<div style="font-size:15px;color:var(--text2);margin-top:4px">👋 Hola, <b>${escapeHtml(nombre)}</b></div>` : ''}
       <div style="font-size:13px;color:var(--text3);margin-top:8px">Elegí una sección en el menú de la izquierda para empezar.</div>
+      ${App.currentUser?.role === 'dueno' ? `
+        <div style="margin-top:22px;max-width:420px">
+          <button class="btn btn-primary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">🔔 Activar alertas de velocidad</button>
+          <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">
+            Recibí un aviso en este celular cuando una unidad supere los <b>80 km/h</b>, aunque tengas la app cerrada.<br>
+            📱 En <b>iPhone</b>: primero agregá la app a la pantalla de inicio (Compartir → "Agregar a inicio") y activá desde ahí.
+          </div>
+        </div>` : ''}
     </div>`;
+  if (App.currentUser?.role === 'dueno') _refreshSpeedAlertBtn();
+}
+
+// Deja el botón de alertas reflejando si este dispositivo ya está suscripto.
+async function _refreshSpeedAlertBtn() {
+  const btn = document.getElementById('btn-speed-alerts');
+  if (!btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { btn.textContent = '🔕 Desactivar alertas de velocidad'; btn.onclick = disableSpeedAlerts; }
+    else     { btn.textContent = '🔔 Activar alertas de velocidad';   btn.onclick = enableSpeedAlerts; }
+  } catch (e) { /* dejar el botón por defecto */ }
+}
+
+function _urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+async function enableSpeedAlerts() {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      showToast('error', 'Este dispositivo o navegador no soporta notificaciones push.'); return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { showToast('warn', 'Tenés que permitir las notificaciones para recibir las alertas.'); return; }
+    const keyRes = await apiFetch('/api/push/public-key');
+    const { publicKey, enabled } = await keyRes.json();
+    if (!enabled || !publicKey) { showToast('error', 'Las notificaciones todavía no están configuradas en el servidor.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _urlBase64ToUint8Array(publicKey) });
+    const r = await apiFetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); showToast('error', e.error || 'No se pudo activar'); return; }
+    showToast('ok', '🔔 Alertas de velocidad activadas en este dispositivo');
+    _refreshSpeedAlertBtn();
+  } catch (e) { showToast('error', 'No se pudo activar: ' + (e.message || e)); }
+}
+
+async function disableSpeedAlerts() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await apiFetch('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {});
+      await sub.unsubscribe().catch(() => {});
+    }
+    showToast('ok', 'Alertas desactivadas en este dispositivo');
+    _refreshSpeedAlertBtn();
+  } catch (e) { showToast('error', 'No se pudo desactivar: ' + (e.message || e)); }
 }
 
 // ── DASHBOARD ──
