@@ -11,6 +11,13 @@ const push = require('./push');
 const HYST = 5;        // km/h por debajo del límite para dar por cerrado el evento
 const STALE_MIN = 15;  // cerrar eventos abiertos sin actualización hace N min (unidad sin reporte)
 
+// Remolcados (semirremolque / acoplado): no tienen motor propio. El GPS reporta la
+// velocidad del camión que los arrastra, así que NO deben disparar alerta de exceso.
+function esRemolcado(type) {
+  const t = String(type || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  return t.includes('remolque') || t.includes('acoplad');
+}
+
 let _ready = false;
 async function ensureSchema() {
   if (_ready) return;
@@ -37,6 +44,8 @@ async function processVehicle(v, speed) {
   const s = Math.round(parseFloat(speed) || 0);
   const code = v && (v.code || v.plate);
   if (!code) return;
+  // Los semirremolques / acoplados no generan alerta (velocidad del camión que los tira).
+  if (esRemolcado(v.type)) return;
   await ensureSchema();
 
   const openRes = await query(

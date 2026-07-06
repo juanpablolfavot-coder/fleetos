@@ -282,7 +282,7 @@ async function syncGPSData() {
           gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
-        RETURNING id, code, plate, base, km_current
+        RETURNING id, code, plate, base, type, km_current
       `, [km, hourMeter, lat, lng, speed, status, searchPlate]);
 
       if (r.rows.length > 0) {
