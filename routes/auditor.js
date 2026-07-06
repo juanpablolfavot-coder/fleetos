@@ -7,6 +7,7 @@
 const auditorRouter = require('express').Router();
 const { query }     = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
+const speeding = require('../services/speeding');
 
 const canAudit = (req, res, next) => {
   if (['auditor','dueno'].includes(req.user?.role)) return next();
@@ -653,6 +654,15 @@ auditorRouter.get('/eficiencia-unidades', authenticate, canAudit, async (req, re
       },
     });
   } catch(err) { console.error('auditor eficiencia-unidades:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// ── 9. Historial de excesos de velocidad ──────────────────
+auditorRouter.get('/excesos-velocidad', authenticate, canAudit, async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const eventos = await speeding.listEvents({ desde, hasta, limit: req.query.limit });
+    res.json({ eventos });
+  } catch (err) { console.error('auditor excesos:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 module.exports = auditorRouter;

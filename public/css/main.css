@@ -391,7 +391,13 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 }
 
 /* ── RESPONSIVE MOBILE (≤600px) ── */
+/* Botones que solo aparecen en la barra superior en celular (en desktop van en el
+   pie del menú lateral). Ej: cerrar sesión / config. cuenta, que en mobile quedan
+   ocultos porque .sidebar-footer se esconde. */
+.topbar-mobile-only { display: none; }
+
 @media (max-width: 600px) {
+  .topbar-mobile-only { display: inline-flex !important; align-items: center; }
   /* Sidebar se convierte en bottom nav */
   .sidebar {
     width: 100% !important;

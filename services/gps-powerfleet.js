@@ -8,7 +8,7 @@
 
 const https  = require('https');
 const { query } = require('../db/pool');
-const push = require('./push');
+const speeding = require('./speeding');
 
 const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
 const PF_USER = process.env.GPS_USER     || 'EBiletta';
@@ -282,14 +282,14 @@ async function syncGPSData() {
           gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
-        RETURNING id, code, plate, km_current
+        RETURNING id, code, plate, base, km_current
       `, [km, hourMeter, lat, lng, speed, status, searchPlate]);
 
       if (r.rows.length > 0) {
         updated++;
         log.push(`${r.rows[0].code}(${km}km/${Math.round(hourMeter)}h)`);
-        // Alerta de velocidad a los dueños (si supera el límite). Fire-and-forget.
-        push.maybeAlertSpeeding(r.rows[0], speed).catch(() => {});
+        // Eventos de exceso de velocidad (abre/actualiza/cierra + push). Fire-and-forget.
+        speeding.processVehicle(r.rows[0], speed).catch(() => {});
       } else {
         // Vehículo no existe — crear con datos del GPS
         const cleanPlate = searchPlate.replace(/[^A-Z0-9]/gi,'').toUpperCase();
@@ -305,6 +305,9 @@ async function syncGPSData() {
         } catch(e) { /* ignorar si ya existe */ }
       }
     }
+
+    // Cerrar eventos de velocidad de unidades que dejaron de reportar.
+    speeding.closeStale().catch(() => {});
 
     _lastSync   = new Date();
     _lastResult = {
