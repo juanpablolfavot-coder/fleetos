@@ -9,6 +9,7 @@
 const https  = require('https');
 const { query } = require('../db/pool');
 const speeding = require('./speeding');
+const idle = require('./idle');
 
 const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
 const PF_USER = process.env.GPS_USER     || 'EBiletta';
@@ -201,6 +202,37 @@ async function fetchIO(vehicleId) {
   return null;
 }
 
+// Estado de ignición (motor encendido) desde el endpoint IO. Devuelve 1, 0 o null.
+// Busca la entrada "ignición" entre los inputs (igual criterio que el agente Python).
+async function fetchIgnition(vehicleId) {
+  const rt = process.env.PF_IO_RESOURCE_TYPE || '1';
+  const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+  const paths = [
+    `/Fleetcore.Api/api/io/${vehicleId}?resourceType=${rt}`,
+    `/fleetcore.api/api/io/${vehicleId}?resourceType=${rt}`,
+  ];
+  for (const path of paths) {
+    const res = await httpsReq(path, { timeout: 8000 });
+    if (res.status === 200 && res.body.length > 5) {
+      try {
+        const d = JSON.parse(res.body);
+        const inputs = d?.data?.inputs || d?.inputs || [];
+        for (const item of inputs) {
+          if (norm(item?.name) === 'ignicion' || norm(item?.name) === 'ignition') {
+            const val = parseFloat(item?.value);
+            if (!Number.isNaN(val)) return val >= 1 ? 1 : 0;
+            const st = norm(item?.status);
+            if (['encendida', 'encendido', 'activo', 'activa', 'on'].includes(st)) return 1;
+            if (['apagada', 'apagado', 'inactivo', 'inactiva', 'off'].includes(st)) return 0;
+            return 0;
+          }
+        }
+      } catch(e) {}
+    }
+  }
+  return null;
+}
+
 // ── Asegurar columnas GPS en vehicles ──────────────────────
 async function ensureColumns() {
   try {
@@ -240,6 +272,7 @@ async function syncGPSData() {
     let updated = 0;
     const log = [];
 
+    const idleCandidates = [];
     for (const v of fleet) {
       // Campo licensePlate (del Python que ya funcionaba)
       const plate     = (v.licensePlate || v.Plate || v.PlateNo || v.plate || '').toString().trim();
@@ -290,6 +323,13 @@ async function syncGPSData() {
         log.push(`${r.rows[0].code}(${km}km/${Math.round(hourMeter)}h)`);
         // Eventos de exceso de velocidad (abre/actualiza/cierra + push). Fire-and-forget.
         speeding.processVehicle(r.rows[0], speed).catch(() => {});
+        // Ralentí: si está detenido, es candidato (hay que ver la ignición vía IO,
+        // se resuelve en paralelo al final). Si se mueve, cierra cualquier ralentí abierto.
+        if (speed <= idle.IDLE_SPEED) {
+          idleCandidates.push({ row: r.rows[0], speed, vehicleId, address: v.address || v.Address || null });
+        } else {
+          idle.processVehicle(r.rows[0], speed, null).catch(() => {});
+        }
       } else {
         // Vehículo no existe — crear con datos del GPS
         const cleanPlate = searchPlate.replace(/[^A-Z0-9]/gi,'').toUpperCase();
@@ -306,8 +346,15 @@ async function syncGPSData() {
       }
     }
 
-    // Cerrar eventos de velocidad de unidades que dejaron de reportar.
+    // Ralentí: resolver la ignición de las unidades detenidas (en paralelo) y registrar.
+    await Promise.all(idleCandidates.map(async (c) => {
+      const engineOn = c.vehicleId ? await fetchIgnition(c.vehicleId).catch(() => null) : null;
+      await idle.processVehicle(c.row, c.speed, engineOn, c.address).catch(() => {});
+    }));
+
+    // Cerrar eventos de unidades que dejaron de reportar.
     speeding.closeStale().catch(() => {});
+    idle.closeStale().catch(() => {});
 
     _lastSync   = new Date();
     _lastResult = {

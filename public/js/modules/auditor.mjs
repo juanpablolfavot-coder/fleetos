@@ -39,6 +39,7 @@ async function renderAuditorPanel() {
         ['comparativo','📈 Comparativo mensual'],
         ['eficiencia', '⚡ Rendimiento por unidad'],
         ['excesos',    '🚨 Excesos de velocidad'],
+        ['ralenti',    '🕒 Ralentí'],
         ['log',        '🗂 Log de acciones'],
       ].map(([id,label]) => `
         <button id="atab-${id}" onclick="showAuditorTab('${id}')"
@@ -80,6 +81,7 @@ async function showAuditorTab(tab) {
     if (tab === 'comparativo')  await renderAuditorComparativo(content);
     if (tab === 'eficiencia')   await renderAuditorEficiencia(content);
     if (tab === 'excesos')      await renderAuditorExcesos(content);
+    if (tab === 'ralenti')      await renderAuditorRalenti(content);
     if (tab === 'log')          await renderAuditorLog(content);
   } catch(e) {
     content.innerHTML = `<div class="card" style="color:var(--danger);padding:24px">Error: ${e.message}</div>`;
@@ -1058,6 +1060,95 @@ async function renderAuditorExcesos(el) {
     </div>`;
 }
 
+// ── Tab: Ralentí (historial + estadísticas del mes) ───────
+async function renderAuditorRalenti(el) {
+  const now = new Date();
+  const mes = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const res = await apiFetch(`/api/auditor/ralenti?mes=${mes}`);
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ralentí</div>`; return; }
+  const d = await res.json();
+  const r = d.resumen || {};
+  const fAr = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+  const nombreMes = new Date(d.periodo.anio, d.periodo.mes - 1, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+
+  if (!d.por_unidad || !d.por_unidad.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">🕒</div>
+      <div style="font-weight:600;color:var(--ok)">Sin ralentí registrado en ${nombreMes}</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">Se registra automáticamente cuando una unidad queda con el motor encendido y detenida más de ${d.umbral_min} min. Requiere el dato de ignición del GPS.</div>
+    </div>`;
+    return;
+  }
+
+  const maxTot = Math.max(...d.por_unidad.map(u => u.total_seconds), 1);
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card info">
+        <div class="kpi-label">🕒 Tiempo total en ralentí</div>
+        <div class="kpi-value white">${_fmtDur(r.total_seconds)}</div>
+        <div class="kpi-trend">${r.episodios || 0} episodios · ${r.unidades || 0} unidades</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(239,68,68,.4)">
+        <div class="kpi-label">⛽ Gasoil desperdiciado (est.)</div>
+        <div class="kpi-value" style="color:var(--danger)">${Math.round(r.litros_estimados || 0).toLocaleString('es-AR')} L</div>
+        <div class="kpi-trend">según el consumo de ralentí de cada modelo</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">💸 Costo estimado</div>
+        <div class="kpi-value" style="color:#f59e0b">${fAr(r.costo_estimado)}</div>
+        <div class="kpi-trend">${r.precio_litro ? '~' + fAr(r.precio_litro) + '/L' : 'sin precio de referencia'}</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0;margin-bottom:16px">
+      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Ranking por unidad — ${nombreMes}</div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr>
+            <th>Unidad</th><th>Base</th>
+            <th style="text-align:right">Episodios</th>
+            <th style="text-align:right">Tiempo total</th>
+            <th style="text-align:right">L/h</th>
+            <th style="text-align:right">Gasoil est.</th>
+            <th style="width:120px">&nbsp;</th>
+          </tr></thead>
+          <tbody>${d.por_unidad.map(u => `<tr>
+            <td class="td-mono" style="font-weight:600">${escapeHtml(u.vehicle_code || '—')}</td>
+            <td style="color:var(--text3)">${escapeHtml(u.base || '—')}</td>
+            <td class="td-mono" style="text-align:right">${u.episodios}</td>
+            <td class="td-mono" style="text-align:right;font-weight:700">${_fmtDur(u.total_seconds)}</td>
+            <td class="td-mono" style="text-align:right;color:var(--text3)">${(u.litros_por_hora ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
+            <td class="td-mono" style="text-align:right">${Math.round(u.litros_estimados).toLocaleString('es-AR')} L</td>
+            <td><div style="background:var(--bg3);border-radius:4px;height:8px;overflow:hidden"><div style="width:${Math.round(u.total_seconds / maxTot * 100)}%;height:100%;background:var(--warn)"></div></div></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
+        Ralentí = motor encendido y unidad detenida más de ${d.umbral_min} min. El gasoil se estima con el
+        consumo de ralentí de cada modelo (columna L/h) × el tiempo. No incluye semirremolques ni autoelevadoras.
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Últimos episodios</div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr><th>Unidad</th><th>Base</th><th>Inicio</th><th style="text-align:right">Duración</th><th>Estado</th></tr></thead>
+          <tbody>${(d.eventos || []).slice(0, 50).map(e => `<tr>
+            <td class="td-mono" style="font-weight:600">${escapeHtml(e.vehicle_code || '—')}</td>
+            <td style="color:var(--text3)">${escapeHtml(e.base || '—')}</td>
+            <td class="td-mono">${new Date(e.started_at).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+            <td class="td-mono" style="text-align:right;font-weight:700">${_fmtDur(e.duration_seconds)}</td>
+            <td>${e.en_curso ? '<span class="badge badge-warn">🟡 en curso</span>' : '<span class="badge badge-ok">finalizado</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 // ── Tab 6: Log de acciones ────────────────────────────────
 // Estado de paginación del log (trae de a páginas del backend con "Cargar más").
 let _auditLog = { rows: [], offset: 0, pageSize: 100, allLoaded: false, el: null, nota: null, error: false };
@@ -1262,6 +1353,7 @@ expose('loadAuditorEficiencia', loadAuditorEficiencia);
 expose('sortAuditorEficiencia', sortAuditorEficiencia);
 expose('exportEficienciaPDF', exportEficienciaPDF);
 expose('renderAuditorExcesos', renderAuditorExcesos);
+expose('renderAuditorRalenti', renderAuditorRalenti);
 expose('renderAuditorLog', renderAuditorLog);
 expose('cargarMasAuditLog', cargarMasAuditLog);
 expose('openAuditorIA', openAuditorIA);

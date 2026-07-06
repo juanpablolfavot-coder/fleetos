@@ -8,6 +8,7 @@ const auditorRouter = require('express').Router();
 const { query }     = require('../db/pool');
 const { authenticate, requireRole } = require('../middleware/auth');
 const speeding = require('../services/speeding');
+const idle = require('../services/idle');
 
 const canAudit = (req, res, next) => {
   if (['auditor','dueno'].includes(req.user?.role)) return next();
@@ -663,6 +664,14 @@ auditorRouter.get('/excesos-velocidad', authenticate, canAudit, async (req, res)
     const eventos = await speeding.listEvents({ desde, hasta, limit: req.query.limit });
     res.json({ eventos });
   } catch (err) { console.error('auditor excesos:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// ── 10. Ralentí (historial + estadísticas) ────────────────
+auditorRouter.get('/ralenti', authenticate, canAudit, async (req, res) => {
+  try {
+    const data = await idle.stats({ mes: req.query.mes });
+    res.json(data);
+  } catch (err) { console.error('auditor ralenti:', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 module.exports = auditorRouter;
