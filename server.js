@@ -57,6 +57,7 @@ const sucursalesRouter = require('./routes/sucursales');
 const adminRouter = require('./routes/admin');
 const assetsRouter = require('./routes/assets');
 const suppliersRouter = require('./routes/suppliers');
+const pushRouter = require('./routes/push');
 const app=express();
 const BUILD_VERSION = String(
   process.env.RENDER_GIT_COMMIT ||
@@ -145,6 +146,7 @@ app.use('/api/sucursales',sucursalesRouter);
 app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
+app.use('/api/push', pushRouter);
 
 // ── Endpoints GPS ──
 // Importar middleware de autenticación

@@ -8,6 +8,7 @@
 
 const https  = require('https');
 const { query } = require('../db/pool');
+const push = require('./push');
 
 const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
 const PF_USER = process.env.GPS_USER     || 'EBiletta';
@@ -287,6 +288,8 @@ async function syncGPSData() {
       if (r.rows.length > 0) {
         updated++;
         log.push(`${r.rows[0].code}(${km}km/${Math.round(hourMeter)}h)`);
+        // Alerta de velocidad a los dueños (si supera el límite). Fire-and-forget.
+        push.maybeAlertSpeeding(r.rows[0], speed).catch(() => {});
       } else {
         // Vehículo no existe — crear con datos del GPS
         const cleanPlate = searchPlate.replace(/[^A-Z0-9]/gi,'').toUpperCase();
