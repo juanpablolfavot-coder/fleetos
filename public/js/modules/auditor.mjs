@@ -29,7 +29,7 @@ async function renderAuditorPanel() {
         <button class="btn btn-primary btn-sm" onclick="openAuditorIA()">🤖 Consultar IA</button>
       </div>
     </div>
-    <div id="auditor-tabs" style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--border2);padding-bottom:0">
+    <div id="auditor-tabs" style="display:flex;flex-wrap:wrap;gap:4px 2px;margin-bottom:20px;border-bottom:1px solid var(--border2);padding-bottom:0">
       ${[
         ['resumen',    '📊 Resumen'],
         ['visual',     '📈 Indicadores visuales'],
@@ -1163,7 +1163,7 @@ async function renderAuditorRalenti(el) {
       </div>
       <div class="kpi-card" style="border-color:rgba(239,68,68,.4)">
         <div class="kpi-label">⛽ Gasoil desperdiciado (est.)</div>
-        <div class="kpi-value" style="color:var(--danger)">${Math.round(r.litros_estimados || 0).toLocaleString('es-AR')} L</div>
+        <div class="kpi-value" style="color:var(--danger)">${(Number(r.litros_estimados) || 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} L</div>
         <div class="kpi-trend">según el consumo de ralentí de cada modelo</div>
       </div>
       <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
@@ -1192,7 +1192,7 @@ async function renderAuditorRalenti(el) {
             <td class="td-mono" style="text-align:right">${u.episodios}</td>
             <td class="td-mono" style="text-align:right;font-weight:700">${_fmtDur(u.total_seconds)}</td>
             <td class="td-mono" style="text-align:right;color:var(--text3)">${(u.litros_por_hora ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</td>
-            <td class="td-mono" style="text-align:right">${Math.round(u.litros_estimados).toLocaleString('es-AR')} L</td>
+            <td class="td-mono" style="text-align:right">${(Number(u.litros_estimados) || 0).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} L</td>
             <td><div style="background:var(--bg3);border-radius:4px;height:8px;overflow:hidden"><div style="width:${Math.round(u.total_seconds / maxTot * 100)}%;height:100%;background:var(--warn)"></div></div></td>
           </tr>`).join('')}</tbody>
         </table>
