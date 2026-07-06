@@ -8,7 +8,10 @@
 const { query } = require('../db/pool');
 const push = require('./push');
 
-const HYST = 5;        // km/h por debajo del límite para dar por cerrado el evento
+// Tolerancia (km/h) sobre el límite para ABRIR un exceso. Por defecto 0 = estricto:
+// apenas se pasa del límite se marca (no se le da margen a los choferes). Se puede
+// aflojar con SPEED_ALERT_MARGIN si alguna vez hiciera falta.
+const MARGIN = Math.max(0, parseInt(process.env.SPEED_ALERT_MARGIN || '0', 10) || 0);
 const STALE_MIN = 15;  // cerrar eventos abiertos sin actualización hace N min (unidad sin reporte)
 
 // Remolcados (semirremolque / acoplado): no tienen motor propio. El GPS reporta la
@@ -41,6 +44,7 @@ async function ensureSchema() {
 // Procesa una lectura de una unidad. Abre/actualiza/cierra el evento según la velocidad.
 async function processVehicle(v, speed) {
   const LIMIT = push.SPEED_LIMIT || 80;
+  const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   const s = Math.round(parseFloat(speed) || 0);
   const code = v && (v.code || v.plate);
   if (!code) return;
@@ -52,7 +56,7 @@ async function processVehicle(v, speed) {
     'SELECT id FROM speeding_events WHERE vehicle_code=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [code]);
   const open = openRes.rows[0];
 
-  if (s > LIMIT) {
+  if (s > OPEN_AT) {
     if (open) {
       await query('UPDATE speeding_events SET max_speed=GREATEST(max_speed,$1), updated_at=NOW() WHERE id=$2', [s, open.id]);
     } else {
@@ -67,14 +71,14 @@ async function processVehicle(v, speed) {
         url: '/',
       }).catch(() => {});
     }
-  } else if (open && s <= LIMIT - HYST) {
-    // Bajó claramente: cerrar el evento y calcular la duración.
+  } else if (open && s <= LIMIT) {
+    // Volvió al límite (o menos): cerrar el evento y calcular la duración.
     await query(
       `UPDATE speeding_events SET ended_at=NOW(),
          duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)
        WHERE id=$1`, [open.id]);
   } else if (open) {
-    // Banda de histéresis (entre límite-5 y límite): mantener vivo el evento.
+    // Banda entre el límite y el umbral de apertura (sólo si hay margen): mantener vivo.
     await query('UPDATE speeding_events SET updated_at=NOW() WHERE id=$1', [open.id]);
   }
 }
