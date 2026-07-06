@@ -38,6 +38,7 @@ async function renderAuditorPanel() {
         ['trazabilidad','📋 Trazabilidad'],
         ['comparativo','📈 Comparativo mensual'],
         ['eficiencia', '⚡ Rendimiento por unidad'],
+        ['excesos',    '🚨 Excesos de velocidad'],
         ['log',        '🗂 Log de acciones'],
       ].map(([id,label]) => `
         <button id="atab-${id}" onclick="showAuditorTab('${id}')"
@@ -78,6 +79,7 @@ async function showAuditorTab(tab) {
     if (tab === 'trazabilidad') await renderAuditorTrazabilidad(content);
     if (tab === 'comparativo')  await renderAuditorComparativo(content);
     if (tab === 'eficiencia')   await renderAuditorEficiencia(content);
+    if (tab === 'excesos')      await renderAuditorExcesos(content);
     if (tab === 'log')          await renderAuditorLog(content);
   } catch(e) {
     content.innerHTML = `<div class="card" style="color:var(--danger);padding:24px">Error: ${e.message}</div>`;
@@ -978,6 +980,84 @@ function exportEficienciaPDF() {
   window.showToast?.('ok', 'PDF descargado');
 }
 
+// ── Tab: Excesos de velocidad (historial de eventos) ──────
+function _fmtDur(seg) {
+  const s = Math.max(0, parseInt(seg) || 0);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60), r = s % 60;
+  if (m < 60) return `${m}m${r ? ' ' + r + 's' : ''}`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  return `${h}h${mm ? ' ' + mm + 'm' : ''}`;
+}
+
+async function renderAuditorExcesos(el) {
+  const res = await apiFetch('/api/auditor/excesos-velocidad');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar excesos</div>`; return; }
+  const { eventos } = await res.json();
+
+  if (!eventos || !eventos.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">✅</div>
+      <div style="font-weight:600;color:var(--ok)">Sin excesos de velocidad registrados</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px">Se registran automáticamente cuando una unidad supera el límite. Requiere las alertas de velocidad configuradas.</div>
+    </div>`;
+    return;
+  }
+
+  const enCurso = eventos.filter(e => e.en_curso).length;
+  const unidades = new Set(eventos.map(e => e.vehicle_code)).size;
+  const maxVel = Math.max(...eventos.map(e => parseFloat(e.max_speed) || 0));
+  const fecha = d => new Date(d).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:16px">
+      <div class="kpi-card ${enCurso ? 'danger' : 'info'}">
+        <div class="kpi-label">🚨 Excesos registrados</div>
+        <div class="kpi-value ${enCurso ? 'danger' : 'white'}">${eventos.length}</div>
+        <div class="kpi-trend">${enCurso ? enCurso + ' en curso ahora' : 'ninguno en curso'}</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
+        <div class="kpi-label">🚛 Unidades involucradas</div>
+        <div class="kpi-value" style="color:#3b82f6">${unidades}</div>
+        <div class="kpi-trend">distintas</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
+        <div class="kpi-label">⏱ Velocidad máxima</div>
+        <div class="kpi-value" style="color:#f59e0b">${Math.round(maxVel)} km/h</div>
+        <div class="kpi-trend">pico registrado</div>
+      </div>
+    </div>
+    <div class="card" style="padding:0">
+      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">Historial de excesos — ${eventos.length}</div>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:12px">
+          <thead><tr>
+            <th>Unidad</th><th>Base</th><th>Inicio</th>
+            <th style="text-align:right">Duración</th>
+            <th style="text-align:right">Vel. máx</th>
+            <th style="text-align:right">Límite</th>
+            <th>Estado</th>
+          </tr></thead>
+          <tbody>${eventos.map(e => `<tr>
+            <td class="td-mono" style="font-weight:600">${escapeHtml(e.vehicle_code || '—')}</td>
+            <td style="color:var(--text3)">${escapeHtml(e.base || '—')}</td>
+            <td class="td-mono">${fecha(e.started_at)}</td>
+            <td class="td-mono" style="text-align:right">${_fmtDur(e.duration_seconds)}</td>
+            <td class="td-mono" style="text-align:right;font-weight:700;color:var(--danger)">${Math.round(parseFloat(e.max_speed) || 0)} km/h</td>
+            <td class="td-mono" style="text-align:right;color:var(--text3)">${e.limit_kmh}</td>
+            <td>${e.en_curso ? '<span class="badge badge-warn">🔴 en curso</span>' : '<span class="badge badge-ok">finalizado</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
+        Cada fila es un exceso desde que la unidad cruzó el límite hasta que bajó. La duración es aproximada
+        (según la frecuencia del GPS). "En curso" = la unidad todavía va excedida en el último reporte.
+      </div>
+    </div>`;
+}
+
 // ── Tab 6: Log de acciones ────────────────────────────────
 // Estado de paginación del log (trae de a páginas del backend con "Cargar más").
 let _auditLog = { rows: [], offset: 0, pageSize: 100, allLoaded: false, el: null, nota: null, error: false };
@@ -1181,6 +1261,7 @@ expose('renderAuditorEficiencia', renderAuditorEficiencia);
 expose('loadAuditorEficiencia', loadAuditorEficiencia);
 expose('sortAuditorEficiencia', sortAuditorEficiencia);
 expose('exportEficienciaPDF', exportEficienciaPDF);
+expose('renderAuditorExcesos', renderAuditorExcesos);
 expose('renderAuditorLog', renderAuditorLog);
 expose('cargarMasAuditLog', cargarMasAuditLog);
 expose('openAuditorIA', openAuditorIA);

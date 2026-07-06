@@ -78,32 +78,8 @@ async function notifyDuenos(payload) {
   return sent;
 }
 
-// Anti-spam: por unidad, no repetir el aviso dentro de la ventana de enfriamiento
-// (en memoria, por proceso — alcanza para no bombardear cada 5 min de sync GPS).
-const _lastAlert = new Map();
-const COOLDOWN_MS = 15 * 60 * 1000;
-
-// Llamar por cada unidad en cada sync del GPS. Sólo dispara si supera el límite.
-async function maybeAlertSpeeding(vehicle, speed) {
-  if (!pushEnabled()) return;
-  const kmh = Math.round(parseFloat(speed) || 0);
-  if (kmh <= SPEED_LIMIT) return;
-  const key = vehicle.code || vehicle.plate || 'unidad';
-  const now = Date.now();
-  if (now - (_lastAlert.get(key) || 0) < COOLDOWN_MS) return;
-  _lastAlert.set(key, now);
-  try {
-    await notifyDuenos({
-      title: '⚠ Exceso de velocidad',
-      body: `${key} circulando a ${kmh} km/h (límite ${SPEED_LIMIT})`,
-      tag: `speed-${key}`,
-      url: '/',
-    });
-  } catch (e) { console.error('[push] alerta velocidad:', e.message); }
-}
-
 module.exports = {
   pushEnabled, getPublicKey, ensurePushSchema,
-  saveSubscription, removeSubscription, notifyDuenos, maybeAlertSpeeding,
+  saveSubscription, removeSubscription, notifyDuenos,
   SPEED_LIMIT,
 };
