@@ -1041,16 +1041,21 @@ async function renderAuditorExcesos(el) {
             <th style="text-align:right">Vel. máx</th>
             <th style="text-align:right">Límite</th>
             <th>Estado</th>
+            <th>Enviar</th>
           </tr></thead>
-          <tbody>${eventos.map(e => `<tr>
+          <tbody>${eventos.map(e => {
+            const kmh = Math.round(parseFloat(e.max_speed) || 0);
+            return `<tr>
             <td class="td-mono" style="font-weight:600">${escapeHtml(e.vehicle_code || '—')}</td>
             <td style="color:var(--text3)">${escapeHtml(e.base || '—')}</td>
             <td class="td-mono">${fecha(e.started_at)}</td>
             <td class="td-mono" style="text-align:right">${_fmtDur(e.duration_seconds)}</td>
-            <td class="td-mono" style="text-align:right;font-weight:700;color:var(--danger)">${Math.round(parseFloat(e.max_speed) || 0)} km/h</td>
+            <td class="td-mono" style="text-align:right;font-weight:700;color:var(--danger)">${kmh} km/h</td>
             <td class="td-mono" style="text-align:right;color:var(--text3)">${e.limit_kmh}</td>
             <td>${e.en_curso ? '<span class="badge badge-warn">🔴 en curso</span>' : '<span class="badge badge-ok">finalizado</span>'}</td>
-          </tr>`).join('')}</tbody>
+            <td><button class="btn btn-secondary btn-sm" onclick="compartirExceso('${escapeHtml(e.vehicle_code || '')}',${kmh},'${e.started_at}')" title="Enviar aviso al chofer">📲 Enviar</button></td>
+          </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>
       <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
@@ -1058,6 +1063,57 @@ async function renderAuditorExcesos(el) {
         (según la frecuencia del GPS). "En curso" = la unidad todavía va excedida en el último reporte.
       </div>
     </div>`;
+}
+
+// Genera un "cartelito" (imagen) del exceso y lo comparte por el menú del celular
+// (WhatsApp, etc.). Si el equipo no soporta compartir archivos, descarga la imagen.
+async function compartirExceso(code, kmh, isoFecha) {
+  try {
+    const fecha = new Date(isoFecha).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const W = 680, H = 420;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    // Fondo
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, W - 2, H - 2);
+    // Header naranja Biletta
+    ctx.fillStyle = '#ea580c'; ctx.fillRect(0, 0, W, 96);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 44px Arial'; ctx.fillText('EB', 28, 64);
+    ctx.font = 'bold 28px Arial'; ctx.fillText('Expreso Biletta', 96, 44);
+    ctx.font = '17px Arial'; ctx.fillText('Aviso de velocidad', 96, 74);
+    // Cuerpo
+    ctx.fillStyle = '#b91c1c'; ctx.font = 'bold 34px Arial';
+    ctx.fillText('EXCESO DE VELOCIDAD', 30, 165);
+    ctx.fillStyle = '#111827'; ctx.font = '26px Arial';
+    ctx.fillText('Unidad: ' + code, 30, 222);
+    ctx.fillStyle = '#dc2626'; ctx.font = 'bold 40px Arial';
+    ctx.fillText(kmh + ' km/h', 30, 278);
+    ctx.fillStyle = '#4b5563'; ctx.font = '21px Arial';
+    ctx.fillText('Fecha: ' + fecha, 30, 320);
+    ctx.fillStyle = '#111827'; ctx.font = '21px Arial';
+    ctx.fillText('Por favor, respetá el límite de velocidad.', 30, 362);
+    ctx.fillStyle = '#9ca3af'; ctx.font = '14px Arial';
+    ctx.fillText('Generado por FleetOS — Expreso Biletta', 30, 398);
+
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+    const texto = `Expreso Biletta - Aviso de velocidad\nUnidad ${code} registró ${kmh} km/h el ${fecha}.\nPor favor, moderá la velocidad. Gracias.`;
+    const file = blob ? new File([blob], `aviso-velocidad-${code}.png`, { type: 'image/png' }) : null;
+
+    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Aviso de velocidad', text: texto });
+    } else if (navigator.share) {
+      await navigator.share({ title: 'Aviso de velocidad', text: texto });
+    } else if (blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = `aviso-velocidad-${code}.png`; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      window.showToast?.('info', 'Imagen descargada — adjuntala en WhatsApp');
+    }
+  } catch (e) {
+    if (String(e && e.name) !== 'AbortError') window.showToast?.('error', 'No se pudo compartir: ' + (e.message || e));
+  }
 }
 
 // ── Tab: Ralentí (historial + estadísticas del mes) ───────
@@ -1353,6 +1409,7 @@ expose('loadAuditorEficiencia', loadAuditorEficiencia);
 expose('sortAuditorEficiencia', sortAuditorEficiencia);
 expose('exportEficienciaPDF', exportEficienciaPDF);
 expose('renderAuditorExcesos', renderAuditorExcesos);
+expose('compartirExceso', compartirExceso);
 expose('renderAuditorRalenti', renderAuditorRalenti);
 expose('renderAuditorLog', renderAuditorLog);
 expose('cargarMasAuditLog', cargarMasAuditLog);
