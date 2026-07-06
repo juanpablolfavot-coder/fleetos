@@ -83,9 +83,24 @@ async function showAuditorTab(tab) {
     if (tab === 'excesos')      await renderAuditorExcesos(content);
     if (tab === 'ralenti')      await renderAuditorRalenti(content);
     if (tab === 'log')          await renderAuditorLog(content);
+    _applyTableLabels(content);
   } catch(e) {
     content.innerHTML = `<div class="card" style="color:var(--danger);padding:24px">Error: ${e.message}</div>`;
   }
+}
+
+// Para el celular: copia el título de cada columna a un data-label en cada celda,
+// así el CSS puede mostrar las tablas como tarjetas (etiqueta: valor) sin scroll
+// horizontal. Se llama cada vez que se (re)dibuja una tabla del auditor.
+function _applyTableLabels(root) {
+  if (!root) return;
+  root.querySelectorAll('table').forEach(table => {
+    const heads = [...table.querySelectorAll('thead th')].map(th => (th.textContent || '').replace(/[▲▼]/g, '').trim());
+    if (!heads.length) return;
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      [...tr.children].forEach((td, i) => { if (heads[i]) td.setAttribute('data-label', heads[i]); });
+    });
+  });
 }
 
 // ── Tab 1: Resumen ejecutivo ──────────────────────────────
@@ -924,6 +939,7 @@ function _renderEficienciaTable() {
         "—" = sin recorrido medible (falta ≥2 lecturas del contador).
       </div>
     </div>`;
+  _applyTableLabels(wrap);
 }
 
 function exportEficienciaPDF() {
@@ -1295,6 +1311,7 @@ function _auditLogRender() {
       </div>
       ${cargarMas}
     </div>`;
+  _applyTableLabels(el);
 }
 
 // ── Asistente IA del auditor ──────────────────────────────
