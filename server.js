@@ -275,8 +275,9 @@ app.use((err,req,res,next)=>{
 const PORT=process.env.PORT||3000;
 httpServer = app.listen(PORT, () => {
   console.log('FleetOS OK port', PORT);
-  // Iniciar sync GPS con Powerfleet cada 5 minutos
-  startGPSSync(5);
+  // Iniciar sync GPS con Powerfleet. Intervalo por defecto 2 min (configurable
+  // con GPS_SYNC_MINUTES): cuanto menor, más a tiempo llegan las alertas de velocidad.
+  startGPSSync();
 
   // P7 — limpieza global periódica de refresh tokens vencidos. El refresh por
   // usuario solo borra los suyos; los de dispositivos abandonados quedaban

@@ -328,10 +328,15 @@ async function syncGPSData() {
   }
 }
 
-function startGPSSync(intervalMin = 5) {
-  console.log(`[GPS] Servicio iniciado. Sync cada ${intervalMin} min`);
+// Intervalo del sync, configurable por entorno (GPS_SYNC_MINUTES). Piso de 1 min
+// para no exigir de más a la API de Powerfleet. Menos minutos = alertas de
+// velocidad más a tiempo, pero más consultas al proveedor.
+let _intervalMin = 2;
+function startGPSSync(intervalMin) {
+  _intervalMin = Math.max(1, parseInt(intervalMin != null ? intervalMin : process.env.GPS_SYNC_MINUTES || '2', 10) || 2);
+  console.log(`[GPS] Servicio iniciado. Sync cada ${_intervalMin} min`);
   setTimeout(syncGPSData, 15000);
-  setInterval(syncGPSData, intervalMin * 60 * 1000);
+  setInterval(syncGPSData, _intervalMin * 60 * 1000);
 }
 
 function getGPSStatus() {
@@ -342,7 +347,7 @@ function getGPSStatus() {
     hasToken:   !!_token,
     tokenExpIn: _tokenExp ? Math.round((_tokenExp - Date.now()) / 1000) + 's' : null,
     running:    _running,
-    interval:   '5 min',
+    interval:   _intervalMin + ' min',
   };
 }
 
