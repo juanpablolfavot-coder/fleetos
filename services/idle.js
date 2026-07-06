@@ -10,7 +10,26 @@ const { query } = require('../db/pool');
 const IDLE_SPEED   = 3;                                                  // km/h: detenido
 const IDLE_MIN_SEC = Math.max(30, (parseInt(process.env.IDLE_MIN_MINUTES || '3', 10) || 3) * 60); // umbral para contar
 const STALE_MIN    = 15;                                                 // cerrar si dejó de reportar
-const LITERS_PER_HOUR = parseFloat(process.env.IDLE_LITERS_PER_HOUR || '3') || 3; // estimación de consumo en ralentí
+const LITERS_PER_HOUR = parseFloat(process.env.IDLE_LITERS_PER_HOUR || '3') || 3; // consumo por defecto (unidad sin tabla)
+
+// Consumo de ralentí por unidad (L/h), según modelo. Las que no estén acá usan el default.
+const IDLE_LH_BY_CODE = {
+  AB723IX: 0.6, AF823RB: 0.6,                                        // Citroën Berlingo
+  AG468LK: 0.8,                                                      // Ford Transit
+  AB902MF: 0.9, AE919NN: 0.9,                                        // Mercedes-Benz Sprinter
+  OKQ888: 1.0,                                                       // Iveco Daily
+  AF041MB: 1.8,                                                      // Mercedes-Benz Accelo 815
+  AH035AN: 1.9, AH035AO: 1.9,                                        // Iveco GB 110-190
+  AA147OT: 2.0, AA508SW: 2.0, AB120EF: 2.0, AD225WO: 2.0, AF159UC: 2.0, // Mercedes-Benz Accelo 1016
+  AH327AU: 2.4, AH327CF: 2.4,                                        // Iveco Tector 170E28
+  AE517UM: 2.8, AG470AG: 2.8,                                        // Atego 1729 / 1726
+  AD235FE: 3.0, AD644VD: 3.0, AF614LB: 3.0, AF931PD: 3.0, AG468LQ: 3.0, // Iveco Stralis
+  AH327RZ: 3.0, AH327SA: 3.0, AH327SB: 3.0, AH327SG: 3.0, AH462JI: 3.0,
+};
+function litrosPorHora(code) {
+  const r = IDLE_LH_BY_CODE[String(code || '').toUpperCase()];
+  return (r != null) ? r : LITERS_PER_HOUR;
+}
 
 // No aplican: remolcados (sin motor) ni autoelevadoras (trabajan detenidas en ralentí).
 function excluido(type) {
@@ -98,28 +117,35 @@ async function stats({ mes } = {}) {
              WHERE price_per_l > 0 AND logged_at >= (CURRENT_DATE - INTERVAL '60 days')`).catch(() => ({ rows: [{}] })),
   ]);
 
-  const totalSeg = porUnidad.rows.reduce((a, r) => a + (parseInt(r.total_seconds) || 0), 0);
-  const litros = (totalSeg / 3600) * LITERS_PER_HOUR;
   const precioL = parseFloat(precio.rows[0]?.p) || 0;
+  const porUnidadOut = porUnidad.rows.map(r => {
+    const seg = parseInt(r.total_seconds) || 0;
+    const lh = litrosPorHora(r.vehicle_code);
+    const litros = (seg / 3600) * lh;
+    return {
+      vehicle_code: r.vehicle_code, base: r.base,
+      episodios: parseInt(r.episodios) || 0,
+      total_seconds: seg,
+      litros_por_hora: lh,
+      litros_estimados: litros,
+    };
+  });
+  const totalSeg = porUnidadOut.reduce((a, u) => a + u.total_seconds, 0);
+  const litros = porUnidadOut.reduce((a, u) => a + u.litros_estimados, 0);
 
   return {
     periodo: { anio: yr, mes: mo },
-    litros_por_hora: LITERS_PER_HOUR,
+    litros_por_hora: LITERS_PER_HOUR,      // default para unidades sin tabla
     umbral_min: Math.round(IDLE_MIN_SEC / 60),
     resumen: {
       total_seconds: totalSeg,
-      episodios: porUnidad.rows.reduce((a, r) => a + (parseInt(r.episodios) || 0), 0),
-      unidades: porUnidad.rows.length,
+      episodios: porUnidadOut.reduce((a, u) => a + u.episodios, 0),
+      unidades: porUnidadOut.length,
       litros_estimados: litros,
       costo_estimado: litros * precioL,
       precio_litro: precioL,
     },
-    por_unidad: porUnidad.rows.map(r => ({
-      vehicle_code: r.vehicle_code, base: r.base,
-      episodios: parseInt(r.episodios) || 0,
-      total_seconds: parseInt(r.total_seconds) || 0,
-      litros_estimados: ((parseInt(r.total_seconds) || 0) / 3600) * LITERS_PER_HOUR,
-    })),
+    por_unidad: porUnidadOut,
     eventos: eventos.rows,
   };
 }
