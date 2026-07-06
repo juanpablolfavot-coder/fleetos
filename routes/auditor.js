@@ -563,9 +563,9 @@ auditorRouter.get('/uso-flota', authenticate, canAudit, async (req, res) => {
 
 // ── 8. Rendimiento histórico por unidad (km/L, L/100km, $/km) ──
 // Agrega, por vehículo, litros y costo de combustible (excluye urea) y el
-// recorrido (MAX-MIN de odómetro con ≥2 lecturas). Excluye autoelevadoras del
-// cálculo de km (van por horas, no km). ?meses=N limita a los últimos N meses;
-// meses=0 o sin parámetro = histórico completo.
+// recorrido (MAX-MIN de odómetro con ≥2 lecturas). Las autoelevadoras van por
+// HORAS (mismo campo de lectura): para ellas se calcula L/hora y $/hora en vez
+// de km/L. ?meses=N limita a los últimos N meses; meses=0 = histórico completo.
 auditorRouter.get('/eficiencia-unidades', authenticate, canAudit, async (req, res) => {
   try {
     await ensureAuditorSchema();
@@ -601,23 +601,33 @@ auditorRouter.get('/eficiencia-unidades', authenticate, canAudit, async (req, re
       const costo  = parseFloat(row.costo) || 0;
       const esAutoelev = row.es_autoelev === true;
       const lecturas = parseInt(row.lecturas_odo) || 0;
-      // Km sólo si hay ≥2 lecturas de odómetro y no es autoelevadora (van por horas)
-      const km = (!esAutoelev && lecturas >= 2 && row.km_max != null && row.km_min != null)
+      // Diferencia de lecturas del contador (≥2 lecturas). En vehículos es KM;
+      // en autoelevadoras el mismo campo lleva las HORAS del horómetro.
+      const recorrido = (lecturas >= 2 && row.km_max != null && row.km_min != null)
         ? Math.max(0, parseInt(row.km_max) - parseInt(row.km_min))
         : 0;
+      const km    = esAutoelev ? 0 : recorrido;
+      const horas = esAutoelev ? recorrido : 0;
       return {
         code: row.code,
         plate: row.plate,
         type: row.type,
         base: row.base,
         es_autoelev: esAutoelev,
+        medida: esAutoelev ? 'hs' : 'km',
         cargas: parseInt(row.cargas) || 0,
         litros,
         costo,
         km,
+        horas,
+        recorrido,
+        // Vehículos (km): km/L, L/100km, $/km
         km_l:      km > 0 && litros > 0 ? km / litros : null,
         l_100km:   km > 0 && litros > 0 ? litros / km * 100 : null,
         costo_km:  km > 0 && costo  > 0 ? costo / km : null,
+        // Autoelevadoras (horas): litros por hora y $ por hora
+        l_hora:      horas > 0 && litros > 0 ? litros / horas : null,
+        costo_hora:  horas > 0 && costo  > 0 ? costo / horas : null,
         primera_carga: row.primera_carga,
         ultima_carga:  row.ultima_carga,
       };

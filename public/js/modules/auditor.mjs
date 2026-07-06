@@ -878,30 +878,46 @@ function _renderEficienciaTable() {
             ${th('code','Unidad')}
             ${th('base','Base')}
             ${th('cargas','Cargas','text-align:right')}
-            ${th('km','Km','text-align:right')}
+            ${th('recorrido','Km / Hs','text-align:right')}
             ${th('litros','Litros','text-align:right')}
             ${th('costo','Combustible','text-align:right')}
-            ${th('km_l','km/L','text-align:right')}
+            ${th('km_l','Rendimiento','text-align:right')}
             ${th('l_100km','L/100km','text-align:right')}
-            ${th('costo_km','$/km','text-align:right')}
+            ${th('costo_km','$/km · $/h','text-align:right')}
           </tr></thead>
-          <tbody>${rows.map(u => `<tr>
+          <tbody>${rows.map(u => {
+            const chico = 'font-size:9px;color:var(--text3)';
+            // Km/Hs
+            const recCell = u.recorrido > 0
+              ? `${u.recorrido.toLocaleString('es-AR')}${u.es_autoelev ? ` <span style="${chico}">hs</span>` : ''}`
+              : '—';
+            // Rendimiento: vehículos km/L (con semáforo); autoelevadoras L/h
+            const rendCell = u.es_autoelev
+              ? (u.l_hora != null ? `${f1(u.l_hora)} <span style="${chico}">L/h</span>` : '—')
+              : `<span style="font-weight:700;color:${rendColor(u.km_l)}">${u.km_l != null ? f1(u.km_l) : '—'}</span>${u.km_l != null ? ` <span style="${chico}">km/L</span>` : ''}`;
+            // $/km (vehículos) o $/h (autoelevadoras)
+            const costoRec = u.es_autoelev
+              ? (u.costo_hora != null ? `${fAr(u.costo_hora)} <span style="${chico}">/h</span>` : '—')
+              : (u.costo_km != null ? fAr(u.costo_km) : '—');
+            return `<tr>
             <td class="td-mono" style="font-weight:600">${escapeHtml(u.code)}${u.es_autoelev?' <span style="font-size:9px;color:var(--text3)">(hs)</span>':''}</td>
             <td style="color:var(--text3)">${escapeHtml(u.base||'—')}</td>
             <td class="td-mono" style="text-align:right">${u.cargas}</td>
-            <td class="td-mono" style="text-align:right">${u.km>0?u.km.toLocaleString('es-AR'):'—'}</td>
+            <td class="td-mono" style="text-align:right">${recCell}</td>
             <td class="td-mono" style="text-align:right">${Math.round(u.litros).toLocaleString('es-AR')} L</td>
             <td class="td-mono" style="text-align:right">${fAr(u.costo)}</td>
-            <td class="td-mono" style="text-align:right;font-weight:700;color:${rendColor(u.km_l)}">${u.km_l!=null?f1(u.km_l):'—'}</td>
-            <td class="td-mono" style="text-align:right">${u.l_100km!=null?f1(u.l_100km):'—'}</td>
-            <td class="td-mono" style="text-align:right">${u.costo_km!=null?fAr(u.costo_km):'—'}</td>
-          </tr>`).join('')}</tbody>
+            <td class="td-mono" style="text-align:right">${rendCell}</td>
+            <td class="td-mono" style="text-align:right">${u.es_autoelev ? '—' : (u.l_100km!=null?f1(u.l_100km):'—')}</td>
+            <td class="td-mono" style="text-align:right">${costoRec}</td>
+          </tr>`;
+          }).join('')}</tbody>
         </table>
       </div>
       <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
-        Tocá cualquier encabezado para ordenar. <span style="color:var(--ok)">Verde</span> ≥ 3 km/L ·
+        Tocá cualquier encabezado para ordenar. Rendimiento en km/L: <span style="color:var(--ok)">verde</span> ≥ 3 ·
         <span style="color:var(--warn)">amarillo</span> 2–3 · <span style="color:var(--danger)">rojo</span> &lt; 2.
-        "—" = sin recorrido medible en el período (falta ≥2 lecturas de odómetro).
+        Las autoelevadoras <b>(hs)</b> van por horas: muestran <b>L/h</b> y <b>$/h</b> en vez de km/L.
+        "—" = sin recorrido medible (falta ≥2 lecturas del contador).
       </div>
     </div>`;
 }
@@ -934,18 +950,18 @@ function exportEficienciaPDF() {
     u.code + (u.es_autoelev ? ' (hs)' : ''),
     u.base || '—',
     String(u.cargas),
-    u.km > 0 ? u.km.toLocaleString('es-AR') : '—',
+    u.recorrido > 0 ? (u.recorrido.toLocaleString('es-AR') + (u.es_autoelev ? ' hs' : '')) : '—',
     Math.round(u.litros).toLocaleString('es-AR') + ' L',
     fAr(u.costo),
-    f1(u.km_l),
-    f1(u.l_100km),
-    u.costo_km != null ? fAr(u.costo_km) : '—',
+    u.es_autoelev ? (u.l_hora != null ? f1(u.l_hora) + ' L/h' : '—') : f1(u.km_l),
+    u.es_autoelev ? '—' : f1(u.l_100km),
+    u.es_autoelev ? (u.costo_hora != null ? fAr(u.costo_hora) + '/h' : '—') : (u.costo_km != null ? fAr(u.costo_km) : '—'),
   ]);
   const r = _efi.resumen || {};
   const style = window._pdfTableStyle ? window._pdfTableStyle() : {};
   doc.autoTable({
     startY,
-    head: [['Unidad','Base','Cargas','Km','Litros','Combustible','km/L','L/100km','$/km']],
+    head: [['Unidad','Base','Cargas','Km / Hs','Litros','Combustible','Rend.','L/100km','$/km · $/h']],
     body,
     ...style,
     columnStyles: { 0:{fontStyle:'bold'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}, 8:{halign:'right'} },
