@@ -713,4 +713,6 @@ tr:hover td { background: var(--bg3); color: var(--text); }
   }
   /* Barras/botones dentro de celdas: que ocupen su lado derecho sin romper */
   #auditor-content tbody td > div { width: auto; min-width: 90px; }
+  /* Pestañas del auditor más compactas para que entren varias por fila */
+  #auditor-tabs button { padding: 6px 8px !important; font-size: 11px !important; }
 }
