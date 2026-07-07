@@ -2912,7 +2912,7 @@ function openFuelEntryModal() {
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;font-size:12px;color:var(--text3);margin-bottom:10px">
       Nivel actual: <strong id="fe-nivel-actual">${gasoilNivel}</strong>
     </div>
-    ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
+    ${_fuelPuedePrecioIngreso(App.currentUser?.role) ? `
       <div class="form-row">
         <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" placeholder="Nombre del proveedor" id="fe-supplier"></div>
         <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" placeholder="1200" id="fe-ppu"></div>
@@ -2935,7 +2935,7 @@ async function saveFuelEntry() {
   const liters   = parseFloat(document.getElementById('fe-liters')?.value) || 0;
   const supplier = (document.getElementById('fe-supplier')?.value || '').trim();
   const remito   = (document.getElementById('fe-remito')?.value || '').trim();
-  const ppu      = _fuelPuedeVerPrecios(App.currentUser?.role) ? (parseFloat(document.getElementById('fe-ppu')?.value) || null) : null;
+  const ppu      = _fuelPuedePrecioIngreso(App.currentUser?.role) ? (parseFloat(document.getElementById('fe-ppu')?.value) || null) : null;
 
   if (liters <= 0) { showToast('error', 'Ingresá la cantidad de litros'); return; }
 
@@ -4621,6 +4621,13 @@ function _ocPuedeVerPrecios(role) {
 function _fuelPuedeVerPrecios(role) {
   const rolesQueSiVen = ['dueno','gerencia','compras','contador','auditor','encargado_combustible','proveedores'];
   return rolesQueSiVen.includes(role);
+}
+
+// Al RECIBIR combustible (ingreso a cisterna) el jefe de mantenimiento también puede
+// cargar el precio por litro, además de quienes ven precios en general. Es solo para
+// ese formulario; en el resto del módulo el jefe sigue sin ver precios.
+function _fuelPuedePrecioIngreso(role) {
+  return _fuelPuedeVerPrecios(role) || role === 'jefe_mantenimiento';
 }
 
 function _fuelPuedeGestionarCisterna(role) {
