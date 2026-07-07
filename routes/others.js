@@ -285,7 +285,7 @@ fuelRouter.get('/tank-entries', authenticate, async (req, res) => {
 });
 
 // Registrar ingreso a cisterna + crear ticket básico.
-fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','encargado_combustible','compras','jefe_mantenimiento'), async (req, res) => {
+fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','encargado_combustible','compras','jefe_mantenimiento','proveedores'), async (req, res) => {
   const client = await require('../db/pool').pool.connect();
   try {
     await ensureFuelTankEntriesTable();
