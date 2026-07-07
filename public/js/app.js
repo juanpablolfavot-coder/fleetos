@@ -4631,7 +4631,7 @@ function _fuelPuedePrecioIngreso(role) {
 }
 
 function _fuelPuedeGestionarCisterna(role) {
-  return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento'].includes(role);
+  return ['dueno','gerencia','compras','encargado_combustible','jefe_mantenimiento','proveedores'].includes(role);
 }
 
 function _fuelPuedeGestionarDespachos(role) {

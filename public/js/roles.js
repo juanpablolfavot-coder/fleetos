@@ -359,7 +359,7 @@ function getRoleData(role) {
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['home','purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['home','tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
     gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['home','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'], canEdit:['stock','purchase_orders'] },
-    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['home','proveedor_panel','suppliers','purchase_orders'], canEdit:['suppliers'] },
+    proveedores:           { label:'Proveedores',              badge:'role-proveedores',modules:['home','proveedor_panel','suppliers','purchase_orders','fuel'], canEdit:['suppliers','fuel'] },
   };
   return roles[role] || roles['auditor'];
 }
