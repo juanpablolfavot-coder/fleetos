@@ -118,17 +118,17 @@ async function renderAuditorResumen(el) {
     <div class="kpi-row" style="margin-bottom:20px">
       <div class="kpi-card info">
         <div class="kpi-label">💰 Costo total del mes</div>
-        <div class="kpi-value white">$${Math.round(parseFloat(d.combustible.costo)+parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR')}</div>
+        <div class="kpi-value white">$${(parseFloat(d.combustible.costo)+parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">combustible + mantenimiento</div>
       </div>
       <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
         <div class="kpi-label">⛽ Combustible</div>
-        <div class="kpi-value" style="color:#3b82f6">$${Math.round(parseFloat(d.combustible.costo)).toLocaleString('es-AR')}</div>
+        <div class="kpi-value" style="color:#3b82f6">$${(parseFloat(d.combustible.costo)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">${Math.round(parseFloat(d.combustible.litros)).toLocaleString()} L · ${d.combustible.cargas} cargas · ${d.combustible.sin_ticket} sin ticket</div>
       </div>
       <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
         <div class="kpi-label">🔧 Mantenimiento</div>
-        <div class="kpi-value" style="color:#f59e0b">$${Math.round(parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR')}</div>
+        <div class="kpi-value" style="color:#f59e0b">$${(parseFloat(d.ordenes.mano_obra)+parseFloat(d.ordenes.repuestos)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">${d.ordenes.total} OTs · ${d.ordenes.abiertas} abiertas · ${d.ordenes.cerradas} cerradas</div>
       </div>
       <div class="kpi-card ${flotaOk < flotaTotal * 0.8 ? 'danger' : 'ok'}">
@@ -153,7 +153,7 @@ async function renderAuditorResumen(el) {
     </div>
     ${(() => {
       const c = d.compras || {};
-      const fmtAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+      const fmtAr = n => '$' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
       const deudaColor = (c.deuda_vencida||0) > 0 ? 'danger' : (c.deuda_total||0) > 0 ? 'warn' : 'ok';
       return `
       <div style="margin-top:22px;font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🛒 Compras y pagos</div>
@@ -585,7 +585,7 @@ async function _renderAuditorStacked() {
       legend.innerHTML = `
         <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:12px;background:rgba(37,99,235,0.6);border:2px solid rgba(37,99,235,1);border-radius:2px"></span>Combustible</span>
         <span style="display:flex;align-items:center;gap:6px"><span style="width:12px;height:12px;background:rgba(217,119,6,0.6);border:2px solid rgba(217,119,6,1);border-radius:2px"></span>Mantenimiento</span>
-        <span style="color:var(--text3);margin-left:12px">Total 6 meses: <strong style="color:var(--text);font-family:var(--mono)">$${Math.round(totalGeneral).toLocaleString('es-AR')}</strong></span>
+        <span style="color:var(--text3);margin-left:12px">Total 6 meses: <strong style="color:var(--text);font-family:var(--mono)">$${(totalGeneral).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></span>
       `;
     }
   } catch(err) {
@@ -654,7 +654,7 @@ async function renderAuditorOTs(el) {
       <div class="table-wrap">
         <table style="font-size:12px">
           <thead><tr>${Object.keys(a.registros[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
-          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${Object.values(r).map(v=>`<td class="td-mono">${typeof v === 'number' ? '$'+Math.round(v).toLocaleString('es-AR') : (v||'—')}</td>`).join('')}</tr>`).join('')}</tbody>
+          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${Object.values(r).map(v=>`<td class="td-mono">${typeof v === 'number' ? '$'+(v).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : (v||'—')}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>
     </div>`).join('');
@@ -690,7 +690,7 @@ async function loadAuditorTrazabilidad() {
 
   el.innerHTML = `
     <div class="kpi-row" style="margin-bottom:16px">
-      <div class="kpi-card info"><div class="kpi-label">Costo total histórico</div><div class="kpi-value white">$${Math.round(costTotal).toLocaleString('es-AR')}</div></div>
+      <div class="kpi-card info"><div class="kpi-label">Costo total histórico</div><div class="kpi-value white">$${(costTotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div></div>
       <div class="kpi-card" style="border-color:rgba(59,130,246,.4)"><div class="kpi-label">Cargas combustible</div><div class="kpi-value" style="color:#3b82f6">${d.resumen.total_cargas}</div></div>
       <div class="kpi-card" style="border-color:rgba(245,158,11,.4)"><div class="kpi-label">Órdenes de trabajo</div><div class="kpi-value" style="color:#f59e0b">${d.resumen.total_ots}</div></div>
       <div class="kpi-card ok"><div class="kpi-label">Checklists</div><div class="kpi-value ok">${d.resumen.total_checklists}</div></div>
@@ -710,7 +710,7 @@ async function loadAuditorTrazabilidad() {
               <td><span style="color:${colores[e.tipo]||'var(--text3)'};">${iconos[e.tipo]||'•'} ${e.tipo.replace(/_/g,' ')}</span></td>
               <td style="font-size:12px">${escapeHtml(e.detalle)}</td>
               <td style="font-size:12px;color:var(--text3)">${escapeHtml(e.usuario||'—')}</td>
-              <td class="td-mono" style="font-size:12px;color:${e.monto>0?'var(--danger)':'var(--text3)'}">${e.monto>0?'$'+Math.round(e.monto).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="font-size:12px;color:${e.monto>0?'var(--danger)':'var(--text3)'}">${e.monto>0?'$'+(e.monto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
             </tr>`;
           }).join('')}</tbody>
         </table>
@@ -761,14 +761,14 @@ async function renderAuditorComparativo(el) {
               : '';
             return `<tr>
               <td class="td-mono" style="font-weight:600">${m.label.toUpperCase()}</td>
-              <td class="td-mono" style="color:#3b82f6">${m.costo_combustible>0?'$'+Math.round(m.costo_combustible).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#3b82f6">${m.costo_combustible>0?'$'+(m.costo_combustible).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:#3b82f6">${m.litros>0?Math.round(m.litros).toLocaleString()+' L':'—'}${litrosBreak}</td>
               <td class="td-mono">${kmCell}</td>
               <td class="td-mono">${rendCell}</td>
-              <td class="td-mono" style="color:#06b6d4">${m.costo_urea>0?'$'+Math.round(m.costo_urea).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#f59e0b">${m.costo_mantenimiento>0?'$'+Math.round(m.costo_mantenimiento).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${m.costo_urea>0?'$'+(m.costo_urea).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#f59e0b">${m.costo_mantenimiento>0?'$'+(m.costo_mantenimiento).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono">${m.ots||'—'}</td>
-              <td class="td-mono" style="font-weight:700">${m.total>0?'$'+Math.round(m.total).toLocaleString('es-AR'):'—'}</td>
+              <td class="td-mono" style="font-weight:700">${m.total>0?'$'+(m.total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:${varColor}">${varPct !== null ? (parseFloat(varPct)>0?'+':'')+varPct+'%' : '—'}</td>
             </tr>`;
           }).join('')}</tbody>
@@ -844,7 +844,7 @@ function _renderEficienciaTable() {
 
   const r = _efi.resumen;
   const f1 = n => Number(n).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const fAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+  const fAr = n => '$' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 
   // Orden
   const k = _efi.sortKey, dir = _efi.sortDir;
@@ -953,7 +953,7 @@ function exportEficienciaPDF() {
     : 60);
 
   const f1 = n => n == null ? '—' : Number(n).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  const fAr = n => '$' + Math.round(Number(n)||0).toLocaleString('es-AR');
+  const fAr = n => '$' + (Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 
   // Mismo orden que se ve en pantalla
   const k = _efi.sortKey, dir = _efi.sortDir;
@@ -1140,7 +1140,7 @@ async function renderAuditorRalenti(el) {
   if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ralentí</div>`; return; }
   const d = await res.json();
   const r = d.resumen || {};
-  const fAr = n => '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+  const fAr = n => '$' + (Number(n) || 0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   const nombreMes = new Date(d.periodo.anio, d.periodo.mes - 1, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
   if (!d.por_unidad || !d.por_unidad.length) {

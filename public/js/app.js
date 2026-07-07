@@ -570,22 +570,22 @@ function renderDashboard() {
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⛽ Combustible</div>
-          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${Math.round(combustibleMesCosto).toLocaleString('es-AR')}</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${(combustibleMesCosto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${Math.round(litrosMes).toLocaleString('es-AR')} L · ${fuelMes.length} cargas</div>
         </div>
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🔧 OTs cerradas</div>
           <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">${otsCerradasMes.length}</div>
-          <div style="font-size:10px;color:var(--text3);margin-top:2px">Costo: $${Math.round(costoOTsMes).toLocaleString('es-AR')}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px">Costo: $${(costoOTsMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         </div>
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🛒 OCs del mes</div>
-          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${Math.round(ocsMesTotal).toLocaleString('es-AR')}</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${(ocsMesTotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">${ocsMes.length} órdenes</div>
         </div>
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">💰 Total gastado</div>
-          <div style="font-size:20px;font-weight:700;color:var(--accent);font-family:var(--mono)">$${Math.round(combustibleMesCosto + costoOTsMes).toLocaleString('es-AR')}</div>
+          <div style="font-size:20px;font-weight:700;color:var(--accent);font-family:var(--mono)">$${(combustibleMesCosto + costoOTsMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
           <div style="font-size:10px;color:var(--text3);margin-top:2px">combustible + mantenimiento</div>
         </div>
       </div>
@@ -704,7 +704,7 @@ function renderDashboard() {
       ${recentOCs.map(p => `<tr>
         <td class="td-mono"><b>${escapeHtml(p.code)}</b></td>
         <td>${escapeHtml((p.proveedor || '—').substring(0, 22))}</td>
-        <td class="td-mono">$${Math.round(parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0).toLocaleString('es-AR')}</td>
+        <td class="td-mono">$${(parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
         <td>${_ocEstadoBadge(p)}</td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -743,7 +743,7 @@ function renderDashboard() {
           const el = document.getElementById(id);
           if (!el || el.children.length < 3) return;
           el.children[1].textContent = n;
-          el.children[2].textContent = n > 0 ? '$' + Math.round(monto).toLocaleString('es-AR') : vacio;
+          el.children[2].textContent = n > 0 ? '$' + (monto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : vacio;
         };
         setTile('cmd-fac-pend',      pend.length,      suma(pend),      'sin pendientes');
         setTile('cmd-pag-porvencer', porVencer.length, suma(porVencer), 'nada por vencer');
@@ -1362,7 +1362,7 @@ function showVehicleFicha(id, tab) {
             <td style="max-width:200px;color:var(--text2)">${escapeHtml(o.desc)}</td>
             <td>${o.mechanic}</td>
             <td><span class="badge ${o.status==='Cerrada'?'badge-ok':o.status==='En proceso'?'badge-info':'badge-warn'}">${o.status}</span></td>
-            <td class="td-mono">${(o.parts_cost)>0?'$'+Math.round(o.parts_cost).toLocaleString('es-AR'):'—'}</td>
+            <td class="td-mono">${(o.parts_cost)>0?'$'+(o.parts_cost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
             <td class="td-mono" style="font-size:11px">${o.opened.split(' ')[0]}</td>
             <td><button class="btn btn-secondary btn-sm" onclick="printOT('${o.id}')">🖨</button></td>
           </tr>`).join('')}</tbody></table>`
@@ -1760,7 +1760,7 @@ async function saveEditOT(id) {
 function _closeStockOptionsHTML() {
   window._closeStockList = _catalogStockSuggestions('', 300);
   return window._closeStockList.map((s, i) =>
-    `<option value="${i}" data-cost="${s.unit_cost}">${escapeHtml(s.code)} — ${escapeHtml(s.name)} · ${escapeHtml(s.base_location)}/${escapeHtml(s.area)} — ${s.qty} ${escapeHtml(s.unit)} — $${Math.round(s.unit_cost).toLocaleString('es-AR')}</option>`
+    `<option value="${i}" data-cost="${s.unit_cost}">${escapeHtml(s.code)} — ${escapeHtml(s.name)} · ${escapeHtml(s.base_location)}/${escapeHtml(s.area)} — ${s.qty} ${escapeHtml(s.unit)} — $${(s.unit_cost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</option>`
   ).join('');
 }
 
@@ -2084,8 +2084,8 @@ async function printOT(id) {
         <td>${escapeHtml(p.name || '—')}</td>
         <td style="text-align:center">${qty} ${escapeHtml(p.unit || 'un')}</td>
         <td style="text-align:center">${origenBadge}</td>
-        <td style="text-align:right">$${Math.round(unitCost).toLocaleString('es-AR')}</td>
-        <td style="text-align:right;font-weight:600">$${Math.round(subtotal).toLocaleString('es-AR')}</td>
+        <td style="text-align:right">$${(unitCost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+        <td style="text-align:right;font-weight:600">$${(subtotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       </tr>`;
     });
   } else {
@@ -2216,7 +2216,7 @@ async function printOT(id) {
         <tfoot>
           <tr class="total-row">
             <td colspan="4" style="text-align:right">Subtotal repuestos:</td>
-            <td style="text-align:right">$${Math.round(partsTotal).toLocaleString('es-AR')}</td>
+            <td style="text-align:right">$${(partsTotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
           </tr>
         </tfoot>
       </table>
@@ -2246,11 +2246,11 @@ async function printOT(id) {
       <table>
         <tr class="grand-total-row">
           <td style="font-weight:700">TOTAL ORDEN DE TRABAJO</td>
-          <td style="text-align:right;font-weight:700">$${Math.round(totalCost).toLocaleString('es-AR')}</td>
+          <td style="text-align:right;font-weight:700">$${(totalCost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
         </tr>
       </table>
       <div style="font-size:10px;color:#6b7280;margin-top:6px;text-align:right">
-        Repuestos: $${Math.round(partsTotal).toLocaleString('es-AR')} · Mano de obra propia sin precio
+        Repuestos: $${(partsTotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})} · Mano de obra propia sin precio
       </div>
     </div>
 
@@ -2782,7 +2782,7 @@ async function updateFuelPlaceNote() {
       ppuEl.title            = 'Precio fijado por el abastecimiento de cisterna';
       const ppuLabel = document.getElementById('fl-ppu-label');
       if (ppuLabel) ppuLabel.innerHTML = 'Precio por litro <span style="color:var(--ok);font-size:11px;font-weight:400">🔒 fijado por cisterna</span>';
-      noteEl.innerHTML = `💡 Litros se descontarán de cisterna · <strong>$${Math.round(precio).toLocaleString('es-AR')}/L</strong>`;
+      noteEl.innerHTML = `💡 Litros se descontarán de cisterna · <strong>$${(precio).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}/L</strong>`;
     } else if (puedeVerPrecios) {
       if (ppuEl) { ppuEl.readOnly = false; ppuEl.style.opacity = '1'; ppuEl.style.cursor = ''; ppuEl.style.background = ''; }
       noteEl.textContent = '⚠ Sin precio configurado en cisterna — compras debe actualizarlo. Se guarda sin precio hasta entonces.';
@@ -3030,10 +3030,10 @@ function openFuelTankEntryTicket(entryOrId) {
   const ticketCode = _fuelTankEntryCode(entry);
   const litros = Math.round(parseFloat(entry.liters) || 0).toLocaleString('es-AR');
   const ppu = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l))
-    ? '$' + Math.round(parseFloat(entry.price_per_l)).toLocaleString('es-AR')
+    ? '$' + (parseFloat(entry.price_per_l)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : '—';
   const total = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l))
-    ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR')
+    ? '$' + ((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})
     : '—';
   const fecha = fleetDateTimeAR(entry.created_at_ar || entry.created_at || entry.date);
 
@@ -3079,8 +3079,8 @@ function printFuelTankEntryTicket(entryId) {
   const ticketCode = _fuelTankEntryCode(entry);
   const litros = Math.round(parseFloat(entry.liters) || 0).toLocaleString('es-AR');
   const ppuVal = entry.price_per_l !== null && entry.price_per_l !== undefined && !isNaN(parseFloat(entry.price_per_l));
-  const ppu = ppuVal ? '$' + Math.round(parseFloat(entry.price_per_l)).toLocaleString('es-AR') : '—';
-  const total = ppuVal ? '$' + Math.round((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR') : '—';
+  const ppu = ppuVal ? '$' + (parseFloat(entry.price_per_l)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  const total = ppuVal ? '$' + ((parseFloat(entry.liters)||0) * (parseFloat(entry.price_per_l)||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const fecha = fleetDateTimeAR(entry.created_at_ar || entry.created_at || entry.date);
 
   const win = window.open('', '_blank');
@@ -3825,7 +3825,7 @@ function exportCostPDF() {
       '$'+comb.toLocaleString('es-AR'),
       '$'+prev.toLocaleString('es-AR'),
       '$'+corr.toLocaleString('es-AR'),
-      '$'+Math.round(d.totalMes).toLocaleString('es-AR'),
+      '$'+(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}),
       d.costKmReal>0 ? '$'+d.costKmReal.toFixed(3) : '—',
     ];
     // Autoelevadores: se miden por hora (d.kmMes son horas, d.costKmReal es $/hora).
@@ -3843,7 +3843,7 @@ function exportCostPDF() {
         `${escapeHtml(v.brand||'')} ${escapeHtml(v.model||'')}`.trim() || '—',
         '$'+prev.toLocaleString('es-AR'),
         '$'+corr.toLocaleString('es-AR'),
-        '$'+Math.round(d.totalMes).toLocaleString('es-AR'),
+        '$'+(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}),
       ]);
     } else {
       totalKm += d.kmMes;
@@ -4089,17 +4089,17 @@ function renderCosts() {
     <div class="kpi-row" style="margin-bottom:20px">
       <div class="kpi-card info">
         <div class="kpi-label">💰 Costo total del mes</div>
-        <div class="kpi-value white">$${Math.round(totalGeneral).toLocaleString('es-AR')}</div>
+        <div class="kpi-value white">$${(totalGeneral).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">combustible + mantenimiento</div>
       </div>
       <div class="kpi-card" style="border-color:rgba(59,130,246,.4)">
         <div class="kpi-label">⛽ Combustible</div>
-        <div class="kpi-value" style="color:#3b82f6">$${Math.round(totalCombustible).toLocaleString('es-AR')}</div>
+        <div class="kpi-value" style="color:#3b82f6">$${(totalCombustible).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">${Math.round(totalLitros).toLocaleString()} L · ${fuelMes.length} cargas</div>
       </div>
       <div class="kpi-card" style="border-color:rgba(245,158,11,.4)">
         <div class="kpi-label">🔧 Mantenimiento</div>
-        <div class="kpi-value" style="color:#f59e0b">$${Math.round(totalOTs).toLocaleString('es-AR')}</div>
+        <div class="kpi-value" style="color:#f59e0b">$${(totalOTs).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div class="kpi-trend">mano $${Math.round(totalMano).toLocaleString()} · rep $${Math.round(totalRepuestos).toLocaleString()}</div>
       </div>
       <div class="kpi-card info">
@@ -4165,11 +4165,11 @@ function renderCosts() {
               <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString() : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
-              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
+              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+(d.rubros[0].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+(d.rubros[3].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+(d.rubros[1].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+(d.rubros[2].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td class="td-mono" style="font-weight:700;color:var(--${ev[0]})">${ck>0?'$'+ck.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><span class="badge badge-${ev[0]}">${ev[1]}</span></td>
@@ -4232,11 +4232,11 @@ function renderCosts() {
               <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
               <td class="td-mono">${d.kmMes > 0 ? d.kmMes.toLocaleString()+' h' : '—'}</td>
               <td class="td-mono" style="color:#3b82f6">${litros > 0 ? Math.round(litros).toLocaleString()+' L' : '—'}</td>
-              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+Math.round(d.rubros[0].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+Math.round(d.rubros[3].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
+              <td class="td-mono" style="color:#3b82f6">${d.rubros[0].total>0?'$'+(d.rubros[0].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#06b6d4">${d.rubros[3]&&d.rubros[3].total>0?'$'+(d.rubros[3].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+(d.rubros[1].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+(d.rubros[2].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td class="td-mono">${ckCell}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td>${evalCell}</td>
@@ -4272,9 +4272,9 @@ function renderCosts() {
             return `<tr style="cursor:pointer" onclick="openCostDrillDown('${escapeJsArg(v.code)}')" title="Clic para ver desglose completo">
               <td class="td-mono td-main">${escapeHtml(v.code)}</td>
               <td>${escapeHtml(v.brand || '')} ${escapeHtml(v.model || '')}</td>
-              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+Math.round(d.rubros[1].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+Math.round(d.rubros[2].total).toLocaleString('es-AR'):'—'}</td>
-              <td class="td-mono" style="font-weight:600">$${Math.round(d.totalMes).toLocaleString('es-AR')}</td>
+              <td class="td-mono" style="color:#22c55e">${d.rubros[1].total>0?'$'+(d.rubros[1].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="color:#ef4444">${d.rubros[2].total>0?'$'+(d.rubros[2].total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+              <td class="td-mono" style="font-weight:600">$${(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td class="td-mono" style="color:var(--text3)">${pctMes}%</td>
               <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openCostDrillDown('${escapeJsArg(v.code)}')">Ver</button></td>
             </tr>`;
@@ -4340,7 +4340,7 @@ function buildCostRankChart(sorted, avgNum) {
 function fmtMontoCorto(n) {
   n = Number(n) || 0;
   if (n >= 1000000) return '$' + (n / 1000000).toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' M';
-  return '$' + Math.round(n).toLocaleString('es-AR');
+  return '$' + (n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 function openCostDrillDown(vehicleCode) {
   // Respetar el mes elegido en Costos (si no, el detalle mostraba siempre el mes
@@ -4362,7 +4362,7 @@ function openCostDrillDown(vehicleCode) {
       <div style="margin-left:auto;text-align:right">
         <div style="font-size:28px;font-weight:700;font-family:var(--mono);color:var(--${d.costKmReal>0.25?'danger':d.costKmReal>0.20?'warn':'ok'})">${d.costKmReal>0?'$'+d.costKmReal.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}):'Sin datos'}</div>
         <div style="font-size:11px;color:var(--text3)">por ${unidad === 'km' ? 'kilómetro' : unidad}</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px">$${Math.round(d.totalMes).toLocaleString('es-AR')} / mes</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text);margin-top:2px">$${(d.totalMes).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})} / mes</div>
         <div style="font-size:13px;font-weight:600;color:var(--${d.kmPorLitro>0?'ok':'text3'});margin-top:4px" title="Rendimiento del mes, tramo a tramo entre cargas">⛽ ${rendStr}${d.kmPorLitro>0?' · '+Math.round(d.litrosMes).toLocaleString('es-AR')+' L':''}</div>
       </div>
     </div>
@@ -5326,7 +5326,7 @@ function _otRenderRows() {
     const totalCost = rows.reduce((a,o) => a + (parseFloat(o.parts_cost)||0), 0);
     footer.innerHTML = `
       <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} OTs</span>
-      <span>Costo total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalCost).toLocaleString('es-AR')}</b></span>
+      <span>Costo total visible: <b style="color:var(--text);font-family:var(--mono)">$${(totalCost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></span>
     `;
   }
 }
@@ -5412,7 +5412,7 @@ function _otRenderRow(o) {
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-weight:600;font-size:12px;color:${totalCost>0?'var(--text)':'var(--text3)'}">
-      ${totalCost>0 ? '$'+Math.round(totalCost).toLocaleString('es-AR') : '—'}
+      ${totalCost>0 ? '$'+(totalCost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
     </td>
 
     <td style="padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap">
@@ -5516,7 +5516,7 @@ function _otExportPDF() {
     o.mechanic || '—',
     o.status || '—',
     o.priority || '—',
-    `$${Math.round((parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0)).toLocaleString('es-AR')}`,
+    `$${((parseFloat(o.parts_cost)||0) + (parseFloat(o.labor_cost)||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`,
     (o.opened||'—').split(' ')[0],
   ]);
 
@@ -5541,7 +5541,7 @@ function _otExportPDF() {
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
   doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
-  doc.text(`TOTAL VISIBLE: $${Math.round(totalCost).toLocaleString('es-AR')}`, 40, finalY + 20);
+  doc.text(`TOTAL VISIBLE: $${(totalCost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`, 40, finalY + 20);
 
   const fileDate = todayISO();
   doc.save(`OTs-Biletta-${fileDate}.pdf`);
@@ -6133,7 +6133,7 @@ function onOTPartNameInput(idx, val) {
         <div style="color:var(--text3);font-size:11px"><span style="font-family:monospace">${escapeHtml(s.code)}</span> · ${escapeHtml(s.base_location)} / ${escapeHtml(s.area)}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round(s.unit_cost).toLocaleString('es-AR')}/${escapeHtml(s.unit)}</div>
+        <div style="font-weight:700;color:var(--accent)">$${(s.unit_cost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}/${escapeHtml(s.unit)}</div>
         <div style="font-size:10px;color:var(--ok);font-weight:700">Stock: ${s.qty} ${escapeHtml(s.unit)}</div>
       </div>
     </div>`;
@@ -6223,8 +6223,8 @@ function updateOTTotal() {
   const totalEl    = document.getElementById('ot-total-display');
   const partsValEl = document.getElementById('ot-parts-total-val');
   const partsTotalDiv = document.getElementById('ot-parts-total');
-  if (totalEl)    totalEl.value = '$' + Math.round(total).toLocaleString('es-AR');
-  if (partsValEl) partsValEl.textContent = '$' + Math.round(partsTotal).toLocaleString('es-AR');
+  if (totalEl)    totalEl.value = '$' + (total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (partsValEl) partsValEl.textContent = '$' + (partsTotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   if (partsTotalDiv && partsTotal > 0) partsTotalDiv.style.display = 'block';
 }
 
@@ -6800,7 +6800,7 @@ function _poRenderRows() {
       : '';
     footer.innerHTML = `
       <span>Mostrando <b style="color:var(--text)">${rows.length}</b> de ${all.length} cargadas${cargarMas}</span>
-      <span>Monto total visible: <b style="color:var(--text);font-family:var(--mono)">$${Math.round(totalMonto).toLocaleString('es-AR')}</b></span>
+      <span>Monto total visible: <b style="color:var(--text);font-family:var(--mono)">$${(totalMonto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</b></span>
     `;
   }
 }
@@ -6894,7 +6894,7 @@ function _poRenderRow(po) {
 
     <td data-label="Total" style="padding:10px 12px;font-family:var(--mono);font-weight:700;font-size:12px;color:var(--text);text-align:right">
       ${puedeVerPrecios
-        ? `$${Math.round(total).toLocaleString('es-AR')}${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}`
+        ? `$${(total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}${parseFloat(po.iva_pct||0) > 0 ? `<div style="font-size:9px;color:var(--text3);font-weight:400">IVA ${po.iva_pct}%</div>` : ''}`
         : `<span style="color:var(--text3)" title="Solo compras/tesorería ven los precios">—</span>`
       }
     </td>
@@ -6994,7 +6994,7 @@ function _poExportPDF() {
     p.solicitante_nombre || '—',
     p.proveedor || '—',
     p.factura_nro || '—',
-    (() => { const tr = parseFloat(p.total_real||0); const t = tr > 0 ? tr : parseFloat(p.total_estimado||0); return `$${Math.round(t).toLocaleString('es-AR')}`; })(),
+    (() => { const tr = parseFloat(p.total_real||0); const t = tr > 0 ? tr : parseFloat(p.total_estimado||0); return `$${(t).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`; })(),
     p.created_at ? new Date(p.created_at).toLocaleDateString('es-AR') : '—',
   ]);
 
@@ -7014,7 +7014,7 @@ function _poExportPDF() {
   doc.setFontSize(10);
   doc.setFont('helvetica','bold');
   doc.setTextColor(BILETTA_BRAND.dark[0], BILETTA_BRAND.dark[1], BILETTA_BRAND.dark[2]);
-  doc.text(`TOTAL VISIBLE: $${Math.round(totalMonto).toLocaleString('es-AR')}`, 40, finalY + 20);
+  doc.text(`TOTAL VISIBLE: $${(totalMonto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}`, 40, finalY + 20);
 
   doc.save(`OCs-Biletta-${todayISO()}.pdf`);
   showToast?.('ok','PDF descargado');
@@ -7277,10 +7277,10 @@ function updatePOTotal() {
   const ivaMEl  = document.getElementById('po-iva-monto');
   const totalEl = document.getElementById('po-total');
 
-  if (subEl)  subEl.textContent  = '$' + Math.round(subtotal).toLocaleString('es-AR');
+  if (subEl)  subEl.textContent  = '$' + (subtotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   if (ivaLbl) ivaLbl.textContent = 'IVA (' + ivaPct + '%)';
-  if (ivaMEl) ivaMEl.textContent = '$' + Math.round(ivaMonto).toLocaleString('es-AR');
-  if (totalEl) totalEl.textContent = '$' + Math.round(total).toLocaleString('es-AR');
+  if (ivaMEl) ivaMEl.textContent = '$' + (ivaMonto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (totalEl) totalEl.textContent = '$' + (total).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -8492,12 +8492,12 @@ async function printPO(id) {
               <td style="text-align:center">${parseFloat(i.cantidad)}</td>
               <td style="text-align:center">${escapeHtml(i.unidad||'un')}</td>
               <td style="text-align:right">$${parseFloat(i.precio_unit||0).toLocaleString('es-AR')}</td>
-              <td style="text-align:right;font-weight:600">$${Math.round(parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)).toLocaleString('es-AR')}</td>
+              <td style="text-align:right;font-weight:600">$${(parseFloat(i.cantidad||0) * parseFloat(i.precio_unit||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
             </tr>`).join('')}
             ${parseFloat(po.iva_pct||0) > 0 ? `
             <tr class="total-row">
               <td colspan="4" style="text-align:right">Subtotal neto</td>
-              <td style="text-align:right">$${Math.round(totalReal).toLocaleString('es-AR')}</td>
+              <td style="text-align:right">$${(totalReal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
             </tr>
             <tr class="total-row">
               <td colspan="4" style="text-align:right">IVA (${po.iva_pct}%)</td>
@@ -10380,8 +10380,8 @@ function _partsRender(parts) {
     const origenColor = p.origin === 'stock' ? 'var(--ok)' : (cost > 0 ? 'var(--accent)' : 'var(--text3)');
     const stockCode = p.stock_code ? ` · <span style="font-family:var(--mono);font-size:10px">${p.stock_code}</span>` : '';
     const poCode = p.po_code ? ` · <span style="font-family:var(--mono);font-size:10px;color:var(--accent)">${p.po_code}</span>` : '';
-    const costText = p.origin === 'externo' && cost <= 0 ? 'A cotizar' : ('$' + Math.round(cost).toLocaleString('es-AR'));
-    const subText  = p.origin === 'externo' && cost <= 0 ? 'Pendiente' : ('$' + Math.round(subtotal).toLocaleString('es-AR'));
+    const costText = p.origin === 'externo' && cost <= 0 ? 'A cotizar' : ('$' + (cost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}));
+    const subText  = p.origin === 'externo' && cost <= 0 ? 'Pendiente' : ('$' + (subtotal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}));
     return `<div style="display:grid;grid-template-columns:70px 1fr 70px 90px 100px 32px;gap:6px;margin-bottom:6px;align-items:center;padding:6px 10px;background:var(--bg3);border-radius:var(--radius);font-size:12px">
       <div style="color:${origenColor};font-weight:600;font-size:11px">${origenLabel}</div>
       <div>
@@ -10399,7 +10399,7 @@ function _partsRender(parts) {
 
   const totalM = parts.reduce((a,p) => a + parseFloat(p.subtotal || (p.qty * p.unit_cost) || 0), 0);
   if (totalDiv) totalDiv.style.display = 'block';
-  if (totalVal) totalVal.textContent = '$' + Math.round(totalM).toLocaleString('es-AR');
+  if (totalVal) totalVal.textContent = '$' + (totalM).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   if (eoParts)  eoParts.value = totalM.toFixed(2);
 }
 
@@ -10646,7 +10646,7 @@ function _partsNameInput(val) {
         <div style="color:var(--text3);font-family:monospace;font-size:11px">${escapeHtml(a.code||'—')}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-weight:700;color:var(--accent)">$${Math.round(parseFloat(a.unit_cost)||0).toLocaleString('es-AR')}/${escapeHtml(a.unit||'un')}</div>
+        <div style="font-weight:700;color:var(--accent)">$${(parseFloat(a.unit_cost)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}/${escapeHtml(a.unit||'un')}</div>
         <div style="font-size:10px;color:${color};font-weight:700">Stock: ${total} ${escapeHtml(a.unit||'un')}</div>
       </div>
     </div>`;
@@ -10745,7 +10745,7 @@ function _partsRecalc() {
   const qty = parseFloat(document.getElementById('pnew-qty')?.value) || 0;
   const cost = origin === 'stock' ? (parseFloat(document.getElementById('pnew-cost')?.value) || 0) : 0;
   const subtotalEl = document.getElementById('pnew-subtotal');
-  if (subtotalEl) subtotalEl.value = origin === 'stock' ? ('$' + Math.round(qty * cost).toLocaleString('es-AR')) : 'OC a cotizar';
+  if (subtotalEl) subtotalEl.value = origin === 'stock' ? ('$' + (qty * cost).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})) : 'OC a cotizar';
 }
 
 async function _partsSave() {
@@ -10900,7 +10900,7 @@ function openVehicleHistoryModal(vehicleCode) {
               <td style="padding:8px">${(o.opened || o.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px">${o.type || '—'}</td>
               <td style="padding:8px">${escapeHtml((o.desc || o.description || '—').substring(0, 50))}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${((o.parts_cost||0)+(o.labor_cost||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td style="padding:8px"><span style="color:${statusColors[o.status] || 'var(--text3)'};font-weight:600">● ${o.status || '—'}</span></td>
             </tr>`).join('')}
           </tbody>
@@ -10927,7 +10927,7 @@ function openVehicleHistoryModal(vehicleCode) {
               <td style="padding:8px;font-family:var(--mono);font-weight:600">${escapeHtml(p.code || '—')}</td>
               <td style="padding:8px">${(p.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px">${escapeHtml(p.proveedor || '—')}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round(p.factura_monto || p.total_estimado || 0).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${(p.factura_monto || p.total_estimado || 0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td style="padding:8px"><span style="color:${ocStatusColors[p.status] || 'var(--text3)'};font-weight:600">● ${p.status || '—'}</span></td>
             </tr>`).join('')}
           </tbody>
@@ -10953,8 +10953,8 @@ function openVehicleHistoryModal(vehicleCode) {
             ${fuels.map(f => `<tr style="border-bottom:1px solid var(--border)">
               <td style="padding:8px">${(f.date || f.created_at || '—').toString().slice(0,10)}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.liters || '—'}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${Math.round((f.ppu != null ? f.ppu : f.price_per_l) || 0).toLocaleString('es-AR')}</td>
-              <td style="padding:8px;text-align:right;font-family:var(--mono);color:var(--accent);font-weight:600">$${Math.round(f.total != null ? f.total : (f.liters||0)*((f.ppu != null ? f.ppu : f.price_per_l)||0)).toLocaleString('es-AR')}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono)">$${((f.ppu != null ? f.ppu : f.price_per_l) || 0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+              <td style="padding:8px;text-align:right;font-family:var(--mono);color:var(--accent);font-weight:600">$${(f.total != null ? f.total : (f.liters||0)*((f.ppu != null ? f.ppu : f.price_per_l)||0)).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
               <td style="padding:8px;text-align:right;font-family:var(--mono)">${f.km ? f.km.toLocaleString('es-AR') : '—'}</td>
             </tr>`).join('')}
           </tbody>
@@ -11034,7 +11034,7 @@ function openFuelVehicleTicket(logId) {
         <div><b>Chofer</b><br>${escapeHtml(f.driver || '—')}</div>
         <div><b>Cargó</b><br>${escapeHtml(f.cargado_por || App.currentUser?.name || '—')}</div>
         <div><b>Estado</b><br>Ticket interno generado</div>
-        ${verPrecios ? `<div><b>Precio/L</b><br>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div><div><b>Total</b><br>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>` : ''}
+        ${verPrecios ? `<div><b>Precio/L</b><br>${ppuVal ? '$' + (ppuVal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</div><div><b>Total</b><br>${totalVal ? '$' + (totalVal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</div>` : ''}
       </div>
 
       <div style="margin-top:14px;background:var(--bg3);border-radius:var(--radius);padding:10px;font-size:12px;color:var(--text2)">
@@ -11058,8 +11058,8 @@ function printFuelVehicleTicket(logId) {
   const ppuVal = parseFloat(f.ppu || 0);
   const totalVal = (parseFloat(f.liters)||0) * (parseFloat(f.ppu)||0);
   const priceHtml = verPrecios ? `
-    <div><b>Precio/L</b>${ppuVal ? '$' + Math.round(ppuVal).toLocaleString('es-AR') : '—'}</div>
-    <div><b>Total</b>${totalVal ? '$' + Math.round(totalVal).toLocaleString('es-AR') : '—'}</div>
+    <div><b>Precio/L</b>${ppuVal ? '$' + (ppuVal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</div>
+    <div><b>Total</b>${totalVal ? '$' + (totalVal).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</div>
   ` : '';
 
   const win = window.open('', '_blank');
@@ -11176,9 +11176,9 @@ function _filterFuelLogs() {
       : '';
 
     if (filtered.length === total) {
-      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${total} cargas · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${Math.round(totalPesos).toLocaleString('es-AR')}${verMasBtn}`;
+      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${total} cargas · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${(totalPesos).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}${verMasBtn}`;
     } else {
-      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${filtered.length} filtrados (${total} total) · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${Math.round(totalPesos).toLocaleString('es-AR')}${verMasBtn}`;
+      countInfo.innerHTML = `Mostrando <b>${shown.length}</b> de ${filtered.length} filtrados (${total} total) · <b>${Math.round(totalLitros).toLocaleString('es-AR')}</b> L · $${(totalPesos).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}${verMasBtn}`;
     }
   }
 }
@@ -11280,7 +11280,7 @@ function exportFuelPDF() {
       'TOTALES', '', '', '',
       Math.round(totalLitros).toLocaleString('es-AR') + ' L',
       '', '',
-      '$' + Math.round(totalPesos).toLocaleString('es-AR'),
+      '$' + (totalPesos).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}),
       '', '',
     ]],
   });
