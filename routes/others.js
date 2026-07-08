@@ -30,6 +30,11 @@ function ensureFuelTankEntriesTable() {
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE").catch(() => {});
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
   await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
+  // Normaliza los tipos numéricos: en bases viejas current_l/capacity_l podían
+  // haber quedado con tipos distintos (numeric vs double precision), lo que
+  // rompía el UPDATE de recepción con "inconsistent types deduced for parameter $1".
+  await query("ALTER TABLE tanks ALTER COLUMN current_l TYPE NUMERIC(12,2)").catch(() => {});
+  await query("ALTER TABLE tanks ALTER COLUMN capacity_l TYPE NUMERIC(12,2)").catch(() => {});
   await query(`
     CREATE TABLE IF NOT EXISTS fuel_tank_entries (
       id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -155,10 +160,14 @@ async function _addFuelToDestinationTank(client, { destinoSucursal, tankType, li
   if (existing.rows[0]) {
     const current = parseFloat(existing.rows[0].current_l) || 0;
     const next = current + litros;
+    // $1 va casteado a ::numeric en los dos usos. Si en alguna base vieja las
+    // columnas current_l y capacity_l quedaron con tipos distintos (ej. una
+    // numeric y otra double precision), sin el cast Postgres deduce dos tipos
+    // para el mismo $1 y falla con "inconsistent types deduced for parameter $1".
     const upd = await client.query(
       `UPDATE tanks
-          SET current_l=$1,
-              capacity_l=GREATEST(COALESCE(capacity_l,0), $1),
+          SET current_l=$1::numeric,
+              capacity_l=GREATEST(COALESCE(capacity_l,0), $1::numeric),
               updated_at=NOW()
         WHERE id=$2
         RETURNING *`,
