@@ -168,9 +168,18 @@ async function _addFuelToDestinationTank(client, { destinoSucursal, tankType, li
   }
 
   const loc = _branchTankLocation(suc, dbType);
+  // ON CONFLICT contra el índice único parcial uq_tanks_type_location: si ya existe
+  // un tanque activo con el mismo (type, location) que la búsqueda difusa de arriba
+  // no llegó a matchear, en vez de reventar con "duplicate key" (500) se le suman
+  // los litros al existente. Así la recepción nunca falla por una colisión de tanque.
   const ins = await client.query(
     `INSERT INTO tanks(type, capacity_l, current_l, price_per_l, location, active)
      VALUES ($1,$2,$3,$4,$5,TRUE)
+     ON CONFLICT (type, COALESCE(location,'')) WHERE active IS DISTINCT FROM FALSE
+     DO UPDATE SET current_l  = tanks.current_l + EXCLUDED.current_l,
+                   capacity_l = GREATEST(COALESCE(tanks.capacity_l,0), tanks.current_l + EXCLUDED.current_l),
+                   price_per_l = COALESCE(EXCLUDED.price_per_l, tanks.price_per_l),
+                   updated_at = NOW()
      RETURNING *`,
     [dbType, litros, litros, originPricePerL || null, loc]
   );
@@ -443,8 +452,9 @@ fuelRouter.post('/dispatches', authenticate, requireRole('dueno','gerencia','jef
 });
 
 fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico','gerente_sucursal'), validateUUID('id'), async (req, res) => {
-  const client = await require('../db/pool').pool.connect();
+  let client;
   try {
+    client = await require('../db/pool').pool.connect();
     await ensureFuelTankEntriesTable();
     const { received_by, received_liters, receive_notes, destination_sucursal } = req.body || {};
     const litrosRecibidos = received_liters === '' || received_liters === undefined || received_liters === null ? null : parseFloat(received_liters);
@@ -523,11 +533,13 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
     await client.query('COMMIT');
     res.json({ ok:true, dispatch: updDispatch.rows[0], destination_tank: destinoTank });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[fuel dispatch receive]', err.message);
-    res.status(500).json({ error: 'Error al confirmar recepción' });
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel dispatch receive]', err.message, err.stack);
+    // Se incluye `detail` para que, si vuelve a fallar, el toast muestre la causa
+    // real (esta es una herramienta interna) y podamos diagnosticar sin logs.
+    res.status(500).json({ error: 'Error al confirmar recepción', detail: err.message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -535,8 +547,9 @@ fuelRouter.patch('/dispatches/:id/receive', authenticate, requireRole('dueno','g
 // Regularizar un despacho ya marcado como recibido: suma los litros al tanque de la sucursal.
 // Sirve para despachos recibidos antes de que existiera el tanque propio de sucursal.
 fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('dueno','gerencia','jefe_mantenimiento','encargado_combustible','compras','mecanico','gerente_sucursal'), validateUUID('id'), async (req, res) => {
-  const client = await require('../db/pool').pool.connect();
+  let client;
   try {
+    client = await require('../db/pool').pool.connect();
     await ensureFuelTankEntriesTable();
     const branch = _userSucursal(req);
     await client.query('BEGIN');
@@ -604,11 +617,11 @@ fuelRouter.patch('/dispatches/:id/apply-to-tank', authenticate, requireRole('due
     await client.query('COMMIT');
     res.json({ ok:true, dispatch: updDispatch.rows[0], destination_tank: destinoTank });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    console.error('[fuel dispatch apply-to-tank]', err.message);
-    res.status(500).json({ error: 'Error al sumar despacho al tanque de sucursal' });
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel dispatch apply-to-tank]', err.message, err.stack);
+    res.status(500).json({ error: 'Error al sumar despacho al tanque de sucursal', detail: err.message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 

@@ -3268,7 +3268,11 @@ async function applyFuelDispatchToBranchTank(dispatchId) {
   const res = await apiFetch(`/api/fuel/dispatches/${dispatchId}/apply-to-tank`, { method: 'PATCH', body: JSON.stringify({}) });
   let data = {};
   try { data = await res.json(); } catch(_) {}
-  if (!res.ok) { showToast('error', data.error || 'No se pudo sumar al tanque'); return; }
+  if (!res.ok) {
+    const msg = data.detail ? `${data.error || 'No se pudo sumar al tanque'} (${data.detail})` : (data.error || 'No se pudo sumar al tanque');
+    showToast('error', msg);
+    return;
+  }
 
   const idx = (App.data.fuelDispatches || []).findIndex(x => x.id === dispatchId);
   if (idx >= 0 && data.dispatch) {
@@ -3407,7 +3411,11 @@ async function saveFuelDispatchReception(dispatchId) {
   });
   let data = {};
   try { data = await res.json(); } catch(_) {}
-  if (!res.ok) { showToast('error', data.error || 'Error al confirmar recepción'); return; }
+  if (!res.ok) {
+    const msg = data.detail ? `${data.error || 'Error al confirmar recepción'} (${data.detail})` : (data.error || 'Error al confirmar recepción');
+    showToast('error', msg);
+    return;
+  }
   const idx = (App.data.fuelDispatches || []).findIndex(x => x.id === dispatchId);
   if (idx >= 0 && data.dispatch) {
     App.data.fuelDispatches[idx] = Object.assign(App.data.fuelDispatches[idx], {
