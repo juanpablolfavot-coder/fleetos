@@ -23,11 +23,21 @@ const DRY_RUN = !!process.env.DRY_RUN;
 
 // ── Cargas a registrar ──────────────────────────────────────────────────────
 // fecha: hora local Argentina (la del ticket).  total: lo que se pagó (con impuestos).
+// Nota: la unidad escrita a mano como "AA5C85W" en los tickets es la patente
+// AA508SW ya cargada en el sistema (los km dan en serie: 496.899 → 498.030 →
+// 498.675 → 499.342). Se registra como AA508SW.
 const CARGAS = [
-  { code:'AF041MB', fecha:'2026-06-22 06:54:27', litros:71.02,  total:150000.00, km:264450, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06398-00028621' },
-  { code:'AF041MB', fecha:'2026-06-24 15:25:26', litros:70.79,  total:149999.98, km:264983, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06398-00028672' },
-  { code:'AA508SW', fecha:'2026-06-24 13:35:46', litros:84.28,  total:200000.00, km:496899, estacion:'Echeverría e Hijos — González Catán',        ticket:'00017-00013810' },
-  { code:'AE517UM', fecha:'2026-06-24 08:42:43', litros:144.58, total:300078.64, km:283543, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'08020-00036834' },
+  { code:'AF041MB', fecha:'2026-07-02 07:04:14', litros:70.922,  total:150000.03, km:265915, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06-025001' },
+  { code:'AE517UM', fecha:'2026-07-02 14:37:37', litros:140.5811, total:300000.07, km:284552, estacion:'ACA — Norbayres, José León Suárez (BA)',   ticket:'00003-00002394' },
+  { code:'AF041MB', fecha:'2026-07-06 13:42:51', litros:71.4626,  total:150000.00, km:266336, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06398-00028889' },
+  { code:'AA508SW', fecha:'2026-07-06 07:43:51', litros:85.2878,  total:199999.89, km:498030, estacion:'YPF Infinia — Malvinas Argentinas (BA)',    ticket:'06922-00061372' },
+  { code:'AE517UM', fecha:'2026-07-08 14:41:21', litros:86.2813,  total:200000.07, km:285112, estacion:'NAFPUR XXI — CABA',                          ticket:'00022-00079959' },
+  { code:'AF041MB', fecha:'2026-07-08 14:50:42', litros:69.606,   total:149933.00, km:266838, estacion:'GULF — Zayco, Gral. Pacheco/Tigre (BA)',    ticket:'0007-00027208' },
+  { code:'AA508SW', fecha:'2026-07-10 06:53:40', litros:86.2813,  total:200000.05, km:498675, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06394-00034777' },
+  { code:'AF041MB', fecha:'2026-07-14 15:08:12', litros:84.8536,  total:199999.94, km:267268, estacion:'BUZANCY — Bella Vista (BA)',                ticket:'00016-00033673' },
+  { code:'AA508SW', fecha:'2026-07-15 06:50:14', litros:86.2813,  total:200000.05, km:499342, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06394-00034853' },
+  { code:'AE517UM', fecha:'2026-07-13 15:38:15', litros:127.1219, total:271151.01, km:285381, estacion:'ACA — Norbayres, José León Suárez (BA)',   ticket:'00004-00022225' },
+  { code:'AE517UM', fecha:'2026-07-15 11:16:00', litros:13.1048,  total:28018.06,  km:285618, estacion:'ACA — Norbayres, José León Suárez (BA)',   ticket:'00004-00022267' },
 ];
 
 async function main() {
@@ -44,7 +54,7 @@ async function main() {
 
   for (const c of CARGAS) {
     try {
-      const v = await pool.query('SELECT id, driver_name FROM vehicles WHERE code=$1', [c.code]);
+      const v = await pool.query('SELECT id, driver_name FROM vehicles WHERE code=$1 OR plate=$1', [c.code]);
       if (!v.rows[0]) { console.log(`❌ ${c.code}: vehículo no encontrado — salteado`); err++; continue; }
       const vehId = v.rows[0].id;
 
@@ -53,8 +63,11 @@ async function main() {
       const totalCalc = +(c.litros * ppu).toFixed(2);
 
       // Dedup: misma unidad + misma fecha/hora + mismos litros.
+      // liters se guarda como NUMERIC(10,2), por eso se redondea a 2 decimales en
+      // ambos lados: si no, 13.1048 (fila) nunca igualaría a 13.10 (guardado) y el
+      // re-run duplicaría la carga.
       const dup = await pool.query(
-        `SELECT id FROM fuel_logs WHERE vehicle_id=$1 AND logged_at=$2::timestamptz AND liters=$3 LIMIT 1`,
+        `SELECT id FROM fuel_logs WHERE vehicle_id=$1 AND logged_at=$2::timestamptz AND ROUND(liters,2)=ROUND($3::numeric,2) LIMIT 1`,
         [vehId, c.fecha, c.litros]
       );
       if (dup.rows[0]) { console.log(`↩️  ${c.code} ${c.fecha} ${c.litros}L: ya existe — salteado`); skip++; continue; }
