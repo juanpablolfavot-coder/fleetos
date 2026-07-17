@@ -24,12 +24,12 @@ before(async () => {
   const { Client } = require('pg');
   client = new Client({ connectionString: DBURL });
   await client.connect();
-  await client.query("DELETE FROM purchase_orders WHERE code LIKE 'ITEST-%'"); // limpiar corridas previas
+  await limpiarITEST(); // limpiar corridas previas
 });
 
 after(async () => {
   if (!client) return;
-  await client.query("DELETE FROM purchase_orders WHERE code LIKE 'ITEST-%'").catch(() => {});
+  await limpiarITEST().catch((e) => console.error('[po_flow] limpieza final falló:', e.message));
   await client.end();
 });
 
@@ -43,6 +43,15 @@ async function nuevaOC(code, { status = 'enviada_proveedor', delivery = 'pendien
 }
 const poEstado = async (id) =>
   (await client.query(`SELECT status, delivery_status, payment_status FROM purchase_orders WHERE id=$1`, [id])).rows[0];
+
+// El borrado de la OC cascadea a items, pero purchase_order_receipt_items
+// referencia a los items SIN cascade: hay que borrarlos primero o la limpieza
+// falla y la suite deja de ser re-ejecutable sobre la misma base.
+async function limpiarITEST() {
+  await client.query(`DELETE FROM purchase_order_receipt_items WHERE po_item_id IN
+    (SELECT i.id FROM purchase_order_items i JOIN purchase_orders p ON p.id=i.po_id WHERE p.code LIKE 'ITEST-%')`);
+  await client.query(`DELETE FROM purchase_orders WHERE code LIKE 'ITEST-%'`);
+}
 
 // ── Recepción: parcial vs total ─────────────────────────────────────────────
 test('recepción parcial deja delivery=parcial; completar deja recibida', { skip: SKIP }, async () => {
