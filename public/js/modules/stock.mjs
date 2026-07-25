@@ -287,7 +287,9 @@ function _renderMovementsInline(list) {
     const dest = m.wo_code ? ('🔧 OT ' + escapeHtml(m.wo_code)) : (m.reason ? escapeHtml(m.reason) : '');
     const costStr = cost > 0 ? ('$' + Math.round(cost).toLocaleString('es-AR')) : '';
     const detail = [dest, costStr].filter(Boolean).join(' · ');
-    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px">
+    // Fila clickeable: abre el detalle del movimiento (con opción de imprimir).
+    const idAttr = (m.id != null) ? `onclick="openMovementDetail('${escapeJsArg(String(m.id))}')" title="Ver detalle e imprimir" style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px"` : `style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:12px"`;
+    return `<div class="stock-mov-row" ${idAttr}>
       <span class="badge badge-${color(m.type)}" style="min-width:62px;text-align:center">${sign(m.type)} ${num(m.qty)} ${escapeHtml(m.unit || '')}</span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="td-mono" style="font-size:11px">${escapeHtml(m.code)}</span> · ${escapeHtml(m.name)}</div>
@@ -297,6 +299,114 @@ function _renderMovementsInline(list) {
       <span style="color:var(--text3);font-size:11px;white-space:nowrap">${fmt(m.created_at)}</span>
     </div>`;
   }).join('');
+}
+
+// Busca un movimiento ya cargado en memoria por su id.
+function _findMovement(id) {
+  return (App.data.stockMovements || []).find((m) => String(m.id) === String(id));
+}
+
+// Etiquetas legibles para el tipo de movimiento (con el signo/dirección).
+function _movTypeInfo(type) {
+  if (type === 'Ingreso') return { color: 'ok', sign: '+', dir: 'Entrada de stock' };
+  if (type === 'Egreso') return { color: 'danger', sign: '−', dir: 'Salida de stock' };
+  return { color: 'warn', sign: '±', dir: 'Ajuste de inventario' };
+}
+
+// Detalle completo de un movimiento en un modal, con botón para imprimir el
+// comprobante. Reusa los datos que ya trajo la lista (no re-consulta el backend).
+function openMovementDetail(id) {
+  const m = _findMovement(id);
+  if (!m) { showToast('error', 'No se encontró el movimiento'); return; }
+  const num = (v) => parseFloat(v) || 0;
+  const info = _movTypeInfo(m.type);
+  const fechaHora = (s) => { try { return s ? new Date(s).toLocaleString('es-AR') : '—'; } catch (e) { return '—'; } };
+  const cost = num(m.qty) * num(m.unit_cost);
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border)">
+    <span style="color:var(--text3)">${k}</span><span style="font-weight:600;text-align:right">${v}</span></div>`;
+  const dest = m.wo_code ? ('🔧 OT ' + escapeHtml(m.wo_code)) : (m.reason ? escapeHtml(m.reason) : '—');
+  const body = `
+    <div style="text-align:center;margin-bottom:14px">
+      <span class="badge badge-${info.color}" style="font-size:16px;padding:6px 14px">${info.sign} ${num(m.qty)} ${escapeHtml(m.unit || '')}</span>
+      <div style="color:var(--text3);font-size:12px;margin-top:6px">${escapeHtml(info.dir)}</div>
+    </div>
+    <div style="font-size:13px">
+      ${row('Artículo', `<span class="td-mono" style="font-size:11px">${escapeHtml(m.code)}</span> · ${escapeHtml(m.name)}`)}
+      ${row('Tipo', escapeHtml(m.type || '—'))}
+      ${row('Cantidad', `${num(m.qty)} ${escapeHtml(m.unit || '')}`)}
+      ${row('Ubicación', `${escapeHtml(_stockShortLoc(m.base_location) || '—')}${m.area ? ' · ' + escapeHtml(m.area) : ''}`)}
+      ${row('Motivo / destino', dest)}
+      ${cost > 0 ? row('Valor al costo', '$' + Math.round(cost).toLocaleString('es-AR') + ` <span style="color:var(--text3);font-weight:400">(costo unit. $${num(m.unit_cost).toLocaleString('es-AR')})</span>`) : ''}
+      ${row('Registrado por', escapeHtml(m.user_name || '—'))}
+      ${row('Fecha y hora', fechaHora(m.created_at))}
+    </div>`;
+  openModal('Detalle del movimiento', body, [
+    { label: '🖨 Imprimir', cls: 'btn-primary', fn: () => printStockMovement(id) },
+    { label: 'Cerrar', cls: 'btn-secondary', fn: () => closeModal() },
+  ]);
+}
+
+// Genera un comprobante imprimible del movimiento (patrón de ticket del sistema:
+// abre una ventana con el HTML y dispara window.print()).
+function printStockMovement(id) {
+  const m = _findMovement(id);
+  if (!m) { showToast('error', 'No se encontró el movimiento'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { showToast('error', 'Habilitá las ventanas emergentes para imprimir'); return; }
+  w.document.write(_movComprobanteHtml(m));
+  w.document.close();
+}
+
+// HTML del comprobante de movimiento de stock (mismo estilo que los demás tickets).
+function _movComprobanteHtml(m) {
+  const num = (v) => parseFloat(v) || 0;
+  const esc = escapeHtml;
+  const info = _movTypeInfo(m.type);
+  const fechaHora = (s) => { try { return s ? new Date(s).toLocaleString('es-AR') : '—'; } catch (e) { return '—'; } };
+  const cost = num(m.qty) * num(m.unit_cost);
+  const dest = m.wo_code ? ('OT ' + m.wo_code) : (m.reason || '—');
+  const rows = [
+    ['Artículo', `${esc(m.code || '')} · ${esc(m.name || '')}`],
+    ['Tipo de movimiento', `${esc(m.type || '—')} (${esc(info.dir)})`],
+    ['Cantidad', `${info.sign} ${num(m.qty)} ${esc(m.unit || '')}`],
+    ['Ubicación', `${esc(_stockShortLoc(m.base_location) || '—')}${m.area ? ' · ' + esc(m.area) : ''}`],
+    ['Motivo / destino', esc(dest)],
+  ];
+  if (cost > 0) rows.push(['Valor al costo', `$${Math.round(cost).toLocaleString('es-AR')} (costo unit. $${num(m.unit_cost).toLocaleString('es-AR')})`]);
+  rows.push(['Registrado por', esc(m.user_name || '—')]);
+  rows.push(['Fecha y hora', fechaHora(m.created_at)]);
+  const filas = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+    <title>Comprobante de movimiento — ${esc(m.code || '')}</title>
+    <style>
+      * { box-sizing:border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color:#1f2937; margin:0; padding:32px; }
+      .head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #ea580c; padding-bottom:12px; margin-bottom:18px; }
+      .brand { font-size:22px; font-weight:800; color:#ea580c; }
+      .brand small { display:block; font-size:11px; color:#6b7280; font-weight:400; margin-top:2px; }
+      .doc { text-align:right; }
+      .doc h1 { font-size:16px; margin:0; letter-spacing:.5px; }
+      .doc .qty { color:#ea580c; font-weight:700; font-size:18px; margin-top:4px; }
+      .doc .date { color:#6b7280; font-size:11px; margin-top:2px; }
+      table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:14px; }
+      th { background:#f3f4f6; text-align:left; padding:9px 10px; width:180px; color:#374151; vertical-align:top; }
+      td { padding:9px 10px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+      tr th { border-bottom:1px solid #f0f0f0; }
+      .foot { margin-top:28px; color:#6b7280; font-size:10px; text-align:center; border-top:1px solid #e5e7eb; padding-top:8px; }
+      @media print { body { padding:12px; } }
+    </style></head><body>
+    <div class="head">
+      <div class="brand">Expreso Biletta<small>Sistema de gestión de flota — FleetOS</small></div>
+      <div class="doc">
+        <h1>MOVIMIENTO DE STOCK</h1>
+        <div class="qty">${info.sign} ${num(m.qty)} ${esc(m.unit || '')}</div>
+        <div class="date">Emitido: ${fechaHora(new Date())}</div>
+      </div>
+    </div>
+    <table><tbody>${filas}</tbody></table>
+    <div class="foot">Comprobante generado por FleetOS · Expreso Biletta S.R.L. · ${fechaHora(new Date())}</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+  </body></html>`;
 }
 
 // Chips compactos con el saldo por ubicación para la columna "Por sucursal/área".
@@ -611,6 +721,8 @@ expose('_renderDispatchesInline', _renderDispatchesInline);
 expose('_renderMovementsInline', _renderMovementsInline);
 expose('_renderMovementsSection', _renderMovementsSection);
 expose('cargarMasStockMov', cargarMasStockMov);
+expose('openMovementDetail', openMovementDetail);
+expose('printStockMovement', printStockMovement);
 expose('_stockShortLoc', _stockShortLoc);
 expose('_stockBalChips', _stockBalChips);
 expose('_catDetailHtml', _catDetailHtml);
