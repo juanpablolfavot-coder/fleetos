@@ -250,10 +250,13 @@ function _renderDispatchesInline(list) {
     const badge = d.status === 'en_transito' ? '<span class="badge badge-warn">🚚 En tránsito</span>'
       : d.status === 'recibido' ? '<span class="badge badge-ok">✓ Recibido</span>'
       : '<span class="badge badge-danger">Cancelado</span>';
-    const recvBtn = (d.status === 'en_transito' && canRecv) ? `<button class="btn btn-primary btn-sm" onclick="receiveDispatch('${d.id}',${num(d.qty_sent)})">✓ Recibir</button>` : '';
-    const cancBtn = (d.status === 'en_transito' && canSend) ? `<button class="btn btn-secondary btn-sm" onclick="cancelDispatch('${d.id}')">Cancelar</button>` : '';
+    // Los botones de acción cortan la propagación para que su click no abra el
+    // detalle de la tarjeta (que también es clickeable).
+    const recvBtn = (d.status === 'en_transito' && canRecv) ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();receiveDispatch('${d.id}',${num(d.qty_sent)})">✓ Recibir</button>` : '';
+    const cancBtn = (d.status === 'en_transito' && canSend) ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();cancelDispatch('${d.id}')">Cancelar</button>` : '';
     const when = fmtDate(d.dispatched_at);
-    return `<div style="border:1px solid var(--border);border-left:3px solid var(--${sideColor(d.status)});border-radius:var(--radius);padding:9px 11px;margin-bottom:8px">
+    const clickAttr = (d.id != null) ? `class="stock-disp-card" onclick="openDispatchDetail('${escapeJsArg(String(d.id))}')" title="Ver detalle e imprimir" style="cursor:pointer;` : `style="`;
+    return `<div ${clickAttr}border:1px solid var(--border);border-left:3px solid var(--${sideColor(d.status)});border-radius:var(--radius);padding:9px 11px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:7px">
         <div style="font-weight:600;font-size:13px"><span class="td-mono" style="font-size:11px">${escapeHtml(d.code)}</span> · ${escapeHtml(d.name)}</div>${badge}
       </div>
@@ -271,6 +274,129 @@ function _renderDispatchesInline(list) {
   if (!enTransito.length && !otros.length) return '<div style="color:var(--text3);font-size:12px;text-align:center;padding:14px">No hay despachos.</div>';
   return `${enTransito.length ? `<div style="font-size:12px;font-weight:600;color:var(--warn);margin-bottom:6px">En tránsito (${enTransito.length})</div>${enTransito.map(card).join('')}` : ''}
     ${otros.length ? `<div style="font-size:12px;font-weight:600;color:var(--text2);margin:10px 0 6px">Recientes</div>${otros.map(card).join('')}` : ''}`;
+}
+
+// Busca un despacho ya cargado en memoria por su id.
+function _findDispatch(id) {
+  return (App.data.stockDispatches || []).find((d) => String(d.id) === String(id));
+}
+
+// Etiqueta legible del estado de un despacho.
+function _dispatchStatusInfo(status) {
+  if (status === 'en_transito') return { color: 'warn', label: '🚚 En tránsito', plain: 'En tránsito' };
+  if (status === 'recibido') return { color: 'ok', label: '✓ Recibido', plain: 'Recibido' };
+  return { color: 'danger', label: 'Cancelado', plain: 'Cancelado' };
+}
+
+// Detalle completo de un despacho en un modal, con botón para imprimir el
+// remito. Reusa los datos que ya trajo la lista (no re-consulta el backend).
+function openDispatchDetail(id) {
+  const d = _findDispatch(id);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  const num = (v) => parseFloat(v) || 0;
+  const info = _dispatchStatusInfo(d.status);
+  const fechaHora = (s) => { try { return s ? new Date(s).toLocaleString('es-AR') : '—'; } catch (e) { return '—'; } };
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid var(--border)">
+    <span style="color:var(--text3)">${k}</span><span style="font-weight:600;text-align:right">${v}</span></div>`;
+  const body = `
+    <div style="text-align:center;margin-bottom:14px">
+      <span class="badge badge-${info.color}" style="font-size:14px;padding:6px 14px">${info.label}</span>
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;margin-top:10px;flex-wrap:wrap">
+        <span style="background:var(--bg3);padding:3px 8px;border-radius:8px">${escapeHtml(_stockShortLoc(d.from_location) || '—')}${d.from_area ? ' · ' + escapeHtml(d.from_area) : ''}</span>
+        <span style="color:var(--accent);font-weight:700;white-space:nowrap">→ ${num(d.qty_sent)} ${escapeHtml(d.unit || '')} →</span>
+        <span style="background:var(--bg3);padding:3px 8px;border-radius:8px">${escapeHtml(_stockShortLoc(d.to_location) || '—')}${d.to_area ? ' · ' + escapeHtml(d.to_area) : ''}</span>
+      </div>
+    </div>
+    <div style="font-size:13px">
+      ${row('Artículo', `<span class="td-mono" style="font-size:11px">${escapeHtml(d.code)}</span> · ${escapeHtml(d.name)}`)}
+      ${row('Cantidad enviada', `${num(d.qty_sent)} ${escapeHtml(d.unit || '')}`)}
+      ${row('Origen', `${escapeHtml(_stockShortLoc(d.from_location) || '—')}${d.from_area ? ' · ' + escapeHtml(d.from_area) : ''}`)}
+      ${row('Destino', `${escapeHtml(_stockShortLoc(d.to_location) || '—')}${d.to_area ? ' · ' + escapeHtml(d.to_area) : ''}`)}
+      ${row('Estado', escapeHtml(info.plain))}
+      ${row('Despachado por', escapeHtml(d.dispatched_by_name || '—'))}
+      ${row('Fecha de despacho', fechaHora(d.dispatched_at))}
+      ${d.status === 'recibido' ? row('Cantidad recibida', `${num(d.qty_received)} ${escapeHtml(d.unit || '')}`) : ''}
+      ${d.status === 'recibido' && d.received_by_name ? row('Recibido por', escapeHtml(d.received_by_name)) : ''}
+      ${d.status === 'recibido' && d.received_at ? row('Fecha de recepción', fechaHora(d.received_at)) : ''}
+      ${d.notes ? row('Nota', escapeHtml(d.notes)) : ''}
+      ${d.receive_notes ? row('Nota de recepción', escapeHtml(d.receive_notes)) : ''}
+    </div>`;
+  openModal('Detalle del despacho', body, [
+    { label: '🖨 Imprimir', cls: 'btn-primary', fn: () => printDispatch(id) },
+    { label: 'Cerrar', cls: 'btn-secondary', fn: () => closeModal() },
+  ]);
+}
+
+// Genera un remito imprimible del despacho (patrón de ticket del sistema).
+function printDispatch(id) {
+  const d = _findDispatch(id);
+  if (!d) { showToast('error', 'No se encontró el despacho'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { showToast('error', 'Habilitá las ventanas emergentes para imprimir'); return; }
+  w.document.write(_dispatchComprobanteHtml(d));
+  w.document.close();
+}
+
+// HTML del remito de despacho (mismo estilo que los demás tickets).
+function _dispatchComprobanteHtml(d) {
+  const num = (v) => parseFloat(v) || 0;
+  const esc = escapeHtml;
+  const info = _dispatchStatusInfo(d.status);
+  const fechaHora = (s) => { try { return s ? new Date(s).toLocaleString('es-AR') : '—'; } catch (e) { return '—'; } };
+  const rows = [
+    ['Artículo', `${esc(d.code || '')} · ${esc(d.name || '')}`],
+    ['Cantidad enviada', `${num(d.qty_sent)} ${esc(d.unit || '')}`],
+    ['Origen', `${esc(_stockShortLoc(d.from_location) || '—')}${d.from_area ? ' · ' + esc(d.from_area) : ''}`],
+    ['Destino', `${esc(_stockShortLoc(d.to_location) || '—')}${d.to_area ? ' · ' + esc(d.to_area) : ''}`],
+    ['Estado', esc(info.plain)],
+    ['Despachado por', esc(d.dispatched_by_name || '—')],
+    ['Fecha de despacho', fechaHora(d.dispatched_at)],
+  ];
+  if (d.status === 'recibido') {
+    rows.push(['Cantidad recibida', `${num(d.qty_received)} ${esc(d.unit || '')}`]);
+    if (d.received_by_name) rows.push(['Recibido por', esc(d.received_by_name)]);
+    if (d.received_at) rows.push(['Fecha de recepción', fechaHora(d.received_at)]);
+  }
+  if (d.notes) rows.push(['Nota', esc(d.notes)]);
+  if (d.receive_notes) rows.push(['Nota de recepción', esc(d.receive_notes)]);
+  const filas = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8">
+    <title>Remito de despacho — ${esc(d.code || '')}</title>
+    <style>
+      * { box-sizing:border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color:#1f2937; margin:0; padding:32px; }
+      .head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #ea580c; padding-bottom:12px; margin-bottom:18px; }
+      .brand { font-size:22px; font-weight:800; color:#ea580c; }
+      .brand small { display:block; font-size:11px; color:#6b7280; font-weight:400; margin-top:2px; }
+      .doc { text-align:right; }
+      .doc h1 { font-size:16px; margin:0; letter-spacing:.5px; }
+      .doc .qty { color:#ea580c; font-weight:700; font-size:18px; margin-top:4px; }
+      .doc .date { color:#6b7280; font-size:11px; margin-top:2px; }
+      .route { text-align:center; font-size:14px; margin:0 0 16px; padding:10px; background:#f9fafb; border-radius:8px; }
+      .route b { color:#ea580c; }
+      table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:14px; }
+      th { background:#f3f4f6; text-align:left; padding:9px 10px; width:180px; color:#374151; vertical-align:top; }
+      td { padding:9px 10px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+      tr th { border-bottom:1px solid #f0f0f0; }
+      .sign { display:flex; gap:40px; margin-top:40px; }
+      .sign > div { flex:1; border-top:1px solid #9ca3af; padding-top:6px; font-size:11px; color:#6b7280; text-align:center; }
+      .foot { margin-top:28px; color:#6b7280; font-size:10px; text-align:center; border-top:1px solid #e5e7eb; padding-top:8px; }
+      @media print { body { padding:12px; } }
+    </style></head><body>
+    <div class="head">
+      <div class="brand">Expreso Biletta<small>Sistema de gestión de flota — FleetOS</small></div>
+      <div class="doc">
+        <h1>REMITO DE DESPACHO</h1>
+        <div class="qty">${num(d.qty_sent)} ${esc(d.unit || '')}</div>
+        <div class="date">Emitido: ${fechaHora(new Date())}</div>
+      </div>
+    </div>
+    <div class="route"><b>${esc(_stockShortLoc(d.from_location) || '—')}${d.from_area ? ' · ' + esc(d.from_area) : ''}</b> &nbsp;→&nbsp; <b>${esc(_stockShortLoc(d.to_location) || '—')}${d.to_area ? ' · ' + esc(d.to_area) : ''}</b></div>
+    <table><tbody>${filas}</tbody></table>
+    <div class="sign"><div>Firma / aclaración — Entrega</div><div>Firma / aclaración — Recepción</div></div>
+    <div class="foot">Comprobante generado por FleetOS · Expreso Biletta S.R.L. · ${fechaHora(new Date())}</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+  </body></html>`;
 }
 
 // Historial: últimos movimientos del catálogo (ingreso/egreso/ajuste).
@@ -723,6 +849,8 @@ expose('_renderMovementsSection', _renderMovementsSection);
 expose('cargarMasStockMov', cargarMasStockMov);
 expose('openMovementDetail', openMovementDetail);
 expose('printStockMovement', printStockMovement);
+expose('openDispatchDetail', openDispatchDetail);
+expose('printDispatch', printDispatch);
 expose('_stockShortLoc', _stockShortLoc);
 expose('_stockBalChips', _stockBalChips);
 expose('_catDetailHtml', _catDetailHtml);
