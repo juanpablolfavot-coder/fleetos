@@ -691,6 +691,10 @@ tr:hover td { background: var(--bg3); color: var(--text); }
 .stock-mov-row[onclick] { border-radius: 6px; transition: background .12s; }
 .stock-mov-row[onclick]:hover { background: var(--bg3); }
 
+/* Tarjeta de despacho: clickeable para ver el detalle / imprimir el remito */
+.stock-disp-card { transition: box-shadow .12s, border-color .12s; }
+.stock-disp-card:hover { border-color: var(--accent); box-shadow: var(--shadow); }
+
 /* ── Celular: tablas del Panel de Auditoría como tarjetas ──
    Muchas columnas obligaban a arrastrar la pantalla para el costado. En ≤600px
    cada fila se muestra apilada (etiqueta: valor), sin scroll horizontal. La
