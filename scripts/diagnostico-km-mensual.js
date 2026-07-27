@@ -117,6 +117,17 @@ async function sospechosas(client, desde, hasta) {
   return alertas;
 }
 
+// Litros (no urea, no autoelev) por unidad en un rango — para cruzar con km.
+async function litrosPorUnidad(client, desde, hasta) {
+  const r = await client.query(`
+    SELECT COALESCE(v.code, v.plate) AS code, COALESCE(SUM(fl.liters),0) AS litros
+    FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+    WHERE fl.logged_at BETWEEN $1 AND $2 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+      AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'
+    GROUP BY COALESCE(v.code, v.plate)`, [desde, hasta]);
+  return new Map(r.rows.map(x => [x.code, Number(x.litros)]));
+}
+
 // Auditoría/reconciliación de un mes: cuántas cargas hay y cuántas entran al km.
 async function auditarMes(client, ym) {
   const desde = desdeYm(ym), hasta = hastaYmDia(ym, lastDay(ym));
@@ -242,6 +253,35 @@ async function auditarMes(client, ym) {
     console.log(`   unidad     cargas   km_veh        min → max`);
     au.perVeh.forEach(u =>
       console.log(`   ${String(u.code).padEnd(10)} ${String(u.cargas).padStart(4)}   ${num(u.km_veh).padStart(9)}   ${num(u.mn)} → ${num(u.mx)}`));
+
+    // 6) RENDIMIENTO km/L por unidad: A vs B, y km "faltante" en B según su gasoil.
+    const litA = await litrosPorUnidad(client, desdeYm(A), hastaYmDia(A, lastDay(A)));
+    const litB = await litrosPorUnidad(client, desdeYm(B), hastaYmDia(B, lastDay(B)));
+    const totLitA = [...litA.values()].reduce((a, b) => a + b, 0);
+    const totLitB = [...litB.values()].reduce((a, b) => a + b, 0);
+    const rendA = totLitA > 0 ? totA.kmTotal / totLitA : 0;
+    const rendB = totLitB > 0 ? totB.kmTotal / totLitB : 0;
+    console.log(`\n=== 6) RENDIMIENTO km/L POR UNIDAD — ${label(A)} vs ${label(B)} ===`);
+    console.log(`   Flota: ${label(A)} ${rendA.toFixed(2)} km/L   ·   ${label(B)} ${rendB.toFixed(2)} km/L`);
+    console.log(`   "km faltante" en ${label(B)} = litros_${label(B).slice(0,3)} × rend_${label(A).slice(0,3)} − km_${label(B).slice(0,3)}`);
+    console.log(`   (mide cuántos km debería haber recorrido según su gasoil, si rindiera como en ${label(A)})\n`);
+    const rows = codes.map(c => {
+      const kA = mapA.get(c) ? Number(mapA.get(c).km_veh) : 0;
+      const kB = mapB.get(c) ? Number(mapB.get(c).km_veh) : 0;
+      const lA = litA.get(c) || 0, lB = litB.get(c) || 0;
+      const rA = lA > 0 ? kA / lA : 0, rB = lB > 0 ? kB / lB : 0;
+      const faltante = rA > 0 ? Math.round(lB * rA - kB) : 0; // km que "faltan" en B según su gasoil
+      return { code: c, kA, kB, lA, lB, rA, rB, faltante };
+    }).filter(r => r.lB > 0).sort((x, y) => y.faltante - x.faltante);
+    console.log(`   unidad     ${label(A).slice(0,3)} km/L   ${label(B).slice(0,3)} km/L   ${label(B).slice(0,3)} litros   ${label(B).slice(0,3)} km    km faltante`);
+    rows.slice(0, 22).forEach(r => {
+      const flag = (r.rA > 0 && r.rB < r.rA * 0.6 && r.faltante > 1500) ? '  ⚠ km bajo p/su gasoil' : '';
+      console.log(`   ${String(r.code).padEnd(10)} ${r.rA.toFixed(2).padStart(7)}  ${r.rB.toFixed(2).padStart(8)}  ${num(r.lB).padStart(8)}  ${num(r.kB).padStart(8)}  ${(r.faltante >= 0 ? '+' : '') + num(r.faltante)}`.padEnd(66) + flag);
+    });
+    const totalFaltante = rows.reduce((a, r) => a + Math.max(0, r.faltante), 0);
+    console.log(`\n   Suma de "km faltante" en ${label(B)}: ~${num(totalFaltante)} km`);
+    console.log(`   → Si se reparte parejo entre muchas unidades = mes incompleto (se corrige al cerrar el mes).`);
+    console.log(`   → Si se concentra en pocas ⚠ = esas unidades tienen odómetro subcargado (lecturas a revisar).`);
     console.log('');
   } catch (e) {
     console.error('ERROR:', e.message);
