@@ -117,6 +117,39 @@ async function sospechosas(client, desde, hasta) {
   return alertas;
 }
 
+// Auditoría/reconciliación de un mes: cuántas cargas hay y cuántas entran al km.
+async function auditarMes(client, ym) {
+  const desde = desdeYm(ym), hasta = hastaYmDia(ym, lastDay(ym));
+  const tot = (await client.query(`
+    SELECT COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE COALESCE(LOWER(fuel_type),'') = 'urea')  AS urea,
+           COUNT(*) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea') AS combustible
+    FROM fuel_logs WHERE logged_at BETWEEN $1 AND $2`, [desde, hasta])).rows[0];
+  // Cargas de combustible sin vehículo asociado (no entran).
+  const sinVeh = (await client.query(`
+    SELECT COUNT(*) AS n FROM fuel_logs
+    WHERE logged_at BETWEEN $1 AND $2 AND COALESCE(LOWER(fuel_type),'') <> 'urea' AND vehicle_id IS NULL`,
+    [desde, hasta])).rows[0].n;
+  // Clasificación de las de combustible con vehículo.
+  const cls = (await client.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE COALESCE(LOWER(v.type),'') LIKE '%autoelev%') AS autoelev,
+      COUNT(*) FILTER (WHERE COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%' AND (fl.odometer_km IS NULL OR fl.odometer_km <= 0)) AS sin_odo,
+      COUNT(*) FILTER (WHERE COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%' AND fl.odometer_km > 0) AS con_odo
+    FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+    WHERE fl.logged_at BETWEEN $1 AND $2 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'`, [desde, hasta])).rows[0];
+  // Por unidad (con odómetro válido): cuántas cargas y km_veh.
+  const perVeh = (await client.query(`
+    SELECT COALESCE(v.code, v.plate) AS code, COUNT(*) AS cargas,
+           MIN(fl.odometer_km) AS mn, MAX(fl.odometer_km) AS mx,
+           MAX(fl.odometer_km) - MIN(fl.odometer_km) AS km_veh
+    FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+    WHERE fl.logged_at BETWEEN $1 AND $2 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+      AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%' AND fl.odometer_km > 0
+    GROUP BY COALESCE(v.code, v.plate) ORDER BY cargas DESC, code`, [desde, hasta])).rows;
+  return { tot, sinVeh: Number(sinVeh), cls, perVeh };
+}
+
 (async () => {
   const client = await pool.connect();
   try {
@@ -184,6 +217,31 @@ async function sospechosas(client, desde, hasta) {
       });
       console.log(`\n   Cada una se corrige con un script puntual (patrón corregir-km-*.js).`);
     }
+
+    // 5) AUDITORÍA / RECONCILIACIÓN de las cargas del mes más nuevo (B)
+    const au = await auditarMes(client, B);
+    const con2 = au.perVeh.filter(u => Number(u.cargas) >= 2);
+    const con1 = au.perVeh.filter(u => Number(u.cargas) === 1);
+    const sumaKm = con2.reduce((a, u) => a + Number(u.km_veh), 0);
+    console.log(`\n=== 5) AUDITORÍA DE CARGAS — ${label(B)} (¿se toma todo?) ===`);
+    console.log(`   Cargas totales del mes: ${au.tot.total}   (urea: ${au.tot.urea} · combustible: ${au.tot.combustible})`);
+    console.log(`   De las ${au.tot.combustible} de combustible, NO entran al cálculo de km:`);
+    console.log(`     · ${au.cls.autoelev} en autoelevadores (excluidos a propósito)`);
+    console.log(`     · ${au.sinVeh} sin vehículo asociado`);
+    console.log(`     · ${au.cls.sin_odo} sin odómetro cargado (o en 0)`);
+    console.log(`   Con odómetro válido: ${au.cls.con_odo} cargas en ${au.perVeh.length} unidades.`);
+    console.log(`     · ${con2.length} unidades con ≥2 cargas → ENTRAN (km medible)`);
+    console.log(`     · ${con1.length} unidades con 1 sola carga → NO entran (no se puede medir distancia con 1 punto)`);
+    if (con1.length) {
+      console.log(`       Unidades con 1 sola carga en ${label(B)} (km "perdido" para el total):`);
+      con1.forEach(u => console.log(`         - ${String(u.code).padEnd(10)} 1 carga · odo ${num(u.mn)}`));
+    }
+    console.log(`   Reconciliación: suma de km de las ${con2.length} unidades = ${num(sumaKm)} km`);
+    console.log(`     ${Math.abs(sumaKm - totB.kmTotal) < 1 ? '✓ coincide con el total del bloque 1' : '⚠ NO coincide con el bloque 1 (' + num(totB.kmTotal) + ') — revisar'}`);
+    console.log(`\n   Detalle por unidad (${label(B)}, con odómetro válido):`);
+    console.log(`   unidad     cargas   km_veh        min → max`);
+    au.perVeh.forEach(u =>
+      console.log(`   ${String(u.code).padEnd(10)} ${String(u.cargas).padStart(4)}   ${num(u.km_veh).padStart(9)}   ${num(u.mn)} → ${num(u.mx)}`));
     console.log('');
   } catch (e) {
     console.error('ERROR:', e.message);
