@@ -450,7 +450,7 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
       const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-      const [fuel, ots, km] = await Promise.all([
+      const [fuel, ots, km, tramos] = await Promise.all([
         query(`SELECT
                  COALESCE(SUM(liters*price_per_l) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as costo_fuel,
                  COALESCE(SUM(liters)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as litros,
@@ -476,6 +476,39 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
                  GROUP BY fl.vehicle_id
                  HAVING COUNT(*) >= 2
                ) t`, [desde, hasta+' 23:59:59']),
+        // Rendimiento POR TRAMOS: cada carga cubre el tramo desde la carga anterior
+        // (el camión tanquea al volver del viaje). Si el tramo cruza el cambio de mes,
+        // litros y km se reparten proporcional al tiempo que cae en cada mes. Así el
+        // gasoil se atribuye al mes en que se QUEMÓ y no al mes en que se cargó — sin
+        // esto, las cargas post-viaje de principios de mes inflan el consumo del mes
+        // nuevo y regalan rendimiento al anterior (visto en junio/julio 2026: ~8.400 L).
+        query(`WITH cargas AS (
+                 SELECT fl.vehicle_id, fl.logged_at, fl.liters, fl.odometer_km,
+                        LAG(fl.odometer_km) OVER w AS odo_prev,
+                        LAG(fl.logged_at)  OVER w AS fecha_prev
+                 FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+                 WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+                   AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'
+                   AND fl.odometer_km IS NOT NULL AND fl.odometer_km > 0
+                   AND COALESCE(fl.liters,0) > 0
+                 WINDOW w AS (PARTITION BY fl.vehicle_id ORDER BY fl.logged_at, fl.id)
+               ), tramos AS (
+                 SELECT liters, (odometer_km - odo_prev) AS km_tramo, fecha_prev, logged_at,
+                        EXTRACT(EPOCH FROM (logged_at - fecha_prev)) AS dur
+                 FROM cargas
+                 WHERE odo_prev IS NOT NULL
+                   AND odometer_km > odo_prev                    -- descarta odómetros que retroceden (typos)
+                   AND (odometer_km - odo_prev) < 20000          -- descarta saltos absurdos
+                   AND EXTRACT(EPOCH FROM (logged_at - fecha_prev)) BETWEEN 600 AND 45*86400
+               )
+               SELECT COALESCE(SUM(liters  * frac),0) AS litros_tramos,
+                      COALESCE(SUM(km_tramo * frac),0) AS km_tramos
+               FROM (
+                 SELECT liters, km_tramo,
+                        GREATEST(0, EXTRACT(EPOCH FROM (LEAST(logged_at, $2::timestamptz) - GREATEST(fecha_prev, $1::timestamptz)))) / dur AS frac
+                 FROM tramos
+                 WHERE logged_at > $1::timestamptz AND fecha_prev < $2::timestamptz
+               ) t`, [desde, hasta+' 23:59:59']),
       ]);
 
       meses.push({
@@ -491,6 +524,8 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         cargas_cisterna:   parseInt(fuel.rows[0].cargas_cisterna),
         cargas_estacion:   parseInt(fuel.rows[0].cargas_estacion),
         km:                parseFloat(km.rows[0].km_total),
+        km_tramos:         parseFloat(tramos.rows[0].km_tramos),
+        litros_tramos:     parseFloat(tramos.rows[0].litros_tramos),
         costo_mantenimiento: parseFloat(ots.rows[0].costo_mant),
         ots:               parseInt(ots.rows[0].ots),
         total:             parseFloat(fuel.rows[0].costo_fuel) + parseFloat(fuel.rows[0].costo_urea) + parseFloat(ots.rows[0].costo_mant),
