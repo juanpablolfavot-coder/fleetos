@@ -128,6 +128,32 @@ async function litrosPorUnidad(client, desde, hasta) {
   return new Map(r.rows.map(x => [x.code, Number(x.litros)]));
 }
 
+// Rendimiento "interno" por unidad: km_veh / (litros SIN la última carga).
+// Excluir la última carga quita el gasoil que se maneja DESPUÉS del último odómetro
+// (la "cola" del mes incompleto), dejando la eficiencia real medida entre cargas.
+async function rendInternoPorUnidad(client, desde, hasta) {
+  const r = await client.query(`
+    SELECT COALESCE(v.code, v.plate) AS code, fl.logged_at, fl.id, fl.odometer_km, fl.liters
+    FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+    WHERE fl.logged_at BETWEEN $1 AND $2 AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+      AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'
+      AND fl.odometer_km IS NOT NULL AND fl.odometer_km > 0
+    ORDER BY COALESCE(v.code, v.plate), fl.logged_at, fl.id`, [desde, hasta]);
+  const porU = new Map();
+  for (const row of r.rows) {
+    if (!porU.has(row.code)) porU.set(row.code, []);
+    porU.get(row.code).push(row);
+  }
+  const out = new Map();
+  for (const [code, f] of porU) {
+    if (f.length < 2) continue;
+    const kmVeh = Number(f[f.length - 1].odometer_km) - Number(f[0].odometer_km);
+    const litrosSinUlt = f.slice(0, -1).reduce((a, x) => a + Number(x.liters || 0), 0); // fuel 1..n-1
+    out.set(code, { kmVeh, litrosSinUlt, kmL: litrosSinUlt > 0 ? kmVeh / litrosSinUlt : 0 });
+  }
+  return out;
+}
+
 // Auditoría/reconciliación de un mes: cuántas cargas hay y cuántas entran al km.
 async function auditarMes(client, ym) {
   const desde = desdeYm(ym), hasta = hastaYmDia(ym, lastDay(ym));
@@ -282,6 +308,35 @@ async function auditarMes(client, ym) {
     console.log(`\n   Suma de "km faltante" en ${label(B)}: ~${num(totalFaltante)} km`);
     console.log(`   → Si se reparte parejo entre muchas unidades = mes incompleto (se corrige al cerrar el mes).`);
     console.log(`   → Si se concentra en pocas ⚠ = esas unidades tienen odómetro subcargado (lecturas a revisar).`);
+
+    // 7) km/L INTERNO (excluye la última carga → quita la "cola" del mes incompleto)
+    const intA = await rendInternoPorUnidad(client, desdeYm(A), hastaYmDia(A, lastDay(A)));
+    const intB = await rendInternoPorUnidad(client, desdeYm(B), hastaYmDia(B, lastDay(B)));
+    const sum = (m, f) => [...m.values()].reduce((a, x) => a + f(x), 0);
+    const flIntA = sum(intA, x => x.litrosSinUlt) > 0 ? sum(intA, x => x.kmVeh) / sum(intA, x => x.litrosSinUlt) : 0;
+    const flIntB = sum(intB, x => x.litrosSinUlt) > 0 ? sum(intB, x => x.kmVeh) / sum(intB, x => x.litrosSinUlt) : 0;
+    console.log(`\n=== 7) km/L INTERNO — excluye la última carga de cada unidad (quita el efecto "mes incompleto") ===`);
+    console.log(`   Si al sacar la cola el km/L de ${label(B)} SE RECUPERA cerca de ${label(A)} → era timing (se arregla solo).`);
+    console.log(`   Si IGUAL queda bajo → lecturas subcargadas de verdad (problema real, hay km para corregir).\n`);
+    console.log(`   Flota INTERNO: ${label(A)} ${flIntA.toFixed(2)} km/L   ·   ${label(B)} ${flIntB.toFixed(2)} km/L`);
+    console.log(`   (recordá: total con cola daba ${rendA.toFixed(2)} vs ${rendB.toFixed(2)})\n`);
+    console.log(`   unidad     ${label(A).slice(0,3)} int   ${label(B).slice(0,3)} int   veredicto`);
+    let nReal = 0, nTiming = 0;
+    codes.map(c => {
+      const a = intA.get(c), b = intB.get(c);
+      return { code: c, ra: a ? a.kmL : 0, rb: b ? b.kmL : 0 };
+    }).filter(r => r.ra > 0 && r.rb > 0).sort((x, y) => (x.rb / x.ra) - (y.rb / y.ra)).forEach(r => {
+      const ratio = r.rb / r.ra;
+      let vd;
+      if (ratio >= 0.8) { vd = 'OK — se recupera (era timing)'; nTiming++; }
+      else if (ratio < 0.6) { vd = '⚠ SIGUE BAJO — lectura subcargada (revisar)'; nReal++; }
+      else { vd = '~ parcial'; }
+      console.log(`   ${String(r.code).padEnd(10)} ${r.ra.toFixed(2).padStart(6)}  ${r.rb.toFixed(2).padStart(6)}   ${vd}`);
+    });
+    console.log(`\n   Resumen: ${nReal} unidad(es) con lectura subcargada real · ${nTiming} que se recuperan (timing).`);
+    console.log(`   Veredicto flota: ${flIntB >= flIntA * 0.85
+      ? 'el km/L interno se recupera → el grueso del faltante es MES INCOMPLETO (se cierra solo).'
+      : 'el km/L interno SIGUE bajo → hay subcarga real de odómetros (no es solo mes incompleto).'}`);
     console.log('');
   } catch (e) {
     console.error('ERROR:', e.message);
