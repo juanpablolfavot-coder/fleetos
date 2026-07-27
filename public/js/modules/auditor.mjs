@@ -753,9 +753,16 @@ async function renderAuditorComparativo(el) {
             const km = m.km || 0, l = m.litros || 0;
             const f1 = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
             const kmCell = km > 0 ? Math.round(km).toLocaleString('es-AR') + ' km' : '—';
-            const rendCell = (km > 0 && l > 0)
-              ? `${f1(km / l)} km/L<div style="font-size:10px;color:var(--text3)">${f1(l / km * 100)} L/100km</div>`
-              : '—';
+            // Rendimiento por TRAMOS (asigna cada carga al período en que ese gasoil se
+            // quemó, prorrateando los tramos que cruzan el cambio de mes) = cifra auditable.
+            // El cálculo por calendario queda como secundario: se distorsiona cuando los
+            // camiones tanquean a la vuelta del viaje cruzando el cambio de mes.
+            const kmT = m.km_tramos || 0, lT = m.litros_tramos || 0;
+            const rendCell = (kmT > 0 && lT > 0)
+              ? `<span title="Por tramos: el gasoil se asigna al mes en que se quemó">${f1(kmT / lT)} km/L</span><div style="font-size:10px;color:var(--text3)">${f1(lT / kmT * 100)} L/100km · calendario: ${(km > 0 && l > 0) ? f1(km / l) : '—'}</div>`
+              : (km > 0 && l > 0)
+                ? `${f1(km / l)} km/L<div style="font-size:10px;color:var(--text3)">${f1(l / km * 100)} L/100km</div>`
+                : '—';
             const litrosBreak = (l > 0 && ((m.litros_cisterna || 0) > 0 || (m.litros_estacion || 0) > 0))
               ? `<div style="font-size:10px;color:var(--text3)">cist. ${Math.round(m.litros_cisterna || 0).toLocaleString()} · est. ${Math.round(m.litros_estacion || 0).toLocaleString()}</div>`
               : '';
@@ -773,6 +780,12 @@ async function renderAuditorComparativo(el) {
             </tr>`;
           }).join('')}</tbody>
         </table>
+      </div>
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
+        <b>Rendimiento por tramos:</b> cada carga se asigna al período en que ese gasoil se quemó (el tramo desde la carga
+        anterior), prorrateando los tramos que cruzan el cambio de mes. Evita que las cargas de la vuelta de viaje a
+        principios de mes "regalen" litros al mes anterior. El valor chico ("calendario") es el cálculo simple por fecha de carga.
+        El mes en curso consolida con las primeras cargas del mes siguiente.
       </div>`}
     </div>`;
 }
