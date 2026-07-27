@@ -42,6 +42,7 @@ const CARGAS = [
   // el anotado a mano en el ticket (va en notes; el chofer del sistema no se pisa).
   { code:'AA508SW', fecha:'2026-07-21 12:31:07', litros:81.4664,  total:200000.01, km:499862, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'00012-00050237', nota:'pagado con Mercado Pago · anotado en ticket: Sebastián' },
   { code:'AE517UM', fecha:'2026-07-21 09:01:05', litros:129.4219, total:300000.00, km:285976, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'0006-00025431',  nota:'pagado en efectivo · anotado en ticket: Abel' },
+  { code:'AF041MB', fecha:'2026-07-20 07:53:06', litros:81.4664,  total:200000.01, km:267868, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'07894-00059157', nota:'pagado con Visa Electrón' },
 ];
 
 async function main() {
