@@ -38,6 +38,10 @@ const CARGAS = [
   { code:'AA508SW', fecha:'2026-07-15 06:50:14', litros:86.2813,  total:200000.05, km:499342, estacion:'YPF — Operadora de Estaciones de Servicios', ticket:'06394-00034853' },
   { code:'AE517UM', fecha:'2026-07-13 15:38:15', litros:127.1219, total:271151.01, km:285381, estacion:'ACA — Norbayres, José León Suárez (BA)',   ticket:'00004-00022225' },
   { code:'AE517UM', fecha:'2026-07-15 11:16:00', litros:13.1048,  total:28018.06,  km:285618, estacion:'ACA — Norbayres, José León Suárez (BA)',   ticket:'00004-00022267' },
+  // Tickets del 21/07 — YPF Operadora, Leones (CBA). El nombre entre paréntesis es
+  // el anotado a mano en el ticket (va en notes; el chofer del sistema no se pisa).
+  { code:'AA508SW', fecha:'2026-07-21 12:31:07', litros:81.4664,  total:200000.01, km:499862, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'00012-00050237', nota:'pagado con Mercado Pago · anotado en ticket: Sebastián' },
+  { code:'AE517UM', fecha:'2026-07-21 09:01:05', litros:129.4219, total:300000.00, km:285976, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'0006-00025431',  nota:'pagado en efectivo · anotado en ticket: Abel' },
 ];
 
 async function main() {
@@ -81,7 +85,7 @@ async function main() {
             odometer_km, location, notes, ticket_image, ticket_estado, logged_at)
          VALUES ($1,$2,$3,NULL,'diesel',$4,$5,$6,$7,$8,NULL,NULL,$9::timestamptz)`,
         [vehId, registraId, v.rows[0].driver_name || null, c.litros, ppu, c.km, c.estacion,
-         `Ticket ${c.ticket} · carga manual (script)`, c.fecha]
+         `Ticket ${c.ticket} · carga manual (script)${c.nota ? ' · ' + c.nota : ''}`, c.fecha]
       );
       // Actualizar el odómetro del vehículo si avanzó.
       await pool.query('UPDATE vehicles SET km_current=$1 WHERE id=$2 AND COALESCE(km_current,0)<$1', [c.km, vehId]);
