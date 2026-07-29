@@ -267,7 +267,12 @@ function accountIdDelToken() {
 }
 
 // ── Asegurar columnas GPS en vehicles ──────────────────────
+// Una sola vez por arranque, no en cada sync: son sentencias idempotentes, pero
+// repetirlas cada 2 minutos es trabajo de base al pedo y toma locks sobre
+// vehicles justo cuando el sync va a escribir sus 42 unidades.
+let _colsReady = false;
 async function ensureColumns() {
+  if (_colsReady) return;
   try {
     await query(`ALTER TABLE vehicles
       ADD COLUMN IF NOT EXISTS gps_lat         NUMERIC(10,7),
@@ -287,6 +292,7 @@ async function ensureColumns() {
       -- por patente, sin esto no hay forma de saber de quién habla.
       ADD COLUMN IF NOT EXISTS gps_vehicle_id  VARCHAR(60)`);
     await query(`CREATE INDEX IF NOT EXISTS idx_vehicles_gps_id ON vehicles(gps_vehicle_id) WHERE gps_vehicle_id IS NOT NULL`).catch(() => {});
+    _colsReady = true;
   } catch(e) { /* ya existen */ }
 }
 
