@@ -30,7 +30,9 @@ const LIMITE_POR_UNIDAD = {
   AB723IX: 110,  // Citroën Berlingo Furgón 1.6 HDI Business
   AF823RB: 110,  // Citroën Berlingo Furgón HDI 92 Business
   AE919NN:  90,  // Mercedes-Benz Sprinter 416 CDI Furgón
+  AB902MF:  90,  // Mercedes-Benz Sprinter 515 CDI Furgón
   AG468LK:  90,  // Ford Transit Van Larga
+  OKQ888:   90,  // Iveco Daily 70C 16 Chasis
 };
 
 // Se busca por código Y por patente, normalizando: si en la ficha el código no
