@@ -242,7 +242,13 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS gps_speed       NUMERIC(6,1) DEFAULT 0,
       ADD COLUMN IF NOT EXISTS gps_status      VARCHAR(20)  DEFAULT 'unknown',
       ADD COLUMN IF NOT EXISTS gps_hour_meter  NUMERIC(10,2),
-      ADD COLUMN IF NOT EXISTS gps_updated_at  TIMESTAMPTZ`);
+      ADD COLUMN IF NOT EXISTS gps_updated_at  TIMESTAMPTZ,
+      -- La respuesta de fleetview/vehicles ya trae la dirección de calle y el
+      -- estado nativo de la unidad; se venían descartando. gps_status se sigue
+      -- calculando como antes (speed > 2) para no cambiar nada de lo que ya
+      -- consume el frontend: gps_state guarda el valor tal cual lo manda el GPS.
+      ADD COLUMN IF NOT EXISTS gps_address     TEXT,
+      ADD COLUMN IF NOT EXISTS gps_state       VARCHAR(30)`);
   } catch(e) { /* ya existen */ }
 }
 
@@ -282,6 +288,10 @@ async function syncGPSData() {
       const speed     = parseFloat(v.speed || v.Speed || v.CurrentSpeed || 0) || 0;
       const lat       = parseFloat(v.latitude  || v.Latitude  || v.lat  || 0) || null;
       const lng       = parseFloat(v.longitude || v.Longitude || v.lng  || 0) || null;
+      // Dirección de calle y estado nativo ('parking', 'driving', ...): vienen en
+      // la misma respuesta y hasta ahora se usaban solo para el ralentí.
+      const address   = (v.address || v.Address || '').toString().trim() || null;
+      const vState    = (v.vState  || v.VState  || '').toString().trim() || null;
 
       // Si la lista no trae km/horas y tenemos vehicleId, consultar /api/io/{vehicleId}
       if (vehicleId && (km === 0 || hourMeter === 0)) {
@@ -312,11 +322,13 @@ async function syncGPSData() {
           gps_speed      = $5,
           gps_status     = $6,
           gps_hour_meter = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
+          gps_address    = COALESCE($8, gps_address),
+          gps_state      = COALESCE($9, gps_state),
           gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
         RETURNING id, code, plate, base, type, km_current
-      `, [km, hourMeter, lat, lng, speed, status, searchPlate]);
+      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState]);
 
       if (r.rows.length > 0) {
         updated++;
@@ -326,7 +338,7 @@ async function syncGPSData() {
         // Ralentí: si está detenido, es candidato (hay que ver la ignición vía IO,
         // se resuelve en paralelo al final). Si se mueve, cierra cualquier ralentí abierto.
         if (speed <= idle.IDLE_SPEED) {
-          idleCandidates.push({ row: r.rows[0], speed, vehicleId, address: v.address || v.Address || null });
+          idleCandidates.push({ row: r.rows[0], speed, vehicleId, address });
         } else {
           idle.processVehicle(r.rows[0], speed, null).catch(() => {});
         }
