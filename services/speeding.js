@@ -21,6 +21,28 @@ function esRemolcado(type) {
   return t.includes('remolque') || t.includes('acoplad');
 }
 
+// ── Límite propio por unidad (km/h) ──────────────────────────────────
+// El límite general (SPEED_ALERT_KMH, 80) está pensado para los camiones. Los
+// utilitarios livianos tienen autorizado andar más rápido, y con el límite de
+// camión avisaban por manejar normal. Las unidades que no estén acá usan el
+// general.
+const LIMITE_POR_UNIDAD = {
+  AB723IX: 110,  // Citroën Berlingo Furgón 1.6 HDI Business
+  AF823RB: 110,  // Citroën Berlingo Furgón HDI 92 Business
+  AE919NN:  90,  // Mercedes-Benz Sprinter 416 CDI Furgón
+  AG468LK:  90,  // Ford Transit Van Larga
+};
+
+// Se busca por código Y por patente, normalizando: si en la ficha el código no
+// coincidiera exactamente con la patente, una unidad quedaría con el límite de
+// camión sin que nadie se entere (seguiría avisando de más, en silencio).
+const _norm = (x) => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function limiteDe(v) {
+  return LIMITE_POR_UNIDAD[_norm(v && v.code)]
+      || LIMITE_POR_UNIDAD[_norm(v && v.plate)]
+      || (push.SPEED_LIMIT || 80);
+}
+
 let _ready = false;
 async function ensureSchema() {
   if (_ready) return;
@@ -43,11 +65,11 @@ async function ensureSchema() {
 
 // Procesa una lectura de una unidad. Abre/actualiza/cierra el evento según la velocidad.
 async function processVehicle(v, speed) {
-  const LIMIT = push.SPEED_LIMIT || 80;
-  const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   const s = Math.round(parseFloat(speed) || 0);
   const code = v && (v.code || v.plate);
   if (!code) return;
+  const LIMIT = limiteDe(v);               // el general, salvo que la unidad tenga el suyo
+  const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   // Los semirremolques / acoplados no generan alerta (velocidad del camión que los tira).
   if (esRemolcado(v.type)) return;
   await ensureSchema();
@@ -109,4 +131,4 @@ async function listEvents({ desde, hasta, limit = 200 } = {}) {
   return r.rows;
 }
 
-module.exports = { ensureSchema, processVehicle, closeStale, listEvents };
+module.exports = { ensureSchema, processVehicle, closeStale, listEvents, limiteDe, LIMITE_POR_UNIDAD };
