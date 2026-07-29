@@ -73,8 +73,9 @@ async function ensureSchema() {
 // ignorando mayúsculas, guiones y guiones bajos. Así da igual si el proveedor
 // manda {licensePlate} o {data:{vehicle:{LicensePlate}}}.
 const _k = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-function buscarCampo(raiz, nombres, { numerico = false } = {}) {
-  const buscados = new Set(nombres.map(_k));
+
+// Busca UN nombre en todo el objeto, por niveles (primero lo más superficial).
+function _buscarUno(raiz, buscado, numerico) {
   const cola = [raiz];
   let vueltas = 0;
   while (cola.length && vueltas++ < 500) {
@@ -83,7 +84,7 @@ function buscarCampo(raiz, nombres, { numerico = false } = {}) {
     for (const [clave, valor] of Object.entries(nodo)) {
       if (valor === null || valor === undefined || valor === '') continue;
       if (typeof valor === 'object') continue;                   // los hijos se ven en la vuelta siguiente
-      if (!buscados.has(_k(clave))) continue;
+      if (_k(clave) !== buscado) continue;
       if (numerico) {
         const n = parseFloat(valor);
         if (!Number.isNaN(n)) return n;
@@ -98,14 +99,36 @@ function buscarCampo(raiz, nombres, { numerico = false } = {}) {
   return null;
 }
 
+// Los nombres se prueban EN ORDEN: el primero de la lista que aparezca gana,
+// aunque otro esté más arriba en el objeto. Hace falta porque alguno de los
+// nombres posibles es genérico ('id'), y en un payload con {id, vehicleId} el
+// bueno es el segundo aunque figure después.
+function buscarCampo(raiz, nombres, { numerico = false } = {}) {
+  for (const nombre of nombres) {
+    const v = _buscarUno(raiz, _k(nombre), numerico);
+    if (v !== null) return v;
+  }
+  return null;
+}
+
 // Powerfleet usa 'YYYY/MM/DD HH:mm' en varios endpoints, y también manda ISO.
 // Si no se puede leer, devolvemos null: sin fecha se procesa igual (mejor una
 // alerta a destiempo que una alerta perdida), la ventana solo filtra cuando
 // sabemos con certeza que el evento es viejo.
+//
+// Cuando la fecha viene SIN zona horaria se interpreta como UTC, no como la hora
+// del servidor. El proveedor manda UTC: en la respuesta de fleetview su
+// maxInsertTime coincide al segundo con la hora UTC de nuestro reloj, no con la
+// argentina. Y esto no es un detalle: si el server corriera en hora argentina,
+// una fecha sin zona se leería 3 horas vieja, la ventana la descartaría, y no
+// llegaría NINGUNA alerta — sin un solo error en el log.
 function leerFecha(v) {
   if (!v) return null;
-  const s = String(v).trim();
-  const d = new Date(/^\d{4}[/-]\d{2}[/-]\d{2} /.test(s) ? s.replace(/\//g, '-').replace(' ', 'T') : s);
+  let s = String(v).trim().replace(/\//g, '-');       // 2026/07/29 → 2026-07-29
+  if (!s) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?)$/.exec(s);
+  if (m) s = `${m[1]}T${m[2]}Z`;                      // sin zona → UTC explícito
+  const d = new Date(s);                              // las que ya traen Z u offset pasan derecho
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
@@ -121,7 +144,10 @@ function numeroSeguro(v, max) {
 }
 
 function extraer(payload) {
-  const fecha = leerFecha(buscarCampo(payload, ['eventDate', 'eventTime', 'gpsDate', 'dateTime', 'date', 'timestamp', 'occurredAt']));
+  // gpsDateTime y rowReferenceTime salen del payload REAL de fleetview en esta
+  // cuenta; el resto son los nombres habituales, por si el webhook usa otro.
+  const fecha = leerFecha(buscarCampo(payload,
+    ['eventDate', 'eventTime', 'gpsDateTime', 'gpsDate', 'dateTime', 'occurredAt', 'timestamp', 'date', 'rowReferenceTime']));
   // Una fecha delirante (año 9999) también rompe la columna. Se permite hasta un
   // año para adelante porque el proveedor podría mandar hora local argentina sin
   // zona, y eso ya se ve como unas horas en el futuro.
@@ -132,7 +158,12 @@ function extraer(payload) {
     // Un webhook muy probablemente identifique la unidad por su id interno y no
     // por la patente. El sync guarda ese id en vehicles.gps_vehicle_id, así que
     // sirve igual para saber de qué unidad habla.
-    vehicleId: buscarCampo(payload, ['vehicleId', 'assetId', 'unitId', 'deviceId', 'objectId']),
+    //
+    // 'id' va ÚLTIMO y es el que efectivamente usa esta cuenta: en
+    // fleetview/vehicles cada unidad viene como {id:"58795", licensePlate:...}.
+    // Queda al final porque es un nombre genérico y en un payload que traiga
+    // también el id del evento, el bueno es el específico.
+    vehicleId: buscarCampo(payload, ['vehicleId', 'assetId', 'unitId', 'objectId', 'deviceId', 'id']),
     velocidad: numeroSeguro(buscarCampo(payload, ['speed', 'currentSpeed', 'maxSpeed', 'speedKmh', 'velocity'], { numerico: true }), VELOCIDAD_MAX),
     limite:    numeroSeguro(buscarCampo(payload, ['speedLimit', 'limitSpeed', 'maxAllowedSpeed', 'threshold'], { numerico: true }), VELOCIDAD_MAX),
     fecha:     fecha && Math.abs(fecha.getTime() - Date.now()) < AÑO ? fecha : null,
