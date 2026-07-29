@@ -147,6 +147,7 @@ app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.use('/api/push', pushRouter);
+app.use('/api/flota', require('./routes/flota'));
 
 // ── Endpoints GPS ──
 // Importar middleware de autenticación
