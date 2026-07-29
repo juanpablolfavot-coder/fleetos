@@ -63,6 +63,15 @@ async function ensureSchema() {
   _ready = true;
 }
 
+// Cierra un evento calculando su duración. Se usa tanto cuando la unidad vuelve
+// a su límite como cuando el límite de la unidad cambió con el evento abierto.
+function cerrarEvento(id) {
+  return query(
+    `UPDATE speeding_events SET ended_at=NOW(),
+       duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)
+     WHERE id=$1`, [id]);
+}
+
 // Procesa una lectura de una unidad. Abre/actualiza/cierra el evento según la velocidad.
 async function processVehicle(v, speed) {
   const s = Math.round(parseFloat(speed) || 0);
@@ -75,8 +84,22 @@ async function processVehicle(v, speed) {
   await ensureSchema();
 
   const openRes = await query(
-    'SELECT id FROM speeding_events WHERE vehicle_code=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [code]);
-  const open = openRes.rows[0];
+    'SELECT id, limit_kmh FROM speeding_events WHERE vehicle_code=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [code]);
+  let open = openRes.rows[0];
+
+  // Si el límite de la unidad cambió mientras había un evento abierto, ese evento
+  // quedó midiendo contra un número que ya no rige: se cierra acá. Si la unidad
+  // sigue en exceso, en el mismo ciclo se abre uno nuevo contra el límite actual
+  // (con su push y su limit_kmh correcto).
+  //
+  // La alternativa —seguir usando el limit_kmh guardado mientras el evento esté
+  // abierto— deja un agujero peor: al subir el límite de 80 a 110, una Berlingo
+  // crucerando a 95 nunca bajaría de su límite viejo y el evento quedaría abierto
+  // para siempre, marcado "EN CURSO" en el historial.
+  if (open && Number(open.limit_kmh) !== LIMIT) {
+    await cerrarEvento(open.id);
+    open = null;
+  }
 
   if (s > OPEN_AT) {
     if (open) {
@@ -95,10 +118,7 @@ async function processVehicle(v, speed) {
     }
   } else if (open && s <= LIMIT) {
     // Volvió al límite (o menos): cerrar el evento y calcular la duración.
-    await query(
-      `UPDATE speeding_events SET ended_at=NOW(),
-         duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)
-       WHERE id=$1`, [open.id]);
+    await cerrarEvento(open.id);
   } else if (open) {
     // Banda entre el límite y el umbral de apertura (sólo si hay margen): mantener vivo.
     await query('UPDATE speeding_events SET updated_at=NOW() WHERE id=$1', [open.id]);
