@@ -19,6 +19,16 @@ router.post('/subscribe', authenticate, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Disparar el resumen de flota AHORA (solo dueño). Sirve para probar sin
+// esperar a que llegue la hora: saltea la ventana horaria y el intervalo.
+router.post('/resumen-ahora', authenticate, async (req, res) => {
+  if (req.user?.role !== 'dueno') return res.status(403).json({ error: 'Solo los dueños' });
+  try {
+    const r = await require('../services/resumen-flota').generarYEnviarResumen({ force: true });
+    res.json(r);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Baja de una suscripción (por endpoint).
 router.post('/unsubscribe', authenticate, async (req, res) => {
   try {
