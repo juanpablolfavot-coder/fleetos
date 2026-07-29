@@ -22,6 +22,10 @@ const REFRESCO_MS = 30000;
 let _timer = null;
 let _tab = 'ahora';
 let _horas = 24;
+// Evento que hay que resaltar: viene de tocar una notificación de exceso, o de
+// tocar una línea del último resumen. Se limpia apenas el usuario navega solo.
+let _evento = null;
+let _ampliado = false;   // ya se intentó ensanchar el período buscando _evento
 
 const SITUACION = {
   ruta:         { punto: '🟢', label: 'En ruta' },
@@ -73,6 +77,72 @@ function mensaje(texto, color = 'var(--text3)') {
   return `<div class="card" style="text-align:center;color:${color};padding:30px">${texto}</div>`;
 }
 
+// ── El último resumen, arriba de todo ─────────────────────────────────
+// La notificación de las 20:06 dice "AF823RB 129 km/h · AF614LB 12 min en
+// ralentí" y después se va de la bandeja. Sin esto hay que buscar esas dos
+// cosas a mano en el feed, una por una. Acá quedan a la vista y cada una
+// lleva de un toque a su evento. Se reemplaza sola cuando entra el resumen
+// siguiente; los excesos igual quedan todos en "Lo que pasó".
+function lineaResumen(icono, color, id, texto, sub) {
+  const clickable = !!id;
+  return `
+    <div ${clickable ? `onclick="irAEventoFlota('${escapeHtml(String(id))}')" role="button" tabindex="0"` : ''}
+         style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-top:1px solid var(--border)
+                ${clickable ? ';cursor:pointer' : ''}">
+      <span style="font-size:13px;color:${color}">${icono}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--text)">${texto}</div>
+        ${sub ? `<div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sub}</div>` : ''}
+      </div>
+      ${clickable ? '<span style="color:var(--text3);font-size:15px">›</span>' : ''}
+    </div>`;
+}
+
+function tarjetaResumen(r) {
+  if (!r) return '';
+  const filas = [];
+  for (const e of (r.excesos || [])) {
+    filas.push(lineaResumen('⚠', 'var(--danger)', e.id,
+      `<b>${escapeHtml(e.code || '—')}</b> a <b style="color:var(--danger)">${e.kmh} km/h</b>
+       <span style="color:var(--text3)">(límite ${e.limite})</span>`,
+      [horaDe(e.cuando), e.base ? escapeHtml(e.base) : ''].filter(Boolean).join(' · ')));
+  }
+  for (const i of (r.ralentis || [])) {
+    filas.push(lineaResumen('⏸', 'var(--warn)', i.id,
+      `<b>${escapeHtml(i.code || '—')}</b> <b style="color:var(--warn)">${duracion(i.minutos)} en ralentí</b>`,
+      [horaDe(i.cuando), escapeHtml(i.lugar || i.base || '')].filter(Boolean).join(' · ')));
+  }
+
+  const est = r.estado || {};
+  const foto = [`${est.en_ruta || 0} en ruta`, `${est.detenidas || 0} detenidas`];
+  if (est.en_ralenti)   foto.push(`${est.en_ralenti} en ralentí`);
+  if (est.sin_reportar) foto.push(`${est.sin_reportar} sin reportar`);
+
+  return `
+    <div class="card" style="margin-bottom:18px;border-left:3px solid var(--accent)">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div style="font-size:14px;font-weight:700;color:var(--text)">🚛 Resumen de las ${escapeHtml(r.hora || '')}</div>
+        <div style="font-size:11px;color:var(--text3)">${hace(r.minutos_atras)}</div>
+      </div>
+      ${filas.length
+        ? filas.join('')
+        : `<div style="padding:9px 4px;border-top:1px solid var(--border);font-size:13px;color:var(--text3)">
+             Sin excesos ni ralentí en el período. 👌</div>`}
+      <div style="border-top:1px solid var(--border);padding-top:9px;margin-top:2px;font-size:12px;color:var(--text3)">
+        ${foto.join(' · ')}${r.litros >= 1 ? ` · ralentí del período ~${r.litros.toFixed(1)} L` : ''}
+      </div>
+    </div>`;
+}
+
+async function traerResumen() {
+  try {
+    const res = await apiFetch('/api/flota/resumen');
+    if (!res.ok) return null;
+    const d = await res.json();
+    return (d && typeof d === 'object' && d.hora) ? d : null;
+  } catch (e) { return null; }
+}
+
 // ── Pestaña "Ahora" ───────────────────────────────────────────────────
 function filaUnidad(u) {
   const s = SITUACION[u.situacion] || SITUACION.detenida;
@@ -113,6 +183,9 @@ function filaUnidad(u) {
 }
 
 async function renderAhora(cont) {
+  // El resumen se pide en paralelo y no puede romper la pantalla: si falla,
+  // simplemente no aparece la tarjeta.
+  const pResumen = traerResumen();
   let d;
   try {
     const res = await apiFetch('/api/flota/ahora');
@@ -136,6 +209,7 @@ async function renderAhora(cont) {
 
   const arrastrados = Array.isArray(d.arrastrados) ? d.arrastrados : [];
   cont.innerHTML = `
+    ${tarjetaResumen(await pResumen)}
     ${tarjetas([
       ['En ruta',      d.resumen.en_ruta,      'var(--ok)'],
       ['Ralentí',      d.resumen.en_ralenti,   'var(--warn)'],
@@ -187,8 +261,15 @@ function filaEvento(e) {
                title="Enviar el aviso al chofer">📲 Avisar</button>`
     : '';
 
+  // El evento que se vino a ver (desde la notificación o desde el resumen) se
+  // marca y se lleva al centro de la pantalla. Si no, en una lista de 40 líneas
+  // no hay forma de saber cuál era el que acababa de avisar.
+  const buscado = e.id && String(e.id) === String(_evento);
+
   return `
-    <div style="display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border)">
+    <div ${e.id ? `id="ev-${escapeHtml(String(e.id))}"` : ''}
+         style="display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border)
+                ${buscado ? ';background:var(--bg3);box-shadow:inset 3px 0 0 var(--accent)' : ''}">
       <div style="min-width:56px;text-align:right">
         <div style="font-size:13px;font-weight:700;color:var(--text2)">${horaDe(e.cuando)}</div>
         <div style="font-size:10px;color:var(--text3)">${diaDe(e.cuando)}</div>
@@ -198,6 +279,7 @@ function filaEvento(e) {
         <div style="font-size:13px">
           <b style="color:var(--text)">${escapeHtml(e.code || '—')}</b> · ${detalle}
           ${e.en_curso ? `<span style="font-size:10px;background:${color};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px">EN CURSO</span>` : ''}
+          ${buscado ? `<span style="font-size:10px;background:var(--accent);color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px">EL DEL AVISO</span>` : ''}
         </div>
         ${lugar ? `<div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(lugar)}</div>` : ''}
         ${esExceso && e.duracion_min ? `<div style="font-size:11px;color:var(--text3)">duró ${duracion(e.duracion_min)}</div>` : ''}
@@ -250,6 +332,28 @@ async function renderFeed(cont) {
       modelo, no con una medición del tanque.<br>
       Los semirremolques no aparecen acá: no tienen motor, así que no generan exceso ni ralentí.
     </div>`;
+
+  if (!_evento) return;
+  const fila = document.getElementById('ev-' + _evento);
+  if (fila) {
+    fila.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+  // No está en el período elegido. Pasa si se toca una notificación al otro día:
+  // el feed abre en 24 h y el exceso ya quedó afuera. Se ensancha UNA vez a la
+  // semana completa antes de darlo por perdido.
+  if (!_ampliado && _horas < 168) {
+    _ampliado = true;
+    _horas = 168;
+    await renderFeed(cont);
+    return;
+  }
+  // Sigue sin aparecer: se avisa en vez de dejar la pantalla como si nada.
+  const aviso = document.createElement('div');
+  aviso.style.cssText = 'font-size:12px;color:var(--text3);margin-top:10px';
+  aviso.textContent = 'El evento del aviso ya no entra en el período mostrado.';
+  cont.appendChild(aviso);
+  _evento = null;
 }
 
 // ── Pestaña "Preguntar" ───────────────────────────────────────────────
@@ -358,9 +462,11 @@ async function renderFlotaAhora() {
   if (!root) return;
 
   // Si se llegó tocando una notificación push, abrir directo en la pestaña que
-  // pidió. Se consume una sola vez: después el usuario manda con los botones.
+  // pidió, y si el aviso era de un exceso puntual, parada en ESE evento.
+  // Se consume una sola vez: después el usuario manda con los botones.
   const nav = window._navParams;
   if (nav && nav.tab) { _tab = nav.tab === 'feed' ? 'feed' : 'ahora'; delete nav.tab; }
+  if (nav && nav.evento) { _evento = nav.evento; _tab = 'feed'; _ampliado = false; delete nav.evento; }
 
   const tabBtn = (id, label) => `
     <button class="btn btn-sm ${_tab === id ? 'btn-primary' : 'btn-secondary'}"
@@ -394,9 +500,19 @@ async function renderFlotaAhora() {
   programarRefresco();
 }
 
-function mostrarTabFlota(tab) { _tab = tab; renderFlotaAhora(); }
+// Cuando el usuario navega por su cuenta, el resaltado deja de tener sentido:
+// ya no está mirando "lo que le avisaron", está mirando lo que él eligió.
+function mostrarTabFlota(tab) { _tab = tab; _evento = null; renderFlotaAhora(); }
 
-function cambiarPeriodoFlota(horas) { _horas = horas; renderFlotaAhora(); }
+function cambiarPeriodoFlota(horas) { _horas = horas; _evento = null; renderFlotaAhora(); }
+
+// Tocar una línea del resumen: lleva al feed parado en ese evento.
+function irAEventoFlota(id) {
+  _evento = String(id);
+  _ampliado = false;
+  _tab = 'feed';
+  renderFlotaAhora();
+}
 
 // Un solo timer vivo, solo mientras la sección esté abierta y solo en la
 // pestaña "Ahora": el feed mira el pasado, no necesita refrescarse solo.
@@ -413,6 +529,7 @@ function programarRefresco() {
 expose('renderFlotaAhora', renderFlotaAhora);
 expose('mostrarTabFlota', mostrarTabFlota);
 expose('cambiarPeriodoFlota', cambiarPeriodoFlota);
+expose('irAEventoFlota', irAEventoFlota);
 expose('preguntarFlota', preguntarFlota);
 expose('preguntarFlotaSugerida', preguntarFlotaSugerida);
 expose('limpiarCharlaFlota', limpiarCharlaFlota);

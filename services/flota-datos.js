@@ -155,12 +155,12 @@ async function eventos({ horas } = {}) {
   const desde = new Date(Date.now() - h * 3600 * 1000);
 
   const [exc, ral] = await Promise.all([
-    query(`SELECT vehicle_code, vehicle_plate, base, started_at, ended_at,
+    query(`SELECT id, vehicle_code, vehicle_plate, base, started_at, ended_at,
                   max_speed, limit_kmh, ${DUR} AS dur, (ended_at IS NULL) AS en_curso
              FROM speeding_events
             WHERE started_at >= $1
             ORDER BY started_at DESC`, [desde]),
-    query(`SELECT vehicle_code, base, location, started_at, ended_at,
+    query(`SELECT id, vehicle_code, base, location, started_at, ended_at,
                   ${DUR} AS dur, (ended_at IS NULL) AS en_curso
              FROM idle_events
             WHERE started_at >= $1 AND ${DUR} >= $2
@@ -169,6 +169,7 @@ async function eventos({ horas } = {}) {
 
   const excesos = exc.rows.map((r) => ({
     tipo: 'exceso',
+    id: r.id,
     code: r.vehicle_code,
     base: r.base,
     cuando: r.started_at,
@@ -182,6 +183,7 @@ async function eventos({ horas } = {}) {
     const seg = parseInt(r.dur) || 0;
     return {
       tipo: 'ralenti',
+      id: r.id,
       code: r.vehicle_code,
       base: r.base,
       lugar: r.location || null,

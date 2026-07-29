@@ -74,14 +74,17 @@ async function estadoFlota() {
 }
 
 // ── Qué pasó desde el resumen anterior ────────────────────────────────
+// Se traen también el id y la hora de cada evento: sin eso, el resumen puede
+// nombrar "AF823RB 129 km/h" pero no hay forma de llevar a nadie hasta ESE
+// exceso, y hay que buscarlo a mano en el feed.
 async function novedadesDesde(desde) {
   const DUR = `COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(ended_at,NOW())-started_at))::int))`;
   const [excesos, ralentis] = await Promise.all([
-    query(`SELECT vehicle_code, max_speed, limit_kmh
+    query(`SELECT id, vehicle_code, base, started_at, max_speed, limit_kmh
              FROM speeding_events
             WHERE started_at >= $1
             ORDER BY max_speed DESC`, [desde]),
-    query(`SELECT vehicle_code, ${DUR} AS dur
+    query(`SELECT id, vehicle_code, base, location, started_at, ${DUR} AS dur
              FROM idle_events
             WHERE started_at >= $1 AND ${DUR} >= $2
             ORDER BY dur DESC`, [desde, idle.IDLE_MIN_SEC]),
@@ -133,6 +136,34 @@ async function _marcarEnviado(cuando) {
                ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(cuando.toISOString())]);
 }
 
+// ── El último resumen, guardado para poder VERLO ──────────────────────
+// La notificación dura lo que dura en la bandeja del celular; después queda el
+// dato de que "algo pasó" y ninguna forma de volver a mirarlo. Se guarda entero
+// —con el id de cada exceso y cada ralentí— así la pantalla puede mostrarlo y
+// llevar de un toque al evento puntual.
+//
+// Es UNA sola clave: el resumen nuevo pisa al anterior. Los excesos no se
+// pierden por eso, siguen todos en el feed; lo que se reemplaza es la foto.
+async function _guardarUltimo(datos) {
+  await query(`INSERT INTO app_config(key,value) VALUES('resumen_flota_ultimo',$1)
+               ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(datos)]).catch(() => {});
+}
+
+// Un resumen viejo arriba de la pantalla es ruido, no información: si el server
+// estuvo caído o es la primera hora del día, el último puede ser de anoche.
+// Se muestra mientras siga siendo "el de este rato".
+const VIGENCIA_MIN = Math.max(60, (INTERVALO_MIN || 120) * 2);
+
+async function ultimoResumen() {
+  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
+  const r = await query(`SELECT value FROM app_config WHERE key='resumen_flota_ultimo'`).catch(() => ({ rows: [] }));
+  const d = r.rows[0] && r.rows[0].value;
+  if (!d || !d.cuando) return null;
+  const minutos = (Date.now() - new Date(d.cuando).getTime()) / 60000;
+  if (!(minutos >= 0) || minutos > VIGENCIA_MIN) return null;
+  return Object.assign({ minutos_atras: Math.round(minutos) }, d);
+}
+
 // ── Envío ─────────────────────────────────────────────────────────────
 // force=true saltea la ventana horaria y el intervalo (lo usa el botón de
 // prueba del dueño), pero igual registra el envío.
@@ -176,6 +207,24 @@ async function generarYEnviarResumen({ force = false } = {}) {
     url:   '/?ir=flota',
   });
 
+  // Lo mismo que dice la notificación, pero para poder mirarlo después y tocarlo:
+  // cada anomalía se guarda con su id para poder saltar a ese evento.
+  await _guardarUltimo({
+    cuando: ahora.toISOString(),
+    hora:   _hhmm(ahoraAR),
+    desde:  desde.toISOString(),
+    estado,
+    litros: Math.round(nov.litros * 10) / 10,
+    excesos: nov.excesos.slice(0, 12).map((e) => ({
+      id: e.id, code: e.vehicle_code, base: e.base || null, cuando: e.started_at,
+      kmh: Math.round(parseFloat(e.max_speed) || 0), limite: e.limit_kmh,
+    })),
+    ralentis: nov.ralentis.slice(0, 12).map((r) => ({
+      id: r.id, code: r.vehicle_code, base: r.base || null, lugar: r.location || null,
+      cuando: r.started_at, minutos: Math.round((parseInt(r.dur) || 0) / 60),
+    })),
+  });
+
   await _marcarEnviado(ahora);
   return { sent: _hhmm(ahoraAR), enviados, estado, novedades: { excesos: nov.excesos.length, ralentis: nov.ralentis.length } };
 }
@@ -208,5 +257,5 @@ function programarResumenFlota() {
 
 module.exports = {
   generarYEnviarResumen, programarResumenFlota,
-  estadoFlota, novedadesDesde, armarCuerpo,
+  estadoFlota, novedadesDesde, armarCuerpo, ultimoResumen, VIGENCIA_MIN,
 };

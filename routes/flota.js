@@ -11,7 +11,21 @@
 const router = require('express').Router();
 const datos = require('../services/flota-datos');
 const asistente = require('../services/asistente-flota');
+const resumen = require('../services/resumen-flota');
 const { authenticate, requireRole } = require('../middleware/auth');
+
+// ── El último resumen que salió por notificación ──────────────────────
+// La notificación se va de la bandeja y con ella el detalle de lo que avisó.
+// Acá queda para poder mirarlo y tocarlo. Devuelve null si no hay ninguno
+// vigente (recién arrancado, o el último ya quedó viejo).
+router.get('/resumen', authenticate, requireRole('dueno'), async (req, res) => {
+  try {
+    res.json(await resumen.ultimoResumen());
+  } catch (err) {
+    console.error('flota/resumen:', err.message);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
 
 // ── Dónde está cada unidad, ahora ─────────────────────────────────────
 router.get('/ahora', authenticate, requireRole('dueno'), async (req, res) => {

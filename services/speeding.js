@@ -111,18 +111,20 @@ async function processVehicle(v, speed) {
       await query('UPDATE speeding_events SET max_speed=GREATEST(max_speed,$1), updated_at=NOW() WHERE id=$2', [s, open.id]);
       return 'exceso ya abierto: actualizado';
     } else {
-      await query(
-        `INSERT INTO speeding_events (vehicle_code, vehicle_plate, base, max_speed, limit_kmh) VALUES ($1,$2,$3,$4,$5)`,
+      const nuevo = await query(
+        `INSERT INTO speeding_events (vehicle_code, vehicle_plate, base, max_speed, limit_kmh)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
         [code, v.plate || null, v.base || null, s, LIMIT]);
       // Una notificación por evento (al abrirlo).
       await push.notifyDuenos({
         title: '⚠ Exceso de velocidad',
         body: `${code} a ${s} km/h${v.base ? ' — ' + v.base : ''} (límite ${LIMIT})`,
         tag: `speed-${code}`,
-        // Al tocar la notificación se abre directo el feed de Control en vivo,
-        // que es donde está el exceso y el botón para avisarle al chofer. Antes
-        // caía en Inicio y había que buscar a mano de qué avisaba.
-        url: '/?ir=flota&tab=feed',
+        // Al tocar la notificación se abre el feed de Control en vivo YA PARADO
+        // en este exceso, resaltado: es donde está el botón para avisarle al
+        // chofer. Sin el id caía en la lista entera y había que buscar cuál de
+        // todos era el que acababa de avisar.
+        url: `/?ir=flota&tab=feed&evento=${nuevo.rows[0].id}`,
       }).catch(() => {});
       return 'exceso abierto + notificación';
     }
