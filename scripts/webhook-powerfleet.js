@@ -70,7 +70,8 @@ async function main() {
         dias: parseInt(flag('dias', '365'), 10),
       });
       console.log(r.ok ? '\n✅ Alta OK' : '\n❌ El alta falló');
-      console.log('\nCuerpo enviado:'); mostrar(r.cuerpo);
+      console.log('\nVariantes probadas:'); mostrar(r.intentos);
+      console.log('\nCuerpo que se envió en el último intento:'); mostrar(r.cuerpo);
       console.log('\nRespuesta del proveedor (HTTP ' + r.status + '):'); mostrar(r.respuesta);
       if (!r.ok) {
         console.log('\nSi se queja por un campo que falta, pasalo a mano:');

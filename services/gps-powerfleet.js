@@ -281,7 +281,12 @@ async function ensureColumns() {
       -- calculando como antes (speed > 2) para no cambiar nada de lo que ya
       -- consume el frontend: gps_state guarda el valor tal cual lo manda el GPS.
       ADD COLUMN IF NOT EXISTS gps_address     TEXT,
-      ADD COLUMN IF NOT EXISTS gps_state       VARCHAR(30)`);
+      ADD COLUMN IF NOT EXISTS gps_state       VARCHAR(30),
+      -- Id interno de la unidad en Powerfleet. El sync ya lo tenía y lo tiraba.
+      -- Hace falta para el webhook: si el aviso identifica la unidad por id y no
+      -- por patente, sin esto no hay forma de saber de quién habla.
+      ADD COLUMN IF NOT EXISTS gps_vehicle_id  VARCHAR(60)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_vehicles_gps_id ON vehicles(gps_vehicle_id) WHERE gps_vehicle_id IS NOT NULL`).catch(() => {});
   } catch(e) { /* ya existen */ }
 }
 
@@ -357,11 +362,13 @@ async function syncGPSData() {
           gps_hour_meter = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
           gps_address    = COALESCE($8, gps_address),
           gps_state      = COALESCE($9, gps_state),
+          gps_vehicle_id = COALESCE($10, gps_vehicle_id),
           gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
         RETURNING id, code, plate, base, type, km_current
-      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState]);
+      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState,
+          vehicleId != null ? String(vehicleId) : null]);
 
       if (r.rows.length > 0) {
         updated++;

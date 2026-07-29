@@ -129,6 +129,10 @@ function extraer(payload) {
   return {
     tipo:      numeroSeguro(buscarCampo(payload, ['webhookType', 'notificationType', 'eventType', 'alertType'], { numerico: true }), 2147483647),
     patente:   buscarCampo(payload, ['licensePlate', 'plate', 'plateNo', 'vehiclePlate', 'patente']),
+    // Un webhook muy probablemente identifique la unidad por su id interno y no
+    // por la patente. El sync guarda ese id en vehicles.gps_vehicle_id, así que
+    // sirve igual para saber de qué unidad habla.
+    vehicleId: buscarCampo(payload, ['vehicleId', 'assetId', 'unitId', 'deviceId', 'objectId']),
     velocidad: numeroSeguro(buscarCampo(payload, ['speed', 'currentSpeed', 'maxSpeed', 'speedKmh', 'velocity'], { numerico: true }), VELOCIDAD_MAX),
     limite:    numeroSeguro(buscarCampo(payload, ['speedLimit', 'limitSpeed', 'maxAllowedSpeed', 'threshold'], { numerico: true }), VELOCIDAD_MAX),
     fecha:     fecha && Math.abs(fecha.getTime() - Date.now()) < AÑO ? fecha : null,
@@ -161,7 +165,7 @@ async function procesar(payload) {
   // para tener el registro, pero no generan nada. Cuando el tipo no viene
   // (todavía no conocemos el formato) se sigue de largo y se decide por los datos.
   if (d.tipo !== null && d.tipo !== TIPO_EXCESO) return cerrar(`tipo ${d.tipo}: no es exceso de velocidad`);
-  if (!d.patente)   return cerrar('llegó sin patente reconocible — ver payload');
+  if (!d.patente && !d.vehicleId) return cerrar('llegó sin patente ni id de unidad — ver payload');
   if (d.velocidad === null) {
     // Se distingue "no vino" de "vino un disparate": lo segundo es un sensor
     // fallado y conviene que se lea así en el diagnóstico.
@@ -176,13 +180,27 @@ async function procesar(payload) {
     if (min > VENTANA_MIN) return cerrar(`evento de hace ${min} min: fuera de la ventana de ${VENTANA_MIN}`);
   }
 
+  // Se identifica por patente, y si no vino, por el id interno de Powerfleet que
+  // el sync guarda en cada unidad. Si vinieran los dos apuntando a unidades
+  // distintas gana la patente: es la clave de la tabla y lo que identifica al
+  // camión para quien lee la alerta, mientras que el id guardado vale lo que
+  // valga el último sync.
   const r = await query(
-    `SELECT id, code, plate, base, type FROM vehicles
-      WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
-            UPPER(REGEXP_REPLACE($1,    '[^A-Z0-9]', '', 'g'))
-        AND active IS NOT FALSE
-      LIMIT 1`, [String(d.patente)]);
-  if (!r.rows.length) return cerrar(`patente ${d.patente} no está en la flota de FleetOS`);
+    `SELECT id, code, plate, base, type,
+            (UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
+             UPPER(REGEXP_REPLACE($1,    '[^A-Z0-9]', '', 'g'))) AS por_patente
+       FROM vehicles
+      WHERE active IS NOT FALSE
+        AND ( ($1::text IS NOT NULL AND UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
+                                        UPPER(REGEXP_REPLACE($1,    '[^A-Z0-9]', '', 'g')))
+           OR ($2::text IS NOT NULL AND gps_vehicle_id = $2) )
+      ORDER BY por_patente DESC NULLS LAST
+      LIMIT 1`,
+    [d.patente ? String(d.patente) : null, d.vehicleId != null ? String(d.vehicleId) : null]);
+  if (!r.rows.length) {
+    const quien = d.patente ? `patente ${d.patente}` : `id de Powerfleet ${d.vehicleId}`;
+    return cerrar(`${quien} no está en la flota de FleetOS`);
+  }
 
   // Las mismas reglas que el sondeo: límite propio de la unidad, semirremolques
   // afuera, un push por evento. Si Powerfleet avisa por debajo de nuestro
@@ -239,19 +257,42 @@ async function alta({ url, nombre, accountId, dias = DIAS_ALTA } = {}) {
   const cuenta = accountId != null ? accountId : gps.accountIdDelToken();
   const vence = new Date(Date.now() + dias * 24 * 3600 * 1000);
 
-  const cuerpo = {
+  // No sabemos exactamente qué espera el proveedor: la guía documenta la
+  // respuesta del alta (un escueto {"isSucceded": true}) pero no es precisa con
+  // el pedido. Hay dos dudas concretas y baratas de resolver probando, así que
+  // se prueban en vez de fallar y hacer ida y vuelta:
+  //   - la fecha: acá se manda ISO, pero otros endpoints de la misma API usan
+  //     'YYYY/MM/DD HH:mm';
+  //   - AccountId: se saca de los claims del token, que puede no traerlo. Si lo
+  //     mandamos mal es peor que no mandarlo.
+  const fmtPf = (x) => `${x.getFullYear()}/${String(x.getMonth() + 1).padStart(2, '0')}/${String(x.getDate()).padStart(2, '0')} ${String(x.getHours()).padStart(2, '0')}:${String(x.getMinutes()).padStart(2, '0')}`;
+  const base = {
     Id: 0,
     URL: destino,
     Name: nombre || 'FleetOS exceso de velocidad',
     webhookType: TIPO_EXCESO,
     Token: SECRETO,
-    expirationDate: vence.toISOString(),
   };
-  if (cuenta != null) cuerpo.AccountId = cuenta;
 
-  const res = await gps.apiRequest('/Fleetcore.api/api/webhooks', { method: 'POST', body: cuerpo });
-  const d = _json(res);
-  const ok = res.status === 200 && (!d || d.isSucceded !== false);
+  const variantes = [];
+  for (const [etiquetaFecha, fecha] of [['ISO', vence.toISOString()], ['YYYY/MM/DD HH:mm', fmtPf(vence)]]) {
+    for (const conCuenta of cuenta != null ? [true, false] : [false]) {
+      const cuerpo = Object.assign({}, base, { expirationDate: fecha });
+      if (conCuenta) cuerpo.AccountId = cuenta;
+      variantes.push({ etiqueta: `fecha ${etiquetaFecha}${conCuenta ? ' + AccountId' : ' sin AccountId'}`, cuerpo });
+    }
+  }
+
+  let res, d, ok = false, cuerpo = variantes[0].cuerpo, intentos = [];
+  for (const v of variantes) {
+    res = await gps.apiRequest('/Fleetcore.api/api/webhooks', { method: 'POST', body: v.cuerpo });
+    d = _json(res);
+    ok = res.status === 200 && (!d || d.isSucceded !== false);
+    cuerpo = v.cuerpo;
+    intentos.push({ variante: v.etiqueta, status: res.status, ok, respuesta: d || String(res.body).slice(0, 200) });
+    console.log(`[webhook] alta (${v.etiqueta}): HTTP ${res.status} ${ok ? 'OK' : 'rechazado'}`);
+    if (ok) break;
+  }
 
   if (ok) {
     // Se guarda el cuerpo que FUNCIONÓ: la renovación automática lo reusa tal
@@ -261,7 +302,7 @@ async function alta({ url, nombre, accountId, dias = DIAS_ALTA } = {}) {
                  ON CONFLICT(key) DO UPDATE SET value=$1`,
       [JSON.stringify({ registrado_at: new Date().toISOString(), vence: vence.toISOString(), cuerpo })]).catch(() => {});
   }
-  return { ok, status: res.status, cuerpo, respuesta: d || res.body };
+  return { ok, status: res.status, cuerpo, respuesta: d || res.body, intentos };
 }
 
 async function baja(id) {
