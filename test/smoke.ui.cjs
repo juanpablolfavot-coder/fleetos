@@ -128,6 +128,37 @@ const FIX = {
   purchaseOrders: [{ id: 'po1', code: 'OC-1', supplier_name: 'Proveedor X', status: 'borrador', total: 1000, items: [], created_at: '2026-01-01T10:00:00' }],
   catalog: [{ id: 'c1', code: 'FIL-1', name: 'Filtro de aceite', category: 'Filtros', unit: 'un', total: 10, qty_min: 2, unit_cost: 500, balances: [{ base_location: 'Central', area: 'Depósito', qty_current: 10 }] }],
   config: { bases: ['Central', 'Norte'], vehicle_types: ['tractor', 'camion'], areas: { Central: ['Depósito', 'Taller'] }, labor_rate: 5000, stock_categories: ['Filtros'] },
+  flotaAhora: {
+    actualizado: '2026-01-01T10:00:00.000Z',
+    resumen: { total: 2, en_ruta: 1, en_ralenti: 1, detenidas: 0, sin_reportar: 0, arrastrados: 1, total_con_gps: 3 },
+    unidades: [
+      { code: 'INT-1', plate: 'AA111BB', base: 'Central', direccion: 'Ruta 9 km 232', lat: -34.4, lng: -58.7,
+        velocidad: 84, situacion: 'ruta', arrastrado: false, estado_gps: 'driving', minutos_sin_reportar: 1, ralenti_minutos: null },
+      { code: 'INT-2', plate: 'AA222BB', base: 'Norte', direccion: 'Base Norte', lat: null, lng: null,
+        velocidad: 0, situacion: 'ralenti', arrastrado: false, estado_gps: 'parking', minutos_sin_reportar: 2, ralenti_minutos: 22 },
+    ],
+    arrastrados: [
+      { code: 'SEMI-1', plate: 'BB111BB', base: 'Central', direccion: 'Ruta 9 km 232', lat: null, lng: null,
+        velocidad: 84, situacion: 'ruta', arrastrado: true, estado_gps: 'driving', minutos_sin_reportar: 1, ralenti_minutos: null },
+    ],
+  },
+  flotaEventos: {
+    horas: 24, desde: '2026-01-01T10:00:00.000Z',
+    resumen: { excesos: 1, velocidad_max: 97, ralenti_eventos: 1, ralenti_minutos: 22, ralenti_litros: 1.03 },
+    eventos: [
+      { tipo: 'exceso', code: 'INT-1', base: 'Central', cuando: '2026-01-01T12:00:00.000Z',
+        duracion_min: 3, en_curso: false, velocidad_max: 97, limite: 80 },
+      { tipo: 'ralenti', code: 'INT-2', base: 'Norte', lugar: 'Base Norte', cuando: '2026-01-01T11:00:00.000Z',
+        duracion_min: 22, en_curso: true, litros: 1.03 },
+    ],
+  },
+};
+
+// Algunas pantallas tienen pestañas: renderizar solo la primera deja sin cubrir
+// el HTML —y los onclick— de las demás. Acá se listan las llamadas extra a
+// hacer después del render inicial de cada pantalla.
+const TABS_EXTRA = {
+  flota: ["mostrarTabFlota('feed')"],
 };
 
 // Decide el cuerpo de respuesta según el path del endpoint.
@@ -151,6 +182,11 @@ function stubFor(url) {
   if (u.includes('/purchase-orders')) return FIX.purchaseOrders;
   // Endpoints del auditor: objeto "kitchen-sink" para que los || [] no rompan.
   if (u.includes('/auditor/')) return { kpis: {}, meses: [], vehiculos: [], anomalias: [], ots: [], items: [], data: [], rows: [], logs: [] };
+  // Control en vivo: sin estos stubs el default [] hacía que la pantalla
+  // mostrara "respuesta inesperada", o sea que el smoke probaba la rama de
+  // error y no la pantalla de verdad.
+  if (u.includes('/api/flota/ahora'))   return FIX.flotaAhora;
+  if (u.includes('/api/flota/eventos')) return FIX.flotaEventos;
   return []; // por defecto: lista vacía (la mayoría de endpoints devuelven arrays)
 }
 
@@ -227,12 +263,21 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
 
   const results = [];
   for (const p of PAGES) {
-    current = p;
+    // El primer paso es el render de la pantalla; los siguientes, sus pestañas.
+    // Van por el mismo camino de chequeo, solo cambia el HTML que queda dibujado.
+    const pasos = [
+      { etiqueta: p, code: `window.renderPage(${JSON.stringify(p)})` },
+      ...(TABS_EXTRA[p] || []).map((c) => ({ etiqueta: `${p} → ${c}`, code: c })),
+    ];
+    for (const paso of pasos) {
+    current = paso.etiqueta;
     const before = errors.length;
-    const thrown = await page.evaluate((pg) => {
-      try { window.renderPage(pg); return null; } catch (e) { return e && e.message ? e.message : String(e); }
-    }, p);
-    await page.waitForTimeout(200);
+    const thrown = await page.evaluate((code) => {
+      try { (0, eval)(code); return null; } catch (e) { return e && e.message ? e.message : String(e); }
+    }, paso.code);
+    // 350 ms y no 200: varias pantallas dibujan después de un fetch, y con 200
+    // el chequeo de onclick corría contra el "Cargando…" en vez del contenido.
+    await page.waitForTimeout(350);
     const asyncErrs = errors.slice(before).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg));
     // Chequeo de onclick: cada handler del DOM renderizado llama funciones por
     // nombre (onclick="foo()"). Si una NO resuelve a algo definido en el scope
@@ -257,7 +302,8 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
       }
       return missing;
     });
-    results.push({ page: p, thrown, asyncErrs, missingOnclick });
+    results.push({ page: paso.etiqueta, thrown, asyncErrs, missingOnclick });
+    }
   }
 
   await browser.close();

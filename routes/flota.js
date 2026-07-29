@@ -8,6 +8,7 @@
 // ════════════════════════════════════════════════════════════════════
 const router = require('express').Router();
 const { query } = require('../db/pool');
+const idle = require('../services/idle');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 // A partir de acá una unidad no está "detenida" sino "sin reportar": el equipo
@@ -108,6 +109,85 @@ router.get('/ahora', authenticate, requireRole('dueno'), async (req, res) => {
     });
   } catch (err) {
     console.error('flota/ahora:', err.message);
+    res.status(500).json({ error: 'Error del servidor' });
+  }
+});
+
+// ── Lo que pasó: excesos y ralentí en una sola línea de tiempo ────────
+//
+// Reemplaza el reporte por horas que llegaba por WhatsApp: en vez de que caiga
+// un mensaje cada tanto, está siempre acá y se mira cuando hace falta.
+//
+// Los excesos y el ralentí viven en tablas distintas porque son cosas
+// distintas, pero para el dueño son el mismo relato: "qué hizo la flota hoy".
+// Por eso se mezclan y se ordenan por hora, del más reciente al más viejo.
+const HORAS_DEFAULT = 24;
+const HORAS_MAX = 168;   // una semana: más que eso ya no es un feed, es un reporte
+
+// Misma expresión de duración que usa idle.js: un evento sin cerrar se mide
+// hasta ahora, no se descarta.
+const DUR = `COALESCE(duration_seconds, GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(ended_at,NOW())-started_at))::int))`;
+
+router.get('/eventos', authenticate, requireRole('dueno'), async (req, res) => {
+  try {
+    const horas = Math.min(HORAS_MAX, Math.max(1, parseInt(req.query.horas) || HORAS_DEFAULT));
+    const desde = new Date(Date.now() - horas * 3600 * 1000);
+
+    const [exc, ral] = await Promise.all([
+      query(`SELECT vehicle_code, vehicle_plate, base, started_at, ended_at,
+                    max_speed, limit_kmh, ${DUR} AS dur, (ended_at IS NULL) AS en_curso
+               FROM speeding_events
+              WHERE started_at >= $1
+              ORDER BY started_at DESC`, [desde]),
+      query(`SELECT vehicle_code, base, location, started_at, ended_at,
+                    ${DUR} AS dur, (ended_at IS NULL) AS en_curso
+               FROM idle_events
+              WHERE started_at >= $1 AND ${DUR} >= $2
+              ORDER BY started_at DESC`, [desde, idle.IDLE_MIN_SEC]),
+    ]);
+
+    const excesos = exc.rows.map((r) => ({
+      tipo: 'exceso',
+      code: r.vehicle_code,
+      base: r.base,
+      cuando: r.started_at,
+      duracion_min: Math.round((parseInt(r.dur) || 0) / 60),
+      en_curso: r.en_curso,
+      velocidad_max: Math.round(parseFloat(r.max_speed) || 0),
+      limite: r.limit_kmh,
+    }));
+
+    const ralentis = ral.rows.map((r) => {
+      const seg = parseInt(r.dur) || 0;
+      return {
+        tipo: 'ralenti',
+        code: r.vehicle_code,
+        base: r.base,
+        lugar: r.location || null,
+        cuando: r.started_at,
+        duracion_min: Math.round(seg / 60),
+        en_curso: r.en_curso,
+        litros: (seg / 3600) * idle.litrosPorHora(r.vehicle_code),
+      };
+    });
+
+    const eventos = [...excesos, ...ralentis]
+      .sort((a, b) => new Date(b.cuando) - new Date(a.cuando));
+
+    res.json({
+      horas,
+      desde: desde.toISOString(),
+      resumen: {
+        excesos:          excesos.length,
+        velocidad_max:    excesos.reduce((m, e) => Math.max(m, e.velocidad_max), 0),
+        ralenti_eventos:  ralentis.length,
+        ralenti_minutos:  ralentis.reduce((a, r) => a + r.duracion_min, 0),
+        ralenti_litros:   ralentis.reduce((a, r) => a + r.litros, 0),
+      },
+      eventos,
+    });
+  } catch (err) {
+    console.error('flota/eventos:', err.message);
     res.status(500).json({ error: 'Error del servidor' });
   }
 });
