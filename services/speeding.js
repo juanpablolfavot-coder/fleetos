@@ -21,6 +21,30 @@ function esRemolcado(type) {
   return t.includes('remolque') || t.includes('acoplad');
 }
 
+// ── Límite propio por unidad (km/h) ──────────────────────────────────
+// El límite general (SPEED_ALERT_KMH, 80) está pensado para los camiones. Los
+// utilitarios livianos tienen autorizado andar más rápido, y con el límite de
+// camión avisaban por manejar normal. Las unidades que no estén acá usan el
+// general.
+const LIMITE_POR_UNIDAD = {
+  AB723IX: 110,  // Citroën Berlingo Furgón 1.6 HDI Business
+  AF823RB: 110,  // Citroën Berlingo Furgón HDI 92 Business
+  AE919NN:  90,  // Mercedes-Benz Sprinter 416 CDI Furgón
+  AB902MF:  90,  // Mercedes-Benz Sprinter 515 CDI Furgón
+  AG468LK:  90,  // Ford Transit Van Larga
+  OKQ888:   90,  // Iveco Daily 70C 16 Chasis
+};
+
+// Se busca por código Y por patente, normalizando: si en la ficha el código no
+// coincidiera exactamente con la patente, una unidad quedaría con el límite de
+// camión sin que nadie se entere (seguiría avisando de más, en silencio).
+const _norm = (x) => String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function limiteDe(v) {
+  return LIMITE_POR_UNIDAD[_norm(v && v.code)]
+      || LIMITE_POR_UNIDAD[_norm(v && v.plate)]
+      || (push.SPEED_LIMIT || 80);
+}
+
 let _ready = false;
 async function ensureSchema() {
   if (_ready) return;
@@ -41,20 +65,43 @@ async function ensureSchema() {
   _ready = true;
 }
 
+// Cierra un evento calculando su duración. Se usa tanto cuando la unidad vuelve
+// a su límite como cuando el límite de la unidad cambió con el evento abierto.
+function cerrarEvento(id) {
+  return query(
+    `UPDATE speeding_events SET ended_at=NOW(),
+       duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)
+     WHERE id=$1`, [id]);
+}
+
 // Procesa una lectura de una unidad. Abre/actualiza/cierra el evento según la velocidad.
 async function processVehicle(v, speed) {
-  const LIMIT = push.SPEED_LIMIT || 80;
-  const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   const s = Math.round(parseFloat(speed) || 0);
   const code = v && (v.code || v.plate);
   if (!code) return;
+  const LIMIT = limiteDe(v);               // el general, salvo que la unidad tenga el suyo
+  const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   // Los semirremolques / acoplados no generan alerta (velocidad del camión que los tira).
   if (esRemolcado(v.type)) return;
   await ensureSchema();
 
   const openRes = await query(
-    'SELECT id FROM speeding_events WHERE vehicle_code=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [code]);
-  const open = openRes.rows[0];
+    'SELECT id, limit_kmh FROM speeding_events WHERE vehicle_code=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1', [code]);
+  let open = openRes.rows[0];
+
+  // Si el límite de la unidad cambió mientras había un evento abierto, ese evento
+  // quedó midiendo contra un número que ya no rige: se cierra acá. Si la unidad
+  // sigue en exceso, en el mismo ciclo se abre uno nuevo contra el límite actual
+  // (con su push y su limit_kmh correcto).
+  //
+  // La alternativa —seguir usando el limit_kmh guardado mientras el evento esté
+  // abierto— deja un agujero peor: al subir el límite de 80 a 110, una Berlingo
+  // crucerando a 95 nunca bajaría de su límite viejo y el evento quedaría abierto
+  // para siempre, marcado "EN CURSO" en el historial.
+  if (open && Number(open.limit_kmh) !== LIMIT) {
+    await cerrarEvento(open.id);
+    open = null;
+  }
 
   if (s > OPEN_AT) {
     if (open) {
@@ -73,10 +120,7 @@ async function processVehicle(v, speed) {
     }
   } else if (open && s <= LIMIT) {
     // Volvió al límite (o menos): cerrar el evento y calcular la duración.
-    await query(
-      `UPDATE speeding_events SET ended_at=NOW(),
-         duration_seconds=GREATEST(0, EXTRACT(EPOCH FROM (NOW()-started_at))::int)
-       WHERE id=$1`, [open.id]);
+    await cerrarEvento(open.id);
   } else if (open) {
     // Banda entre el límite y el umbral de apertura (sólo si hay margen): mantener vivo.
     await query('UPDATE speeding_events SET updated_at=NOW() WHERE id=$1', [open.id]);
@@ -109,4 +153,4 @@ async function listEvents({ desde, hasta, limit = 200 } = {}) {
   return r.rows;
 }
 
-module.exports = { ensureSchema, processVehicle, closeStale, listEvents };
+module.exports = { ensureSchema, processVehicle, closeStale, listEvents, limiteDe, LIMITE_POR_UNIDAD };
