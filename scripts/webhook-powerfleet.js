@@ -94,7 +94,22 @@ async function main() {
       const e = await webhook.ultimos(flag('limite', 20));
       console.log('Configurado:', e.configurado ? 'sí' : 'NO (falta GPS_WEBHOOK_SECRET)');
       console.log('URL:', e.url || '—');
-      console.log(`Avisos recibidos: ${e.resumen.total} (procesados: ${e.resumen.procesados}) · último: ${e.resumen.ultimo || 'ninguno'}\n`);
+
+      // La mitad que no se ve desde la base: si Powerfleet todavía la tiene
+      // registrada. Sin esto, "no llegó nada" no distingue entre "no hubo
+      // excesos" y "la suscripción se cayó".
+      const l = await webhook.listar().catch((err) => ({ status: 0, webhooks: [], error: err.message }));
+      if (l.status !== 200) {
+        console.log('Del lado de Powerfleet: no se pudo consultar (HTTP ' + l.status + ')');
+      } else {
+        const mia = l.webhooks.find((w) => String(w.url || w.URL || '') === webhook.urlPublica());
+        console.log('Del lado de Powerfleet:', mia
+          ? `registrada (id ${mia.id ?? mia.Id}, tipo ${mia.webhookType}, vence ${webhook.fechaUtil(mia.expirationDate) ? mia.expirationDate : 'sin declarar'})`
+          : `❌ NO figura — el aviso no va a llegar. Correr: node ${require('path').basename(__filename)} alta`);
+        if (l.webhooks.length > 1) console.log(`  (hay ${l.webhooks.length} suscripciones en la cuenta)`);
+      }
+
+      console.log(`\nAvisos recibidos: ${e.resumen.total} (procesados: ${e.resumen.procesados}) · último: ${e.resumen.ultimo || 'ninguno'}\n`);
       if (!e.eventos.length) {
         console.log('Todavía no llegó ningún aviso. Puede ser normal: solo llegan cuando');
         console.log('Powerfleet detecta un exceso según SU umbral.');
