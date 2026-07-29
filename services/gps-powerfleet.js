@@ -233,6 +233,39 @@ async function fetchIgnition(vehicleId) {
   return null;
 }
 
+// ── Llamada autenticada genérica a la API ──────────────────
+// Hace el login si hace falta y reintenta con las otras capitalizaciones del
+// prefijo cuando la ruta da 404 (el proveedor no es consistente: /Fleetcore.Api,
+// /Fleetcore.api y /fleetcore.api conviven según el endpoint).
+// La usa el alta/baja de webhooks, para no repetir credenciales ni ciclo de token.
+const _PREFIJO = /^\/[Ff]leet[Cc]ore\.[Aa]pi\//;
+async function apiRequest(path, opts = {}) {
+  if (!(await login())) return { status: 401, body: '', error: 'login fallido' };
+  let res = await httpsReq(path, opts);
+  if (res.status !== 404 || !_PREFIJO.test(path)) return res;
+  for (const c of ['Fleetcore.Api', 'Fleetcore.api', 'fleetcore.api']) {
+    const alt = path.replace(_PREFIJO, `/${c}/`);
+    if (alt === path) continue;
+    res = await httpsReq(alt, opts);
+    if (res.status !== 404) return res;
+  }
+  return res;
+}
+
+// El token es un JWT: su payload trae el id de cuenta, que el alta de webhook
+// pide y no está en ningún otro lado. Si no se puede leer, devuelve null y el
+// script lo pide por parámetro.
+function accountIdDelToken() {
+  try {
+    if (!_token) return null;
+    const p = JSON.parse(Buffer.from(_token.split('.')[1], 'base64').toString('utf8'));
+    for (const k of Object.keys(p)) {
+      if (/^account_?id$/i.test(k)) return p[k];
+    }
+    return p.nameid || p.sub || null;
+  } catch (_) { return null; }
+}
+
 // ── Asegurar columnas GPS en vehicles ──────────────────────
 async function ensureColumns() {
   try {
@@ -413,4 +446,4 @@ function getGPSStatus() {
   };
 }
 
-module.exports = { startGPSSync, syncGPSData, getGPSStatus };
+module.exports = { startGPSSync, syncGPSData, getGPSStatus, apiRequest, login, accountIdDelToken };
