@@ -269,10 +269,27 @@ function _json(res) {
   try { return JSON.parse(res.body); } catch (_) { return null; }
 }
 
+// El alta devuelve data como OBJETO y el listado como ARRAY; se normaliza acá
+// para que quien consuma esto no tenga que saberlo.
+function _comoLista(d) {
+  const x = d && d.data;
+  if (!x) return [];
+  return Array.isArray(x) ? x : [x];
+}
+const _url = (w) => String((w && (w.url || w.URL)) || '');
+
 async function listar() {
   const res = await gps.apiRequest('/Fleetcore.api/api/webhooks');
   const d = _json(res);
-  return { status: res.status, webhooks: (d && d.data) || [], crudo: d || res.body };
+  return { status: res.status, webhooks: _comoLista(d), crudo: d || res.body };
+}
+
+// Powerfleet devuelve '0001-01-01T00:00:00-03:00' (el DateTime.MinValue de .NET)
+// cuando no tiene un vencimiento cargado: ignora el que le mandamos en el alta.
+// Eso NO es una fecha con la que se pueda decidir nada, así que se descarta.
+function fechaUtil(v) {
+  const d = leerFecha(v);
+  return d && d.getUTCFullYear() > 1900 ? d : null;
 }
 
 // Da de alta la suscripción. Devuelve TODO lo que contestó el proveedor: la
@@ -325,43 +342,106 @@ async function alta({ url, nombre, accountId, dias = DIAS_ALTA } = {}) {
     if (ok) break;
   }
 
+  let guardadoOk = null;
+  let venceDeclarado = null;
   if (ok) {
-    // Se guarda el cuerpo que FUNCIONÓ: la renovación automática lo reusa tal
-    // cual en vez de volver a adivinar los campos.
-    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
-    await query(`INSERT INTO app_config(key,value) VALUES('gps_webhook',$1)
-                 ON CONFLICT(key) DO UPDATE SET value=$1`,
-      [JSON.stringify({ registrado_at: new Date().toISOString(), vence: vence.toISOString(), cuerpo })]).catch(() => {});
+    // Lo que el proveedor DIJO que guardó, no lo que le pedimos: en esta cuenta
+    // ignora el expirationDate del pedido y devuelve el suyo.
+    venceDeclarado = fechaUtil(_comoLista(d)[0] && (_comoLista(d)[0].expirationDate || _comoLista(d)[0].ExpirationDate));
+
+    // Este guardado es lo que después permite renovar. Antes su error estaba
+    // silenciado: si fallaba, el alta decía "OK", la renovación nunca se
+    // enteraba de nada y el día que la suscripción se cayera no había forma de
+    // notarlo. Ahora el resultado viaja en la respuesta.
+    try {
+      await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
+      await query(`INSERT INTO app_config(key,value) VALUES('gps_webhook',$1)
+                   ON CONFLICT(key) DO UPDATE SET value=$1`,
+        [JSON.stringify({
+          registrado_at: new Date().toISOString(),
+          vence_pedido: vence.toISOString(),
+          vence_declarado: venceDeclarado ? venceDeclarado.toISOString() : null,
+          cuerpo,
+        })]);
+      guardadoOk = true;
+    } catch (e) {
+      guardadoOk = false;
+      console.error('[webhook] la suscripción quedó dada de alta pero NO se pudo guardar local:', e.message);
+    }
   }
-  return { ok, status: res.status, cuerpo, respuesta: d || res.body, intentos };
+  return { ok, status: res.status, cuerpo, respuesta: d || res.body, intentos, guardadoOk, venceDeclarado };
 }
 
 async function baja(id) {
   const res = await gps.apiRequest(`/Fleetcore.api/api/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  return { ok: res.status === 200, status: res.status, respuesta: _json(res) || res.body };
+  const ok = res.status === 200;
+  // Si se dio de baja a propósito, se borra el registro local: si no, la
+  // renovación automática la volvería a dar de alta y pelearía con la decisión.
+  if (ok) await query(`DELETE FROM app_config WHERE key='gps_webhook'`).catch(() => {});
+  return { ok, status: res.status, respuesta: _json(res) || res.body };
 }
 
 // ── Renovación automática ─────────────────────────────────────────────
-// Solo actúa si YA hubo un alta exitosa (el script guardó el cuerpo que anduvo).
-// Renueva cuando falta menos de DIAS_RENOVAR para el vencimiento. No intenta
-// dar de alta por su cuenta: si nunca se registró, avisa y no toca nada.
+// La verdad sobre si la suscripción sigue viva la tiene el PROVEEDOR, no
+// nuestra copia. Por eso acá se le pregunta en vez de mirar una fecha guardada:
+//
+//   - esta cuenta ignora el expirationDate que le mandamos en el alta y guarda
+//     '0001-01-01' (el DateTime.MinValue de .NET), o sea que la fecha que
+//     habíamos anotado no describía nada real;
+//   - y si la suscripción desaparece del otro lado por cualquier motivo, la
+//     única forma de notarlo es que no figure en la lista.
+//
+// Solo actúa si alguna vez hubo un alta exitosa (queda registrada en
+// app_config). Si nunca se dio de alta, o si se dio de baja a propósito, no
+// toca nada: dar de alta por su cuenta sería pelear con una decisión tomada.
+let _ultimoMotivo = null;
+function _log(motivo) {
+  if (motivo === _ultimoMotivo) return;   // no repetir lo mismo cada 12 horas
+  _ultimoMotivo = motivo;
+  console.log('[webhook] ' + motivo);
+}
+
 async function renovarSiHaceFalta() {
   await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key='gps_webhook'`).catch(() => ({ rows: [] }));
   const guardado = r.rows[0] && r.rows[0].value;
   if (!guardado || !guardado.cuerpo) {
-    console.log('[webhook] no hay suscripción registrada — correr: node scripts/webhook-powerfleet.js alta');
+    _log('sin suscripción dada de alta — correr: node scripts/webhook-powerfleet.js alta');
     return { renovado: false, motivo: 'nunca se dio de alta' };
   }
-  const vence = new Date(guardado.vence || 0).getTime();
-  const dias = (vence - Date.now()) / 86400000;
-  if (dias > DIAS_RENOVAR) return { renovado: false, motivo: `vence en ${Math.round(dias)} días` };
 
-  console.log(`[webhook] la suscripción vence en ${Math.round(dias)} días: renovando`);
-  const res = await alta({ url: guardado.cuerpo.URL, nombre: guardado.cuerpo.Name, accountId: guardado.cuerpo.AccountId })
-    .catch((e) => ({ ok: false, respuesta: e.message }));
-  console.log(res.ok ? '[webhook] renovada' : '[webhook] la renovación falló: ' + JSON.stringify(res.respuesta).slice(0, 200));
-  return { renovado: res.ok, respuesta: res.respuesta };
+  const lista = await listar().catch(() => null);
+  if (!lista || lista.status !== 200) {
+    // No poder preguntar no es lo mismo que no estar registrada: no se toca nada.
+    _log('no se pudo verificar la suscripción con el proveedor; se reintenta en el próximo ciclo');
+    return { renovado: false, motivo: 'no se pudo consultar al proveedor' };
+  }
+
+  const mia = lista.webhooks.find((w) => _url(w) === guardado.cuerpo.URL);
+  const renovar = async (por) => {
+    console.log(`[webhook] ${por}: dando de alta de nuevo`);
+    const res = await alta({ url: guardado.cuerpo.URL, nombre: guardado.cuerpo.Name, accountId: guardado.cuerpo.AccountId })
+      .catch((e) => ({ ok: false, respuesta: e.message }));
+    _ultimoMotivo = null;
+    console.log(res.ok ? '[webhook] renovada' : '[webhook] la renovación falló: ' + JSON.stringify(res.respuesta).slice(0, 200));
+    return { renovado: res.ok, respuesta: res.respuesta };
+  };
+
+  if (!mia) return renovar('la suscripción ya no figura del lado de Powerfleet');
+
+  const vence = fechaUtil(mia.expirationDate || mia.ExpirationDate);
+  if (!vence) {
+    // Sin vencimiento declarado no hay nada que anticipar: el chequeo de que
+    // siga en la lista, que ya pasó, es toda la garantía disponible.
+    _log('suscripción activa (el proveedor no declara vencimiento)');
+    return { renovado: false, motivo: 'activa, sin vencimiento declarado' };
+  }
+  const dias = (vence.getTime() - Date.now()) / 86400000;
+  if (dias > DIAS_RENOVAR) {
+    _log(`suscripción activa, vence en ${Math.round(dias)} días`);
+    return { renovado: false, motivo: `vence en ${Math.round(dias)} días` };
+  }
+  return renovar(`vence en ${Math.round(dias)} días`);
 }
 
 // ── Estado para el diagnóstico (lo mira el dueño desde la app) ─────────
@@ -409,7 +489,7 @@ function programarWebhook() {
 }
 
 module.exports = {
-  ensureSchema, procesar, extraer, buscarCampo, leerFecha,
+  ensureSchema, procesar, extraer, buscarCampo, leerFecha, fechaUtil,
   secretoOk, configurado, urlPublica,
   listar, alta, baja, renovarSiHaceFalta, ultimos, purgar, programarWebhook,
   TIPO_EXCESO, VENTANA_MIN,
