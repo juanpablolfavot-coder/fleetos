@@ -146,11 +146,20 @@ const FIX = {
     horas: 24, desde: '2026-01-01T10:00:00.000Z',
     resumen: { excesos: 1, velocidad_max: 97, ralenti_eventos: 1, ralenti_minutos: 22, ralenti_litros: 1.03 },
     eventos: [
-      { tipo: 'exceso', code: 'INT-1', base: 'Central', cuando: '2026-01-01T12:00:00.000Z',
+      { tipo: 'exceso', id: 'exc-1', code: 'INT-1', base: 'Central', cuando: '2026-01-01T12:00:00.000Z',
         duracion_min: 3, en_curso: false, velocidad_max: 97, limite: 80 },
-      { tipo: 'ralenti', code: 'INT-2', base: 'Norte', lugar: 'Base Norte', cuando: '2026-01-01T11:00:00.000Z',
+      { tipo: 'ralenti', id: 'ral-1', code: 'INT-2', base: 'Norte', lugar: 'Base Norte', cuando: '2026-01-01T11:00:00.000Z',
         duracion_min: 22, en_curso: true, litros: 1.03 },
     ],
+  },
+  // El último resumen que salió por notificación, con el id de cada anomalía:
+  // es lo que permite tocar una línea y caer en ESE evento.
+  flotaResumen: {
+    cuando: '2026-01-01T12:06:00.000Z', hora: '12:06', desde: '2026-01-01T10:06:00.000Z',
+    minutos_atras: 12, litros: 2.8,
+    estado: { en_ruta: 11, detenidas: 30, sin_reportar: 0, en_ralenti: 1 },
+    excesos:  [{ id: 'exc-1', code: 'INT-1', base: 'Central', cuando: '2026-01-01T12:00:00.000Z', kmh: 97, limite: 80 }],
+    ralentis: [{ id: 'ral-1', code: 'INT-2', base: 'Norte', lugar: 'Base Norte', cuando: '2026-01-01T11:00:00.000Z', minutos: 22 }],
   },
 };
 
@@ -158,7 +167,9 @@ const FIX = {
 // el HTML —y los onclick— de las demás. Acá se listan las llamadas extra a
 // hacer después del render inicial de cada pantalla.
 const TABS_EXTRA = {
-  flota: ["mostrarTabFlota('feed')", "mostrarTabFlota('preguntar')"],
+  flota: ["mostrarTabFlota('feed')", "mostrarTabFlota('preguntar')",
+          // Tocar una línea del resumen tiene que llevar al feed sin romper nada.
+          "irAEventoFlota('exc-1')"],
 };
 
 // Decide el cuerpo de respuesta según el path del endpoint.
@@ -187,6 +198,7 @@ function stubFor(url) {
   // error y no la pantalla de verdad.
   if (u.includes('/api/flota/ahora'))   return FIX.flotaAhora;
   if (u.includes('/api/flota/eventos')) return FIX.flotaEventos;
+  if (u.includes('/api/flota/resumen')) return FIX.flotaResumen;
   return []; // por defecto: lista vacía (la mayoría de endpoints devuelven arrays)
 }
 
@@ -332,6 +344,37 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
     missingOnclick: [
       ...(deepLink.enFeed ? [] : ['(no abrió la pestaña del feed)']),
       ...(deepLink.limpio ? [] : ['(no se limpió la query de la URL)']),
+    ],
+  });
+
+  // ── Aterrizaje en UN evento puntual ──
+  // La alerta de velocidad lleva ?evento=<id>. Sin esto se cae en la lista
+  // entera y hay que adivinar cuál de todos los excesos fue el que avisó, que
+  // es justo lo que este parámetro vino a evitar.
+  current = 'deep-link-evento';
+  const antesEvento = errors.length;
+  await page.goto(base + '/?ir=flota&tab=feed&evento=exc-1', { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await page.waitForFunction(
+    () => typeof App !== 'undefined' && App.currentUser && typeof renderPage === 'function',
+    { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1200);
+  const evt = await page.evaluate(() => {
+    const html = document.getElementById('page-flota')?.innerHTML || '';
+    return {
+      pagina: typeof App !== 'undefined' ? App.currentPage : null,
+      marcado: /EL DEL AVISO/.test(html),
+      // El resaltado tiene que caer en la fila del evento pedido, no en otra.
+      enLaFila: /id="ev-exc-1"[^>]*>[\s\S]{0,900}?EL DEL AVISO/.test(html),
+    };
+  });
+  const eventoErrs = errors.slice(antesEvento).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg));
+  results.push({
+    page: 'deep-link ?evento=<id>',
+    thrown: evt.pagina === 'flota' ? null : `aterrizó en "${evt.pagina}" en vez de "flota"`,
+    asyncErrs: eventoErrs,
+    missingOnclick: [
+      ...(evt.marcado  ? [] : ['(no resaltó el evento del aviso)']),
+      ...(evt.enLaFila ? [] : ['(resaltó una fila que no es la del evento pedido)']),
     ],
   });
 
