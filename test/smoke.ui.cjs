@@ -158,7 +158,7 @@ function stubFor(url) {
 // los renderizan otros archivos; se incluyen igual.
 const PAGES = [
   'home',
-  'dashboard', 'fleet', 'workorders', 'fuel', 'tires', 'stock', 'documents',
+  'dashboard', 'fleet', 'flota', 'workorders', 'fuel', 'tires', 'stock', 'documents',
   'costs', 'maintenance', 'chofer_panel', 'encargado_panel', 'contador_panel',
   'auditor_panel', 'users', 'config', 'purchase_orders', 'suppliers', 'assets',
   'proveedor_panel', 'tesoreria_panel',
