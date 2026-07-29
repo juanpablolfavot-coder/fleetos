@@ -297,4 +297,9 @@ httpServer = app.listen(PORT, () => {
   // email una sola vez. Usa el mismo SMTP de los backups.
   try { require('./services/reporte-mensual').programarReporteMensual(); }
   catch (e) { console.error('[reporte-mensual] no se pudo programar:', e.message); }
+
+  // Resumen periódico de la flota por push a los dueños (default cada 2 hs,
+  // de 6 a 22). Se desactiva con RESUMEN_FLOTA_MIN=0.
+  try { require('./services/resumen-flota').programarResumenFlota(); }
+  catch (e) { console.error('[resumen-flota] no se pudo programar:', e.message); }
 });

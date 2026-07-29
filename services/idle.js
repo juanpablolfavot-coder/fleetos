@@ -150,4 +150,6 @@ async function stats({ mes } = {}) {
   };
 }
 
-module.exports = { ensureSchema, processVehicle, closeStale, stats, IDLE_SPEED };
+// litrosPorHora e IDLE_MIN_SEC se exportan para que el resumen de flota use
+// la MISMA tabla de consumo y el mismo umbral, sin duplicarlos.
+module.exports = { ensureSchema, processVehicle, closeStale, stats, litrosPorHora, IDLE_SPEED, IDLE_MIN_SEC };
