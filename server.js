@@ -113,6 +113,12 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json({ limit: '6mb' }));  // tickets/facturas en base64 pueden superar 2mb
+// Webhook de Powerfleet (alerta de velocidad en el momento). Se monta ACÁ, antes
+// de hpp/sanitize/rate-limit/auditoría: lo llama una máquina, no un navegador.
+// sanitize le tocaría el payload que queremos guardar crudo, la auditoría
+// escribiría una fila por alerta, y el rate limit podría descartar avisos en una
+// ráfaga. Su propia autenticación es el secreto en la URL.
+app.use('/api/gps/webhook', require('./routes/webhook-gps'));
 app.use(hpp());
 app.use(sanitize);
 app.use(compression());
@@ -303,4 +309,10 @@ httpServer = app.listen(PORT, () => {
   // de 6 a 22). Se desactiva con RESUMEN_FLOTA_MIN=0.
   try { require('./services/resumen-flota').programarResumenFlota(); }
   catch (e) { console.error('[resumen-flota] no se pudo programar:', e.message); }
+
+  // Webhook de Powerfleet: renueva la suscripción antes de que venza y purga
+  // los avisos viejos. Si no está configurado (sin GPS_WEBHOOK_SECRET) no hace
+  // nada y el exceso se sigue detectando por el sondeo de siempre.
+  try { require('./services/webhook-powerfleet').programarWebhook(); }
+  catch (e) { console.error('[webhook] no se pudo programar:', e.message); }
 });

@@ -75,14 +75,17 @@ function cerrarEvento(id) {
 }
 
 // Procesa una lectura de una unidad. Abre/actualiza/cierra el evento según la velocidad.
+// Devuelve en una palabra qué hizo. Al sondeo no le importa (lo llama y sigue),
+// pero el webhook lo guarda para poder decir si un aviso terminó en notificación
+// o si el evento ya venía abierto.
 async function processVehicle(v, speed) {
   const s = Math.round(parseFloat(speed) || 0);
   const code = v && (v.code || v.plate);
-  if (!code) return;
+  if (!code) return 'sin código de unidad';
   const LIMIT = limiteDe(v);               // el general, salvo que la unidad tenga el suyo
   const OPEN_AT = LIMIT + MARGIN;          // umbral para abrir (estricto: = límite)
   // Los semirremolques / acoplados no generan alerta (velocidad del camión que los tira).
-  if (esRemolcado(v.type)) return;
+  if (esRemolcado(v.type)) return 'remolcado: no genera alerta';
   await ensureSchema();
 
   const openRes = await query(
@@ -106,6 +109,7 @@ async function processVehicle(v, speed) {
   if (s > OPEN_AT) {
     if (open) {
       await query('UPDATE speeding_events SET max_speed=GREATEST(max_speed,$1), updated_at=NOW() WHERE id=$2', [s, open.id]);
+      return 'exceso ya abierto: actualizado';
     } else {
       await query(
         `INSERT INTO speeding_events (vehicle_code, vehicle_plate, base, max_speed, limit_kmh) VALUES ($1,$2,$3,$4,$5)`,
@@ -120,14 +124,18 @@ async function processVehicle(v, speed) {
         // caía en Inicio y había que buscar a mano de qué avisaba.
         url: '/?ir=flota&tab=feed',
       }).catch(() => {});
+      return 'exceso abierto + notificación';
     }
   } else if (open && s <= LIMIT) {
     // Volvió al límite (o menos): cerrar el evento y calcular la duración.
     await cerrarEvento(open.id);
+    return 'volvió al límite: evento cerrado';
   } else if (open) {
     // Banda entre el límite y el umbral de apertura (sólo si hay margen): mantener vivo.
     await query('UPDATE speeding_events SET updated_at=NOW() WHERE id=$1', [open.id]);
+    return 'en el margen: evento sigue abierto';
   }
+  return `${s} km/h: dentro del límite de ${LIMIT}`;
 }
 
 // Cierra eventos que quedaron abiertos porque la unidad dejó de reportar.

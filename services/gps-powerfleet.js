@@ -233,6 +233,39 @@ async function fetchIgnition(vehicleId) {
   return null;
 }
 
+// ── Llamada autenticada genérica a la API ──────────────────
+// Hace el login si hace falta y reintenta con las otras capitalizaciones del
+// prefijo cuando la ruta da 404 (el proveedor no es consistente: /Fleetcore.Api,
+// /Fleetcore.api y /fleetcore.api conviven según el endpoint).
+// La usa el alta/baja de webhooks, para no repetir credenciales ni ciclo de token.
+const _PREFIJO = /^\/[Ff]leet[Cc]ore\.[Aa]pi\//;
+async function apiRequest(path, opts = {}) {
+  if (!(await login())) return { status: 401, body: '', error: 'login fallido' };
+  let res = await httpsReq(path, opts);
+  if (res.status !== 404 || !_PREFIJO.test(path)) return res;
+  for (const c of ['Fleetcore.Api', 'Fleetcore.api', 'fleetcore.api']) {
+    const alt = path.replace(_PREFIJO, `/${c}/`);
+    if (alt === path) continue;
+    res = await httpsReq(alt, opts);
+    if (res.status !== 404) return res;
+  }
+  return res;
+}
+
+// El token es un JWT: su payload trae el id de cuenta, que el alta de webhook
+// pide y no está en ningún otro lado. Si no se puede leer, devuelve null y el
+// script lo pide por parámetro.
+function accountIdDelToken() {
+  try {
+    if (!_token) return null;
+    const p = JSON.parse(Buffer.from(_token.split('.')[1], 'base64').toString('utf8'));
+    for (const k of Object.keys(p)) {
+      if (/^account_?id$/i.test(k)) return p[k];
+    }
+    return p.nameid || p.sub || null;
+  } catch (_) { return null; }
+}
+
 // ── Asegurar columnas GPS en vehicles ──────────────────────
 async function ensureColumns() {
   try {
@@ -248,7 +281,12 @@ async function ensureColumns() {
       -- calculando como antes (speed > 2) para no cambiar nada de lo que ya
       -- consume el frontend: gps_state guarda el valor tal cual lo manda el GPS.
       ADD COLUMN IF NOT EXISTS gps_address     TEXT,
-      ADD COLUMN IF NOT EXISTS gps_state       VARCHAR(30)`);
+      ADD COLUMN IF NOT EXISTS gps_state       VARCHAR(30),
+      -- Id interno de la unidad en Powerfleet. El sync ya lo tenía y lo tiraba.
+      -- Hace falta para el webhook: si el aviso identifica la unidad por id y no
+      -- por patente, sin esto no hay forma de saber de quién habla.
+      ADD COLUMN IF NOT EXISTS gps_vehicle_id  VARCHAR(60)`);
+    await query(`CREATE INDEX IF NOT EXISTS idx_vehicles_gps_id ON vehicles(gps_vehicle_id) WHERE gps_vehicle_id IS NOT NULL`).catch(() => {});
   } catch(e) { /* ya existen */ }
 }
 
@@ -324,11 +362,13 @@ async function syncGPSData() {
           gps_hour_meter = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
           gps_address    = COALESCE($8, gps_address),
           gps_state      = COALESCE($9, gps_state),
+          gps_vehicle_id = COALESCE($10, gps_vehicle_id),
           gps_updated_at = NOW()
         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
               UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
         RETURNING id, code, plate, base, type, km_current
-      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState]);
+      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState,
+          vehicleId != null ? String(vehicleId) : null]);
 
       if (r.rows.length > 0) {
         updated++;
@@ -413,4 +453,4 @@ function getGPSStatus() {
   };
 }
 
-module.exports = { startGPSSync, syncGPSData, getGPSStatus };
+module.exports = { startGPSSync, syncGPSData, getGPSStatus, apiRequest, login, accountIdDelToken };
