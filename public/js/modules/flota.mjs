@@ -252,6 +252,106 @@ async function renderFeed(cont) {
     </div>`;
 }
 
+// ── Pestaña "Preguntar" ───────────────────────────────────────────────
+// La charla vive en el módulo, no en el DOM: la pantalla se redibuja entera en
+// cada mensaje y en cada cambio de pestaña, y si no se perdería lo hablado.
+let _charla = [];
+let _pensando = false;
+
+const SUGERENCIAS = [
+  '¿Dónde está cada unidad?',
+  '¿Cuántos camiones tengo en ruta?',
+  '¿Hubo excesos de velocidad hoy?',
+  '¿Qué unidad desperdició más gasoil en ralentí esta semana?',
+];
+
+function burbuja(m) {
+  const mio = m.role === 'user';
+  return `
+    <div style="display:flex;justify-content:${mio ? 'flex-end' : 'flex-start'};margin-bottom:10px">
+      <div style="max-width:82%;padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.5;
+                  ${mio ? 'background:var(--accent);color:#fff;border-bottom-right-radius:3px'
+                        : 'background:var(--bg3);color:var(--text);border-bottom-left-radius:3px'}">
+        ${escapeHtml(m.content).replace(/\n/g, '<br>')}
+      </div>
+    </div>`;
+}
+
+function renderPreguntar(cont) {
+  const vacia = _charla.length === 0;
+  cont.innerHTML = `
+    <div class="card" style="padding:16px">
+      <div id="flota-charla" style="max-height:52vh;overflow-y:auto;margin-bottom:14px">
+        ${vacia ? `
+          <div style="text-align:center;color:var(--text3);padding:18px 8px">
+            <div style="font-size:30px;margin-bottom:8px">💬</div>
+            <div style="font-size:13px">Preguntame lo que quieras sobre la flota, en criollo.</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-width:460px;margin:0 auto">
+            ${SUGERENCIAS.map((s) => `
+              <button class="btn btn-secondary btn-sm" style="text-align:left;font-weight:400"
+                      onclick="preguntarFlotaSugerida('${escapeHtml(s).replace(/'/g, "\\'")}')">${escapeHtml(s)}</button>`).join('')}
+          </div>`
+        : _charla.map(burbuja).join('')
+          + (_pensando ? `<div style="color:var(--text3);font-size:13px;padding:4px 6px">Pensando…</div>` : '')}
+      </div>
+      <div style="display:flex;gap:8px">
+        <input id="flota-pregunta" type="text" placeholder="¿Dónde está el AH327RZ?"
+               ${_pensando ? 'disabled' : ''} autocomplete="off"
+               style="flex:1;padding:10px 12px;border:1px solid var(--border2);border-radius:var(--radius);
+                      background:var(--bg);color:var(--text);font-size:14px;font-family:var(--font)"
+               onkeydown="if(event.key==='Enter')preguntarFlota()">
+        <button class="btn btn-primary" ${_pensando ? 'disabled' : ''} onclick="preguntarFlota()">Preguntar</button>
+      </div>
+      ${_charla.length ? `<div style="margin-top:10px;text-align:right">
+        <button class="btn btn-secondary btn-sm" onclick="limpiarCharlaFlota()">Empezar de nuevo</button>
+      </div>` : ''}
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-top:12px;line-height:1.6">
+      Contesta con los datos reales del GPS y de los eventos registrados — no inventa.
+      Si le preguntás algo que no tiene a mano (costos, órdenes de trabajo, documentación),
+      te va a decir en qué sección de FleetOS mirarlo.
+    </div>`;
+
+  const inp = document.getElementById('flota-pregunta');
+  if (inp && !_pensando) inp.focus();
+  const caja = document.getElementById('flota-charla');
+  if (caja) caja.scrollTop = caja.scrollHeight;
+}
+
+async function preguntarFlota(textoDirecto) {
+  if (_pensando) return;
+  const inp = document.getElementById('flota-pregunta');
+  const texto = (textoDirecto || (inp && inp.value) || '').trim();
+  if (!texto) return;
+
+  // El historial que se manda es el de ANTES de esta pregunta: la pregunta va
+  // aparte, en su propio campo.
+  const historial = _charla.slice();
+  _charla.push({ role: 'user', content: texto });
+  _pensando = true;
+  renderPreguntar(document.getElementById('flota-cont'));
+
+  let respuesta;
+  try {
+    const res = await apiFetch('/api/flota/preguntar', {
+      method: 'POST',
+      body: JSON.stringify({ pregunta: texto, historial }),
+    });
+    const d = await res.json().catch(() => ({}));
+    respuesta = res.ok ? (d.respuesta || 'No recibí respuesta.') : (d.error || 'No se pudo consultar.');
+  } catch (e) {
+    respuesta = 'Sin conexión con el servidor.';
+  }
+
+  _pensando = false;
+  _charla.push({ role: 'assistant', content: respuesta });
+  renderPreguntar(document.getElementById('flota-cont'));
+}
+
+function preguntarFlotaSugerida(texto) { preguntarFlota(texto); }
+function limpiarCharlaFlota() { _charla = []; renderPreguntar(document.getElementById('flota-cont')); }
+
 // ── Armado de la pantalla ─────────────────────────────────────────────
 async function renderFlotaAhora() {
   const root = document.getElementById('page-flota');
@@ -273,7 +373,7 @@ async function renderFlotaAhora() {
         <p style="font-size:13px;color:var(--text3);margin:4px 0 0" id="flota-sub"></p>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${tabBtn('ahora', '📍 Ahora')}${tabBtn('feed', '📋 Lo que pasó')}
+        ${tabBtn('ahora', '📍 Ahora')}${tabBtn('feed', '📋 Lo que pasó')}${tabBtn('preguntar', '💬 Preguntar')}
         <button class="btn btn-secondary btn-sm" onclick="renderFlotaAhora()">↻</button>
       </div>
     </div>
@@ -284,6 +384,9 @@ async function renderFlotaAhora() {
   if (_tab === 'feed') {
     if (sub) sub.textContent = 'Excesos y ralentí, del más reciente al más viejo';
     await renderFeed(cont);
+  } else if (_tab === 'preguntar') {
+    if (sub) sub.textContent = 'Preguntá en criollo sobre tu flota';
+    renderPreguntar(cont);
   } else {
     if (sub) sub.textContent = 'Dónde está cada unidad · se refresca sola cada 30 s';
     await renderAhora(cont);
@@ -292,6 +395,7 @@ async function renderFlotaAhora() {
 }
 
 function mostrarTabFlota(tab) { _tab = tab; renderFlotaAhora(); }
+
 function cambiarPeriodoFlota(horas) { _horas = horas; renderFlotaAhora(); }
 
 // Un solo timer vivo, solo mientras la sección esté abierta y solo en la
@@ -309,3 +413,6 @@ function programarRefresco() {
 expose('renderFlotaAhora', renderFlotaAhora);
 expose('mostrarTabFlota', mostrarTabFlota);
 expose('cambiarPeriodoFlota', cambiarPeriodoFlota);
+expose('preguntarFlota', preguntarFlota);
+expose('preguntarFlotaSugerida', preguntarFlotaSugerida);
+expose('limpiarCharlaFlota', limpiarCharlaFlota);

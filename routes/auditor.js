@@ -769,9 +769,15 @@ auditorRouter.post('/ia', authenticate, canAudit, async (req, res) => {
     if (!apiKey) return res.status(503).json({ error: 'API key de IA no configurada. Contactar al administrador.' });
 
     const https = require('https');
+    // El modelo anterior (claude-sonnet-4-20250514) fue dado de baja en junio de
+    // 2026: este endpoint venía devolviendo error desde entonces.
+    //
+    // max_tokens sube de 1000 a 4096 porque en los modelos actuales el
+    // razonamiento consume el MISMO cupo que la respuesta: con 1000 la respuesta
+    // salía cortada o vacía.
     const body  = JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      model: 'claude-opus-5',
+      max_tokens: 4096,
       system: contexto || 'Sos un auditor experto en empresas de transporte de Argentina. Respondé en español, de forma concisa y profesional.',
       messages: [{ role: 'user', content: pregunta }]
     });
@@ -801,7 +807,13 @@ auditorRouter.post('/ia', authenticate, canAudit, async (req, res) => {
       r.end();
     });
 
-    const texto = respuesta.content?.[0]?.text;
+    // La respuesta puede traer bloques de razonamiento ANTES del texto, así que
+    // no alcanza con mirar content[0]: hay que quedarse con los de tipo 'text'.
+    const texto = (respuesta.content || [])
+      .filter((b) => b && b.type === 'text')
+      .map((b) => b.text)
+      .join('\n')
+      .trim();
     if (!texto) return res.status(500).json({ error: 'Sin respuesta de la IA' });
     res.json({ respuesta: texto });
   } catch(err) {
