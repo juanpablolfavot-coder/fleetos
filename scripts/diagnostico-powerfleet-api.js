@@ -135,6 +135,9 @@ const SONDAS = [
   },
   {
     sec: '21.4', nombre: 'Notification dashboard', path: '/Fleetcore.Api/api/Notification/dasboard',
+    // La guía escribe 'dasboard' (sin la h). Puede ser un error de tipeo del PDF
+    // o la ruta real; se prueban las dos.
+    alternos: ['/Fleetcore.Api/api/Notification/dashboard'],
     porque: 'conteos por severidad y códigos de falla del motor (DTC)',
     extraer: (d) => {
       const e = d.data?.events?.header?.all;
@@ -159,11 +162,14 @@ const SONDAS = [
   {
     sec: '25.1', nombre: 'Route (viajes del día)', path: '/Fleetcore.api/api/route', metodo: 'POST',
     porque: 'km reales del GPS por viaje — la fuente para cruzar contra los tickets de carga',
-    cuerpo: () => {
+    // La guía marca VehicleId como opcional, pero sin él la API responde
+    // 400 "Vehicle Not Found". Se usa el id de una unidad real de la flota.
+    necesitaVehiculo: true,
+    cuerpo: (vehicleId) => {
       const hoy = new Date();
       const ayer = new Date(hoy.getTime() - 24 * 3600 * 1000);
       const fmt = (d) => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      return { StartDate: fmt(ayer), EndDate: fmt(hoy), getLast: 1 };
+      return { VehicleId: vehicleId, StartDate: fmt(ayer), EndDate: fmt(hoy) };
     },
     extraer: (d) => {
       const t = d.data?.trips || [];
@@ -198,11 +204,13 @@ function clasificar(res) {
 const CAPITALIZACIONES = ['Fleetcore.Api', 'Fleetcore.api', 'fleetcore.api'];
 const PREFIJO = /^\/[Ff]leet[Cc]ore\.[Aa]pi\//;
 
-async function probarConFallback(path, opts) {
+async function probarConFallback(path, opts, alternos = []) {
   const intentos = [path];
-  if (PREFIJO.test(path)) {
+  for (const base of [path, ...alternos]) {
+    if (!intentos.includes(base)) intentos.push(base);
+    if (!PREFIJO.test(base)) continue;
     for (const c of CAPITALIZACIONES) {
-      const alt = path.replace(PREFIJO, `/${c}/`);
+      const alt = base.replace(PREFIJO, `/${c}/`);
       if (!intentos.includes(alt)) intentos.push(alt);
     }
   }
@@ -239,6 +247,7 @@ async function probarConFallback(path, opts) {
   // Coordenadas reales para el sondeo de "unidad más cercana": se toman de
   // la primera unidad de la flota, así la prueba es representativa.
   let coords = null;
+  let vehiculoId = null;
   const resumen = [];
 
   for (const s of SONDAS) {
@@ -252,15 +261,21 @@ async function probarConFallback(path, opts) {
       }
       path = `/Fleetcore.Api/api/fleetview/getnearestvehicles?Lat=${coords.lat}&Lng=${coords.lng}`;
     }
+    if (s.necesitaVehiculo && !vehiculoId) {
+      console.log(`⏭ ${s.sec}  ${s.nombre}`);
+      console.log('      omitido: no se pudo obtener el id de ninguna unidad\n');
+      resumen.push({ sec: s.sec, nombre: s.nombre, icono: '⏭', estado: 'OMITIDO' });
+      continue;
+    }
 
-    const opts = s.metodo === 'POST' ? { method: 'POST', body: s.cuerpo ? s.cuerpo() : {} } : {};
-    const { res, path: usada, usoFallback } = await probarConFallback(path, opts);
+    const opts = s.metodo === 'POST' ? { method: 'POST', body: s.cuerpo ? s.cuerpo(vehiculoId) : {} } : {};
+    const { res, path: usada, usoFallback } = await probarConFallback(path, opts, s.alternos || []);
     const c = clasificar(res);
 
     console.log(`${c.icono} ${s.sec}  ${s.nombre}`);
     console.log(`      para qué: ${s.porque}`);
     console.log(`      ${c.estado}${c.detalle ? ' — ' + c.detalle : ''}`);
-    if (usoFallback) console.log(`      (funcionó con la otra capitalización: ${usada})`);
+    if (usoFallback) console.log(`      (la ruta de la guía dio 404; funcionó con: ${usada})`);
 
     if (c.json) {
       try {
@@ -268,12 +283,17 @@ async function probarConFallback(path, opts) {
         if (linea) console.log(`      ${linea}`);
       } catch (e) { console.log(`      (no se pudo resumir: ${e.message})`); }
 
-      // Guardar coordenadas de la primera unidad para el sondeo 14.11
-      if (!coords && (s.sec === '14.1' || s.sec === '14.2')) {
+      // Guardar coordenadas e id de una unidad real: 14.11 necesita lat/lng y
+      // 25.1 necesita un VehicleId (la guía lo marca opcional, pero sin él la
+      // API responde 400 "Vehicle Not Found").
+      if ((!coords || !vehiculoId) && (s.sec === '14.1' || s.sec === '14.2')) {
         const arr = Array.isArray(c.json.data) ? c.json.data
           : (c.json.data?.fleet?.groups || []).flatMap((g) => g.vehicles || []);
         const v = arr.find((x) => Number(x.lat) && Number(x.lng));
-        if (v) coords = { lat: Number(v.lat), lng: Number(v.lng) };
+        if (v) {
+          if (!coords) coords = { lat: Number(v.lat), lng: Number(v.lng) };
+          if (!vehiculoId) vehiculoId = v.vehicleId || v.unitId || v.id || null;
+        }
       }
 
       if (VERBOSE) console.log('      ── respuesta completa ──\n' + JSON.stringify(c.json, null, 2).split('\n').map((l) => '      ' + l).join('\n'));
