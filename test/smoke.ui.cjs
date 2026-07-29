@@ -158,7 +158,7 @@ const FIX = {
 // el HTML —y los onclick— de las demás. Acá se listan las llamadas extra a
 // hacer después del render inicial de cada pantalla.
 const TABS_EXTRA = {
-  flota: ["mostrarTabFlota('feed')"],
+  flota: ["mostrarTabFlota('feed')", "mostrarTabFlota('preguntar')"],
 };
 
 // Decide el cuerpo de respuesta según el path del endpoint.
