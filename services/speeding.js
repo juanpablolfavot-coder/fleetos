@@ -115,7 +115,10 @@ async function processVehicle(v, speed) {
         title: '⚠ Exceso de velocidad',
         body: `${code} a ${s} km/h${v.base ? ' — ' + v.base : ''} (límite ${LIMIT})`,
         tag: `speed-${code}`,
-        url: '/',
+        // Al tocar la notificación se abre directo el feed de Control en vivo,
+        // que es donde está el exceso y el botón para avisarle al chofer. Antes
+        // caía en Inicio y había que buscar a mano de qué avisaba.
+        url: '/?ir=flota&tab=feed',
       }).catch(() => {});
     }
   } else if (open && s <= LIMIT) {
