@@ -34,6 +34,22 @@ const flag = (n, def = null) => {
 
 function mostrar(x) { console.log(JSON.stringify(x, null, 2)); }
 
+// Node en el contenedor de Render no trae los datos de idioma de 'es-AR', así que
+// toLocaleString cae a formato de 12 horas SIN el AM/PM: un aviso de las 18:28 se
+// leía "06:28". En una herramienta de diagnóstico eso es peor que no mostrar la
+// hora. Se formatea a mano, siempre en hora argentina.
+const HORA_AR = -3;
+function fecha(x) {
+  if (!x) return '—';
+  const d = new Date(x);
+  if (Number.isNaN(d.getTime())) return String(x);
+  const t = new Date(d.getTime() + HORA_AR * 3600 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  // getUTC* después de correr el reloj: así el resultado no depende del huso
+  // horario de la máquina donde corra esto.
+  return `${p(t.getUTCDate())}/${p(t.getUTCMonth() + 1)}/${t.getUTCFullYear()} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}:${p(t.getUTCSeconds())}`;
+}
+
 async function main() {
   switch (comando) {
     case 'tipos': {
@@ -109,14 +125,14 @@ async function main() {
         if (l.webhooks.length > 1) console.log(`  (hay ${l.webhooks.length} suscripciones en la cuenta)`);
       }
 
-      console.log(`\nAvisos recibidos: ${e.resumen.total} (procesados: ${e.resumen.procesados}) · último: ${e.resumen.ultimo || 'ninguno'}\n`);
+      console.log(`\nAvisos recibidos: ${e.resumen.total} (procesados: ${e.resumen.procesados}) · último: ${e.resumen.ultimo ? fecha(e.resumen.ultimo) : 'ninguno'}\n`);
       if (!e.eventos.length) {
         console.log('Todavía no llegó ningún aviso. Puede ser normal: solo llegan cuando');
         console.log('Powerfleet detecta un exceso según SU umbral.');
         break;
       }
       e.eventos.forEach((v) => {
-        console.log(`#${v.id}  ${new Date(v.recibido_at).toLocaleString('es-AR')}  ${v.patente || '—'}  ${v.velocidad ?? '—'} km/h`);
+        console.log(`#${v.id}  ${fecha(v.recibido_at)}  ${v.patente || '—'}  ${v.velocidad ?? '—'} km/h`);
         console.log(`      ${v.resultado || '(sin procesar)'}`);
       });
       console.log('\nPayload crudo del último (así se ve lo que manda el proveedor):');
