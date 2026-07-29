@@ -306,6 +306,35 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
     }
   }
 
+  // ── Aterrizaje desde una notificación push ──
+  // El service worker abre la app con ?ir=<sección>. Si esto se rompe, tocar la
+  // alerta vuelve a dejar al dueño en Inicio buscando a mano de qué le avisaron
+  // —que es exactamente el problema que el parámetro vino a resolver—, y sin
+  // este chequeo la regresión sería invisible.
+  current = 'deep-link';
+  const antesDeepLink = errors.length;
+  await page.goto(base + '/?ir=flota&tab=feed', { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await page.waitForFunction(
+    () => typeof App !== 'undefined' && App.currentUser && typeof renderPage === 'function',
+    { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1200);   // boot + loadInitialData + render de la sección
+  const deepLink = await page.evaluate(() => ({
+    pagina: typeof App !== 'undefined' ? App.currentPage : null,
+    limpio: location.search === '',
+    // La pestaña del feed se reconoce por su selector de período.
+    enFeed: /Últimas 8 h/.test(document.getElementById('page-flota')?.innerHTML || ''),
+  }));
+  const deepLinkErrs = errors.slice(antesDeepLink).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg));
+  results.push({
+    page: 'deep-link ?ir=flota&tab=feed',
+    thrown: deepLink.pagina === 'flota' ? null : `aterrizó en "${deepLink.pagina}" en vez de "flota"`,
+    asyncErrs: deepLinkErrs,
+    missingOnclick: [
+      ...(deepLink.enFeed ? [] : ['(no abrió la pestaña del feed)']),
+      ...(deepLink.limpio ? [] : ['(no se limpió la query de la URL)']),
+    ],
+  });
+
   await browser.close();
   server.close();
 

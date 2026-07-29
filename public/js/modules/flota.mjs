@@ -176,6 +176,17 @@ function filaEvento(e) {
 
   const lugar = esExceso ? (e.base || '') : (e.lugar || e.base || '');
 
+  // Aviso al chofer: arma el cartel con el logo y lo comparte por el menú del
+  // celular (WhatsApp, etc.). Es la MISMA función que usa el panel del auditor
+  // —compartirExceso, expuesta como global— no una copia: el onclick la resuelve
+  // recién al hacer clic, así que no hay que importar nada ni depende del orden
+  // en que carguen los módulos.
+  const enviar = esExceso
+    ? `<button class="btn btn-secondary btn-sm" style="white-space:nowrap"
+               onclick="compartirExceso('${escapeHtml(e.code || '')}',${e.velocidad_max},'${e.cuando}')"
+               title="Enviar el aviso al chofer">📲 Avisar</button>`
+    : '';
+
   return `
     <div style="display:flex;align-items:flex-start;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border)">
       <div style="min-width:56px;text-align:right">
@@ -189,8 +200,9 @@ function filaEvento(e) {
           ${e.en_curso ? `<span style="font-size:10px;background:${color};color:#fff;border-radius:3px;padding:1px 5px;margin-left:6px">EN CURSO</span>` : ''}
         </div>
         ${lugar ? `<div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(lugar)}</div>` : ''}
+        ${esExceso && e.duracion_min ? `<div style="font-size:11px;color:var(--text3)">duró ${duracion(e.duracion_min)}</div>` : ''}
       </div>
-      ${esExceso && e.duracion_min ? `<div style="font-size:12px;color:var(--text3);white-space:nowrap">${duracion(e.duracion_min)}</div>` : ''}
+      ${enviar}
     </div>`;
 }
 
@@ -244,6 +256,11 @@ async function renderFeed(cont) {
 async function renderFlotaAhora() {
   const root = document.getElementById('page-flota');
   if (!root) return;
+
+  // Si se llegó tocando una notificación push, abrir directo en la pestaña que
+  // pidió. Se consume una sola vez: después el usuario manda con los botones.
+  const nav = window._navParams;
+  if (nav && nav.tab) { _tab = nav.tab === 'feed' ? 'feed' : 'ahora'; delete nav.tab; }
 
   const tabBtn = (id, label) => `
     <button class="btn btn-sm ${_tab === id ? 'btn-primary' : 'btn-secondary'}"

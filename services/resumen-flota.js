@@ -171,7 +171,9 @@ async function generarYEnviarResumen({ force = false } = {}) {
     title: `🚛 Flota ${_hhmm(ahoraAR)}`,
     body:  armarCuerpo(estado, nov),
     tag:   'flota-resumen',
-    url:   '/',
+    // Tocar el resumen abre Control en vivo (pestaña "Ahora"), que es el detalle
+    // de lo que el push resume en dos líneas.
+    url:   '/?ir=flota',
   });
 
   await _marcarEnviado(ahora);

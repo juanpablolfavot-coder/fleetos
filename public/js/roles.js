@@ -344,6 +344,27 @@ function logout() {
   fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
 }
 
+// Sección de aterrizaje: 'home', salvo que la URL traiga ?ir=<sección> y el rol
+// tenga acceso a esa sección. El permiso se chequea acá y no en el service
+// worker porque el SW no sabe quién está logueado: sin esto, un link armado a
+// mano llevaría a cualquiera a cualquier pantalla (igual el backend rechaza,
+// pero mostrar una pantalla vacía o de error es peor que no ir).
+// La query se limpia después de usarla para que un F5 no repita el salto.
+function _destinoInicial() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const ir = q.get('ir');
+    if (!ir) return 'home';
+    // Se guardan los parámetros ANTES de limpiar la URL: la sección de destino
+    // los lee para saber, por ejemplo, en qué pestaña abrir.
+    window._navParams = Object.fromEntries(q.entries());
+    history.replaceState({}, '', location.pathname + location.hash);
+    const rol = getRoleData(App.currentUser?.role);
+    const permitido = rol && (rol.modules.includes(ir) || rol.modules.includes('all'));
+    return permitido ? ir : 'home';
+  } catch (_) { return 'home'; }
+}
+
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
@@ -416,7 +437,10 @@ function bootApp() {
     // Todos aterrizan en la pantalla de Inicio (logo EB, sin datos sensibles).
     // Desde ahí cada uno entra a su sección. El "Panel ejecutivo" (gastos/
     // totales) quedó solo para Dueño/Gerencia.
-    navigate('home');
+    // Excepción: si la URL trae ?ir=<sección>, se aterriza ahí. Es lo que abre
+    // el service worker cuando se toca una notificación push — antes caía en
+    // Inicio y había que buscar a mano de qué avisaba.
+    navigate(_destinoInicial());
 
     // Aviso automático para Compras cuando la cisterna de gasoil queda baja.
     setTimeout(() => {
