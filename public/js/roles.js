@@ -569,6 +569,7 @@ function _mapFuelLog(f) {
     fuel_type:    f.fuel_type || 'diesel',
     liters:       parseFloat(f.liters) || 0,
     km:           f.odometer_km || 0,
+    km_tramo:     (f.km_tramo !== undefined && f.km_tramo !== null) ? parseInt(f.km_tramo, 10) : null,
     ppu:          parseFloat(f.price_per_l) || 0,
     total:        parseFloat(f.liters || 0) * parseFloat(f.price_per_l || 0),
     date:         f.logged_at ? (window.FleetTime?.displayAR(f.logged_at) || String(f.logged_at).slice(0,16).replace('T',' ')) : '—',
