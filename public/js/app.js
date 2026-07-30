@@ -2559,6 +2559,7 @@ function renderFuel() {
           <th>Tipo</th>
           <th onclick="_fuelSortBy('liters')" style="cursor:pointer;user-select:none">Litros <span id="fuel-sort-liters" style="opacity:.3">⇅</span></th>
           <th title="Odómetro (km) para vehículos, horómetro (h) para autoelevadores">Odóm. / Horóm.</th>
+          <th title="Km recorridos desde la carga anterior de la unidad y rendimiento del tramo (solo gasoil)">Rendimiento</th>
           ${_fuelPuedeVerPrecios(App.currentUser?.role) ? `
             <th>Precio/L</th>
             <th onclick="_fuelSortBy('total')" style="cursor:pointer;user-select:none">Total <span id="fuel-sort-total" style="opacity:.3">⇅</span></th>
@@ -11100,7 +11101,7 @@ function printFuelVehicleTicket(logId) {
 // Render de una fila de la tabla de combustible (refactorizada para poder filtrar)
 function _renderFuelLogRows(logs) {
   const verPrecios = _fuelPuedeVerPrecios(App.currentUser?.role);
-  const colspan = verPrecios ? 11 : 9;
+  const colspan = verPrecios ? 12 : 10;
   if (!logs || logs.length === 0) {
     return `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text3);padding:24px">Sin cargas registradas con los filtros actuales</td></tr>`;
   }
@@ -11117,6 +11118,20 @@ function _renderFuelLogRows(logs) {
     <td data-label="Tipo"><span class="badge ${f.fuel_type==='urea'?'badge-info':'badge-ok'}" style="font-size:10px">${f.fuel_type==='urea'?'🔵 Urea':'🟡 Gasoil'}</span></td>
     <td data-label="Litros" class="td-mono">${f.liters || 0} L</td>
     <td data-label="${readLabel}" class="td-mono">${f.km > 0 ? f.km.toLocaleString('es-AR')+' '+readUnit : '—'}</td>
+    <td data-label="Rendimiento" class="td-mono">${(() => {
+      // Rendimiento del tramo: km desde la carga anterior de gasoil ÷ litros de ESTA carga.
+      // Solo gasoil con odómetro; urea y primeras cargas no tienen tramo.
+      if (f.fuel_type === 'urea' || f.km_tramo == null || !(f.liters > 0)) return '—';
+      if (f.km_tramo <= 0) return `<span style="color:var(--danger)" title="El odómetro es menor o igual al de la carga anterior: revisar la lectura">⚠ odóm.</span>`;
+      if (f.km_tramo > 20000) return `<span style="color:var(--warn)" title="Salto de odómetro inusualmente grande: revisar la lectura">⚠ salto</span>`;
+      if (isFork) {
+        const lh = f.liters / f.km_tramo;
+        return `${lh.toFixed(1)} L/h<div style="font-size:10px;color:var(--text3)">${f.km_tramo.toLocaleString('es-AR')} h</div>`;
+      }
+      const kml = f.km_tramo / f.liters;
+      const color = kml >= 3 ? 'var(--ok)' : (kml >= 2 ? 'var(--warn)' : 'var(--danger)');
+      return `<span style="font-weight:600;color:${color}">${kml.toFixed(1)} km/L</span><div style="font-size:10px;color:var(--text3)">${f.km_tramo.toLocaleString('es-AR')} km · ${(f.liters / f.km_tramo * 100).toFixed(1)} L/100km</div>`;
+    })()}</td>
     ${verPrecios ? `
       <td data-label="Precio/L" class="td-mono">$${(f.ppu||0).toLocaleString('es-AR')}</td>
       <td data-label="Total" class="td-mono" style="font-weight:600;color:var(--accent)">$${(f.total||0).toLocaleString('es-AR')}</td>

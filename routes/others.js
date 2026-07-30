@@ -249,9 +249,20 @@ fuelRouter.get('/', authenticate, async (req, res) => {
     const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
     let sql = `SELECT fl.*, v.code AS vehicle_code, v.plate,
         COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,''), u.name) AS driver_name,
-        u.name AS cargado_por
+        u.name AS cargado_por,
+        CASE WHEN prev.odo_prev IS NOT NULL THEN fl.odometer_km - prev.odo_prev END AS km_tramo
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
-      LEFT JOIN users u ON u.id = fl.driver_id WHERE 1=1`;
+      LEFT JOIN users u ON u.id = fl.driver_id
+      LEFT JOIN LATERAL (
+        SELECT p.odometer_km AS odo_prev
+        FROM fuel_logs p
+        WHERE p.vehicle_id = fl.vehicle_id
+          AND COALESCE(LOWER(p.fuel_type),'') <> 'urea'
+          AND p.odometer_km > 0
+          AND (p.logged_at, p.id) < (fl.logged_at, fl.id)
+        ORDER BY p.logged_at DESC, p.id DESC LIMIT 1
+      ) prev ON COALESCE(LOWER(fl.fuel_type),'') <> 'urea' AND fl.odometer_km > 0
+      WHERE 1=1`;
     const params = [];
     const ref = { value: sql };
     if (req.user.role === 'chofer') { params.push(req.user.id); ref.value += ` AND fl.driver_id=$${params.length}`; }
