@@ -1387,11 +1387,20 @@ function showVehicleFicha(id, tab) {
   if (tab === 'fuel') {
     content = vFuel.length
       ? `<div style="margin-bottom:12px;font-size:12px;color:var(--text3)">Últimas ${vFuel.length} cargas registradas para esta unidad.</div>
-         <table><thead><tr><th>Fecha</th><th>Litros</th><th>${isAutoelevador(v)?'Horas':'Odómetro'}</th><th>Precio/L</th><th>Total</th><th>Lugar</th></tr></thead>
+         <table><thead><tr><th>Fecha</th><th>Litros</th><th>${isAutoelevador(v)?'Horas':'Odómetro'}</th><th title="Km (u horas) desde la carga anterior y rendimiento del tramo (solo gasoil)">Rendimiento</th><th>Precio/L</th><th>Total</th><th>Lugar</th></tr></thead>
           <tbody>${vFuel.map(f=>`<tr>
             <td class="td-mono" style="font-size:11px">${f.date}</td>
             <td class="td-mono">${f.liters} L</td>
             <td class="td-mono">${(Number(f.km)||0).toLocaleString('es-AR')} ${vehicleMeasureUnit(v)}</td>
+            <td class="td-mono">${(() => {
+              if (f.fuel_type === 'urea' || f.km_tramo == null || !(f.liters > 0)) return '—';
+              if (f.km_tramo <= 0) return '<span style="color:var(--danger)" title="El odómetro es menor o igual al de la carga anterior: revisar la lectura">⚠ odóm.</span>';
+              if (f.km_tramo > 20000) return '<span style="color:var(--warn)" title="Salto de odómetro inusualmente grande: revisar la lectura">⚠ salto</span>';
+              if (isAutoelevador(v)) return `${(f.liters / f.km_tramo).toFixed(1)} L/h<div style="font-size:10px;color:var(--text3)">${f.km_tramo.toLocaleString('es-AR')} h</div>`;
+              const kml = f.km_tramo / f.liters;
+              const color = kml >= 3 ? 'var(--ok)' : (kml >= 2 ? 'var(--warn)' : 'var(--danger)');
+              return `<span style="font-weight:600;color:${color}">${kml.toFixed(1)} km/L</span><div style="font-size:10px;color:var(--text3)">${f.km_tramo.toLocaleString('es-AR')} km · ${(f.liters / f.km_tramo * 100).toFixed(1)} L/100km</div>`;
+            })()}</td>
             <td class="td-mono">$${f.ppu.toLocaleString()}</td>
             <td class="td-mono">$${f.total.toLocaleString()}</td>
             <td style="color:var(--text3)">${f.place}</td>
