@@ -571,6 +571,9 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
             // solo tramos sanos: positivos y sin saltos absurdos (typos no ensucian el total)
             if (t > 0 && t < 20000) {
               u.km_tramos += t; u.litros_tramos += litros;
+              // Costo APAREADO con los mismos tramos: el $/km debe dividir el costo de
+              // estas cargas por estos km (no el costo total, que incluye cargas sin tramo).
+              u.costo_tramos = (u.costo_tramos || 0) + litros * (parseFloat(row.price_per_l) || 0);
               if (litros > 0) u._l100s.push(litros / t * 100);
             }
           }
@@ -578,22 +581,27 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
         }
       }
       const unidades = [...por.values()].map(u => {
-        // Tramos sospechosos: consumo > 1.5× la mediana propia de la unidad
-        // (se necesita un mínimo de historia para tener línea de base).
-        let sospechosos = 0;
+        // Tramos a revisar contra la mediana propia de la unidad (mínimo de historia):
+        //  · sospechosos: consumo > 1.5× la mediana (posible combustible de más)
+        //  · irreales: consumo < 0.5× la mediana (rendimiento imposible → salto de odómetro)
+        let sospechosos = 0, irreales = 0;
         if (u._l100s.length >= 5) {
           const s = [...u._l100s].sort((a, b) => a - b);
           const med = s[Math.floor(s.length / 2)];
-          if (med > 0) sospechosos = u._l100s.filter(x => x > med * 1.5).length;
+          if (med > 0) {
+            sospechosos = u._l100s.filter(x => x > med * 1.5).length;
+            irreales = u._l100s.filter(x => x < med * 0.5).length;
+          }
         }
         return {
           unidad: u.unidad, base: u.base, es_autoelev: u.es_autoelev, cargas: u.cargas,
           litros: Math.round(u.litros), costo: Math.round(u.costo * 100) / 100,
           respaldo_pct: u.cargas > 0 ? Math.round(u.respaldo / u.cargas * 100) : 0,
-          sospechosos,
+          sospechosos, irreales,
           km_tramos: u.km_tramos, litros_tramos: Math.round(u.litros_tramos),
           km_l: (u.km_tramos > 0 && u.litros_tramos > 0) ? +(u.km_tramos / u.litros_tramos).toFixed(2) : null,
-          costo_km: (u.km_tramos > 0 && u.costo > 0) ? Math.round(u.costo / u.km_tramos) : null,
+          // $/km apareado: costo de las cargas con tramo sano ÷ km de esos tramos.
+          costo_km: (u.km_tramos > 0 && u.costo_tramos > 0) ? Math.round(u.costo_tramos / u.km_tramos) : null,
           desde: u.desde, hasta: u.hasta,
         };
       }).sort((a, b) => a.unidad.localeCompare(b.unidad));
@@ -623,14 +631,20 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
         km_l: (km_tramo != null && km_tramo > 0 && km_tramo < 20000 && litros > 0) ? +(km_tramo / litros).toFixed(2) : null,
       };
     });
-    // Tramos sospechosos: consumo del tramo > 1.5× la mediana propia de la unidad.
+    // Tramos a revisar contra la mediana propia de la unidad:
+    //  · sospechoso: consumo > 1.5× la mediana (posible combustible de más)
+    //  · irreal: consumo < 0.5× la mediana (rendimiento imposible → el odómetro de la
+    //    carga anterior estaba viejo/bajo y el tramo quedó inflado)
     const l100s = cargas.filter(c => c.km_l && c.km_tramo > 0 && c.km_tramo < 20000)
       .map(c => c.litros / c.km_tramo * 100);
     if (l100s.length >= 5) {
       const s = [...l100s].sort((a, b) => a - b);
       const med = s[Math.floor(s.length / 2)];
       if (med > 0) cargas.forEach(c => {
-        if (c.km_l && c.km_tramo > 0 && c.km_tramo < 20000 && (c.litros / c.km_tramo * 100) > med * 1.5) c.sospechoso = true;
+        if (!(c.km_l && c.km_tramo > 0 && c.km_tramo < 20000)) return;
+        const l100 = c.litros / c.km_tramo * 100;
+        if (l100 > med * 1.5) c.sospechoso = true;
+        else if (l100 < med * 0.5) c.irreal = true;
       });
     }
     const esAutoelev = /autoelev/i.test(r.rows[0]?.vtype || '');

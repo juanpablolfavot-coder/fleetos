@@ -1050,9 +1050,9 @@ async function renderAuditorHistorial(el) {
           <th>Unidad</th><th style="text-align:right">Cargas</th><th>Primera</th><th>Última</th>
           <th style="text-align:right">Litros</th><th style="text-align:right">Costo</th>
           <th style="text-align:right">Km (tramos)</th><th style="text-align:right">Rend.</th>
-          <th style="text-align:right">$/km</th>
+          <th style="text-align:right" title="Costo de las cargas con tramo sano ÷ km de esos tramos (numerador y denominador apareados)">$/km</th>
           <th style="text-align:right" title="% de cargas con respaldo: ticket interno de cisterna o foto de ticket">Ticket</th>
-          <th style="text-align:right" title="Tramos con consumo &gt; 1,5× la mediana histórica de la unidad">⚠</th>
+          <th style="text-align:right" title="Tramos a revisar: consumo &gt; 1,5× la mediana de la unidad (posible faltante) o &lt; 0,5× (rendimiento irreal: salto de odómetro)">⚠</th>
         </tr></thead>
         <tbody>${(() => {
           // Agrupar por base, con subtotales por base (rend. sobre tramos sanos).
@@ -1067,7 +1067,7 @@ async function renderAuditorHistorial(el) {
             const cargas = us.reduce((a, u) => a + u.cargas, 0);
             const litros = us.reduce((a, u) => a + u.litros, 0);
             const costo = us.reduce((a, u) => a + (u.costo || 0), 0);
-            const sosp = us.reduce((a, u) => a + (u.sospechosos || 0), 0);
+            const sosp = us.reduce((a, u) => a + (u.sospechosos || 0) + (u.irreales || 0), 0);
             const camiones = us.filter(u => !u.es_autoelev);
             const km = camiones.reduce((a, u) => a + (u.km_tramos || 0), 0);
             const litT = camiones.reduce((a, u) => a + (u.litros_tramos || 0), 0);
@@ -1095,7 +1095,7 @@ async function renderAuditorHistorial(el) {
                 <td class="td-mono" style="text-align:right;font-weight:600">${u.km_l != null ? (u.es_autoelev ? (1 / u.km_l).toFixed(1) + ' L/h' : u.km_l.toFixed(2) + ' km/L') : '—'}</td>
                 <td class="td-mono" style="text-align:right">${u.costo_km != null ? fAr(u.costo_km) : '—'}</td>
                 <td class="td-mono" style="text-align:right;color:${u.respaldo_pct >= 90 ? 'var(--ok)' : (u.respaldo_pct >= 60 ? 'var(--warn)' : 'var(--danger)')}">${u.respaldo_pct}%</td>
-                <td class="td-mono" style="text-align:right;color:${u.sospechosos > 0 ? 'var(--warn)' : 'var(--text3)'}">${u.sospechosos > 0 ? '⚠ ' + u.sospechosos : '—'}</td>
+                <td class="td-mono" style="text-align:right;color:${(u.sospechosos + (u.irreales||0)) > 0 ? 'var(--warn)' : 'var(--text3)'}">${(u.sospechosos + (u.irreales||0)) > 0 ? '⚠ ' + (u.sospechosos + (u.irreales||0)) : '—'}</td>
               </tr>`).join('');
             return header + filas;
           }).join('');
@@ -1103,7 +1103,7 @@ async function renderAuditorHistorial(el) {
       </div>
       <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
         Km (tramos) = suma de los tramos entre cargas con odómetro válido (se descartan retrocesos y saltos &gt; 20.000). Urea excluida.
-        · <b>Ticket</b> = % de cargas con respaldo (ticket interno de cisterna o foto). · <b>⚠</b> = tramos con consumo &gt; 1,5× la mediana histórica de esa unidad.
+        · <b>Ticket</b> = % de cargas con respaldo (ticket interno de cisterna o foto). · <b>⚠</b> = tramos a revisar: consumo &gt; 1,5× la mediana de la unidad (posible faltante) o &lt; 0,5× (rendimiento irreal por salto de odómetro). · <b>Rend. y $/km</b> se calculan solo sobre tramos sanos, con numerador y denominador apareados.
       </div>
     </div>
     <div id="aud-hist-detalle"></div>`;
@@ -1134,7 +1134,8 @@ async function loadAuditorHistorialUnidad(unidad) {
     if (d.es_autoelev) return `${(c.litros / c.km_tramo).toFixed(1)} L/h`;
     if (!c.km_l) return '—';
     const color = c.km_l >= 3 ? 'var(--ok)' : (c.km_l >= 2 ? 'var(--warn)' : 'var(--danger)');
-    const sosp = c.sospechoso ? ` <span title="Consumo &gt; 1,5× la mediana histórica de esta unidad: revisar carga/ticket">⚠</span>` : '';
+    const sosp = c.sospechoso ? ` <span title="Consumo &gt; 1,5× la mediana histórica de esta unidad: revisar carga/ticket">⚠</span>`
+      : (c.irreal ? ` <span style="color:#3b82f6" title="Rendimiento irrealmente bueno (&lt; 0,5× la mediana): probable salto de odómetro — la carga anterior tenía un km viejo">⚠</span>` : '');
     return `<span style="font-weight:600;color:${color}">${c.km_l.toFixed(2)} km/L</span>${sosp}<div style="font-size:10px;color:var(--text3)">${(c.litros / c.km_tramo * 100).toFixed(1)} L/100km</div>`;
   };
   const ticketBadge = c => {
@@ -1159,7 +1160,7 @@ async function loadAuditorHistorialUnidad(unidad) {
           <th>Rendimiento</th><th>Lugar</th><th>Chofer</th><th>Ticket</th>
         </tr></thead>
         <tbody>${cargas.map((c, i) => `
-          <tr${c.sospechoso ? ' style="background:rgba(245,158,11,.07)"' : ''}>
+          <tr${c.sospechoso ? ' style="background:rgba(245,158,11,.07)"' : (c.irreal ? ' style="background:rgba(59,130,246,.06)"' : '')}>
             <td class="td-mono" style="color:var(--text3)">${i + 1}</td>
             <td class="td-mono" style="font-size:11px">${fechaHora(c.fecha)}</td>
             <td class="td-mono" style="text-align:right">${fmt(c.litros)} L</td>
@@ -1172,6 +1173,26 @@ async function loadAuditorHistorialUnidad(unidad) {
             <td>${ticketBadge(c)}</td>
           </tr>`).join('')}</tbody></table>
       </div>
+      ${(() => {
+        // Totales ROTULADOS con numeradores y denominadores apareados (auditoría CALC-01):
+        // los tramos con ⚠ no entran al rendimiento, y se muestra también la diferencia
+        // primer→último odómetro para que ninguna cifra quede implícita.
+        const litrosTotal = cargas.reduce((a, c) => a + (c.litros || 0), 0);
+        const costoTotal = cargas.reduce((a, c) => a + (c.costo || 0), 0);
+        let kmS = 0, litS = 0, cosS = 0;
+        cargas.forEach(c => { if (c.km_tramo > 0 && c.km_tramo < 20000) { kmS += c.km_tramo; litS += c.litros || 0; cosS += c.costo || 0; } });
+        const odos = cargas.filter(c => c.odometro > 0).map(c => c.odometro);
+        const delta = odos.length >= 2 ? odos[odos.length - 1] - odos[0] : null;
+        const nAlertas = cargas.filter(c => c.sospechoso || c.irreal || (c.km_tramo != null && (c.km_tramo <= 0 || c.km_tramo >= 20000))).length;
+        return `<div style="padding:10px 14px;font-size:11.5px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 18px">
+          <span><b>Total cargado:</b> ${fmt(litrosTotal)} L · ${fAr(costoTotal)}</span>
+          <span><b>Σ tramos sanos:</b> ${kmS > 0 ? '+' + fmt(kmS) + ' ' + unit : '—'} <span style="color:var(--text3)">(${fmt(litS)} L · ${fAr(cosS)})</span></span>
+          <span><b>Δ primer→último odómetro:</b> ${delta != null ? fmt(delta) + ' ' + unit : '—'}</span>
+          <span><b>Rendimiento (tramos sanos):</b> ${(kmS > 0 && litS > 0) ? (d.es_autoelev ? (litS / kmS).toFixed(1) + ' L/h' : (kmS / litS).toFixed(2) + ' km/L · ' + (litS / kmS * 100).toFixed(1) + ' L/100km') : '—'}</span>
+          <span><b>$/km (apareado):</b> ${(kmS > 0 && cosS > 0) ? fAr(cosS / kmS) + '/' + unit : '—'}</span>
+          ${nAlertas > 0 ? `<span style="color:var(--warn)"><b>⚠ ${nAlertas} carga${nAlertas !== 1 ? 's' : ''} fuera del cálculo o a revisar</b></span>` : ''}
+        </div>`;
+      })()}
     </div>`;
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1201,7 +1222,7 @@ function exportHistorialPDF() {
     c.costo != null ? fAr(c.costo) : '—',
     c.odometro ? fmt(c.odometro) + ' ' + unit : '—',
     c.km_tramo != null ? (c.km_tramo > 0 ? '+' : '') + fmt(c.km_tramo) : '—',
-    rend(c) + (c.sospechoso ? ' ⚠' : ''),
+    rend(c) + (c.sospechoso ? ' ⚠ alto' : (c.irreal ? ' ⚠ irreal' : '')),
     (!_hist.es_autoelev && c.km_l != null && c.km_tramo > 0 && c.km_tramo <= 20000) ? (c.litros / c.km_tramo * 100).toFixed(1) : '—',
     c.lugar || '—', c.chofer || '—',
     c.respaldo || '—',
@@ -1211,7 +1232,8 @@ function exportHistorialPDF() {
   const costoTotal = _hist.cargas.reduce((a, c) => a + (c.costo || 0), 0);
   let kmSanos = 0, litrosSanos = 0;
   _hist.cargas.forEach(c => { if (c.km_tramo > 0 && c.km_tramo <= 20000) { kmSanos += c.km_tramo; litrosSanos += c.litros || 0; } });
-  const nSosp = _hist.cargas.filter(c => c.sospechoso).length;
+  const costoSanos = (() => { let s = 0; _hist.cargas.forEach(c => { if (c.km_tramo > 0 && c.km_tramo <= 20000) s += c.costo || 0; }); return s; })();
+  const nSosp = _hist.cargas.filter(c => c.sospechoso || c.irreal).length;
   const style = window._pdfTableStyle ? window._pdfTableStyle() : {};
   doc.autoTable({
     startY,
@@ -1224,10 +1246,19 @@ function exportHistorialPDF() {
       kmSanos > 0 ? '+' + fmt(kmSanos) : '—',
       (kmSanos > 0 && litrosSanos > 0) ? (_hist.es_autoelev ? (litrosSanos / kmSanos).toFixed(1) + ' L/h' : (kmSanos / litrosSanos).toFixed(2) + ' km/L') : '—',
       (kmSanos > 0 && litrosSanos > 0 && !_hist.es_autoelev) ? (litrosSanos / kmSanos * 100).toFixed(1) : '—',
-      (kmSanos > 0 && costoTotal > 0) ? fAr(costoTotal / kmSanos) + '/' + unit : 'tramos sanos',
+      (kmSanos > 0 && costoSanos > 0) ? fAr(costoSanos / kmSanos) + '/' + unit : 'tramos sanos',
       nSosp > 0 ? nSosp + ' ⚠' : '', '',
     ]],
   });
+  try {
+    const odos = _hist.cargas.filter(c => c.odometro > 0).map(c => c.odometro);
+    const delta = odos.length >= 2 ? odos[odos.length - 1] - odos[0] : null;
+    const y = (doc.lastAutoTable?.finalY || 500) + 14;
+    doc.setFontSize(8); doc.setTextColor(100);
+    doc.text(`Los totales de rendimiento y $/km usan SOLO tramos sanos (sin alertas): ${fmt(kmSanos)} ${unit} / ${fmt(litrosSanos)} L / ${fAr(costoSanos)}. ` +
+      `Total cargado (todas las cargas): ${fmt(litrosTotal)} L / ${fAr(costoTotal)}. ` +
+      (delta != null ? `Diferencia primer-ultimo odometro: ${fmt(delta)} ${unit}.` : ''), 40, y, { maxWidth: 760 });
+  } catch (_) {}
   doc.save(`Historial-cargas-${_hist.unidad}-Biletta.pdf`);
   window.showToast?.('ok', 'PDF descargado');
 }
