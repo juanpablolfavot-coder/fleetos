@@ -109,9 +109,13 @@ const FIXES = [
     }
 
     // ── CHEQUEO INFORMATIVO: cargas del 01-04/06 en el sistema ─────────────────
-    // La planilla del 02-06/06 registra ~15 cargas de camiones (~5.700 L) fechadas
-    // 02-04/06 (AF931PD 622, AH327SG 525, AD235FE 601, AH462JI 500, AD644VD 601,
-    // AG468LQ 554, AH327SA 510, AH327RZ 509, AH327SB 493, AF614LB 239, etc.).
+    // Las planillas (páginas 30/05-02/06 y 02-06/06) registran ~24 cargas de
+    // camiones (~8.100 L) fechadas 01-04/06 que el lote tipeado el 05-06/06 NO
+    // cubrió: 1-2/06 → AH462JI 340, AD644VD 473, AD235FE 100, AH327SB 460,
+    // AH327RZ 439, AF614LB 450, AH035AO 107, AG470AG 68, AH035AN 120, AF823RB 30;
+    // 3/06 → AF931PD 622, AH327SG 525, AD235FE 601, AH462JI 500, AH327AU 164,
+    // AF614LB 239; 4/06 → AD644VD 601, AG468LQ 554, AH327SA 510, AH327RZ 509,
+    // AG470AG 142, AH327SB 493, AH327AU 70.
     // Si acá aparece mucho menos que eso, esas cargas NUNCA se tipearon al sistema
     // y hay que cargarlas (afecta litros y costo de junio, no solo km).
     const early = await client.query(
@@ -122,9 +126,9 @@ const FIXES = [
     const e = early.rows[0];
     console.log(`\n=== CHEQUEO: cargas de gasoil con fecha 01-04/06 en el sistema ===`);
     console.log(`   ${e.n} carga(s) · ${Math.round(e.litros).toLocaleString('es-AR')} L`);
-    console.log(e.n < 10
-      ? `   ⚠ La planilla registra ~15 cargas (~5.700 L) el 02-04/06: faltan tipear. Revisar la planilla del 02-06/06.`
-      : `   ✓ Consistente con la planilla del 02-06/06.`);
+    console.log(e.n < 15
+      ? `   ⚠ Las planillas registran ~24 cargas (~8.100 L) el 01-04/06: faltan tipear. Ver planillas 30/05-06/06.`
+      : `   ✓ Consistente con las planillas del 01-04/06.`);
 
     if (APPLY) { await client.query('COMMIT'); console.log(`\n✅ ${hechas} lectura(s) corregida(s) · ${salteadas} salteada(s).\n`); }
     else { await client.query('ROLLBACK'); console.log(`\n🔎 SIMULACIÓN: ${hechas} a corregir · ${salteadas} salteada(s). No se guardó nada — si está OK, corré con --apply.\n`); }
