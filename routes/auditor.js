@@ -535,6 +535,71 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
   } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// ── 6b. Historial de cargas por unidad (auditoría general) ──────────
+// Sin ?unidad → resumen por unidad (cargas, período, litros, km por tramos, km/L).
+// Con ?unidad=CODE → TODAS las cargas de gasoil de esa unidad, de la primera a la
+// última, con km del tramo desde la carga anterior y rendimiento por tramo.
+auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) => {
+  try {
+    const unidad = String(req.query.unidad || '').trim().toUpperCase();
+    const base = `
+      SELECT COALESCE(v.code, v.plate) AS unidad, v.type AS vtype, fl.id, fl.logged_at,
+             fl.liters, fl.price_per_l, fl.odometer_km, fl.location,
+             COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,'')) AS chofer
+      FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+      WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea'`;
+
+    if (!unidad) {
+      // Resumen: se computa por tramos en JS (pocos miles de filas, orden asc).
+      const r = await query(base + ` ORDER BY COALESCE(v.code, v.plate), fl.logged_at, fl.id`);
+      const por = new Map();
+      for (const row of r.rows) {
+        if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, es_autoelev: /autoelev/i.test(row.vtype || ''), cargas: 0, litros: 0, km_tramos: 0, litros_tramos: 0, desde: row.logged_at, hasta: row.logged_at, _odoPrev: null });
+        const u = por.get(row.unidad);
+        u.cargas++; u.litros += parseFloat(row.liters) || 0; u.hasta = row.logged_at;
+        const odo = parseInt(row.odometer_km, 10) || 0;
+        if (odo > 0) {
+          if (u._odoPrev != null) {
+            const t = odo - u._odoPrev;
+            // solo tramos sanos: positivos y sin saltos absurdos (typos no ensucian el total)
+            if (t > 0 && t < 20000) { u.km_tramos += t; u.litros_tramos += parseFloat(row.liters) || 0; }
+          }
+          u._odoPrev = odo;
+        }
+      }
+      const unidades = [...por.values()].map(u => ({
+        unidad: u.unidad, es_autoelev: u.es_autoelev, cargas: u.cargas,
+        litros: Math.round(u.litros), km_tramos: u.km_tramos,
+        km_l: (u.km_tramos > 0 && u.litros_tramos > 0) ? +(u.km_tramos / u.litros_tramos).toFixed(2) : null,
+        desde: u.desde, hasta: u.hasta,
+      })).sort((a, b) => a.unidad.localeCompare(b.unidad));
+      return res.json({ unidades });
+    }
+
+    const params = [unidad];
+    const r = await query(base + ` AND COALESCE(v.code, v.plate) = $1 ORDER BY fl.logged_at, fl.id`, params);
+    let odoPrev = null;
+    const cargas = r.rows.map(row => {
+      const odo = parseInt(row.odometer_km, 10) || 0;
+      let km_tramo = null;
+      if (odo > 0) {
+        if (odoPrev != null) km_tramo = odo - odoPrev;
+        odoPrev = odo;
+      }
+      const litros = parseFloat(row.liters) || 0;
+      return {
+        id: row.id, fecha: row.logged_at, litros,
+        precio: parseFloat(row.price_per_l) || null,
+        odometro: odo || null, lugar: row.location || null, chofer: row.chofer || null,
+        km_tramo,
+        km_l: (km_tramo != null && km_tramo > 0 && km_tramo < 20000 && litros > 0) ? +(km_tramo / litros).toFixed(2) : null,
+      };
+    });
+    const esAutoelev = /autoelev/i.test(r.rows[0]?.vtype || '');
+    res.json({ unidad, es_autoelev: esAutoelev, cargas });
+  } catch (err) { console.error('[auditor historial-cargas]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
 // ── 7. Uso de flota (heatmap de actividad por vehículo × día) ──
 // Devuelve: array de vehículos con array de días (1..31) indicando nivel de actividad
 // Fuentes combinadas: checklists + fuel_logs + work_orders (cualquier actividad cuenta)
