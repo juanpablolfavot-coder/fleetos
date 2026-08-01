@@ -1048,7 +1048,11 @@ async function renderAuditorHistorial(el) {
       <div class="table-wrap">
         <table><thead><tr>
           <th>Unidad</th><th style="text-align:right">Cargas</th><th>Primera</th><th>Última</th>
-          <th style="text-align:right">Litros</th><th style="text-align:right">Km (tramos)</th><th style="text-align:right">Rend.</th>
+          <th style="text-align:right">Litros</th><th style="text-align:right">Costo</th>
+          <th style="text-align:right">Km (tramos)</th><th style="text-align:right">Rend.</th>
+          <th style="text-align:right">$/km</th>
+          <th style="text-align:right" title="% de cargas con respaldo: ticket interno de cisterna o foto de ticket">Ticket</th>
+          <th style="text-align:right" title="Tramos con consumo &gt; 1,5× la mediana histórica de la unidad">⚠</th>
         </tr></thead>
         <tbody>${(() => {
           // Agrupar por base, con subtotales por base (rend. sobre tramos sanos).
@@ -1058,9 +1062,12 @@ async function renderAuditorHistorial(el) {
             if (!grupos.has(b)) grupos.set(b, []);
             grupos.get(b).push(u);
           });
+          const fAr = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
           return [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([baseNombre, us]) => {
             const cargas = us.reduce((a, u) => a + u.cargas, 0);
             const litros = us.reduce((a, u) => a + u.litros, 0);
+            const costo = us.reduce((a, u) => a + (u.costo || 0), 0);
+            const sosp = us.reduce((a, u) => a + (u.sospechosos || 0), 0);
             const camiones = us.filter(u => !u.es_autoelev);
             const km = camiones.reduce((a, u) => a + (u.km_tramos || 0), 0);
             const litT = camiones.reduce((a, u) => a + (u.litros_tramos || 0), 0);
@@ -1069,8 +1076,12 @@ async function renderAuditorHistorial(el) {
               <tr style="background:var(--bg2, rgba(59,130,246,.06))">
                 <td colspan="4" style="font-weight:700;font-size:12px;padding:8px 12px">📍 ${escapeHtml(baseNombre)} <span style="font-weight:400;color:var(--text3)">· ${us.length} unidad${us.length !== 1 ? 'es' : ''} · ${cargas} cargas</span></td>
                 <td class="td-mono" style="text-align:right;font-weight:700">${fmt(litros)} L</td>
+                <td class="td-mono" style="text-align:right;font-weight:700">${fAr(costo)}</td>
                 <td class="td-mono" style="text-align:right;font-weight:700">${km > 0 ? fmt(km) + ' km' : '—'}</td>
                 <td class="td-mono" style="text-align:right;font-weight:700">${rend}</td>
+                <td class="td-mono" style="text-align:right;font-weight:700">${(km > 0 && costo > 0) ? fAr(costo / km) : '—'}</td>
+                <td></td>
+                <td class="td-mono" style="text-align:right;font-weight:700;color:${sosp > 0 ? 'var(--warn)' : 'var(--text3)'}">${sosp > 0 ? '⚠ ' + sosp : '—'}</td>
               </tr>`;
             const filas = us.map(u => `
               <tr onclick="loadAuditorHistorialUnidad('${escapeHtml(u.unidad)}')" style="cursor:pointer">
@@ -1079,8 +1090,12 @@ async function renderAuditorHistorial(el) {
                 <td class="td-mono" style="font-size:11px">${fecha(u.desde)}</td>
                 <td class="td-mono" style="font-size:11px">${fecha(u.hasta)}</td>
                 <td class="td-mono" style="text-align:right">${fmt(u.litros)} L</td>
+                <td class="td-mono" style="text-align:right">${u.costo > 0 ? fAr(u.costo) : '—'}</td>
                 <td class="td-mono" style="text-align:right">${u.km_tramos > 0 ? fmt(u.km_tramos) + (u.es_autoelev ? ' h' : ' km') : '—'}</td>
                 <td class="td-mono" style="text-align:right;font-weight:600">${u.km_l != null ? (u.es_autoelev ? (1 / u.km_l).toFixed(1) + ' L/h' : u.km_l.toFixed(2) + ' km/L') : '—'}</td>
+                <td class="td-mono" style="text-align:right">${u.costo_km != null ? fAr(u.costo_km) : '—'}</td>
+                <td class="td-mono" style="text-align:right;color:${u.respaldo_pct >= 90 ? 'var(--ok)' : (u.respaldo_pct >= 60 ? 'var(--warn)' : 'var(--danger)')}">${u.respaldo_pct}%</td>
+                <td class="td-mono" style="text-align:right;color:${u.sospechosos > 0 ? 'var(--warn)' : 'var(--text3)'}">${u.sospechosos > 0 ? '⚠ ' + u.sospechosos : '—'}</td>
               </tr>`).join('');
             return header + filas;
           }).join('');
@@ -1088,6 +1103,7 @@ async function renderAuditorHistorial(el) {
       </div>
       <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
         Km (tramos) = suma de los tramos entre cargas con odómetro válido (se descartan retrocesos y saltos &gt; 20.000). Urea excluida.
+        · <b>Ticket</b> = % de cargas con respaldo (ticket interno de cisterna o foto). · <b>⚠</b> = tramos con consumo &gt; 1,5× la mediana histórica de esa unidad.
       </div>
     </div>
     <div id="aud-hist-detalle"></div>`;
@@ -1118,8 +1134,16 @@ async function loadAuditorHistorialUnidad(unidad) {
     if (d.es_autoelev) return `${(c.litros / c.km_tramo).toFixed(1)} L/h`;
     if (!c.km_l) return '—';
     const color = c.km_l >= 3 ? 'var(--ok)' : (c.km_l >= 2 ? 'var(--warn)' : 'var(--danger)');
-    return `<span style="font-weight:600;color:${color}">${c.km_l.toFixed(2)} km/L</span><div style="font-size:10px;color:var(--text3)">${(c.litros / c.km_tramo * 100).toFixed(1)} L/100km</div>`;
+    const sosp = c.sospechoso ? ` <span title="Consumo &gt; 1,5× la mediana histórica de esta unidad: revisar carga/ticket">⚠</span>` : '';
+    return `<span style="font-weight:600;color:${color}">${c.km_l.toFixed(2)} km/L</span>${sosp}<div style="font-size:10px;color:var(--text3)">${(c.litros / c.km_tramo * 100).toFixed(1)} L/100km</div>`;
   };
+  const ticketBadge = c => {
+    if (c.respaldo === 'interno') return `<span class="badge badge-info" style="font-size:10px">interno</span>`;
+    if (c.respaldo === 'sin ticket') return `<span style="color:var(--danger);font-size:11px">sin ticket</span>`;
+    const cls = c.respaldo === 'verificado' ? 'badge-ok' : (c.respaldo === 'observado' || c.respaldo === 'rechazado' ? 'badge-danger' : 'badge-warn');
+    return `<span class="badge ${cls}" style="font-size:10px">${escapeHtml(c.respaldo)}</span>`;
+  };
+  const fAr = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
   box.innerHTML = `
     <div class="card" style="padding:0">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 20px 10px;border-bottom:1px solid var(--border2);flex-wrap:wrap">
@@ -1129,20 +1153,23 @@ async function loadAuditorHistorialUnidad(unidad) {
       <div class="table-wrap">
         <table><thead><tr>
           <th>#</th><th>Fecha</th><th style="text-align:right">Litros</th>
+          <th style="text-align:right">Costo</th>
           <th style="text-align:right">${d.es_autoelev ? 'Horómetro' : 'Odómetro'}</th>
           <th style="text-align:right">${d.es_autoelev ? 'Hs tramo' : 'Km tramo'}</th>
-          <th>Rendimiento</th><th>Lugar</th><th>Chofer</th>
+          <th>Rendimiento</th><th>Lugar</th><th>Chofer</th><th>Ticket</th>
         </tr></thead>
         <tbody>${cargas.map((c, i) => `
-          <tr>
+          <tr${c.sospechoso ? ' style="background:rgba(245,158,11,.07)"' : ''}>
             <td class="td-mono" style="color:var(--text3)">${i + 1}</td>
             <td class="td-mono" style="font-size:11px">${fechaHora(c.fecha)}</td>
             <td class="td-mono" style="text-align:right">${fmt(c.litros)} L</td>
+            <td class="td-mono" style="text-align:right">${c.costo != null ? fAr(c.costo) : '—'}${(c.costo != null && c.km_tramo > 0 && c.km_tramo <= 20000) ? `<div style="font-size:10px;color:var(--text3)">${fAr(c.costo / c.km_tramo)}/${unit}</div>` : ''}</td>
             <td class="td-mono" style="text-align:right">${c.odometro ? fmt(c.odometro) + ' ' + unit : '—'}</td>
             <td class="td-mono" style="text-align:right">${c.km_tramo != null ? (c.km_tramo > 0 ? '+' : '') + fmt(c.km_tramo) : '—'}</td>
             <td class="td-mono">${rendCell(c)}</td>
             <td style="color:var(--text3);font-size:12px">${escapeHtml(c.lugar || '—')}</td>
-            <td style="font-size:12px">${escapeHtml(c.chofer || '—')}</td>
+            <td style="font-size:12px">${escapeHtml(c.chofer || '—')}${c.cargado_por && c.cargado_por !== c.chofer ? `<div style="font-size:10px;color:var(--text3)">cargó: ${escapeHtml(c.cargado_por)}</div>` : ''}</td>
+            <td>${ticketBadge(c)}</td>
           </tr>`).join('')}</tbody></table>
       </div>
     </div>`;
@@ -1168,31 +1195,37 @@ function exportHistorialPDF() {
     if (_hist.es_autoelev) return (c.litros / c.km_tramo).toFixed(1) + ' L/h';
     return c.km_l != null ? c.km_l.toFixed(2) + ' km/L' : '—';
   };
+  const fAr = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
   const body = _hist.cargas.map((c, i) => [
     String(i + 1), fechaHora(c.fecha), fmt(c.litros) + ' L',
+    c.costo != null ? fAr(c.costo) : '—',
     c.odometro ? fmt(c.odometro) + ' ' + unit : '—',
     c.km_tramo != null ? (c.km_tramo > 0 ? '+' : '') + fmt(c.km_tramo) : '—',
-    rend(c),
+    rend(c) + (c.sospechoso ? ' ⚠' : ''),
     (!_hist.es_autoelev && c.km_l != null && c.km_tramo > 0 && c.km_tramo <= 20000) ? (c.litros / c.km_tramo * 100).toFixed(1) : '—',
     c.lugar || '—', c.chofer || '—',
+    c.respaldo || '—',
   ]);
-  // Totales: litros de todo el historial + km/L global sobre tramos sanos.
+  // Totales: litros y costo de todo el historial + km/L y $/km sobre tramos sanos.
   const litrosTotal = _hist.cargas.reduce((a, c) => a + (c.litros || 0), 0);
+  const costoTotal = _hist.cargas.reduce((a, c) => a + (c.costo || 0), 0);
   let kmSanos = 0, litrosSanos = 0;
   _hist.cargas.forEach(c => { if (c.km_tramo > 0 && c.km_tramo <= 20000) { kmSanos += c.km_tramo; litrosSanos += c.litros || 0; } });
+  const nSosp = _hist.cargas.filter(c => c.sospechoso).length;
   const style = window._pdfTableStyle ? window._pdfTableStyle() : {};
   doc.autoTable({
     startY,
-    head: [['#', 'Fecha', 'Litros', _hist.es_autoelev ? 'Horómetro' : 'Odómetro', (_hist.es_autoelev ? 'Hs' : 'Km') + ' tramo', 'Rendimiento', 'L/100km', 'Lugar', 'Chofer']],
+    head: [['#', 'Fecha', 'Litros', 'Costo', _hist.es_autoelev ? 'Horómetro' : 'Odómetro', (_hist.es_autoelev ? 'Hs' : 'Km') + ' tramo', 'Rendimiento', 'L/100km', 'Lugar', 'Chofer', 'Ticket']],
     body,
     ...style,
-    columnStyles: { 0:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'} },
+    columnStyles: { 0:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'} },
     foot: [[
-      '', 'TOTAL', fmt(litrosTotal) + ' L', '',
+      '', 'TOTAL', fmt(litrosTotal) + ' L', fAr(costoTotal), '',
       kmSanos > 0 ? '+' + fmt(kmSanos) : '—',
       (kmSanos > 0 && litrosSanos > 0) ? (_hist.es_autoelev ? (litrosSanos / kmSanos).toFixed(1) + ' L/h' : (kmSanos / litrosSanos).toFixed(2) + ' km/L') : '—',
       (kmSanos > 0 && litrosSanos > 0 && !_hist.es_autoelev) ? (litrosSanos / kmSanos * 100).toFixed(1) : '—',
-      'tramos sanos (sin ⚠)', '',
+      (kmSanos > 0 && costoTotal > 0) ? fAr(costoTotal / kmSanos) + '/' + unit : 'tramos sanos',
+      nSosp > 0 ? nSosp + ' ⚠' : '', '',
     ]],
   });
   doc.save(`Historial-cargas-${_hist.unidad}-Biletta.pdf`);
