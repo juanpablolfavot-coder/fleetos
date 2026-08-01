@@ -1050,16 +1050,41 @@ async function renderAuditorHistorial(el) {
           <th>Unidad</th><th style="text-align:right">Cargas</th><th>Primera</th><th>Última</th>
           <th style="text-align:right">Litros</th><th style="text-align:right">Km (tramos)</th><th style="text-align:right">Rend.</th>
         </tr></thead>
-        <tbody>${unidades.map(u => `
-          <tr onclick="loadAuditorHistorialUnidad('${escapeHtml(u.unidad)}')" style="cursor:pointer">
-            <td class="td-mono" style="font-weight:600;color:var(--accent)">${escapeHtml(u.unidad)}</td>
-            <td class="td-mono" style="text-align:right">${u.cargas}</td>
-            <td class="td-mono" style="font-size:11px">${fecha(u.desde)}</td>
-            <td class="td-mono" style="font-size:11px">${fecha(u.hasta)}</td>
-            <td class="td-mono" style="text-align:right">${fmt(u.litros)} L</td>
-            <td class="td-mono" style="text-align:right">${u.km_tramos > 0 ? fmt(u.km_tramos) + (u.es_autoelev ? ' h' : ' km') : '—'}</td>
-            <td class="td-mono" style="text-align:right;font-weight:600">${u.km_l != null ? (u.es_autoelev ? (1 / u.km_l).toFixed(1) + ' L/h' : u.km_l.toFixed(2) + ' km/L') : '—'}</td>
-          </tr>`).join('')}</tbody></table>
+        <tbody>${(() => {
+          // Agrupar por base, con subtotales por base (rend. sobre tramos sanos).
+          const grupos = new Map();
+          unidades.forEach(u => {
+            const b = u.base || 'Sin base';
+            if (!grupos.has(b)) grupos.set(b, []);
+            grupos.get(b).push(u);
+          });
+          return [...grupos.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([baseNombre, us]) => {
+            const cargas = us.reduce((a, u) => a + u.cargas, 0);
+            const litros = us.reduce((a, u) => a + u.litros, 0);
+            const camiones = us.filter(u => !u.es_autoelev);
+            const km = camiones.reduce((a, u) => a + (u.km_tramos || 0), 0);
+            const litT = camiones.reduce((a, u) => a + (u.litros_tramos || 0), 0);
+            const rend = (km > 0 && litT > 0) ? (km / litT).toFixed(2) + ' km/L' : '—';
+            const header = `
+              <tr style="background:var(--bg2, rgba(59,130,246,.06))">
+                <td colspan="4" style="font-weight:700;font-size:12px;padding:8px 12px">📍 ${escapeHtml(baseNombre)} <span style="font-weight:400;color:var(--text3)">· ${us.length} unidad${us.length !== 1 ? 'es' : ''} · ${cargas} cargas</span></td>
+                <td class="td-mono" style="text-align:right;font-weight:700">${fmt(litros)} L</td>
+                <td class="td-mono" style="text-align:right;font-weight:700">${km > 0 ? fmt(km) + ' km' : '—'}</td>
+                <td class="td-mono" style="text-align:right;font-weight:700">${rend}</td>
+              </tr>`;
+            const filas = us.map(u => `
+              <tr onclick="loadAuditorHistorialUnidad('${escapeHtml(u.unidad)}')" style="cursor:pointer">
+                <td class="td-mono" style="font-weight:600;color:var(--accent);padding-left:24px">${escapeHtml(u.unidad)}${u.es_autoelev ? ' <span style="font-size:10px;color:var(--text3)">(hs)</span>' : ''}</td>
+                <td class="td-mono" style="text-align:right">${u.cargas}</td>
+                <td class="td-mono" style="font-size:11px">${fecha(u.desde)}</td>
+                <td class="td-mono" style="font-size:11px">${fecha(u.hasta)}</td>
+                <td class="td-mono" style="text-align:right">${fmt(u.litros)} L</td>
+                <td class="td-mono" style="text-align:right">${u.km_tramos > 0 ? fmt(u.km_tramos) + (u.es_autoelev ? ' h' : ' km') : '—'}</td>
+                <td class="td-mono" style="text-align:right;font-weight:600">${u.km_l != null ? (u.es_autoelev ? (1 / u.km_l).toFixed(1) + ' L/h' : u.km_l.toFixed(2) + ' km/L') : '—'}</td>
+              </tr>`).join('');
+            return header + filas;
+          }).join('');
+        })()}</tbody></table>
       </div>
       <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
         Km (tramos) = suma de los tramos entre cargas con odómetro válido (se descartan retrocesos y saltos &gt; 20.000). Urea excluida.

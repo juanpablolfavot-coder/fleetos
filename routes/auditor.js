@@ -543,7 +543,7 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
   try {
     const unidad = String(req.query.unidad || '').trim().toUpperCase();
     const base = `
-      SELECT COALESCE(v.code, v.plate) AS unidad, v.type AS vtype, fl.id, fl.logged_at,
+      SELECT COALESCE(v.code, v.plate) AS unidad, v.type AS vtype, v.base AS vbase, fl.id, fl.logged_at,
              fl.liters, fl.price_per_l, fl.odometer_km, fl.location,
              COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,'')) AS chofer
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
@@ -554,7 +554,7 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
       const r = await query(base + ` ORDER BY COALESCE(v.code, v.plate), fl.logged_at, fl.id`);
       const por = new Map();
       for (const row of r.rows) {
-        if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, es_autoelev: /autoelev/i.test(row.vtype || ''), cargas: 0, litros: 0, km_tramos: 0, litros_tramos: 0, desde: row.logged_at, hasta: row.logged_at, _odoPrev: null });
+        if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.vbase || null, es_autoelev: /autoelev/i.test(row.vtype || ''), cargas: 0, litros: 0, km_tramos: 0, litros_tramos: 0, desde: row.logged_at, hasta: row.logged_at, _odoPrev: null });
         const u = por.get(row.unidad);
         u.cargas++; u.litros += parseFloat(row.liters) || 0; u.hasta = row.logged_at;
         const odo = parseInt(row.odometer_km, 10) || 0;
@@ -568,8 +568,8 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
         }
       }
       const unidades = [...por.values()].map(u => ({
-        unidad: u.unidad, es_autoelev: u.es_autoelev, cargas: u.cargas,
-        litros: Math.round(u.litros), km_tramos: u.km_tramos,
+        unidad: u.unidad, base: u.base, es_autoelev: u.es_autoelev, cargas: u.cargas,
+        litros: Math.round(u.litros), km_tramos: u.km_tramos, litros_tramos: Math.round(u.litros_tramos),
         km_l: (u.km_tramos > 0 && u.litros_tramos > 0) ? +(u.km_tramos / u.litros_tramos).toFixed(2) : null,
         desde: u.desde, hasta: u.hasta,
       })).sort((a, b) => a.unidad.localeCompare(b.unidad));
