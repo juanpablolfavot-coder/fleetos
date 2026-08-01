@@ -1068,6 +1068,9 @@ async function renderAuditorHistorial(el) {
     <div id="aud-hist-detalle"></div>`;
 }
 
+// Última unidad cargada en la solapa (para exportar a PDF sin re-pedir).
+let _hist = { unidad: null, es_autoelev: false, cargas: [] };
+
 async function loadAuditorHistorialUnidad(unidad) {
   if (!unidad) return;
   const sel = document.getElementById('aud-hist-unidad');
@@ -1079,6 +1082,7 @@ async function loadAuditorHistorialUnidad(unidad) {
   if (!res.ok) { box.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ${escapeHtml(unidad)}</div>`; return; }
   const d = await res.json();
   const cargas = d.cargas || [];
+  _hist = { unidad: d.unidad || unidad, es_autoelev: !!d.es_autoelev, cargas };
   const unit = d.es_autoelev ? 'h' : 'km';
   const fmt = n => Math.round(n || 0).toLocaleString('es-AR');
   const fechaHora = ts => ts ? String(ts).replace('T', ' ').slice(0, 16) : '—';
@@ -1093,8 +1097,9 @@ async function loadAuditorHistorialUnidad(unidad) {
   };
   box.innerHTML = `
     <div class="card" style="padding:0">
-      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 20px 10px;border-bottom:1px solid var(--border2);flex-wrap:wrap">
         <div class="card-title" style="margin:0">${escapeHtml(unidad)} — ${cargas.length} cargas de gasoil (primera → última)</div>
+        <button class="btn btn-secondary btn-sm" onclick="exportHistorialPDF()">📄 Exportar PDF</button>
       </div>
       <div class="table-wrap">
         <table><thead><tr>
@@ -1117,6 +1122,56 @@ async function loadAuditorHistorialUnidad(unidad) {
       </div>
     </div>`;
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Exporta a PDF el historial de la unidad actualmente cargada en la solapa.
+function exportHistorialPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { window.showToast?.('error', 'jsPDF no cargado. Refrescá la página.'); return; }
+  if (!_hist.unidad || !_hist.cargas.length) { window.showToast?.('warn', 'Elegí una unidad primero'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const unit = _hist.es_autoelev ? 'h' : 'km';
+  const startY = (window._pdfHeader
+    ? window._pdfHeader(doc, `Historial de cargas — ${_hist.unidad}`, `${_hist.cargas.length} cargas de gasoil (primera → última) · Expreso Biletta SRL`)
+    : 60);
+  const fmt = n => Math.round(n || 0).toLocaleString('es-AR');
+  const fechaHora = ts => ts ? String(ts).replace('T', ' ').slice(0, 16) : '—';
+  const rend = c => {
+    if (c.km_tramo == null) return '—';
+    if (c.km_tramo <= 0) return '⚠ odómetro';
+    if (c.km_tramo > 20000) return '⚠ salto';
+    if (_hist.es_autoelev) return (c.litros / c.km_tramo).toFixed(1) + ' L/h';
+    return c.km_l != null ? c.km_l.toFixed(2) + ' km/L' : '—';
+  };
+  const body = _hist.cargas.map((c, i) => [
+    String(i + 1), fechaHora(c.fecha), fmt(c.litros) + ' L',
+    c.odometro ? fmt(c.odometro) + ' ' + unit : '—',
+    c.km_tramo != null ? (c.km_tramo > 0 ? '+' : '') + fmt(c.km_tramo) : '—',
+    rend(c),
+    (!_hist.es_autoelev && c.km_l != null && c.km_tramo > 0 && c.km_tramo <= 20000) ? (c.litros / c.km_tramo * 100).toFixed(1) : '—',
+    c.lugar || '—', c.chofer || '—',
+  ]);
+  // Totales: litros de todo el historial + km/L global sobre tramos sanos.
+  const litrosTotal = _hist.cargas.reduce((a, c) => a + (c.litros || 0), 0);
+  let kmSanos = 0, litrosSanos = 0;
+  _hist.cargas.forEach(c => { if (c.km_tramo > 0 && c.km_tramo <= 20000) { kmSanos += c.km_tramo; litrosSanos += c.litros || 0; } });
+  const style = window._pdfTableStyle ? window._pdfTableStyle() : {};
+  doc.autoTable({
+    startY,
+    head: [['#', 'Fecha', 'Litros', _hist.es_autoelev ? 'Horómetro' : 'Odómetro', (_hist.es_autoelev ? 'Hs' : 'Km') + ' tramo', 'Rendimiento', 'L/100km', 'Lugar', 'Chofer']],
+    body,
+    ...style,
+    columnStyles: { 0:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'} },
+    foot: [[
+      '', 'TOTAL', fmt(litrosTotal) + ' L', '',
+      kmSanos > 0 ? '+' + fmt(kmSanos) : '—',
+      (kmSanos > 0 && litrosSanos > 0) ? (_hist.es_autoelev ? (litrosSanos / kmSanos).toFixed(1) + ' L/h' : (kmSanos / litrosSanos).toFixed(2) + ' km/L') : '—',
+      (kmSanos > 0 && litrosSanos > 0 && !_hist.es_autoelev) ? (litrosSanos / kmSanos * 100).toFixed(1) : '—',
+      'tramos sanos (sin ⚠)', '',
+    ]],
+  });
+  doc.save(`Historial-cargas-${_hist.unidad}-Biletta.pdf`);
+  window.showToast?.('ok', 'PDF descargado');
 }
 
 async function renderAuditorExcesos(el) {
@@ -1538,6 +1593,7 @@ expose('sortAuditorEficiencia', sortAuditorEficiencia);
 expose('exportEficienciaPDF', exportEficienciaPDF);
 expose('renderAuditorHistorial', renderAuditorHistorial);
 expose('loadAuditorHistorialUnidad', loadAuditorHistorialUnidad);
+expose('exportHistorialPDF', exportHistorialPDF);
 expose('renderAuditorExcesos', renderAuditorExcesos);
 expose('compartirExceso', compartirExceso);
 expose('renderAuditorRalenti', renderAuditorRalenti);
