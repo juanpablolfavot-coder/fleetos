@@ -38,6 +38,7 @@ async function renderAuditorPanel() {
         ['trazabilidad','📋 Trazabilidad'],
         ['comparativo','📈 Comparativo mensual'],
         ['eficiencia', '⚡ Rendimiento por unidad'],
+        ['historial',  '🧾 Cargas por unidad'],
         ['excesos',    '🚨 Excesos de velocidad'],
         ['ralenti',    '🕒 Ralentí'],
         ['log',        '🗂 Log de acciones'],
@@ -80,6 +81,7 @@ async function showAuditorTab(tab) {
     if (tab === 'trazabilidad') await renderAuditorTrazabilidad(content);
     if (tab === 'comparativo')  await renderAuditorComparativo(content);
     if (tab === 'eficiencia')   await renderAuditorEficiencia(content);
+    if (tab === 'historial')    await renderAuditorHistorial(content);
     if (tab === 'excesos')      await renderAuditorExcesos(content);
     if (tab === 'ralenti')      await renderAuditorRalenti(content);
     if (tab === 'log')          await renderAuditorLog(content);
@@ -1021,6 +1023,102 @@ function _fmtDur(seg) {
   return `${h}h${mm ? ' ' + mm + 'm' : ''}`;
 }
 
+// ── Tab: Cargas por unidad (historial completo con rendimiento por tramo) ──
+// Para auditoría general: TODAS las cargas de gasoil de una unidad, de la
+// primera a la última, con los km del tramo desde la carga anterior y el km/L.
+async function renderAuditorHistorial(el) {
+  const res = await apiFetch('/api/auditor/historial-cargas');
+  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar el historial</div>`; return; }
+  const d = await res.json();
+  const unidades = d.unidades || [];
+  const fmt = n => Math.round(n || 0).toLocaleString('es-AR');
+  const fecha = ts => ts ? String(ts).slice(0, 10) : '—';
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px;padding:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:16px 20px 12px;border-bottom:1px solid var(--border2);flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin:0">Cargas por unidad — auditoría general</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Tocá una unidad (o elegila en el selector) para ver TODAS sus cargas de gasoil, de la primera a la última, con los km y el rendimiento de cada tramo.</div>
+        </div>
+        <select class="form-select" id="aud-hist-unidad" onchange="loadAuditorHistorialUnidad(this.value)" style="width:180px;font-size:13px">
+          <option value="">— Elegir unidad —</option>
+          ${unidades.map(u => `<option value="${escapeHtml(u.unidad)}">${escapeHtml(u.unidad)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr>
+          <th>Unidad</th><th style="text-align:right">Cargas</th><th>Primera</th><th>Última</th>
+          <th style="text-align:right">Litros</th><th style="text-align:right">Km (tramos)</th><th style="text-align:right">Rend.</th>
+        </tr></thead>
+        <tbody>${unidades.map(u => `
+          <tr onclick="loadAuditorHistorialUnidad('${escapeHtml(u.unidad)}')" style="cursor:pointer">
+            <td class="td-mono" style="font-weight:600;color:var(--accent)">${escapeHtml(u.unidad)}</td>
+            <td class="td-mono" style="text-align:right">${u.cargas}</td>
+            <td class="td-mono" style="font-size:11px">${fecha(u.desde)}</td>
+            <td class="td-mono" style="font-size:11px">${fecha(u.hasta)}</td>
+            <td class="td-mono" style="text-align:right">${fmt(u.litros)} L</td>
+            <td class="td-mono" style="text-align:right">${u.km_tramos > 0 ? fmt(u.km_tramos) + (u.es_autoelev ? ' h' : ' km') : '—'}</td>
+            <td class="td-mono" style="text-align:right;font-weight:600">${u.km_l != null ? (u.es_autoelev ? (1 / u.km_l).toFixed(1) + ' L/h' : u.km_l.toFixed(2) + ' km/L') : '—'}</td>
+          </tr>`).join('')}</tbody></table>
+      </div>
+      <div style="padding:8px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">
+        Km (tramos) = suma de los tramos entre cargas con odómetro válido (se descartan retrocesos y saltos &gt; 20.000). Urea excluida.
+      </div>
+    </div>
+    <div id="aud-hist-detalle"></div>`;
+}
+
+async function loadAuditorHistorialUnidad(unidad) {
+  if (!unidad) return;
+  const sel = document.getElementById('aud-hist-unidad');
+  if (sel && sel.value !== unidad) sel.value = unidad;
+  const box = document.getElementById('aud-hist-detalle');
+  if (!box) return;
+  box.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text3)">⏳ Cargando historial de ${escapeHtml(unidad)}...</div>`;
+  const res = await apiFetch(`/api/auditor/historial-cargas?unidad=${encodeURIComponent(unidad)}`);
+  if (!res.ok) { box.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ${escapeHtml(unidad)}</div>`; return; }
+  const d = await res.json();
+  const cargas = d.cargas || [];
+  const unit = d.es_autoelev ? 'h' : 'km';
+  const fmt = n => Math.round(n || 0).toLocaleString('es-AR');
+  const fechaHora = ts => ts ? String(ts).replace('T', ' ').slice(0, 16) : '—';
+  const rendCell = c => {
+    if (c.km_tramo == null) return '—';
+    if (c.km_tramo <= 0) return `<span style="color:var(--danger)" title="El odómetro es menor o igual al de la carga anterior: revisar la lectura">⚠ odóm.</span>`;
+    if (c.km_tramo > 20000) return `<span style="color:var(--warn)" title="Salto de odómetro inusualmente grande: revisar la lectura">⚠ salto</span>`;
+    if (d.es_autoelev) return `${(c.litros / c.km_tramo).toFixed(1)} L/h`;
+    if (!c.km_l) return '—';
+    const color = c.km_l >= 3 ? 'var(--ok)' : (c.km_l >= 2 ? 'var(--warn)' : 'var(--danger)');
+    return `<span style="font-weight:600;color:${color}">${c.km_l.toFixed(2)} km/L</span><div style="font-size:10px;color:var(--text3)">${(c.litros / c.km_tramo * 100).toFixed(1)} L/100km</div>`;
+  };
+  box.innerHTML = `
+    <div class="card" style="padding:0">
+      <div style="padding:14px 20px 10px;border-bottom:1px solid var(--border2)">
+        <div class="card-title" style="margin:0">${escapeHtml(unidad)} — ${cargas.length} cargas de gasoil (primera → última)</div>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr>
+          <th>#</th><th>Fecha</th><th style="text-align:right">Litros</th>
+          <th style="text-align:right">${d.es_autoelev ? 'Horómetro' : 'Odómetro'}</th>
+          <th style="text-align:right">${d.es_autoelev ? 'Hs tramo' : 'Km tramo'}</th>
+          <th>Rendimiento</th><th>Lugar</th><th>Chofer</th>
+        </tr></thead>
+        <tbody>${cargas.map((c, i) => `
+          <tr>
+            <td class="td-mono" style="color:var(--text3)">${i + 1}</td>
+            <td class="td-mono" style="font-size:11px">${fechaHora(c.fecha)}</td>
+            <td class="td-mono" style="text-align:right">${fmt(c.litros)} L</td>
+            <td class="td-mono" style="text-align:right">${c.odometro ? fmt(c.odometro) + ' ' + unit : '—'}</td>
+            <td class="td-mono" style="text-align:right">${c.km_tramo != null ? (c.km_tramo > 0 ? '+' : '') + fmt(c.km_tramo) : '—'}</td>
+            <td class="td-mono">${rendCell(c)}</td>
+            <td style="color:var(--text3);font-size:12px">${escapeHtml(c.lugar || '—')}</td>
+            <td style="font-size:12px">${escapeHtml(c.chofer || '—')}</td>
+          </tr>`).join('')}</tbody></table>
+      </div>
+    </div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 async function renderAuditorExcesos(el) {
   const res = await apiFetch('/api/auditor/excesos-velocidad');
   if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar excesos</div>`; return; }
@@ -1438,6 +1536,8 @@ expose('renderAuditorEficiencia', renderAuditorEficiencia);
 expose('loadAuditorEficiencia', loadAuditorEficiencia);
 expose('sortAuditorEficiencia', sortAuditorEficiencia);
 expose('exportEficienciaPDF', exportEficienciaPDF);
+expose('renderAuditorHistorial', renderAuditorHistorial);
+expose('loadAuditorHistorialUnidad', loadAuditorHistorialUnidad);
 expose('renderAuditorExcesos', renderAuditorExcesos);
 expose('compartirExceso', compartirExceso);
 expose('renderAuditorRalenti', renderAuditorRalenti);
