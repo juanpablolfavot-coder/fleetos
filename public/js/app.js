@@ -2877,15 +2877,35 @@ async function saveFuelLoad() {
 
   window._ticketImage = null;
 
-  const res = await apiFetch('/api/fuel', {
-    method: 'POST',
-    body: JSON.stringify({
-      vehicle_id, liters, price_per_l: ppu,
-      driver, fuel_type: type,
-      location: place, tank_id, ticket_image: ticketImg, odometer_km: km || null
-    })
-  });
-  if (!res.ok) { const e = await res.json(); showToast('error', e.error || 'Error al registrar carga'); return; }
+  // Aviso no bloqueante: litros por encima de la capacidad de tanque de la ficha
+  // técnica (si la ficha la tiene). Solo alerta — las fichas pueden estar
+  // desactualizadas (p. ej. unidades con tanque doble).
+  try {
+    const vSel = (App.data.vehicles || []).find(x => x.id === vehicle_id);
+    const cap = parseFloat(getTechSpec(vSel?.brand, vSel?.model, vSel?.type)?.fuel_cap);
+    if (type !== 'urea' && cap > 0 && liters > cap) {
+      showToast('warn', `Ojo: ${liters} L supera la capacidad de tanque de la ficha (${cap} L). Verificá litros y ficha.`);
+    }
+  } catch (_) {}
+
+  const payload = {
+    vehicle_id, liters, price_per_l: ppu,
+    driver, fuel_type: type,
+    location: place, tank_id, ticket_image: ticketImg, odometer_km: km || null
+  };
+  let res = await apiFetch('/api/fuel', { method: 'POST', body: JSON.stringify(payload) });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    // Odómetro menor al anterior: pedir confirmación explícita y reintentar.
+    if (e.code === 'km_retrocede') {
+      const ok = window.confirm(`⚠ ${e.error}\n\n¿Es correcto igual? Aceptar = registrar la carga con ${(km || 0).toLocaleString('es-AR')} km. Cancelar = volver a corregir el número.`);
+      if (!ok) return;
+      res = await apiFetch('/api/fuel', { method: 'POST', body: JSON.stringify({ ...payload, confirm_km: true }) });
+      if (!res.ok) { const e2 = await res.json().catch(() => ({})); showToast('error', e2.error || 'Error al registrar carga'); return; }
+    } else {
+      showToast('error', e.error || 'Error al registrar carga'); return;
+    }
+  }
   const savedLog = await res.json().catch(() => null);
 
   const msg = esCisterna

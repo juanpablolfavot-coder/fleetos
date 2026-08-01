@@ -708,6 +708,26 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         return res.status(409).json({ error: 'Ya registraste una carga de combustible para esta unidad hace menos de 10 minutos. Si es correcta, esperá unos minutos e intentá de nuevo.' });
       }
     }
+    // ── Validación de odómetro: si la lectura RETROCEDE respecto de la última
+    // carga de gasoil de la unidad, se pide confirmación explícita (confirm_km).
+    // Evita typos como 12.325 en lugar de 123.251 o 311.452 por 371.452, que
+    // distorsionan todos los KPI de km y rendimiento (detectados en auditoría).
+    {
+      const kmCheck = parseInt(odometer_km, 10);
+      if (Number.isFinite(kmCheck) && kmCheck > 0 && !esUrea && !req.body.confirm_km) {
+        const last = await client.query(
+          `SELECT odometer_km FROM fuel_logs
+            WHERE vehicle_id=$1 AND odometer_km > 0 AND COALESCE(LOWER(fuel_type),'') <> 'urea'
+            ORDER BY logged_at DESC, id DESC LIMIT 1`, [vehicle_id]);
+        const lastKm = parseInt(last.rows[0]?.odometer_km, 10) || 0;
+        if (lastKm > 0 && kmCheck < lastKm) {
+          return res.status(409).json({
+            error: `El odómetro ingresado (${kmCheck.toLocaleString('es-AR')} km) es MENOR que la última lectura registrada de la unidad (${lastKm.toLocaleString('es-AR')} km). Revisá el número del tablero.`,
+            code: 'km_retrocede', ultimo_km: lastKm,
+          });
+        }
+      }
+    }
     // Validar ticket_image si viene — debe ser JPG o PNG en base64, máx 5MB
     if (ticket_image) {
       const validTypes = ['data:image/jpeg','data:image/jpg','data:image/png','data:image/webp'];
