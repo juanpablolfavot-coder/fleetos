@@ -544,9 +544,12 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
     const unidad = String(req.query.unidad || '').trim().toUpperCase();
     const base = `
       SELECT COALESCE(v.code, v.plate) AS unidad, v.type AS vtype, v.base AS vbase, fl.id, fl.logged_at,
-             fl.liters, fl.price_per_l, fl.odometer_km, fl.location,
-             COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,'')) AS chofer
+             fl.liters, fl.price_per_l, fl.odometer_km, fl.location, fl.tank_id,
+             (fl.ticket_image IS NOT NULL) AS tiene_foto, fl.ticket_estado,
+             COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,'')) AS chofer,
+             u2.name AS cargado_por
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
+      LEFT JOIN users u2 ON u2.id = fl.driver_id
       WHERE COALESCE(LOWER(fl.fuel_type),'') <> 'urea'`;
 
     if (!unidad) {
@@ -554,25 +557,46 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
       const r = await query(base + ` ORDER BY COALESCE(v.code, v.plate), fl.logged_at, fl.id`);
       const por = new Map();
       for (const row of r.rows) {
-        if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.vbase || null, es_autoelev: /autoelev/i.test(row.vtype || ''), cargas: 0, litros: 0, km_tramos: 0, litros_tramos: 0, desde: row.logged_at, hasta: row.logged_at, _odoPrev: null });
+        if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.vbase || null, es_autoelev: /autoelev/i.test(row.vtype || ''), cargas: 0, litros: 0, costo: 0, respaldo: 0, km_tramos: 0, litros_tramos: 0, desde: row.logged_at, hasta: row.logged_at, _odoPrev: null, _l100s: [] });
         const u = por.get(row.unidad);
-        u.cargas++; u.litros += parseFloat(row.liters) || 0; u.hasta = row.logged_at;
+        const litros = parseFloat(row.liters) || 0;
+        u.cargas++; u.litros += litros; u.hasta = row.logged_at;
+        u.costo += litros * (parseFloat(row.price_per_l) || 0);
+        // Respaldo documental: carga de cisterna (ticket interno) o foto de ticket.
+        if (row.tank_id || row.tiene_foto) u.respaldo++;
         const odo = parseInt(row.odometer_km, 10) || 0;
         if (odo > 0) {
           if (u._odoPrev != null) {
             const t = odo - u._odoPrev;
             // solo tramos sanos: positivos y sin saltos absurdos (typos no ensucian el total)
-            if (t > 0 && t < 20000) { u.km_tramos += t; u.litros_tramos += parseFloat(row.liters) || 0; }
+            if (t > 0 && t < 20000) {
+              u.km_tramos += t; u.litros_tramos += litros;
+              if (litros > 0) u._l100s.push(litros / t * 100);
+            }
           }
           u._odoPrev = odo;
         }
       }
-      const unidades = [...por.values()].map(u => ({
-        unidad: u.unidad, base: u.base, es_autoelev: u.es_autoelev, cargas: u.cargas,
-        litros: Math.round(u.litros), km_tramos: u.km_tramos, litros_tramos: Math.round(u.litros_tramos),
-        km_l: (u.km_tramos > 0 && u.litros_tramos > 0) ? +(u.km_tramos / u.litros_tramos).toFixed(2) : null,
-        desde: u.desde, hasta: u.hasta,
-      })).sort((a, b) => a.unidad.localeCompare(b.unidad));
+      const unidades = [...por.values()].map(u => {
+        // Tramos sospechosos: consumo > 1.5× la mediana propia de la unidad
+        // (se necesita un mínimo de historia para tener línea de base).
+        let sospechosos = 0;
+        if (u._l100s.length >= 5) {
+          const s = [...u._l100s].sort((a, b) => a - b);
+          const med = s[Math.floor(s.length / 2)];
+          if (med > 0) sospechosos = u._l100s.filter(x => x > med * 1.5).length;
+        }
+        return {
+          unidad: u.unidad, base: u.base, es_autoelev: u.es_autoelev, cargas: u.cargas,
+          litros: Math.round(u.litros), costo: Math.round(u.costo * 100) / 100,
+          respaldo_pct: u.cargas > 0 ? Math.round(u.respaldo / u.cargas * 100) : 0,
+          sospechosos,
+          km_tramos: u.km_tramos, litros_tramos: Math.round(u.litros_tramos),
+          km_l: (u.km_tramos > 0 && u.litros_tramos > 0) ? +(u.km_tramos / u.litros_tramos).toFixed(2) : null,
+          costo_km: (u.km_tramos > 0 && u.costo > 0) ? Math.round(u.costo / u.km_tramos) : null,
+          desde: u.desde, hasta: u.hasta,
+        };
+      }).sort((a, b) => a.unidad.localeCompare(b.unidad));
       return res.json({ unidades });
     }
 
@@ -587,14 +611,28 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
         odoPrev = odo;
       }
       const litros = parseFloat(row.liters) || 0;
+      const precio = parseFloat(row.price_per_l) || null;
+      // Respaldo documental: cisterna genera ticket interno; estación necesita foto.
+      const respaldo = row.tank_id ? 'interno' : (row.tiene_foto ? (row.ticket_estado || 'foto') : 'sin ticket');
       return {
-        id: row.id, fecha: row.logged_at, litros,
-        precio: parseFloat(row.price_per_l) || null,
+        id: row.id, fecha: row.logged_at, litros, precio,
+        costo: precio ? Math.round(litros * precio * 100) / 100 : null,
         odometro: odo || null, lugar: row.location || null, chofer: row.chofer || null,
+        cargado_por: row.cargado_por || null, respaldo,
         km_tramo,
         km_l: (km_tramo != null && km_tramo > 0 && km_tramo < 20000 && litros > 0) ? +(km_tramo / litros).toFixed(2) : null,
       };
     });
+    // Tramos sospechosos: consumo del tramo > 1.5× la mediana propia de la unidad.
+    const l100s = cargas.filter(c => c.km_l && c.km_tramo > 0 && c.km_tramo < 20000)
+      .map(c => c.litros / c.km_tramo * 100);
+    if (l100s.length >= 5) {
+      const s = [...l100s].sort((a, b) => a - b);
+      const med = s[Math.floor(s.length / 2)];
+      if (med > 0) cargas.forEach(c => {
+        if (c.km_l && c.km_tramo > 0 && c.km_tramo < 20000 && (c.litros / c.km_tramo * 100) > med * 1.5) c.sospechoso = true;
+      });
+    }
     const esAutoelev = /autoelev/i.test(r.rows[0]?.vtype || '');
     res.json({ unidad, es_autoelev: esAutoelev, cargas });
   } catch (err) { console.error('[auditor historial-cargas]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
