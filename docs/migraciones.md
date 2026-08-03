@@ -57,14 +57,45 @@ Y cierra con un veredicto: se puede sacar el DDL de arranque, o no y por qué.
 Opciones: `--json` (salida procesable) y `--strict` (termina con código 1 si hay
 bloqueantes, para usarlo como gate en CI más adelante).
 
-### Lo que hay que correr contra producción
+### Correrlo contra producción
+
+Desde el Shell de Render, **sin prefijo**: el servicio ya tiene `DATABASE_URL`
+en su entorno, y ahí `NODE_ENV=production` hace que el script use SSL con el
+mismo criterio que `db/pool.js`.
 
 ```bash
-DATABASE_URL="<la de Render>" npm run schema:check
+npm run schema:check
 ```
 
-Con esa salida se define la parte B. **No se puede deducir desde el repo**: el
-reporte depende de cómo quedó esa base después de años de arreglos.
+### Resultado sobre la base de producción (3 de agosto de 2026)
+
+```
+Base: 39 tablas · 542 columnas · 153 índices
+
+① BLOQUEANTE: ✓ nada — la base ya tiene todo lo que el DDL de arranque agregaría.
+```
+
+Es decir: **para esa base, las ~270 sentencias del arranque son todas no-op.**
+
+Las otras dos secciones sí trajeron cosas, ninguna urgente:
+
+**② Declarado en `db/schema.sql` y ausente en producción (5).** `work_orders.title`,
+`created_by`, `assigned_to`, `completed_at` y `sucursal_areas.created_at`.
+Ninguna se usa en el código: son declaraciones muertas del esquema. Producción
+funciona sin ellas desde siempre.
+
+**③ En producción y declarado en ningún lado (16).** Tampoco las usa el código,
+así que una base creada desde el repo funciona igual. Se explican solas:
+
+| Qué | Por qué está |
+|---|---|
+| `aprobado_por`, `aprobado_en`, `pagado_en`, `rechazado_en`, `rechazo_motivo` | nombres viejos de un rename — hoy son `aprobado_compras_por`, `aprobado_compras_at`, `pagado_at`, `rechazado_at`, `motivo_rechazo` |
+| `work_orders_backup_renumeracion` | tabla de respaldo de una corrección puntual |
+| `maintenance_plans` | tabla sin una sola referencia en el repo |
+| `vehicles.fuel_capacity`, `urea_capacity`, `engine_hours`, `cost_per_km`, `notes`, `tires.notes`, `documents.file_url`, `fuel_logs.created_at`, `work_orders.diagnosis` | columnas que quedaron de versiones anteriores |
+
+Antes de borrar cualquiera de estas hay que mirar si tienen datos —
+`maintenance_plans` y `work_orders_backup_renumeracion` en particular.
 
 Como referencia, sobre una base recién creada con `npm run migrate` el veredicto
 da **11 objetos bloqueantes** — 4 tablas y 7 índices que ningún `db/*.sql`
