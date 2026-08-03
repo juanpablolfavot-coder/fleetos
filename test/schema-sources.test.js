@@ -117,13 +117,23 @@ test('sobre el repo real detecta el DDL disperso donde está', () => {
     assert.strictEqual(codigo.columnas.get(c), 'services/gps-powerfleet.js', `${c} mal atribuida`);
   }
 
-  // Las 4 tablas que no declara ningún db/*.sql y solo existen por el DDL de
-  // servicios. Si alguna dejara de detectarse, el comparador diría que se puede
-  // borrar ese DDL cuando no se puede.
+  // Las 4 tablas que el DDL de arranque de los servicios crea al vuelo. Si
+  // alguna dejara de detectarse ahí, el comparador diría que se puede borrar
+  // ese DDL cuando no se puede.
   for (const t of ['idle_events', 'speeding_events', 'push_subscriptions', 'gps_webhook_events']) {
     assert.ok(codigo.tablas.has(t), `${t} tiene que detectarse en el código`);
-    assert.ok(!sql.tablas.has(t), `${t} no la declara ningún db/*.sql`);
+    // Y la migración 001 las declara: por eso el DDL de arranque ya es no-op
+    // sobre una base migrada. Antes esta línea afirmaba lo contrario porque el
+    // extractor no leía db/migrations/ — y esa ceguera hacía que cada migración
+    // nueva apareciera como "deriva" en la sección ③ del comparador.
+    assert.strictEqual(sql.tablas.get(t), 'db/migrations/001-tablas-y-columnas-de-servicios.sql',
+      `${t} tiene que quedar atribuida a la migración 001`);
   }
+
+  // La tabla de la migración 003, para que el día que alguien agregue una
+  // migración nueva y no la lea nadie, este test lo diga.
+  assert.strictEqual(sql.tablas.get('maintenance_schedules'),
+    'db/migrations/003-planes-de-mantenimiento.sql');
 
   assert.ok(!codigo.tablas.has('no'), 'ninguna tabla fantasma salida de un comentario');
 });

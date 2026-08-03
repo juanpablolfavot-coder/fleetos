@@ -79,6 +79,9 @@ after(async () => {
   if (!client) return;
   await limpiar().catch(() => {});
   await client.end();
+  // Ídem test/mantenimiento.test.js: el pool compartido mantiene las conexiones
+  // ociosas 3 minutos y sin cerrarlo el proceso no termina hasta que expiren.
+  await require('../db/pool').pool.end().catch(() => {});
 });
 
 beforeEach(async () => {

@@ -142,6 +142,11 @@ after(async () => {
   if (!client) return;
   await limpiar().catch(() => {});
   await client.end();
+  // El servicio abre además el pool compartido de db/pool.js, cuyas conexiones
+  // quedan ociosas 3 minutos a propósito (sobreviven de un sync del GPS al
+  // siguiente). Sin cerrarlo, node --test termina los tests en milisegundos y
+  // después se queda 3 minutos esperando que el event loop se vacíe.
+  await require('../db/pool').pool.end().catch(() => {});
 });
 beforeEach(async () => { if (!SKIP) await limpiar(); });
 
@@ -165,8 +170,17 @@ async function unidadConPlan({ km = 194200, ultimo = 180000, intervalo = 15000, 
 }
 
 const MANIANA = new Date('2026-08-03T13:00:00Z');   // 10:00 AR, dentro de la ventana
-const entregaOk = async () => 2;
-const avisar = (o = {}) => mant.generarYEnviarAviso({ notificar: entregaOk, now: MANIANA, ...o });
+
+// Captura lo que se habría enviado. Las afirmaciones van sobre ESTE contenido y
+// no sobre conteos globales: la base de prueba puede tener otros planes
+// cargados (de otro test, o reales), y un test que exige "hay exactamente 1
+// vencido" falla sin que nada esté mal.
+let ultimoAviso = null;
+const entregaOk = async (roles, payload) => { ultimoAviso = payload; return 2; };
+const avisar = (o = {}) => {
+  ultimoAviso = null;
+  return mant.generarYEnviarAviso({ notificar: entregaOk, now: MANIANA, ...o });
+};
 
 test('estadoPlanes lee los contadores reales de la unidad', { skip: SKIP }, async () => {
   await unidadConPlan({ km: 194200, ultimo: 180000 });
@@ -184,13 +198,16 @@ test('una unidad dada de baja no aparece', { skip: SKIP }, async () => {
 });
 
 test('avisa, y no repite el mismo día', { skip: SKIP }, async () => {
-  await unidadConPlan({ km: 196500, ultimo: 180000 });   // vencido
+  const id = await unidadConPlan({ km: 196500, ultimo: 180000 });   // vencido
+  const codigo = (await client.query('SELECT code FROM vehicles WHERE id=$1', [id])).rows[0].code;
+
   const a = await avisar();
-  assert.ok(a.sent);
-  assert.strictEqual(a.vencidos, 1);
+  assert.ok(a.sent, 'la primera vez avisa');
+  assert.match(ultimoAviso.body, new RegExp(codigo), 'y el aviso nombra a la unidad vencida');
+  assert.match(ultimoAviso.title, /pasado/);
 
   const b = await avisar();
-  assert.ok(!b.sent);
+  assert.ok(!b.sent, 'la segunda no');
   assert.match(b.skipped, /ya se avisó hoy/);
 });
 
@@ -214,11 +231,148 @@ test('un plan sin base no dispara aviso', { skip: SKIP }, async () => {
   const v = await client.query(
     `INSERT INTO vehicles (code, plate, km_current, active) VALUES ($1,$2,500000,TRUE) RETURNING id`,
     [`MTEST-${_n}`, `MT${String(_n).padStart(5, '0')}`]);
+  const nombre = `MTEST sin base ${_n}`;
   await client.query(
     `INSERT INTO maintenance_schedules (vehicle_id, nombre, tipo, intervalo, aviso_antes, ultimo_valor)
-     VALUES ($1, $2, 'km', 15000, 1000, NULL)`, [v.rows[0].id, `MTEST sin base ${_n}`]);
+     VALUES ($1, $2, 'km', 15000, 1000, NULL)`, [v.rows[0].id, nombre]);
 
-  const r = await avisar();
-  assert.ok(!r.sent, 'sin línea de base no hay nada que afirmar');
-  assert.match(r.skipped, /no hay mantenimientos/);
+  // Se afirma sobre ESTE plan, no sobre que la base entera esté vacía: la
+  // versión anterior asumía que no había ningún otro plan cargado, y eso solo
+  // vale en una base recién creada. Contra una con datos —producción, o esta
+  // misma después de otro test— fallaba sin que nada estuviera mal.
+  const mio = (await mant.estadoPlanes()).find((p) => p.nombre === nombre);
+  assert.ok(mio, 'el plan tiene que aparecer en el listado');
+  assert.strictEqual(mio.estado, 'sin_base');
+  assert.strictEqual(mio.restante, null, 'sin línea de base no hay nada que afirmar');
+  assert.strictEqual(mant.armarCuerpo([mio]), null, 'y por lo tanto no arma aviso');
+});
+
+// ── La migración 004 y el helper de la pantalla vieja ─────────────────
+// La pantalla vieja guardaba las horas de una autoelevadora en la MISMA clave
+// tech_spec.maint_last_km que usaba para los km de un camión. Lo único que
+// decidía qué era ese número es isAutoelevador() de public/js/app.js.
+//
+// Si la migración clasifica distinto que ese helper, el plan importado compara
+// kilómetros contra el horómetro y nadie se entera: no falla, da mal.
+//
+// Por eso el test corre el helper REAL sacado de app.js, no una copia escrita
+// acá — una copia se desincroniza en silencio, que es justo el modo de falla
+// que se quiere descartar.
+function helperDeLaPantalla() {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+  const sacar = (nombre) => {
+    const m = src.match(new RegExp(`^function ${nombre}\\([\\s\\S]*?^\\}`, 'm'));
+    assert.ok(m, `no se encontró ${nombre}() en public/js/app.js`);
+    return m[0];
+  };
+  return new Function(
+    `${sacar('normalizeVehicleTypeLabel')}\n${sacar('isAutoelevador')}\nreturn isAutoelevador;`,
+  )();
+}
+
+// Y el CASE se lee del archivo de la migración, no se transcribe.
+function caseDeLaMigracion() {
+  const fs = require('fs');
+  const path = require('path');
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'db', 'migrations', '004-importar-planes-de-techspec.sql'), 'utf8');
+  const m = sql.match(/CASE WHEN [\s\S]*?THEN 'horas' ELSE 'km' END/);
+  assert.ok(m, 'no se encontró el CASE que decide km/horas en la migración 004');
+  // replaceAll, no replace: si el CASE menciona v.type más de una vez y solo se
+  // sustituye la primera, el SELECT falla con "missing FROM-clause entry for
+  // table v" y el test parece detectar el problema cuando en realidad ni llegó
+  // a comparar nada.
+  const expr = m[0].replaceAll('COALESCE(v.type', 'COALESCE($1');
+  assert.ok(!/\bv\./.test(expr), 'quedó una referencia a v. sin sustituir en el CASE');
+  return expr;
+}
+
+test('la migración 004 clasifica km/horas igual que isAutoelevador()', { skip: SKIP }, async () => {
+  const isAutoelevador = helperDeLaPantalla();
+  const expr = caseDeLaMigracion();
+
+  const CASOS = [
+    // Los 9 valores que hoy permite el CHECK de vehicles.type.
+    'camion', 'tractor', 'semirremolque', 'acoplado', 'utilitario',
+    'autoelevador', 'furgon', 'moto', 'otro',
+    // Y variantes que el CHECK hoy no deja entrar. Se prueban igual: son las
+    // que separan la comparación exacta del helper de un LIKE '%autoelevador%'
+    // —"Autoelevador Toyota" y "Montacargas" son km, "Auto-elevador" es horas—
+    // y el día que alguien relaje el CHECK, este test ya cubre el caso.
+    'Autoelevador', 'AUTOELEVADOR', '  Autoelevador  ',
+    'Auto-elevador', 'Auto elevador', 'auto_elevador', 'Autoelevadór',
+    'Autoelevador Toyota', 'Montacargas', 'Camión', '', null,
+  ];
+
+  for (const t of CASOS) {
+    const enLaBase = (await client.query(`SELECT ${expr} AS tipo`, [t])).rows[0].tipo;
+    const enLaPantalla = isAutoelevador(t) ? 'horas' : 'km';
+    assert.strictEqual(enLaBase, enLaPantalla, `tipo "${t}": SQL dice ${enLaBase} y el helper ${enLaPantalla}`);
+  }
+});
+
+test('la migración 004 importa lo configurado y no inventa lo que no', { skip: SKIP }, async () => {
+  _n++;
+  const fs = require('fs');
+  const path = require('path');
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'db', 'migrations', '004-importar-planes-de-techspec.sql'), 'utf8');
+
+  const alta = async (code, type, spec) => (await client.query(
+    `INSERT INTO vehicles (code, plate, type, km_current, active, tech_spec)
+     VALUES ($1,$2,$3,100000,TRUE,$4) RETURNING id`,
+    [code, code.slice(0, 8), type, spec ? JSON.stringify(spec) : null])).rows[0].id;
+
+  const camion = await alta(`MTEST-C${_n}`, 'camion',
+    { maint_task_name: 'Aceite y filtros', maint_interval_km: 15000, maint_last_km: 90000 });
+  const fork = await alta(`MTEST-F${_n}`, 'autoelevador',
+    { maint_task_name: 'Service hidráulico', maint_interval_km: 250, maint_last_km: 1200 });
+  // parseInt('') || 0 escribía un 0: "no lo sé", no "el service fue en el km 0".
+  const sinBase = await alta(`MTEST-S${_n}`, 'camion',
+    { maint_task_name: 'Correa', maint_interval_km: 60000, maint_last_km: 0 });
+  const nunca = await alta(`MTEST-N${_n}`, 'camion', { fuel_type: 'Diesel' });
+
+  const leer = async (id) => (await client.query(
+    'SELECT nombre, tipo, intervalo, aviso_antes, ultimo_valor FROM maintenance_schedules WHERE vehicle_id=$1',
+    [id])).rows;
+
+  // La migración importa de TODAS las unidades con tech_spec configurado, no
+  // solo de las de este test. Contra la base de un desarrollador eso dejaría
+  // planes de unidades reales que limpiar() no borra (no se llaman MTEST). Va
+  // adentro de una transacción que siempre vuelve atrás.
+  await client.query('BEGIN');
+  try {
+    await client.query(sql);
+    await verificar();
+    // Idempotente: correrla de nuevo no duplica nada.
+    await client.query(sql);
+    assert.strictEqual((await leer(camion)).length, 1);
+    assert.strictEqual((await leer(fork)).length, 1);
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});
+  }
+
+  async function verificar() {
+    const c = await leer(camion);
+    assert.strictEqual(c.length, 1);
+    assert.strictEqual(c[0].nombre, 'Aceite y filtros');
+    assert.strictEqual(c[0].tipo, 'km');
+    assert.strictEqual(c[0].intervalo, 15000);
+    assert.strictEqual(c[0].aviso_antes, 1500, 'aviso al 90% del intervalo');
+    assert.strictEqual(Number(c[0].ultimo_valor), 90000);
+
+    const f = await leer(fork);
+    assert.strictEqual(f[0].tipo, 'horas', 'el número de una autoelevadora son horas, no km');
+    assert.strictEqual(f[0].intervalo, 250);
+    assert.strictEqual(Number(f[0].ultimo_valor), 1200);
+    assert.strictEqual(f[0].aviso_antes, 25);
+
+    const s = await leer(sinBase);
+    assert.strictEqual(s.length, 1, 'se importa el plan…');
+    assert.strictEqual(s[0].ultimo_valor, null, '…pero el 0 entra como NULL, no como línea de base');
+
+    assert.strictEqual((await leer(nunca)).length, 0, 'una unidad sin configurar no se inventa');
+  }
 });

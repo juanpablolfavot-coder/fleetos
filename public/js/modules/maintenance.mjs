@@ -1,10 +1,18 @@
 // ════════════════════════════════════════════════════════════════════
-//  MANTENIMIENTO PREVENTIVO (ES module, Fase 3) — planes por vehículo y
-//  generación de OTs preventivas.
+//  MANTENIMIENTO PREVENTIVO — planes por unidad.
 //
-//  Migrado de maintenance.js. Dependencias del mundo legacy declaradas arriba
-//  con need() (fallan en el boot si faltan); las funciones públicas se
-//  re-exponen en window para el dispatcher (renderPage) y los onclick.
+//  Antes esta pantalla guardaba su configuración adentro del JSONB
+//  vehicles.tech_spec: UN plan por unidad, calculado en el navegador y sin nadie
+//  que avisara. Ahora usa /api/mantenimiento/planes, que soporta VARIOS planes
+//  por unidad (aceite cada 15.000 km, correa cada 60.000, matafuegos por fecha),
+//  tres tipos de contador y aviso por push.
+//
+//  Lo que ya estaba configurado NO se perdió: la migración 004 lo importó.
+//
+//  El estado lo calcula el SERVIDOR, no esta pantalla. Así el aviso que llega al
+//  celular y lo que se ve acá no pueden dar distinto — mismo criterio que usa
+//  services/flota-datos.js para que el asistente y la pantalla de flota no se
+//  contradigan.
 // ════════════════════════════════════════════════════════════════════
 import { need, expose } from './dom.mjs';
 
@@ -14,330 +22,326 @@ const openModal = need('openModal');
 const closeModal = need('closeModal');
 const showToast = need('showToast');
 const apiFetch = need('apiFetch');
-const loadInitialData = need('loadInitialData');
-const isAutoelevador = need('isAutoelevador');
-const formatVehicleMeasure = need('formatVehicleMeasure');
-const vehicleMeasureUnit = need('vehicleMeasureUnit');
 const renderDashboard = need('renderDashboard');
-const renderWorkOrders = need('renderWorkOrders');
 
+const ESTADOS = {
+  vencido:  { badge: 'danger', label: 'Pasado',   orden: 0 },
+  proximo:  { badge: 'warn',   label: 'Próximo',  orden: 1 },
+  sin_base: { badge: 'info',   label: 'Sin base', orden: 2 },
+  ok:       { badge: 'ok',     label: 'Al día',   orden: 3 },
+};
+
+const puedeEditar = () => ['dueno', 'gerencia', 'jefe_mantenimiento'].includes(App.currentUser?.role);
+
+// Para el modal, donde todavía no hay respuesta del servidor: ahí lo único que
+// se tiene es el tipo elegido en el <select>.
+function _unidadDe(tipo) { return tipo === 'km' ? 'km' : tipo === 'horas' ? 'h' : 'días'; }
+
+// Para un plan que YA vino del servidor, se usa la etiqueta que él mandó. Las
+// dos definiciones coinciden hoy, y justamente por eso conviene no tener dos:
+// si mañana el servidor agrega un tipo, la pantalla lo dibuja igual en vez de
+// caer al default. El || cubre los planes 'sin_base', que no traen el campo.
+function _unidadDePlan(p) { return p.unidad_medida || _unidadDe(p.tipo); }
+
+// Cuánto del intervalo ya se consumió, para la barra. Un plan sin base no tiene
+// barra: no hay contra qué medir.
+function _pct(p) {
+  if (p.estado === 'sin_base' || p.restante == null) return null;
+  const usado = p.intervalo - p.restante;
+  return Math.max(0, Math.min(100, Math.round((usado / p.intervalo) * 100)));
+}
+
+function _cuanto(p) {
+  if (p.estado === 'sin_base') return 'falta cargar el último service';
+  const u = _unidadDePlan(p);
+  if (p.restante < 0) return `pasado por ${Math.abs(p.restante).toLocaleString('es-AR')} ${u}`;
+  if (p.restante === 0) return 'toca AHORA';
+  return `faltan ${p.restante.toLocaleString('es-AR')} ${u}`;
+}
+
+// ── Pantalla ──────────────────────────────────────────────────────────
 function renderMaintenance() {
   const root = document.getElementById('page-maintenance');
   if (!root) return;
+  root.innerHTML = _cabecera() + `
+    <div class="card" style="text-align:center;padding:40px;color:var(--text3)">Cargando planes…</div>`;
+  _cargar();
+}
 
-  const vehicles = App.data.vehicles || [];
-
-  if (vehicles.length === 0) {
-    root.innerHTML = `
-      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-        <div><h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2></div>
+function _cabecera(resumen) {
+  const r = resumen || {};
+  const tarjeta = (n, txt, color) => `
+    <div class="card" style="padding:12px 16px;flex:1;min-width:120px">
+      <div style="font-size:22px;font-weight:800;color:var(--${color})">${n == null ? '—' : n}</div>
+      <div style="font-size:12px;color:var(--text3)">${txt}</div>
+    </div>`;
+  return `
+    <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2>
+        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">
+          Avisa antes de que toque. No abre órdenes solo: eso lo decidís vos.
+        </p>
       </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${puedeEditar() ? '<button class="btn btn-primary" onclick="openPlanMantModal()">+ Nuevo plan</button>' : ''}
+        ${puedeEditar() ? '<button class="btn btn-secondary" onclick="crearOTsDeVencidos()">🔧 Crear OTs de los pasados</button>' : ''}
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      ${tarjeta(r.vencido, 'Pasados', 'danger')}
+      ${tarjeta(r.proximo, 'Próximos', 'warn')}
+      ${tarjeta(r.ok, 'Al día', 'ok')}
+      ${tarjeta(r.sin_base, 'Sin base', 'info')}
+    </div>`;
+}
+
+async function _cargar() {
+  const root = document.getElementById('page-maintenance');
+  if (!root) return;
+  let planes = [];
+  try {
+    const res = await apiFetch('/api/mantenimiento/planes');
+    if (!res.ok) throw new Error('no se pudo');
+    const datos = await res.json();
+    // Si el endpoint devolviera algo que no es lista, no romper la pantalla entera.
+    planes = Array.isArray(datos) ? datos : [];
+  } catch (_) {
+    root.innerHTML = _cabecera() + `
       <div class="card" style="text-align:center;padding:40px;color:var(--text3)">
-        <div style="font-size:32px;margin-bottom:12px">🔧</div>
-        <div style="font-weight:600;margin-bottom:8px">Sin vehículos registrados</div>
+        No se pudieron cargar los planes. Probá recargar la página.
       </div>`;
     return;
   }
 
-  // Generar planes usando intervalos guardados en tech_spec o defaults
-  const plans = vehicles.map(v => {
-    const km = v.km || 0;
-    const ts = v.tech_spec || {};
-    const isFork = isAutoelevador(v);
-    const unit = isFork ? 'hs' : 'km';
-    const interval = parseInt(ts.maint_interval_km) || (isFork ? 250 : 15000);
-    const lastMaint = parseInt(ts.maint_last_km) || 0;
-    const kmSinceLast = km - lastMaint;
-    const pct = Math.min(100, Math.round(kmSinceLast / interval * 100));
-    const nextKm = lastMaint + interval;
-    const status = pct >= 95 ? 'danger' : pct >= 80 ? 'warn' : 'ok';
-    const taskName = ts.maint_task_name || 'Cambio aceite + filtros';
-    return { v, km, interval, lastMaint, kmSinceLast, pct, nextKm, status, taskName, unit, isFork };
-  });
+  window._planesMant = planes;   // lo leen los onclick por id
+  const resumen = planes.reduce((a, p) => { a[p.estado] = (a[p.estado] || 0) + 1; return a; }, {});
 
-  const rows = plans.map(p => `
-    <tr>
-      <td class="td-mono td-main">${escapeHtml(p.v.code)}</td>
-      <td>
-        <div style="font-weight:500">${p.taskName}</div>
-        <div style="font-size:11px;color:var(--text3)">c/${p.interval.toLocaleString()} ${escapeHtml(p.unit)} · último: ${p.lastMaint.toLocaleString()} ${escapeHtml(p.unit)}</div>
-      </td>
-      <td><span class="badge badge-info">${p.isFork?'Por horas':'Por km'}</span></td>
-      <td class="td-mono">${p.nextKm.toLocaleString()} ${escapeHtml(p.unit)}</td>
-      <td class="td-mono">${p.km.toLocaleString()} ${escapeHtml(p.unit)}</td>
-      <td style="width:140px">
-        <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
-          <div style="background:var(--${p.status});width:${p.pct}%;height:100%"></div>
+  if (!planes.length) {
+    root.innerHTML = _cabecera(resumen) + `
+      <div class="card" style="text-align:center;padding:40px;color:var(--text3)">
+        <div style="font-size:32px;margin-bottom:12px">🔧</div>
+        <div style="font-weight:600;margin-bottom:8px">Todavía no hay planes cargados</div>
+        <div style="font-size:13px;max-width:460px;margin:0 auto;line-height:1.6">
+          Un plan es "cada cuánto toca": cambio de aceite cada 15.000 km, correa cada 60.000,
+          matafuegos una vez por año. El sistema mira solo el odómetro y el horómetro, que ya se
+          actualizan con el GPS y con cada carga de combustible.
         </div>
-        <div style="font-size:11px;color:var(--${p.status});margin-top:2px">${p.pct}% · faltan ${Math.max(0,p.nextKm-p.km).toLocaleString()} ${escapeHtml(p.unit)}</div>
-      </td>
-      <td><span class="badge badge-${p.status}">${p.status==='ok'?'Al día':p.status==='warn'?'Próximo':'Vencido'}</span></td>
-      <td>
-        <button class="btn btn-secondary btn-sm" onclick="openMaintConfigModal('${p.v.id}')">⚙ Configurar</button>
-      </td>
-    </tr>`).join('');
+        ${puedeEditar() ? '<div style="margin-top:18px"><button class="btn btn-primary" onclick="openPlanMantModal()">+ Cargar el primero</button></div>' : ''}
+      </div>`;
+    return;
+  }
 
-  const vencidos = plans.filter(p=>p.status==='danger').length;
-  const proximos = plans.filter(p=>p.status==='warn').length;
-  window._maintenancePlans = plans; // exponer para el onclick
+  // Lo que exige acción va arriba.
+  planes.sort((a, b) => (ESTADOS[a.estado].orden - ESTADOS[b.estado].orden)
+    || (a.restante == null ? 1e9 : a.restante) - (b.restante == null ? 1e9 : b.restante)
+    || String(a.unidad).localeCompare(String(b.unidad)));
 
-  root.innerHTML = `
-    <div class="section-header" style="margin-bottom:20px">
-      <div>
-        <h2 style="font-size:18px;font-weight:700;margin:0">Plan de mantenimiento</h2>
-        <p style="font-size:13px;color:var(--text3);margin:4px 0 0">Preventivo · predictivo · correctivo</p>
-      </div>
-    </div>
-    ${vencidos>0 ? `<div style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--danger);display:flex;align-items:center;justify-content:space-between">
-      <span>⚠ <b>${vencidos} unidad${vencidos>1?'es':''}</b> con mantenimiento vencido.</span>
-      <button class="btn btn-sm" style="background:var(--danger);color:white;border:none" onclick="_crearOTsPreventivas()">Crear OTs preventivas</button>
-    </div>` : ''}
-    ${proximos>0 ? `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--warn)">🔧 <b>${proximos} unidad${proximos>1?'es':''}</b> próxima${proximos>1?'s':''} a mantenimiento. Programar service.</div>` : ''}
-    <div class="card" style="padding:0">
-      <div class="table-wrap">
-        <table>
+  const filas = planes.map((p) => {
+    const est = ESTADOS[p.estado] || ESTADOS.ok;
+    const pct = _pct(p);
+    const u = _unidadDePlan(p);
+    return `
+      <tr>
+        <td class="td-mono td-main">${escapeHtml(p.unidad)}</td>
+        <td>
+          <div style="font-weight:500">${escapeHtml(p.nombre)}</div>
+          <div style="font-size:11px;color:var(--text3)">
+            cada ${p.intervalo.toLocaleString('es-AR')} ${escapeHtml(u)}${p.aviso_antes ? ` · avisa ${p.aviso_antes.toLocaleString('es-AR')} ${escapeHtml(u)} antes` : ''}
+          </div>
+        </td>
+        <td><span class="badge badge-info">${p.tipo === 'km' ? 'Por km' : p.tipo === 'horas' ? 'Por horas' : 'Por fecha'}</span></td>
+        <td class="td-mono">${p.proximo == null ? '—' : escapeHtml(String(p.proximo))}</td>
+        <td class="td-mono">${p.actual == null ? '—' : p.actual.toLocaleString('es-AR')}</td>
+        <td style="width:150px">
+          ${pct == null ? '<span style="font-size:11px;color:var(--text3)">sin línea de base</span>' : `
+            <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
+              <div style="background:var(--${est.badge});width:${pct}%;height:100%"></div>
+            </div>`}
+          <div style="font-size:11px;color:var(--${est.badge});margin-top:2px">${escapeHtml(_cuanto(p))}</div>
+        </td>
+        <td><span class="badge badge-${est.badge}">${est.label}</span></td>
+        <td style="white-space:nowrap">
+          ${puedeEditar() ? `
+            <button class="btn btn-secondary btn-sm" onclick="marcarMantRealizado('${p.id}')" title="Mover la línea de base al contador actual">✓ Ya se hizo</button>
+            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')">✎</button>
+            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')">🗑</button>` : ''}
+        </td>
+      </tr>`;
+  }).join('');
+
+  root.innerHTML = _cabecera(resumen) + `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table class="table">
           <thead><tr>
-            <th>Unidad</th><th>Tarea</th><th>Tipo</th><th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th><th>Acción</th>
+            <th>Unidad</th><th>Plan</th><th>Tipo</th><th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th><th></th>
           </tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${filas}</tbody>
         </table>
       </div>
-    </div>
-    <div style="margin-top:12px;font-size:12px;color:var(--text3)">
-      💡 Hacé clic en <b>⚙ Configurar</b> en cualquier unidad para personalizar el intervalo, el km/horas del último service y la tarea.
     </div>`;
 }
 
-function openMaintConfigModal(vehicleId) {
-  const v = App.data.vehicles.find(x=>x.id===vehicleId);
-  if (!v) return;
-  const ts = v.tech_spec || {};
-  const isFork = isAutoelevador(v);
-  const interval = ts.maint_interval_km || (isFork ? 250 : 15000);
-  const lastKm   = ts.maint_last_km    || 0;
-  const taskName = ts.maint_task_name  || 'Cambio aceite + filtros';
+// ── Alta / edición ────────────────────────────────────────────────────
+function openPlanMantModal(planId) {
+  const p = planId ? (window._planesMant || []).find((x) => x.id === planId) : null;
+  const vehiculos = (App.data.vehicles || []).map((v) => {
+    const sel = p && p.vehicle_id === v.id ? ' selected' : '';
+    return `<option value="${v.id}"${sel}>${escapeHtml(v.code || '')} — ${escapeHtml(v.plate || '')}</option>`;
+  }).join('');
 
-  openModal(`⚙ Configurar mantenimiento — ${escapeHtml(v.code)}`, `
-    <div style="margin-bottom:14px;font-size:12px;color:var(--text3)">
-      ${isFork ? 'Configurá el plan de mantenimiento preventivo por horas para este autoelevador.' : 'Configurá el plan de mantenimiento preventivo para esta unidad.'} Los datos se guardan en la ficha técnica.
+  openModal(p ? 'Editar plan' : 'Nuevo plan de mantenimiento', `
+    <div class="form-group">
+      <label class="form-label">Unidad</label>
+      <select class="form-select" id="pm-vehiculo"${p ? ' disabled' : ''}>${vehiculos}</select>
     </div>
     <div class="form-group">
-      <label class="form-label">Tarea / nombre del service</label>
-      <input class="form-input" id="mc-task" value="${taskName}" placeholder="Ej: Cambio aceite + filtros">
+      <label class="form-label">Qué se hace</label>
+      <input class="form-input" id="pm-nombre" placeholder="Cambio de aceite y filtros" value="${p ? escapeHtml(p.nombre) : ''}">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Intervalo (cada cuántos ${isFork ? 'hs' : 'km'})</label>
-        <input class="form-input" type="number" id="mc-interval" value="${interval}" placeholder="15000">
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">${isFork ? 'Ej: 250, 500, 1000' : 'Ej: 15000, 20000, 25000'}</div>
+        <label class="form-label">Se mide en</label>
+        <select class="form-select" id="pm-tipo" onchange="actualizarUnidadPlanMant()">
+          <option value="km"${p && p.tipo === 'km' ? ' selected' : ''}>Kilómetros</option>
+          <option value="horas"${p && p.tipo === 'horas' ? ' selected' : ''}>Horas de motor</option>
+          <option value="dias"${p && p.tipo === 'dias' ? ' selected' : ''}>Días</option>
+        </select>
       </div>
       <div class="form-group">
-        <label class="form-label">${isFork ? 'Horas del último service' : 'Km del último service'}</label>
-        <input class="form-input" type="number" id="mc-last" value="${lastKm}" placeholder="0">
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">${isFork ? 'Horas cuando hiciste el último service' : 'Km cuando hiciste el último service'}</div>
+        <label class="form-label">Cada cuánto <span id="pm-u1" style="color:var(--text3)"></span></label>
+        <input class="form-input" type="number" min="1" id="pm-intervalo" placeholder="15000" value="${p ? p.intervalo : ''}">
       </div>
-    </div>
-    <div style="background:var(--bg3);border-radius:var(--radius);padding:12px;margin-top:8px;font-size:12px;color:var(--text3)">
-      <b>${isFork ? 'Horas actuales' : 'Km actuales'}:</b> ${formatVehicleMeasure(v)}<br>
-      <b>Próximo service:</b> ${(parseInt(lastKm||0)+parseInt(interval||15000)).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}
-      <span id="mc-preview" style="margin-left:8px;font-weight:600"></span>
-    </div>
-  `, [
-    { label: '💾 Guardar', cls: 'btn-primary',   fn: () => saveMaintConfig(vehicleId) },
-    { label: 'Cancelar',   cls: 'btn-secondary', fn: closeModal },
-  ]);
-
-  // Preview dinámico
-  ['mc-interval','mc-last'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', () => {
-      const int = parseInt(document.getElementById('mc-interval')?.value)||(isFork ? 250 : 15000);
-      const last = parseInt(document.getElementById('mc-last')?.value)||0;
-      const next = last + int;
-      const pct = Math.min(100, Math.round((v.km - last) / int * 100));
-      const preview = document.getElementById('mc-preview');
-      if (preview) preview.textContent = `(${pct}% completado → próximo: ${next.toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'})`;
-    });
-  });
-}
-
-async function saveMaintConfig(vehicleId) {
-  const v = App.data.vehicles.find(x=>x.id===vehicleId);
-  if (!v) return;
-
-  const taskName = (document.getElementById('mc-task')?.value||'').trim() || 'Cambio aceite + filtros';
-  const isFork = isAutoelevador(v);
-  const interval = parseInt(document.getElementById('mc-interval')?.value) || (isFork ? 250 : 15000);
-  const lastKm   = parseInt(document.getElementById('mc-last')?.value)    || 0;
-
-  const newTechSpec = Object.assign({}, v.tech_spec||{}, {
-    maint_task_name:   taskName,
-    maint_interval_km: interval,
-    maint_last_km:     lastKm,
-  });
-
-  const res = await apiFetch(`/api/vehicles/${vehicleId}/techspec`, {
-    method: 'PATCH',
-    body: JSON.stringify(newTechSpec)
-  });
-
-  if (!res.ok) { showToast('error', 'Error al guardar'); return; }
-  const updated = await res.json();
-  v.tech_spec = updated.tech_spec || newTechSpec;
-
-  closeModal();
-  showToast('ok', `Mantenimiento de ${escapeHtml(v.code)} configurado — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
-  renderMaintenance();
-  renderDashboard(); // actualizar alertas del panel
-}
-
-
-function openNewMaintModal() {
-  const vehicleOpts = (App.data.vehicles||[]).map(v =>
-    `<option value="${v.id}" data-code="${escapeHtml(v.code)}" data-unit="${vehicleMeasureUnit(v)}" data-isfork="${isAutoelevador(v)?'1':'0'}">${escapeHtml(v.code)} — ${escapeHtml(v.brand)} ${escapeHtml(v.model)} (${formatVehicleMeasure(v)})</option>`
-  ).join('');
-  openModal('Nueva tarea de mantenimiento', `
-    <div class="form-group" style="margin-bottom:12px">
-      <label class="form-label">Unidad</label>
-      <select class="form-select" id="nm-veh" onchange="updateNewMaintLabels()">${vehicleOpts}</select>
-    </div>
-    <div class="form-group" style="margin-bottom:12px">
-      <label class="form-label">Descripción de la tarea</label>
-      <input class="form-input" placeholder="Ej: Cambio aceite motor + filtros" id="nm-task">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label" id="nm-interval-label">Intervalo (km)</label>
-        <input class="form-input" type="number" placeholder="15000" id="nm-interval" value="15000">
-        <div id="nm-interval-help" style="font-size:11px;color:var(--text3);margin-top:4px">Ej: 15000, 20000, 25000</div>
+        <label class="form-label">Avisar antes <span id="pm-u2" style="color:var(--text3)"></span></label>
+        <input class="form-input" type="number" min="0" id="pm-aviso" placeholder="1000" value="${p ? p.aviso_antes : ''}">
       </div>
-      <div class="form-group"><label class="form-label" id="nm-last-label">Km del último service</label><input class="form-input" type="number" placeholder="0" id="nm-last" value="0"></div>
+      <div class="form-group">
+        <label class="form-label">Último service <span id="pm-u3" style="color:var(--text3)"></span></label>
+        <input class="form-input" id="pm-base" placeholder="180000">
+      </div>
     </div>
-  `, [
-    { label:'Guardar', cls:'btn-primary', fn: saveNewMaintTask },
-    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
-  ]);
-  updateNewMaintLabels();
+    <div style="font-size:12px;color:var(--text3);line-height:1.6;background:var(--bg3);border-radius:var(--radius);padding:10px">
+      El <b>último service</b> es dónde estaba el contador la última vez que se hizo. Sin ese dato el
+      plan queda como "sin base" y no avisa — a propósito: preferimos no decir nada antes que
+      inventar un número sobre un motor.
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="guardarPlanMant('${planId || ''}')">Guardar</button>
+    </div>`);
+
+  // La base es una fecha cuando el plan va por días, y un número si no.
+  const base = document.getElementById('pm-base');
+  if (base && p) base.value = p.tipo === 'dias' ? (p.ultima_fecha || '') : (p.ultimo_valor == null ? '' : p.ultimo_valor);
+  actualizarUnidadPlanMant();
 }
 
-function updateNewMaintLabels() {
-  const sel = document.getElementById('nm-veh');
-  if (!sel) return;
-  const opt = sel.options[sel.selectedIndex];
-  const isFork = opt?.dataset?.isfork === '1';
-  const intervalLabel = document.getElementById('nm-interval-label');
-  const intervalHelp = document.getElementById('nm-interval-help');
-  const lastLabel = document.getElementById('nm-last-label');
-  const intervalInput = document.getElementById('nm-interval');
-  if (intervalLabel) intervalLabel.textContent = `Intervalo (${isFork ? 'horas' : 'km'})`;
-  if (intervalHelp) intervalHelp.textContent = isFork ? 'Ej: 250, 500, 1000 horas' : 'Ej: 15000, 20000, 25000 km';
-  if (lastLabel) lastLabel.textContent = isFork ? 'Horas del último service' : 'Km del último service';
-  if (intervalInput && (!intervalInput.value || intervalInput.value === '15000' || intervalInput.value === '250')) {
-    intervalInput.value = isFork ? '250' : '15000';
-    intervalInput.placeholder = isFork ? '250' : '15000';
+// Las etiquetas cambian con el tipo: "cada 15.000 km" vs "cada 180 días".
+function actualizarUnidadPlanMant() {
+  const tipo = document.getElementById('pm-tipo')?.value || 'km';
+  const u = _unidadDe(tipo);
+  ['pm-u1', 'pm-u2'].forEach((id) => { const e = document.getElementById(id); if (e) e.textContent = `(${u})`; });
+  const u3 = document.getElementById('pm-u3');
+  if (u3) u3.textContent = tipo === 'dias' ? '(fecha)' : `(${u})`;
+  const base = document.getElementById('pm-base');
+  if (base) {
+    base.type = tipo === 'dias' ? 'date' : 'number';
+    base.placeholder = tipo === 'dias' ? '' : tipo === 'horas' ? '3000' : '180000';
   }
 }
 
-async function saveNewMaintTask() {
-  const sel      = document.getElementById('nm-veh');
-  const vehicleId = sel?.value || '';
-  const task     = (document.getElementById('nm-task')?.value || '').trim();
-  const code     = sel?.options[sel.selectedIndex]?.dataset?.code || '';
+async function guardarPlanMant(planId) {
+  const tipo = document.getElementById('pm-tipo')?.value || 'km';
+  const base = (document.getElementById('pm-base')?.value || '').trim();
+  const cuerpo = {
+    nombre: (document.getElementById('pm-nombre')?.value || '').trim(),
+    tipo,
+    intervalo: document.getElementById('pm-intervalo')?.value,
+    aviso_antes: document.getElementById('pm-aviso')?.value || 0,
+  };
+  if (tipo === 'dias') cuerpo.ultima_fecha = base || null;
+  else cuerpo.ultimo_valor = base === '' ? null : base;
+  if (!planId) cuerpo.vehicle_id = document.getElementById('pm-vehiculo')?.value;
 
-  if (!vehicleId) { showToast('error', 'Seleccioná una unidad'); return; }
-  if (!task)      { showToast('error', 'Ingresá la descripción de la tarea'); return; }
-
-  const v = App.data.vehicles.find(x => x.id === vehicleId);
-  const isFork = isAutoelevador(v);
-  const interval = parseInt(document.getElementById('nm-interval')?.value) || (isFork ? 250 : 15000);
-  const lastKm   = parseInt(document.getElementById('nm-last')?.value) || 0;
-  const newTechSpec = Object.assign({}, v?.tech_spec || {}, {
-    maint_task_name:   task,
-    maint_interval_km: interval,
-    maint_last_km:     lastKm,
+  const res = await apiFetch(planId ? `/api/mantenimiento/planes/${planId}` : '/api/mantenimiento/planes', {
+    method: planId ? 'PUT' : 'POST',
+    body: JSON.stringify(cuerpo),
   });
-
-  const res = await apiFetch(`/api/vehicles/${vehicleId}/techspec`, {
-    method: 'PATCH',
-    body: JSON.stringify(newTechSpec)
-  });
-
-  if (!res.ok) { showToast('error', 'Error al guardar la tarea'); return; }
-  const updated = await res.json();
-  if (v) v.tech_spec = updated.tech_spec || newTechSpec;
-
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    showToast('error', e.error || 'No se pudo guardar el plan');
+    return;
+  }
   closeModal();
-  showToast('ok', `Tarea de mantenimiento guardada para ${code} — próximo service: ${(lastKm+interval).toLocaleString('es-AR')} ${isFork ? 'hs' : 'km'}`);
+  showToast('ok', planId ? 'Plan actualizado' : 'Plan creado');
   renderMaintenance();
 }
 
-async function _crearOTsPreventivas() {
-  const planes = (window._maintenancePlans||[]).filter(p=>p.status==='danger');
-  if (!planes.length) { showToast('warn','No hay unidades con mantenimiento vencido'); return; }
-  showToast('ok', `Creando ${planes.length} OTs preventivas...`);
+// "Ya se hizo": mueve la línea de base al contador actual de la unidad. Es la
+// operación de todos los días — sin esto el plan queda pasado para siempre.
+async function marcarMantRealizado(planId) {
+  const p = (window._planesMant || []).find((x) => x.id === planId);
+  if (p && !confirm(`¿Registrar que se hizo "${p.nombre}" en ${p.unidad}?\n\nLa cuenta arranca de nuevo desde el valor actual.`)) return;
+  const res = await apiFetch(`/api/mantenimiento/planes/${planId}/realizado`, { method: 'POST', body: '{}' });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    showToast('error', e.error || 'No se pudo registrar');
+    return;
+  }
+  showToast('ok', 'Registrado. La cuenta arranca de nuevo.');
+  renderMaintenance();
+  renderDashboard();
+}
+
+async function bajaPlanMant(planId) {
+  const p = (window._planesMant || []).find((x) => x.id === planId);
+  if (!confirm(`¿Dar de baja el plan${p ? ` "${p.nombre}" de ${p.unidad}` : ''}?`)) return;
+  const res = await apiFetch(`/api/mantenimiento/planes/${planId}`, { method: 'DELETE' });
+  if (!res.ok) { showToast('error', 'No se pudo dar de baja'); return; }
+  showToast('ok', 'Plan dado de baja');
+  renderMaintenance();
+}
+
+// ── OTs de lo que ya está pasado ──────────────────────────────────────
+// Sigue siendo un botón, no algo automático: que aparezcan órdenes que nadie
+// cargó ensucia los KPI de mantenimiento y los costos del mes.
+async function crearOTsDeVencidos() {
+  const pasados = (window._planesMant || []).filter((p) => p.estado === 'vencido');
+  if (!pasados.length) { showToast('warn', 'No hay mantenimientos pasados'); return; }
+  if (!confirm(`Se van a crear ${pasados.length} orden(es) de trabajo preventivas. ¿Seguir?`)) return;
+
   let creadas = 0, errores = 0;
-  for (const p of planes) {
-    const v = App.data.vehicles.find(x => x.code === p.v.code);
-    if (!v) { errores++; continue; }
+  for (const p of pasados) {
     const res = await apiFetch('/api/workorders', {
       method: 'POST',
       body: JSON.stringify({
-        vehicle_id:  v.id,
-        type:        'Preventivo',
-        priority:    'Normal',
-        description: p.taskName || 'Mantenimiento preventivo programado',
-      })
+        vehicle_id: p.vehicle_id,
+        type: 'Preventivo',
+        priority: 'Normal',
+        description: `${p.nombre} — mantenimiento programado (${_cuanto(p)})`,
+      }),
     });
-    if (res.ok) { creadas++; }
-    else { errores++; }
-    // Pequeña pausa entre requests para no saturar el servidor
-    await new Promise(r => setTimeout(r, 100));
+    if (res.ok) creadas++; else errores++;
+    await new Promise((r) => setTimeout(r, 100));   // no saturar el server
   }
-  showToast(errores > 0 ? 'warn' : 'ok',
-    `${creadas} OTs creadas${errores > 0 ? ' · ' + errores + ' errores' : ''}`);
-  await loadInitialData();
-  renderMaintenance();
-  renderWorkOrders();
-}
-
-async function createPreventiveOT(vehicleCode, task) {
-  const v = App.data.vehicles.find(x => x.code === vehicleCode);
-  if (!v) { showToast('error', 'Vehículo no encontrado'); return; }
-
-  const res = await apiFetch('/api/workorders', {
-    method: 'POST',
-    body: JSON.stringify({
-      vehicle_id:  v.id,
-      type:        'Preventivo',
-      priority:    'urgente',
-      description: task || 'Mantenimiento preventivo programado',
-    })
-  });
-
-  if (!res.ok) { showToast('error', 'Error al crear OT preventiva'); return; }
-  const wo = await res.json();
-
-  // Agregar a memoria local
-  App.data.workOrders.unshift({
-    id: wo.code || wo.id,
-    vehicle: vehicleCode, plate: v.plate || '—',
-    type: 'Preventivo', status: 'Abierta', priority: 'urgente',
-    desc: wo.description, mechanic: '—',
-    opened: new Date().toISOString().slice(0,16).replace('T',' '),
-    parts_cost: 0, labor_cost: 0
-  });
-
-  showToast('ok', `OT preventiva ${escapeHtml(wo.code)} creada para ${vehicleCode}`);
+  showToast(errores ? 'warn' : 'ok', `${creadas} OT(s) creadas${errores ? ` · ${errores} con error` : ''}`);
   renderMaintenance();
 }
 
 // Puente con el mundo legacy (dispatcher renderPage + onclick).
 expose('renderMaintenance', renderMaintenance);
-expose('openMaintConfigModal', openMaintConfigModal);
-expose('saveMaintConfig', saveMaintConfig);
-expose('openNewMaintModal', openNewMaintModal);
-expose('updateNewMaintLabels', updateNewMaintLabels);
-expose('saveNewMaintTask', saveNewMaintTask);
-expose('_crearOTsPreventivas', _crearOTsPreventivas);
-expose('createPreventiveOT', createPreventiveOT);
+expose('openPlanMantModal', openPlanMantModal);
+expose('actualizarUnidadPlanMant', actualizarUnidadPlanMant);
+expose('guardarPlanMant', guardarPlanMant);
+expose('marcarMantRealizado', marcarMantRealizado);
+expose('bajaPlanMant', bajaPlanMant);
+expose('crearOTsDeVencidos', crearOTsDeVencidos);
 
-export { renderMaintenance, openMaintConfigModal, saveMaintConfig, openNewMaintModal, updateNewMaintLabels, saveNewMaintTask, _crearOTsPreventivas, createPreventiveOT };
+export {
+  renderMaintenance, openPlanMantModal, actualizarUnidadPlanMant,
+  guardarPlanMant, marcarMantRealizado, bajaPlanMant, crearOTsDeVencidos,
+};
