@@ -10,6 +10,7 @@
     "schema:check": "node db/schema-check.js",
     "adjuntos:check": "node scripts/diagnostico-adjuntos.js",
     "diag:eventos": "node scripts/diagnostico-eventos-gps.js",
+    "diag:combustible": "node scripts/diagnostico-combustible.js",
     "backup": "node scripts/backup-email.js",
     "build": "node scripts/build-frontend.js",
     "test": "node --test",
