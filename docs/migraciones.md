@@ -28,9 +28,28 @@ los choferes.
 Lo de antes queda intacto: `migrate.js` sigue aplicando `schema.sql` y los 10
 archivos numerados en cada corrida, y el DDL de arranque sigue donde está.
 
-**Parte B (pendiente).** Con el reporte de `schema:check` corrido contra
-producción, mover a `db/migrations/` lo que haga falta y recién ahí sacar el DDL
-de `routes/` y `services/`.
+**Parte B — paso 1 (hecho).** `db/migrations/001-tablas-y-columnas-de-servicios.sql`
+trae al repositorio los 14 objetos que hasta ahora creaban los servicios por su
+cuenta: 4 tablas, 3 columnas y 7 índices que no declaraba ningún `db/*.sql`.
+
+Antes, una base creada con `npm run migrate` quedaba **incompleta** y funcionaba
+de casualidad, porque el server terminaba de armar el esquema mientras
+trabajaba. Ahora `schema:check` sobre una base recién migrada da ① vacío.
+
+La migración es aditiva y todo va con `IF NOT EXISTS`: sobre una base que ya los
+tiene —producción— no hace absolutamente nada (verificado: 38 tablas y 503
+columnas antes y después).
+
+**Parte B — paso 2 (bloqueado).** Sacar el DDL de `routes/` y `services/`.
+
+Falta resolver una cosa antes, y no es de código: **el deploy de Render no corre
+`npm run migrate`.** Hoy eso no se nota, porque el DDL de arranque va aplicando
+los cambios de esquema solo. Si lo sacamos sin poner un paso de migración en el
+deploy, la próxima migración que agreguemos nunca llega a producción — y falla
+en silencio, que es el peor modo.
+
+Lo que hace falta: un **Pre-Deploy Command** con `npm run migrate` en el servicio
+web de Render. Recién con eso puesto, sacar el DDL de arranque es seguro.
 
 ## `npm run schema:check`
 
