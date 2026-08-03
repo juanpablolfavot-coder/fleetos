@@ -26,15 +26,11 @@ let _fuelTankReadyPromise = null;
 function ensureFuelTankEntriesTable() {
   if (_fuelTankReadyPromise) return _fuelTankReadyPromise;
   _fuelTankReadyPromise = (async () => {
-  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS price_per_l NUMERIC(12,2)").catch(() => {});
-  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE").catch(() => {});
-  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
-  await query("ALTER TABLE tanks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()").catch(() => {});
-  // Normaliza los tipos numéricos: en bases viejas current_l/capacity_l podían
-  // haber quedado con tipos distintos (numeric vs double precision), lo que
-  // rompía el UPDATE de recepción con "inconsistent types deduced for parameter $1".
-  await query("ALTER TABLE tanks ALTER COLUMN current_l TYPE NUMERIC(12,2)").catch(() => {});
-  await query("ALTER TABLE tanks ALTER COLUMN capacity_l TYPE NUMERIC(12,2)").catch(() => {});
+  // Los 4 ADD COLUMN de tanks se sacaron: db/schema.sql ya los declara.
+  // Los 2 ALTER ... TYPE NUMERIC(12,2) pasaron a db/migrations/002 porque NO
+  // eran no-op: schema.sql declara (10,2) y estos los llevaban a (12,2), así
+  // que eran la única razón por la que el tipo terminaba bien. Una base creada
+  // solo con `npm run migrate` quedaba en (10,2) y nadie se enteraba.
   await query(`
     CREATE TABLE IF NOT EXISTS fuel_tank_entries (
       id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
