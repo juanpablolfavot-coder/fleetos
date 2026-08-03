@@ -12,8 +12,28 @@ const speeding = require('./speeding');
 const idle = require('./idle');
 
 const PF_HOST = 'rusegur.monitoreodeflotas.com.ar';
-const PF_USER = process.env.GPS_USER     || 'EBiletta';
-const PF_PASS = process.env.GPS_PASSWORD || 'EBiletta26';
+
+// Acá había usuario y contraseña de Powerfleet escritos como valor por defecto
+// de estas dos variables (los valores NO se repiten acá: este repositorio es
+// público y copiarlos a un comentario dejaría todo igual que antes).
+//
+// Esa cuenta ve la posición en tiempo real de toda la flota, y estuvo legible
+// por cualquiera desde abril de 2026.
+//
+// Sacarlas de acá no las saca de la historia de git — siguen en los commits
+// viejos, y hay que dar esa contraseña por comprometida. Lo que este cambio sí
+// garantiza es que no se agreguen commits nuevos con la credencial adentro, y
+// que nadie pueda volver a arrancar el servicio con la vieja "sin darse cuenta".
+//
+// Sin las variables el servicio NO arranca, a propósito: un GPS que no
+// sincroniza se nota el mismo día, y una credencial escondida en el código no
+// se nota nunca.
+const PF_USER = process.env.GPS_USER;
+const PF_PASS = process.env.GPS_PASSWORD;
+
+function credencialesOk() {
+  return !!(PF_USER && PF_PASS);
+}
 
 let _token    = null;
 let _tokenExp = null;
@@ -73,6 +93,13 @@ function httpsReq(path, opts = {}) {
 async function login() {
   if (_token && _tokenExp && Date.now() < _tokenExp) return true;
   _token = null;
+
+  // startGPSSync ya corta antes, pero login() también se llama desde el panel de
+  // estado y desde el webhook: sin esto, esos caminos mandarían usuario vacío.
+  if (!credencialesOk()) {
+    console.error('[GPS] ✗ Login imposible: faltan GPS_USER / GPS_PASSWORD.');
+    return false;
+  }
 
   console.log('[GPS] Login Powerfleet...');
   const res = await httpsReq('/Fleetcore.Api/token', {
@@ -441,6 +468,15 @@ async function syncGPSData() {
 // velocidad más a tiempo, pero más consultas al proveedor.
 let _intervalMin = 2;
 function startGPSSync(intervalMin) {
+  // Falla fuerte y temprano. Antes, sin variables, el servicio arrancaba igual
+  // usando las credenciales del código; ahora avisa con todas las letras en vez
+  // de intentar loguearse 720 veces por día contra una API con el usuario vacío.
+  if (!credencialesOk()) {
+    console.error('[GPS] ✗ NO ARRANCA: faltan GPS_USER / GPS_PASSWORD en el Environment.');
+    console.error('[GPS]   Sin eso no hay posiciones, ni odómetro, ni horómetro, ni avisos');
+    console.error('[GPS]   de velocidad o ralentí. Cargalas en Render → Environment.');
+    return;
+  }
   _intervalMin = Math.max(1, parseInt(intervalMin != null ? intervalMin : process.env.GPS_SYNC_MINUTES || '2', 10) || 2);
   console.log(`[GPS] Servicio iniciado. Sync cada ${_intervalMin} min`);
   setTimeout(syncGPSData, 15000);
