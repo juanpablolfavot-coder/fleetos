@@ -2603,13 +2603,23 @@ function renderFuel() {
   setTimeout(() => {
     const ctx = document.getElementById('fuelChart');
     if (!ctx) return;
+    // Destruir el chart anterior ANTES de crear el nuevo (mismo patrón que
+    // _costChart). Chart.js tira "Canvas is already in use" si se le pide un
+    // chart sobre un canvas que ya tiene uno, y acá pasa por dos caminos:
+    //   - afterSave() re-renderiza la página activa tras cada guardado, así que
+    //     registrar una carga estando en Combustible vuelve a pasar por acá;
+    //   - este timer resuelve el canvas por id AL DISPARARSE, no al programarse:
+    //     dos renders seguidos dejan dos timers apuntando al mismo canvas vivo.
+    // Chart.getChart cubre además el caso de un chart cuyo handle se perdió.
+    const chartPrevio = (typeof Chart !== 'undefined' && typeof Chart.getChart === 'function' && Chart.getChart(ctx)) || window._fuelChart;
+    if (chartPrevio) { try { chartPrevio.destroy(); } catch (_) { /* ya estaba destruido */ } }
     // Agrupar litros por vehículo (últimos 30 días)
     const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
     const recent = App.data.fuelLogs.filter(f => f.fuel_type !== 'urea' && new Date(f.date) >= cutoff);
     const byVeh = {};
     recent.forEach(f => { byVeh[f.vehicle] = (byVeh[f.vehicle] || 0) + f.liters; });
     const sorted = Object.entries(byVeh).sort((a,b) => b[1]-a[1]).slice(0,15);
-    new Chart(ctx, {
+    window._fuelChart = new Chart(ctx, {
       type:'bar',
       data:{ labels: sorted.map(e=>e[0]), datasets:[{ label:'Litros 30 días', data: sorted.map(e=>Math.round(e[1])), backgroundColor:'rgba(59,130,246,.7)', borderRadius:4, borderColor:'transparent' }] },
       options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ctx.parsed.y.toLocaleString()+' L' } }}, scales:{ x:{ticks:{color:'#9ba3be',font:{size:11}}}, y:{ticks:{color:'#9ba3be',font:{size:11}, callback: v => v.toLocaleString()+' L'}} } }

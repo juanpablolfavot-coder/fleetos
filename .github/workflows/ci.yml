@@ -1,0 +1,99 @@
+# ════════════════════════════════════════════════════════════════════
+#  CI de FleetOS — la red de seguridad, corriendo sola.
+#
+#  Qué verifica, en orden de más barato a más caro:
+#    1. Sintaxis del frontend (validate.sh, milisegundos)
+#    2. Que el bundle de producción compile (server.js lo arma al arrancar;
+#       si falla, Render sirve los scripts sueltos EN SILENCIO)
+#    3. Que el esquema completo se aplique sobre una base vacía
+#    4. La suite entera, incluidos los 3 tests de integración de plata que
+#       fuera de CI se saltean por no tener base (TEST_DATABASE_URL)
+#
+#  Lo que cambia respecto de correr `npm test` a mano: acá hay Postgres, así
+#  que NADA se saltea. Fuera de CI la suite pasa igual pero con los flujos de
+#  recepción/pago sin verificar — que son justo los que mueven dinero.
+# ════════════════════════════════════════════════════════════════════
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior: no tiene
+# sentido esperar el resultado de un commit que ya quedó viejo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fleetos
+          POSTGRES_PASSWORD: fleetos
+          POSTGRES_DB: fleetos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fleetos -d fleetos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Base descartable del runner. NODE_ENV queda sin definir a propósito:
+      # db/pool.js solo exige SSL cuando es 'production', y este Postgres es
+      # local al runner (sin TLS).
+      DATABASE_URL: postgresql://fleetos:fleetos@localhost:5432/fleetos_test
+      TEST_DATABASE_URL: postgresql://fleetos:fleetos@localhost:5432/fleetos_test
+      # Valores de juguete: existen para que el código arranque, no protegen nada.
+      # La base se destruye cuando termina el job.
+      JWT_SECRET: ci-solo-para-tests-no-protege-nada-0123456789abcdef
+      ADMIN_PASSWORD: ci-admin-descartable
+      # 4 en vez de 12: el hasheo del admin inicial no se está testeando y a 12
+      # se lleva varios segundos del job.
+      BCRYPT_ROUNDS: '4'
+      TZ: America/Argentina/Buenos_Aires
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Sintaxis del frontend
+        run: ./validate.sh
+
+      - name: Compilar el bundle de producción
+        # server.js arma este bundle al arrancar y, si falla, cae a servir los
+        # <script> individuales sin avisar. Acá el fallo es ruidoso.
+        run: npm run build
+
+      - name: Aplicar el esquema sobre una base vacía
+        # Verifica que schema.sql + las 10 migraciones numeradas se apliquen
+        # limpias desde cero, no solo sobre la base que ya venía andando.
+        run: node db/migrate.js
+
+      - name: Instalar Playwright (solo CI)
+        # A propósito NO está en package.json: agregarlo dispararía la descarga
+        # de navegadores en cada deploy de Render. Acá se instala al vuelo, sin
+        # tocar el lockfile.
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Tests
+        run: npm test
