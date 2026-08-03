@@ -53,14 +53,17 @@ async function removeSubscription(endpoint) {
   if (endpoint) await query('DELETE FROM push_subscriptions WHERE endpoint=$1', [endpoint]);
 }
 
-// Envía una notificación a todos los dueños activos con suscripción.
-async function notifyDuenos(payload) {
+// Envía una notificación a todos los usuarios activos de los roles indicados.
+// Un mismo usuario puede tener varios dispositivos: le llega a todos.
+async function notifyRoles(roles, payload) {
   if (!pushEnabled()) return 0;
+  const lista = (Array.isArray(roles) ? roles : [roles]).filter(Boolean);
+  if (!lista.length) return 0;
   await ensurePushSchema();
   const subs = await query(
     `SELECT s.endpoint, s.p256dh, s.auth
        FROM push_subscriptions s JOIN users u ON u.id = s.user_id
-      WHERE u.role = 'dueno' AND u.active = TRUE`);
+      WHERE u.role = ANY($1) AND u.active = TRUE`, [lista]);
   const body = JSON.stringify(payload);
   let sent = 0;
   await Promise.all(subs.rows.map(async (row) => {
@@ -78,8 +81,14 @@ async function notifyDuenos(payload) {
   return sent;
 }
 
+// Atajo histórico: las alertas de velocidad y el resumen de flota van solo a los
+// dueños. Se mantiene para no tocar a quienes ya lo usan.
+function notifyDuenos(payload) {
+  return notifyRoles(['dueno'], payload);
+}
+
 module.exports = {
   pushEnabled, getPublicKey, ensurePushSchema,
-  saveSubscription, removeSubscription, notifyDuenos,
+  saveSubscription, removeSubscription, notifyDuenos, notifyRoles,
   SPEED_LIMIT,
 };

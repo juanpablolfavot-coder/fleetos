@@ -310,6 +310,13 @@ httpServer = app.listen(PORT, () => {
   try { require('./services/resumen-flota').programarResumenFlota(); }
   catch (e) { console.error('[resumen-flota] no se pudo programar:', e.message); }
 
+  // Aviso de documentación por vencer (VTV, seguro, licencias). El dato ya se
+  // cargaba y se listaba, pero nadie avisaba: una VTV vencida es una multa y un
+  // seguro vencido es un siniestro sin cobertura. Se desactiva con
+  // VENCIMIENTOS_OFF=1.
+  try { require('./services/vencimientos').programarVencimientos(); }
+  catch (e) { console.error('[vencimientos] no se pudo programar:', e.message); }
+
   // Webhook de Powerfleet: renueva la suscripción antes de que venza y purga
   // los avisos viejos. Si no está configurado (sin GPS_WEBHOOK_SECRET) no hace
   // nada y el exceso se sigue detectando por el sondeo de siempre.
