@@ -10,15 +10,9 @@ const userCache = new Map();
 
 // Crear índices de apoyo para auth si la base viene de versiones viejas.
 // Se ejecuta una sola vez al iniciar; no bloquea el login si falla.
-(async () => {
-  try {
-    await query('CREATE INDEX IF NOT EXISTS idx_users_active ON users(active)');
-    await query('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)');
-    await query('CREATE INDEX IF NOT EXISTS idx_users_sucursal_area ON users(sucursal, area)');
-  } catch (e) {
-    console.warn('[auth índices]', e.message);
-  }
-})();
+// Los tres CREATE INDEX sobre users que corrían acá al arrancar se sacaron:
+// db/schema.sql:54-56 los declara (idx_users_active, idx_users_role,
+// idx_users_sucursal_area). Tardaban ~1470 ms en no crear nada.
 
 function getCachedUser(userId) {
   const key = String(userId || '');
@@ -117,25 +111,9 @@ const auditOnly = (req, res, next) => {
 };
 
 // Crear tabla audit_log si no existe
-(async () => {
-  try {
-    await query(`CREATE TABLE IF NOT EXISTS audit_log (
-      id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      user_id    UUID,
-      user_name  VARCHAR(200),
-      action     VARCHAR(50),
-      table_name VARCHAR(100),
-      record_id  UUID,
-      new_value  JSONB,
-      ip_address VARCHAR(50),
-      user_agent VARCHAR(200),
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`);
-    // Auditoría fuerte: valor anterior (para saber DE QUÉ a qué cambió, no solo
-    // el cuerpo del request). Lo usa auditChange() en mutaciones sensibles.
-    await query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS old_value JSONB`).catch(()=>{});
-  } catch(e) { /* tabla ya existe */ }
-})();
+// El CREATE TABLE de audit_log y el ALTER de old_value que corrían acá al
+// arrancar se sacaron: db/schema.sql los declara. En el log del deploy este
+// CREATE figuraba tardando ~1660 ms para no crear nada.
 
 // Registrar acción en audit_log
 const auditAction = (action, tableName) => async (req, res, next) => {
