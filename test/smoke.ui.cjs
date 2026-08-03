@@ -228,7 +228,17 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    // SMOKE_CHROME_PATH permite usar un Chrome que ya esté en la máquina en vez
+    // del que baja Playwright. Es la salida cuando su CDN no responde: el 3/8/26
+    // cdn.playwright.dev devolvió 403 "this service is not available in your
+    // location" al runner de CI y dejó el build en rojo por una razón ajena al
+    // código. Un CI que se pone rojo por un CDN de terceros enseña a ignorarlo.
+    const chromeExterno = (process.env.SMOKE_CHROME_PATH || '').trim();
+    if (chromeExterno) console.log(`  (usando el Chrome de la máquina: ${chromeExterno})`);
+    browser = await chromium.launch({
+      headless: true,
+      ...(chromeExterno ? { executablePath: chromeExterno } : {}),
+    });
   } catch (e) {
     server.close();
     console.error('\n✗ No se pudo lanzar Chromium. Instalá el navegador:\n    npx playwright install chromium\n  (' + e.message + ')\n');

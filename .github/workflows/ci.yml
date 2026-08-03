@@ -87,13 +87,47 @@ jobs:
         # limpias desde cero, no solo sobre la base que ya venía andando.
         run: node db/migrate.js
 
+      - name: Cache del navegador de Playwright
+        # Con el navegador cacheado, la mayoría de las corridas ni tocan el CDN.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
       - name: Instalar Playwright (solo CI)
         # A propósito NO está en package.json: agregarlo dispararía la descarga
         # de navegadores en cada deploy de Render. Acá se instala al vuelo, sin
         # tocar el lockfile.
+        #
+        # continue-on-error + reintentos porque su CDN se cae y además
+        # geo-bloquea: el 3/8/26 devolvió 403 "this service is not available in
+        # your location" y dejó el CI en rojo por una razón ajena al código. Un
+        # CI que se pone rojo por un CDN de terceros enseña a ignorarlo, así que
+        # el paso siguiente cubre ese caso en vez de trabar el PR.
+        id: playwright
+        continue-on-error: true
         run: |
           npm install --no-save playwright
-          npx playwright install --with-deps chromium
+          for intento in 1 2 3; do
+            if npx playwright install --with-deps chromium; then exit 0; fi
+            echo "intento $intento falló; reintentando en $((intento * 10))s"
+            sleep $((intento * 10))
+          done
+          exit 1
+
+      - name: Si el CDN falló, usar el Chrome del runner
+        if: steps.playwright.outcome == 'failure'
+        # Las imágenes de ubuntu-latest ya traen Chrome. El smoke lo acepta por
+        # SMOKE_CHROME_PATH. Se avisa fuerte: la corrida sigue siendo válida,
+        # pero conviene saber que el navegador no es el que Playwright fija.
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium-browser || command -v chromium || true)"
+          if [ -z "$CHROME" ]; then
+            echo "::error::El CDN de Playwright falló y este runner no tiene Chrome. El smoke de UI no puede correr."
+            exit 1
+          fi
+          echo "::warning::El CDN de Playwright falló; el smoke de UI corre con el Chrome del runner ($CHROME)."
+          echo "SMOKE_CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
 
       - name: Tests
         run: npm test
