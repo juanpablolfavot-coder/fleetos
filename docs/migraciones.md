@@ -43,13 +43,60 @@ columnas antes y después).
 **Parte B — paso 2 (bloqueado).** Sacar el DDL de `routes/` y `services/`.
 
 Falta resolver una cosa antes, y no es de código: **el deploy de Render no corre
-`npm run migrate`.** Hoy eso no se nota, porque el DDL de arranque va aplicando
+ninguna migración.** Hoy eso no se nota, porque el DDL de arranque va aplicando
 los cambios de esquema solo. Si lo sacamos sin poner un paso de migración en el
 deploy, la próxima migración que agreguemos nunca llega a producción — y falla
 en silencio, que es el peor modo.
 
-Lo que hace falta: un **Pre-Deploy Command** con `npm run migrate` en el servicio
-web de Render. Recién con eso puesto, sacar el DDL de arranque es seguro.
+## Configurar el Pre-Deploy Command
+
+En el dashboard de Render, en el **servicio web** (no en el Cron Job del backup):
+
+> **Settings → Build & Deploy → Pre-Deploy Command**
+
+```
+npm run migrate:deploy
+```
+
+Eso es todo. Usa el `DATABASE_URL` que el servicio ya tiene en su entorno.
+
+### Por qué `migrate:deploy` y no `migrate`
+
+| | `npm run migrate` | `npm run migrate:deploy` |
+|---|---|---|
+| Qué aplica | `schema.sql` + los 10 numerados + las versionadas | solo las versionadas pendientes |
+| Sobre una base al día | ~1100 ms | ~100 ms |
+| Transacción | **una sola** sobre ~2280 líneas de SQL | una por migración pendiente |
+
+`migrate` es idempotente y funciona, pero en cada deploy tomaría locks sobre el
+esquema entero durante un segundo para no cambiar nada (abre `BEGIN` en
+`db/migrate.js:12` y no cierra hasta la 70). `migrate:deploy` toca solo lo que
+falta.
+
+`npm run migrate` sigue siendo el comando para una base **nueva** o para correr
+a mano.
+
+### Qué pasa cuando algo falla
+
+`migrate:deploy` sale con código 1, y **Render aborta el deploy**: la versión
+anterior sigue sirviendo. Es lo que se quiere — código que necesita una columna
+que no se pudo crear no debería llegar a producción.
+
+```
+[migrate:deploy] ✗ migración 002-x.sql falló (no se aplicó nada de ese archivo): syntax error…
+[migrate:deploy] El deploy se aborta a propósito: la versión anterior sigue sirviendo.
+```
+
+Cada migración corre en su propia transacción, así que una que falla no queda
+aplicada a medias.
+
+### Si el plan no tiene Pre-Deploy Command
+
+Es una función de los planes pagos de Render. Si no aparece el campo, la
+alternativa es seguir corriendo `npm run migrate` a mano desde el Shell después
+de cada deploy que traiga una migración — que es lo que se hace hoy, con el
+riesgo de olvidarse. Ese olvido es justo lo que dejó 4 tablas fuera del
+repositorio durante meses.
 
 ## `npm run schema:check`
 

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "migrate": "node db/migrate.js",
+    "migrate:deploy": "node db/migrate-deploy.js",
     "schema:check": "node db/schema-check.js",
     "adjuntos:check": "node scripts/diagnostico-adjuntos.js",
     "backup": "node scripts/backup-email.js",
