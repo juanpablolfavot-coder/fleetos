@@ -170,6 +170,12 @@ const TABS_EXTRA = {
   flota: ["mostrarTabFlota('feed')", "mostrarTabFlota('preguntar')",
           // Tocar una línea del resumen tiene que llevar al feed sin romper nada.
           "irAEventoFlota('exc-1')"],
+  // Re-render inmediato (sin esperar entre medio): es lo que hace afterSave()
+  // cuando se guarda algo estando parado en la pantalla. Tiene que ser SEGUIDO
+  // en el mismo paso — con la pausa de 350 ms de por medio el timer del chart
+  // ya se disparó y la carrera no se reproduce. Detectó "Canvas is already in
+  // use" en el chart de combustible.
+  fuel: ["renderPage('fuel'); renderPage('fuel')"],
 };
 
 // Decide el cuerpo de respuesta según el path del endpoint.
@@ -241,7 +247,24 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
   // código de render se ejecuta igual y SÍ detectaríamos un bug real ahí.
   await page.addInitScript(() => {
     const noop = function () {};
-    function Chart() { return { destroy: noop, update: noop, resize: noop, render: noop, data: {}, options: {} }; }
+    // El stub emula UNA regla real de Chart.js: no se puede crear un chart
+    // sobre un canvas que ya tiene uno vivo. Sin esto el stub se traga el bug
+    // y la pantalla da verde acá pero rompe en un navegador con la librería de
+    // verdad (que es lo que pasó con el chart de combustible en CI, donde
+    // cdnjs SÍ responde y la lib real pisa este stub).
+    const enUso = new WeakMap();
+    function Chart(ctx) {
+      if (ctx && enUso.has(ctx)) {
+        throw new Error("Canvas is already in use. Chart with ID '0' must be destroyed before the canvas with ID '" + (ctx.id || '') + "' can be reused.");
+      }
+      const inst = {
+        destroy() { if (ctx) enUso.delete(ctx); },
+        update: noop, resize: noop, render: noop, data: {}, options: {},
+      };
+      if (ctx) enUso.set(ctx, inst);
+      return inst;
+    }
+    Chart.getChart = (c) => (c && enUso.get(c)) || undefined;
     Chart.register = noop; Chart.defaults = { plugins: {}, font: {} }; Chart.Tooltip = {};
     window.Chart = Chart;
     function JsPDF() { return { text: noop, save: noop, addPage: noop, setFontSize: noop, setTextColor: noop, autoTable: noop, addImage: noop, setFillColor: noop, rect: noop, line: noop, splitTextToSize: () => [''], internal: { pageSize: { getWidth: () => 595, getHeight: () => 842 } } }; }
