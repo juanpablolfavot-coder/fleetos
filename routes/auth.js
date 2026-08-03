@@ -13,21 +13,18 @@ const LOCK_MINS    = parseInt(process.env.LOCK_TIME_MINUTES)  || 15;
 //  AUTO-MIGRACIÓN: agregar roles nuevos "compras" y "tesoreria"
 //  al CHECK constraint de users.role (si existe el CHECK)
 // ═══════════════════════════════════════════════════════════
-(async () => {
-  try {
-    await query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-    await query(`ALTER TABLE users ADD CONSTRAINT users_role_check
-      CHECK (role IN ('dueno','gerencia','jefe_mantenimiento','mecanico','chofer',
-                      'encargado_combustible','paniol','contador','auditor',
-                      'compras','tesoreria','proveedores','gerente_sucursal'))`);
-    console.log('[auth migración] roles habilitados (incluyendo proveedores y gerente_sucursal)');
-    // Datos de organización del usuario
-    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id)`).catch(()=>{});
-    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS sucursal VARCHAR(200)`).catch(()=>{});
-    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS area VARCHAR(100)`).catch(()=>{});
-    console.log('[auth migración] users.supplier_id/sucursal/area agregados');
-  } catch(e) { console.error('[auth migración]', e.message); }
-})();
+// Acá se rehacía el CHECK de users.role en CADA arranque (DROP + ADD) más los
+// ALTER de supplier_id/sucursal/area. Se sacó.
+//
+// Este era el más caro de todos y NO era un no-op: agregar un CHECK obliga a
+// Postgres a validar la tabla entera, así que hacía trabajo real en cada
+// deploy. En el log figuraba tardando ~1860 ms.
+//
+// db/schema.sql:48-52 declara el constraint con la MISMA lista de 13 roles
+// (verificado uno por uno), y las tres columnas están en schema.sql y en
+// db/07-fks-indexes.sql. Para agregar un rol nuevo ahora va una migración en
+// db/migrations/, que es lo que el comentario de schema.sql daba por imposible
+// cuando esto se escribió: entonces no había migraciones versionadas.
 
 // POST /api/auth/login
 router.post('/login', loginLimiter, checkAccountLock, async (req, res) => {

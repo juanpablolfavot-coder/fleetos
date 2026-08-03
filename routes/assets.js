@@ -9,34 +9,8 @@ const { authenticate, requireRole, auditAction } = require('../middleware/auth')
 const { validateUUID } = require('../middleware/security');
 
 // Auto-create de la tabla (patrón del resto del proyecto)
-(async () => {
-  try {
-    await query(`CREATE TABLE IF NOT EXISTS assets (
-      id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      code          VARCHAR(50) UNIQUE NOT NULL,
-      name          VARCHAR(200) NOT NULL,
-      type          VARCHAR(30) NOT NULL DEFAULT 'otro'
-                    CHECK (type IN ('edilicio','herramienta','equipo','informatica','instalacion','otro')),
-      category      VARCHAR(100),
-      location      VARCHAR(200),
-      brand         VARCHAR(100),
-      model         VARCHAR(100),
-      serial_no     VARCHAR(100),
-      purchase_date DATE,
-      purchase_price NUMERIC(12,2),
-      warranty_until DATE,
-      status        VARCHAR(20) DEFAULT 'operativo'
-                    CHECK (status IN ('operativo','en_reparacion','fuera_servicio','baja')),
-      notes         TEXT,
-      active        BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`);
-    // Índices útiles
-    await query(`CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type) WHERE active=TRUE`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_assets_status ON assets(status) WHERE active=TRUE`);
-  } catch(e) { console.error('[assets] init:', e.message); }
-})();
+// El CREATE TABLE de assets y sus índices que corrían acá al arrancar se
+// sacaron: db/schema.sql los declara. Tardaba ~1390 ms en no crear nada.
 
 // GET /api/assets — listar con filtros opcionales
 router.get('/', authenticate, async (req, res) => {
