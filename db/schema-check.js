@@ -62,8 +62,19 @@ function seccion(titulo, items, vacio) {
 }
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
-    console.error('✗ Falta DATABASE_URL.\n  Uso: DATABASE_URL=postgresql://... node db/schema-check.js');
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error('✗ Falta DATABASE_URL.');
+    console.error('  Desde el Shell de Render ya está en el entorno: corré "npm run schema:check" sin prefijo.');
+    console.error('  Fuera de ahí: DATABASE_URL=postgresql://... npm run schema:check');
+    process.exit(2);
+  }
+  // Un placeholder pegado tal cual ("<la de Render>") llega hasta acá y falla
+  // como un ENOTFOUND críptico varios segundos después. Mejor decirlo ahora.
+  if (!/^postgres(ql)?:\/\//i.test(url.trim())) {
+    console.error(`✗ DATABASE_URL no parece una URL de conexión: "${url.slice(0, 40)}"`);
+    console.error('  Tiene que empezar con postgresql:// — ¿quedó pegado el texto de ejemplo?');
+    console.error('  Desde el Shell de Render no hace falta pasarla: "npm run schema:check" a secas.');
     process.exit(2);
   }
 

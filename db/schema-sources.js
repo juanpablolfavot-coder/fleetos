@@ -134,11 +134,39 @@ function ponerSiFalta(mapa, clave, origen) {
   if (!mapa.has(clave)) mapa.set(clave, origen);
 }
 
-const RE_SIGUIENTE_SENTENCIA = /\b(ALTER\s+TABLE|CREATE\s+(?:TABLE|INDEX|UNIQUE)|DROP\s+TABLE|INSERT\s+INTO|UPDATE\s+|SELECT\s+)/gi;
-function buscarSiguienteSentencia(sql, desde) {
-  RE_SIGUIENTE_SENTENCIA.lastIndex = desde;
-  const m = RE_SIGUIENTE_SENTENCIA.exec(sql);
-  return m ? m.index : -1;
+const RE_SIGUIENTE_SENTENCIA = /\b(ALTER\s+TABLE|CREATE\s+(?:TABLE|INDEX|UNIQUE)|DROP\s+TABLE|INSERT\s+INTO|UPDATE\s+|SELECT\s+)/i;
+
+// Devuelve el cuerpo de una sentencia SQL que arranca en `desde`, hasta el ";"
+// que la cierra. Salta los comentarios SQL "--" en el camino.
+//
+// Ese salto no es un detalle: el SQL embebido en template literales de JS
+// lleva comentarios "--" adentro, y alcanza con que uno tenga un punto y coma
+// —services/gps-powerfleet.js:284 dice "...de la unidad; se venían
+// descartando."— para que la sentencia se corte ahí y las columnas que vienen
+// después se vuelvan invisibles. Pasó con gps_address, gps_state y
+// gps_vehicle_id: el comparador las reportaba como "deriva" cuando estaban
+// declaradas tres líneas más abajo.
+//
+// No se limpian los "--" de TODO el archivo JS porque ahí "--" es el operador
+// de decremento; solo se saltean mientras se recorre una sentencia SQL.
+function cuerpoDeSentencia(sql, desde) {
+  let out = '';
+  let i = desde;
+  while (i < sql.length) {
+    if (sql[i] === '-' && sql[i + 1] === '-') {
+      const nl = sql.indexOf('\n', i);
+      if (nl === -1) break;
+      i = nl;                 // el \n se copia en la vuelta siguiente
+      continue;
+    }
+    if (sql[i] === ';') break;
+    out += sql[i];
+    i++;
+  }
+  // Corte extra por si falta el ";": no arrastrar la sentencia siguiente y
+  // atribuirle a esta tabla columnas que son de otra.
+  const sig = out.match(RE_SIGUIENTE_SENTENCIA);
+  return sig ? out.slice(0, sig.index) : out;
 }
 
 function extraerDe(sql, origen, grupo) {
@@ -146,15 +174,7 @@ function extraerDe(sql, origen, grupo) {
   RE_ALTER_TABLE.lastIndex = 0;
   while ((m = RE_ALTER_TABLE.exec(sql))) {
     const tabla = m[1].toLowerCase();
-    // La sentencia termina en el ";" — o antes, si aparece otro ALTER/CREATE
-    // primero. En el código JS cada DDL vive en su propio template literal y el
-    // ";" real queda después del backtick: cortar también en la próxima
-    // sentencia evita atribuirle a esta tabla columnas de la siguiente.
-    const desde = m.index + m[0].length;
-    const candidatos = [sql.indexOf(';', desde), buscarSiguienteSentencia(sql, desde)]
-      .filter((i) => i !== -1);
-    const corte = candidatos.length ? Math.min(...candidatos) : sql.length;
-    const sentencia = sql.slice(m.index, corte);
+    const sentencia = cuerpoDeSentencia(sql, m.index + m[0].length);
     let c;
     RE_ADD_COLUMN.lastIndex = 0;
     while ((c = RE_ADD_COLUMN.exec(sentencia))) {
@@ -211,4 +231,17 @@ function leerDeclarado() {
   return { sql, codigo, union };
 }
 
-module.exports = { leerDeclarado, quitarComentariosJS, quitarComentariosSQL };
+/**
+ * Analiza un texto suelto (sin leer el repo). Existe para poder testear el
+ * extractor con fixtures: es donde aparecieron los dos errores que daban
+ * respuestas equivocadas EN SILENCIO (comentarios de JS leídos como DDL, y
+ * sentencias cortadas por un ";" adentro de un comentario SQL).
+ */
+function analizar(texto, { lenguaje = 'sql', origen = 'test' } = {}) {
+  const grupo = grupoVacio();
+  const limpio = lenguaje === 'js' ? quitarComentariosJS(texto) : quitarComentariosSQL(texto);
+  extraerDe(limpio, origen, grupo);
+  return grupo;
+}
+
+module.exports = { leerDeclarado, analizar, quitarComentariosJS, quitarComentariosSQL };
