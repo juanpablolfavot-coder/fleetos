@@ -105,15 +105,17 @@ DATABASE_URL="postgresql://..." npm run schema:check
 ```
 
 Hace `SELECT` sobre los catálogos de PostgreSQL (`information_schema`,
-`pg_indexes`) y compara contra lo que declaran los archivos del repo. **No crea,
-no altera y no borra nada**: es seguro correrlo contra producción.
+`pg_indexes`) y compara contra lo que declaran los archivos del repo
+(`db/*.sql`, `db/migrations/*.sql` y el DDL de arranque de
+`routes/`, `services/` y `middleware/`). **No crea, no altera y no borra nada**:
+es seguro correrlo contra producción.
 
 El reporte tiene tres secciones:
 
 1. **BLOQUEANTE** — lo que el DDL de arranque agrega y esa base todavía no
    tiene. Mientras haya algo acá, ese DDL sigue haciendo falta: sacarlo rompería
    esa base. Cada ítem tiene que pasar a ser una migración versionada primero.
-2. **Declarado en `db/*.sql` y ausente** — señal de que a esa base le faltó
+2. **Declarado en el repo y ausente** — señal de que a esa base le faltó
    correr alguna migración numerada.
 3. **En la base y declarado en ningún lado** — deriva: columnas agregadas a mano
    que no se recrearían si mañana se levanta la base desde el repo.
@@ -163,9 +165,16 @@ así que una base creada desde el repo funciona igual. Se explican solas:
 Antes de borrar cualquiera de estas hay que mirar si tienen datos —
 `maintenance_plans` y `work_orders_backup_renumeracion` en particular.
 
-Como referencia, sobre una base recién creada con `npm run migrate` el veredicto
-da **11 objetos bloqueantes** — 4 tablas y 7 índices que ningún `db/*.sql`
-declara:
+> Una nota sobre la sección ③: hasta el 3 de agosto de 2026 el extractor leía
+> `db/*.sql` pero **no** `db/migrations/*.sql`, así que cada migración nueva
+> aparecía ahí como deriva. `maintenance_schedules` (migración 003) fue la
+> primera en delatarlo. Ya está corregido; el test
+> `test/schema-sources.test.js` lo fija para que no vuelva a pasar. Si mirás un
+> reporte viejo, esa sección tiene falsos positivos.
+
+Como referencia, sobre una base recién creada **sin aplicar las migraciones
+versionadas** el veredicto da **11 objetos bloqueantes** — 4 tablas y 7 índices
+que solo existen porque el código los crea al vuelo:
 
 | Objeto | Lo crea | Cuándo |
 |---|---|---|

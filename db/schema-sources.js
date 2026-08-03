@@ -216,6 +216,16 @@ function leerDeclarado() {
   for (const f of fs.readdirSync(path.join(RAIZ, 'db')).filter((f) => f.endsWith('.sql')).sort()) {
     extraerDe(quitarComentariosSQL(fs.readFileSync(path.join(RAIZ, 'db', f), 'utf8')), `db/${f}`, sql);
   }
+  // Las migraciones versionadas también declaran esquema. Sin leerlas, cada
+  // migración nueva aparecía en la sección ③ como "deriva: no lo declara nadie"
+  // —maintenance_schedules fue la primera— y esa sección es justamente la que
+  // hay que poder mirar y encontrar vacía.
+  const dirMig = path.join(RAIZ, 'db', 'migrations');
+  if (fs.existsSync(dirMig)) {
+    for (const f of fs.readdirSync(dirMig).filter((f) => f.endsWith('.sql')).sort()) {
+      extraerDe(quitarComentariosSQL(fs.readFileSync(path.join(dirMig, f), 'utf8')), `db/migrations/${f}`, sql);
+    }
+  }
   for (const dir of DIRS_CODIGO) {
     for (const rel of archivosJS(dir)) {
       extraerDe(quitarComentariosJS(fs.readFileSync(path.join(RAIZ, rel), 'utf8')), rel, codigo);

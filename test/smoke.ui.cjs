@@ -190,6 +190,21 @@ function stubFor(url) {
   if (u.endsWith('/api/stock')) return FIX.stock;
   if (u.includes('/stock/catalog')) return u.includes('/movements') ? [] : FIX.catalog;
   if (u.includes('/stock/dispatches')) return [];
+  // Planes de mantenimiento en los 4 estados posibles: así el smoke ejercita el
+  // dibujo de la tabla (barra, badges, botones) y no solo el estado vacío.
+  if (u.includes('/mantenimiento/planes')) return [
+    { id: 'm1', vehicle_id: 'v1', unidad: 'AH327RZ', nombre: 'Cambio de aceite', tipo: 'km',
+      intervalo: 15000, aviso_antes: 1000, actual: 194200, proximo: 195000, restante: 800,
+      unidad_medida: 'km', estado: 'proximo' },
+    { id: 'm2', vehicle_id: 'v2', unidad: 'AD235FE', nombre: 'Service mayor', tipo: 'km',
+      intervalo: 60000, aviso_antes: 5000, actual: 196500, proximo: 195000, restante: -1500,
+      unidad_medida: 'km', estado: 'vencido' },
+    { id: 'm3', vehicle_id: 'v3', unidad: 'OKQ888', nombre: 'Hidráulico', tipo: 'horas',
+      intervalo: 500, aviso_antes: 50, actual: 187, proximo: 500, restante: 313,
+      unidad_medida: 'h', estado: 'ok' },
+    { id: 'm4', vehicle_id: 'v4', unidad: 'AF823RB', nombre: 'Matafuegos', tipo: 'dias',
+      intervalo: 365, aviso_antes: 30, restante: null, estado: 'sin_base' },
+  ];
   if (u.endsWith('/api/documents')) return FIX.documents;
   if (u.endsWith('/fuel/tanks')) return FIX.tanks;
   if (u.endsWith('/api/users')) return FIX.users;
