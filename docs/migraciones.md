@@ -191,3 +191,47 @@ Reglas: cada archivo corre en su propia transacción, y **una migración ya
 aplicada en producción no se edita nunca más** — se escribe una nueva. Si alguien
 la edita igual, el runner avisa al arrancar, pero para esa base el cambio ya no
 entra.
+
+
+## ⚠ Antes de sacar el DDL de `routes/payments.js`
+
+`ensurePaymentEngine()` NO es DDL "por las dudas" como el resto. Contiene la
+**máquina de estados de las órdenes de compra**: tres `CREATE OR REPLACE
+FUNCTION`, dos triggers y varios `UPDATE` de recálculo.
+
+Y las tres funciones **difieren** de las que declara `db/09-oc-status-triggers.sql`.
+Verificado preguntándole a Postgres, que es lo único confiable acá:
+
+```bash
+# base A: solo npm run migrate (aplica db/09)
+# base B: migrate + arranque del server (aplica routes/payments.js)
+psql -d A -t -A -c "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname='po_resolve_status'"
+psql -d B -t -A -c "SELECT pg_get_functiondef(oid) FROM pg_proc WHERE proname='po_resolve_status'"
+# → distintas, en las tres funciones
+```
+
+Como el arranque corre DESPUÉS de `migrate`, **la versión que gobierna en
+producción es la del código**. Sacarla sin más haría que producción vuelva en
+silencio a la lógica vieja de `db/09` — la que decide cuándo una OC pasa a
+pagada, entregada o cerrada.
+
+**Ninguna de las herramientas de este repo lo detecta:**
+
+- `npm run schema:check` compara tablas, columnas e índices. **No compara
+  cuerpos de función ni constraints.**
+- El diff de `pg_dump --schema-only` que se usó para verificar cada tanda de
+  remoción compara *con arranque* contra *con arranque*: los dos lados tienen la
+  versión del código, así que la divergencia con `db/09` no aparece.
+
+### Cómo hacerlo bien
+
+1. Decidir cuál de las dos versiones es la correcta (presumiblemente la del
+   código, que es la que viene corriendo en producción).
+2. Llevarla a `db/migrations/` como migración versionada.
+3. Recién ahí sacar el bloque de `routes/payments.js`.
+4. Verificar comparando `pg_get_functiondef()` entre una base creada solo con
+   `migrate` y la de producción — **no** con `schema:check`.
+
+Los `UPDATE` de recálculo que están en el mismo bloque son idempotentes (solo
+tocan filas que difieren), pero corren en cada arranque: en el log de producción
+figuran como ~300 ms de ejecución real. También conviene que pasen a migración.
