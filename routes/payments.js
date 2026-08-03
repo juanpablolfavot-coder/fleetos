@@ -25,19 +25,9 @@ let _paymentEnginePromise = null;
 function ensurePaymentEngine() {
   if (_paymentEnginePromise) return _paymentEnginePromise;
   _paymentEnginePromise = query(`
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS banco_origen VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS banco_destino VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cbu_alias_destino VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_nro VARCHAR(50);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_banco VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_fecha_cobro DATE;
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS cheque_a_nombre VARCHAR(200);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_nro VARCHAR(50);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_banco VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_fecha_pago DATE;
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS echeq_clave VARCHAR(100);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS tarjeta_aprobacion VARCHAR(50);
-    ALTER TABLE purchase_order_payments ADD COLUMN IF NOT EXISTS tarjeta_cuotas INTEGER;
+    -- Los 13 ADD COLUMN que estaban acá se sacaron: db/02-pagos.sql los declara
+    -- y schema:check contra producción confirmó que no agregaban nada.
+    -- La reparación de datos de abajo SE QUEDA: eso no es esquema.
 
     -- Reparación legacy: facturas que el sistema viejo marcó como pagadas solo con el neto.
     -- Se ajusta el último pago para que represente el total real pagado con IVA incluido.
