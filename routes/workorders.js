@@ -4,43 +4,13 @@ const { authenticate, requireRole, auditAction } = require('../middleware/auth')
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
 
 // Auto-migrate: agregar campos ot_tipo, asset_id, y crear tabla work_order_labor
-(async () => {
-  try {
-    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS ot_tipo VARCHAR(20) DEFAULT 'vehiculo'`).catch(()=>{});
-    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS asset_id UUID`).catch(()=>{});
-    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_required BOOLEAN NOT NULL DEFAULT FALSE`).catch(()=>{});
-    await query(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_po_id UUID`).catch(()=>{});
-    await query(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID`).catch(()=>{});
-    await query(`ALTER TABLE purchase_order_items ADD COLUMN IF NOT EXISTS work_order_part_id UUID`).catch(()=>{});
-    // Backfill: las OTs viejas sin ot_tipo se marcan como 'vehiculo'
-    await query(`UPDATE work_orders SET ot_tipo = 'vehiculo' WHERE ot_tipo IS NULL`).catch(()=>{});
-
-    // Partes de trabajo por mecánico (Opción B: trazabilidad MO)
-    await query(`CREATE TABLE IF NOT EXISTS work_order_labor (
-      id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      wo_id       UUID NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
-      user_id     UUID REFERENCES users(id),
-      worker_name VARCHAR(200) NOT NULL,
-      hours       NUMERIC(5,2) NOT NULL CHECK (hours > 0 AND hours <= 24),
-      rate        NUMERIC(10,2) NOT NULL DEFAULT 0,
-      subtotal    NUMERIC(12,2) GENERATED ALWAYS AS (hours * rate) STORED,
-      work_date   DATE NOT NULL DEFAULT CURRENT_DATE,
-      notes       TEXT,
-      created_by  UUID REFERENCES users(id),
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`).catch(()=>{});
-    await query(`CREATE INDEX IF NOT EXISTS idx_wol_wo ON work_order_labor(wo_id)`).catch(()=>{});
-    await query(`CREATE INDEX IF NOT EXISTS idx_wol_user ON work_order_labor(user_id)`).catch(()=>{});
-    await query(`CREATE INDEX IF NOT EXISTS idx_wol_date ON work_order_labor(work_date)`).catch(()=>{});
-
-    // Índices del listado principal de OTs. El listado siempre ordena por opened_at DESC
-    // y filtra muy seguido por status; el compuesto cubre ese caso. asset_id y reporter_id
-    // se filtran (OTs de un activo/edificio, y "el chofer ve solo las suyas") y no tenían índice.
-    await query(`CREATE INDEX IF NOT EXISTS idx_wo_status_opened ON work_orders(status, opened_at DESC)`).catch(()=>{});
-    await query(`CREATE INDEX IF NOT EXISTS idx_wo_asset ON work_orders(asset_id)`).catch(()=>{});
-    await query(`CREATE INDEX IF NOT EXISTS idx_wo_reporter ON work_orders(reporter_id)`).catch(()=>{});
-  } catch(e) { /* silent */ }
-})();
+// El bloque de DDL que corría acá al arrancar se sacó: 4 ALTER y 3 CREATE INDEX
+// sobre work_orders que db/schema.sql y db/10-higiene.sql ya declaran.
+// schema:check contra producción confirmó que no agregaban nada, y el log del
+// deploy los mostraba tardando ~1900 ms cada uno para no hacer nada: al
+// arrancar todos los routers a la vez, sus ALTER se pelean por los locks.
+// Cualquier cambio de esquema nuevo va a db/migrations/, que el Pre-Deploy
+// Command de Render aplica antes de levantar la versión nueva.
 
 async function ensureExternalPOFields(clientOrQuery = query) {
   const q = typeof clientOrQuery.query === 'function' ? clientOrQuery.query.bind(clientOrQuery) : clientOrQuery;

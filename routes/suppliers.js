@@ -86,83 +86,11 @@ function normalizeSupplierPayload(body = {}) {
 }
 
 // Auto-create de la tabla
-(async () => {
-  try {
-    await query(`CREATE TABLE IF NOT EXISTS suppliers (
-      id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      name            VARCHAR(200) NOT NULL,
-      razon_social    VARCHAR(200),
-      cuit            VARCHAR(20),
-      iva_condition   VARCHAR(30),         -- 'responsable_inscripto' | 'monotributo' | 'exento' | 'consumidor_final'
-
-      contact_person  VARCHAR(200),
-      phone           VARCHAR(50),
-      email           VARCHAR(200),
-      website         VARCHAR(200),
-
-      address         TEXT,
-      city            VARCHAR(100),
-      province        VARCHAR(100),
-      postal_code     VARCHAR(20),
-
-      rubros          TEXT[],              -- ['repuestos','cubiertas','aceites','administrativo'...]
-
-      forma_pago      VARCHAR(30),         -- 'contado' | 'cuenta_corriente' | 'cheque' | 'transferencia'
-      cc_dias         INT,                 -- días de CC acordados
-      moneda          VARCHAR(5) DEFAULT 'ARS',
-      discount_pct    NUMERIC(5,2) DEFAULT 0,
-
-      delivery_time_days INT,              -- tiempo promedio de entrega
-      rating          NUMERIC(2,1),        -- calificación 0.0-5.0
-      total_compras   NUMERIC(14,2) DEFAULT 0,  -- acumulado
-
-      bank_name       VARCHAR(100),
-      bank_cbu        VARCHAR(30),
-      bank_alias      VARCHAR(100),
-
-      notes           TEXT,
-      status          VARCHAR(20) DEFAULT 'activo'
-                      CHECK (status IN ('activo','suspendido','blacklist')),
-      blacklist_reason TEXT,
-
-      active          BOOLEAN NOT NULL DEFAULT TRUE,
-      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_suppliers_status ON suppliers(status) WHERE active=TRUE`);
-    await query(`CREATE INDEX IF NOT EXISTS idx_suppliers_cuit ON suppliers(cuit) WHERE active=TRUE AND cuit IS NOT NULL`);
-    // Bases viejas: CREATE TABLE IF NOT EXISTS no agrega columnas nuevas.
-    // Esto evita errores 500 al editar proveedores cuando la tabla fue creada antes.
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS razon_social VARCHAR(200)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cuit VARCHAR(20)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS iva_condition VARCHAR(30)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS contact_person VARCHAR(200)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(50)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS email VARCHAR(200)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS website VARCHAR(200)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS address TEXT`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS city VARCHAR(100)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS province VARCHAR(100)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rubros TEXT[]`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS forma_pago VARCHAR(30)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS cc_dias INT`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS moneda VARCHAR(5) DEFAULT 'ARS'`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) DEFAULT 0`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS delivery_time_days INT`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS rating NUMERIC(2,1)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS total_compras NUMERIC(14,2) DEFAULT 0`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_cbu VARCHAR(30)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS bank_alias VARCHAR(100)`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS notes TEXT`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'activo'`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS blacklist_reason TEXT`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
-    await query(`ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
-  } catch(e) { console.error('[suppliers] init:', e.message); }
-})();
+// Acá corría al arrancar el CREATE TABLE de suppliers y ~30 ALTER de sus
+// columnas. Se sacó: db/schema.sql los declara y schema:check contra producción
+// confirmó que no agregaban nada. En el log del deploy, ese CREATE TABLE
+// figuraba tardando ~1800 ms para no crear nada.
+// Los cambios de esquema nuevos van a db/migrations/.
 
 // GET /api/suppliers — listar
 router.get('/', authenticate, async (req, res) => {

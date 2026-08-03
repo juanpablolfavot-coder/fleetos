@@ -748,18 +748,18 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
         return res.status(400).json({ error: 'Al cargar en estación externa, la foto del ticket es obligatoria' });
       }
     }
+    // Acá había 7 ALTER TABLE "por las dudas" (ticket_image, ticket_estado,
+    // ticket_obs, ticket_verificado_por/_at, driver_name y un DROP DEFAULT).
+    // Se sacaron: db/schema.sql:188-200 ya declara las seis columnas, sin
+    // default ninguno, y schema:check contra producción confirmó que no
+    // agregaban nada.
+    //
+    // No era solo trabajo de más. Un ALTER toma ACCESS EXCLUSIVE sobre
+    // fuel_logs, y estos corrían DENTRO de la transacción que además hace
+    // SELECT ... FOR UPDATE sobre tanks para descontar litros. O sea: el
+    // endpoint que más usan los choferes tomaba el lock más fuerte que existe
+    // sobre su propia tabla, en cada carga, para no cambiar nada.
     await client.query('BEGIN');
-    // Asegurar columnas de ticket sin dejar pendientes falsos.
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_image TEXT`).catch(()=>{});
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_estado VARCHAR(20)`).catch(()=>{});
-    await client.query(`ALTER TABLE fuel_logs ALTER COLUMN ticket_estado DROP DEFAULT`).catch(()=>{});
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_obs TEXT`).catch(()=>{});
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_por UUID`).catch(()=>{});
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS ticket_verificado_at TIMESTAMPTZ`).catch(()=>{});
-    // Chofer real de la carga (texto, no FK): el que maneja la unidad ese día.
-    // Antes solo se guardaba driver_id = quien registra (el encargado), y el
-    // listado mostraba al encargado en vez del chofer.
-    await client.query(`ALTER TABLE fuel_logs ADD COLUMN IF NOT EXISTS driver_name VARCHAR(150)`).catch(()=>{});
 
     // ── PRECIO FINAL:
     //    * Cisterna propia (tank_id presente): SIEMPRE el precio del tanque (ignoramos frontend)
