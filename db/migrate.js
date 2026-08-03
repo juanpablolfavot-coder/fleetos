@@ -68,6 +68,14 @@ async function migrate() {
     console.log('✓ Cisternas iniciales verificadas');
 
     await client.query('COMMIT');
+
+    // Migraciones versionadas (db/migrations/): se aplican una sola vez cada
+    // una y quedan anotadas en schema_migrations. Va DESPUÉS del COMMIT de
+    // arriba a propósito: cada migración abre su propia transacción, y un BEGIN
+    // anidado haría que su COMMIT cerrara la transacción de afuera.
+    console.log('\nMigraciones versionadas:');
+    await require('./migrations').aplicarPendientes(client);
+
     console.log('\n✅ Migración completada exitosamente');
   } catch (err) {
     await client.query('ROLLBACK');
