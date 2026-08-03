@@ -154,6 +154,7 @@ app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);
 app.use('/api/push', pushRouter);
 app.use('/api/flota', require('./routes/flota'));
+app.use('/api/mantenimiento', require('./routes/mantenimiento'));
 
 // ── Endpoints GPS ──
 // Importar middleware de autenticación
@@ -316,6 +317,11 @@ httpServer = app.listen(PORT, () => {
   // VENCIMIENTOS_OFF=1.
   try { require('./services/vencimientos').programarVencimientos(); }
   catch (e) { console.error('[vencimientos] no se pudo programar:', e.message); }
+
+  // Mantenimiento preventivo: avisa qué toca antes de que se rompa. Modo aviso,
+  // no genera órdenes de trabajo. Se desactiva con MANTENIMIENTO_OFF=1.
+  try { require('./services/mantenimiento').programarMantenimiento(); }
+  catch (e) { console.error('[mantenimiento] no se pudo programar:', e.message); }
 
   // Webhook de Powerfleet: renueva la suscripción antes de que venza y purga
   // los avisos viejos. Si no está configurado (sin GPS_WEBHOOK_SECRET) no hace
