@@ -95,21 +95,23 @@ async function main() {
   // carga N-1 y la N. Un par sirve solo si el odómetro avanzó algo razonable.
   const pares = await client.query(`
     WITH ordenadas AS (
-      SELECT vehicle_id, liters, odometer_km, logged_at,
-             LAG(odometer_km) OVER (PARTITION BY vehicle_id ORDER BY logged_at, odometer_km) AS odo_prev
-        FROM fuel_logs
-       WHERE fuel_type IS DISTINCT FROM 'urea'
-         AND odometer_km IS NOT NULL AND odometer_km > 0
-         AND liters IS NOT NULL AND liters > 0
+      SELECT f.vehicle_id, v.code AS unidad, f.liters, f.odometer_km, f.logged_at,
+             LAG(f.odometer_km) OVER (PARTITION BY f.vehicle_id ORDER BY f.logged_at, f.odometer_km) AS odo_prev
+        FROM fuel_logs f
+        LEFT JOIN vehicles v ON v.id = f.vehicle_id
+       WHERE f.fuel_type IS DISTINCT FROM 'urea'
+         AND f.odometer_km IS NOT NULL AND f.odometer_km > 0
+         AND f.liters IS NOT NULL AND f.liters > 0
     )
-    SELECT vehicle_id,
+    SELECT vehicle_id, unidad, logged_at,
            odometer_km - odo_prev                                     AS km,
            liters,
            (liters / NULLIF(odometer_km - odo_prev, 0)) * 100         AS l100
       FROM ordenadas
-     WHERE odo_prev IS NOT NULL`);
+     WHERE odo_prev IS NOT NULL
+     ORDER BY vehicle_id, logged_at`);
 
-  let atras = 0, salto = 0, fuera = 0;
+  let atras = 0, salto = 0, bajo = 0, alto = 0;
   const buenos = [];
   const porUnidad = new Map();
 
@@ -118,10 +120,17 @@ async function main() {
     const l100 = Number(p.l100);
     if (km <= 0) { atras++; continue; }
     if (km > KM_MAX_ENTRE_CARGAS) { salto++; continue; }
-    if (!Number.isFinite(l100) || l100 < L100_MIN || l100 > L100_MAX) { fuera++; continue; }
+    // Separado en dos: no son el mismo problema. Por DEBAJO del rango el
+    // consumo salió absurdamente bajo, y eso pasa cuando hay una carga sin
+    // registrar en el medio (los km se hicieron con combustible que no vemos).
+    // Por ARRIBA es un odómetro mal tipeado, o una carga que llenó dos tanques.
+    // Uno se arregla registrando mejor; el otro validando el número al cargar.
+    if (!Number.isFinite(l100)) { bajo++; continue; }
+    if (l100 < L100_MIN) { bajo++; continue; }
+    if (l100 > L100_MAX) { alto++; continue; }
     buenos.push(l100);
-    if (!porUnidad.has(p.vehicle_id)) porUnidad.set(p.vehicle_id, []);
-    porUnidad.get(p.vehicle_id).push(l100);
+    if (!porUnidad.has(p.vehicle_id)) porUnidad.set(p.vehicle_id, { unidad: p.unidad || '?', tramos: [] });
+    porUnidad.get(p.vehicle_id).tramos.push(l100);
   }
 
   const totalPares = pares.rows.length;
@@ -131,7 +140,8 @@ async function main() {
     console.log(`  ✓ utilizables:        ${fmt(buenos.length)}  (${(buenos.length / totalPares * 100).toFixed(0)}%)`);
     console.log(`  ✗ odómetro para atrás:${String(fmt(atras)).padStart(6)}   (error de tipeo o carga fuera de orden)`);
     console.log(`  ✗ salto > ${fmt(KM_MAX_ENTRE_CARGAS)} km:  ${String(fmt(salto)).padStart(6)}   (falta una carga en el medio)`);
-    console.log(`  ✗ consumo imposible:  ${String(fmt(fuera)).padStart(6)}   (fuera de ${L100_MIN}-${L100_MAX} L/100km)`);
+    console.log(`  ✗ consumo < ${L100_MIN}:        ${String(fmt(bajo)).padStart(6)}   (una carga sin registrar en el medio)`);
+    console.log(`  ✗ consumo > ${L100_MAX}:       ${String(fmt(alto)).padStart(6)}   (odómetro mal tipeado)`);
   }
 
   // ── 3. ¿Cada unidad tiene suficiente historia propia? ───────────────
@@ -140,7 +150,7 @@ async function main() {
   // anomalía. Con 5+ ya se puede decir algo.
   const MIN_TRAMOS = 5;
   const listas = [...porUnidad.values()];
-  const conHistoria = listas.filter((v) => v.length >= MIN_TRAMOS);
+  const conHistoria = listas.filter((v) => v.tramos.length >= MIN_TRAMOS);
 
   console.log(`\n── Historia por unidad (el promedio es contra sí misma) ──`);
   console.log(`  unidades con algún tramo bueno:   ${fmt(listas.length)}`);
@@ -155,8 +165,77 @@ async function main() {
     console.log(`\n  Consumo de los tramos buenos (L/100km):`);
     console.log(`    mínimo ${f1(orden[0])} · mediana ${f1(pct(0.5))} · máximo ${f1(orden[orden.length - 1])}`);
     console.log(`    la mitad central cae entre ${f1(pct(0.25))} y ${f1(pct(0.75))}`);
+    console.log(`    (esta dispersión es de la FLOTA: mezcla camionetas con tractores.`);
+    console.log(`     No sirve para el umbral. El de abajo sí.)`);
   } else if (buenos.length) {
     console.log(`\n  (${buenos.length} tramo(s) bueno(s): muy pocos para describir el consumo)`);
+  }
+
+  // ── 4. Cuánto varía cada unidad CONTRA SÍ MISMA ─────────────────────
+  // Acá está lo que decide el umbral. Una unidad que normalmente oscila ±5%
+  // delata un desvío del 20%; otra que oscila ±25% lo tapa. Sin este número, el
+  // umbral se elige a dedo y la alerta sale ruidosa o ciega, sin forma de saber
+  // cuál de las dos hasta que ya está en producción.
+  //
+  // Se usa la desviación absoluta mediana (MAD) y no el desvío estándar: con
+  // 10 tramos, un solo dato malo mueve el desvío estándar lo suficiente como
+  // para esconder justo lo que se busca.
+  const mediana = (xs) => {
+    const o = [...xs].sort((a, b) => a - b);
+    const m = Math.floor(o.length / 2);
+    return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+  };
+  const dispersion = (xs) => {
+    const med = mediana(xs);
+    if (!med) return null;
+    return mediana(xs.map((x) => Math.abs(x - med))) / med * 100;
+  };
+
+  if (conHistoria.length) {
+    console.log(`\n── Cuánto varía CADA unidad contra sí misma ──`);
+    console.log(`  UNIDAD        TRAMOS   MEDIANA   VARIACIÓN TÍPICA`);
+    const filas = conHistoria
+      .map((u) => ({ ...u, med: mediana(u.tramos), disp: dispersion(u.tramos) }))
+      .sort((a, b) => (b.disp ?? 0) - (a.disp ?? 0));
+    for (const u of filas) {
+      console.log(`  ${String(u.unidad).padEnd(12)} ${String(u.tramos.length).padStart(6)}   ${f1(u.med).padStart(7)}   ± ${u.disp == null ? '?' : u.disp.toFixed(0)}%`);
+    }
+    const disps = filas.map((u) => u.disp).filter((d) => d != null);
+    if (disps.length) {
+      console.log(`\n  Variación típica de la flota: ± ${mediana(disps).toFixed(0)}%`);
+      console.log(`  Las de arriba de la lista son las que más se mueven: o tienen`);
+      console.log(`  cargas mal registradas, o algo real que ya está pasando.`);
+    }
+  }
+
+  // ── 5. Qué habría hecho cada umbral sobre estos mismos datos ────────
+  // Elegir el umbral mirando la dispersión sigue siendo teoría. Esto lo prueba:
+  // recorre la historia de cada unidad como si la alerta hubiera estado
+  // corriendo —comparando cada tramo contra la mediana de los ANTERIORES, nunca
+  // contra el futuro— y cuenta cuántos avisos habría mandado.
+  //
+  // Un umbral que en 63 días habría tirado 80 avisos no es una alerta: es la
+  // misma notificación que ya nadie lee.
+  if (conHistoria.length) {
+    console.log(`\n── Cuántos avisos habría mandado cada umbral, sobre estos datos ──`);
+    console.log(`  UMBRAL   AVISOS   POR SEMANA`);
+    const semanas = Math.max(1, dias / 7);
+    for (const umbral of [15, 20, 25, 30, 40, 50]) {
+      let avisos = 0;
+      for (const u of conHistoria) {
+        // Arranca a evaluar recién con MIN_TRAMOS de historia previa.
+        for (let i = MIN_TRAMOS; i < u.tramos.length; i++) {
+          const base = mediana(u.tramos.slice(0, i));
+          if (!base) continue;
+          const desvio = (u.tramos[i] - base) / base * 100;
+          // Solo hacia ARRIBA: gastar de menos no es un problema que avisar.
+          if (desvio > umbral) avisos++;
+        }
+      }
+      console.log(`  ${String(umbral + '%').padStart(5)}   ${String(avisos).padStart(6)}   ${(avisos / semanas).toFixed(1)}`);
+    }
+    console.log(`\n  Sobre ${fmt(dias)} días de historia. Un umbral que acá tira muchos`);
+    console.log(`  avisos va a tirar los mismos en producción.`);
   }
 
   await client.end();
