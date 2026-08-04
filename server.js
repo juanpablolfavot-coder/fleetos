@@ -323,6 +323,13 @@ httpServer = app.listen(PORT, () => {
   try { require('./services/mantenimiento').programarMantenimiento(); }
   catch (e) { console.error('[mantenimiento] no se pudo programar:', e.message); }
 
+  // Consumo de combustible: avisa cuando una unidad se sale de LO SUYO. El
+  // umbral es propio de cada unidad —medido con npm run diag:combustible— para
+  // que las que naturalmente varían más no avisen solas. Se desactiva con
+  // CONSUMO_OFF=1.
+  try { require('./services/consumo').programarConsumo(); }
+  catch (e) { console.error('[consumo] no se pudo programar:', e.message); }
+
   // Webhook de Powerfleet: renueva la suscripción antes de que venza y purga
   // los avisos viejos. Si no está configurado (sin GPS_WEBHOOK_SECRET) no hace
   // nada y el exceso se sigue detectando por el sondeo de siempre.
