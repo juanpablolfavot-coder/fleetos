@@ -77,6 +77,13 @@ jobs:
       - name: Sintaxis del frontend
         run: ./validate.sh
 
+      - name: Linter
+        # Encuentra la clase de error que los tests no ven: comparaciones con ==,
+        # claves y case duplicados, código inalcanzable, variables no declaradas.
+        # Falla solo con esas; las de limpieza salen como avisos y no traban el PR
+        # (ver el porqué en eslint.config.js).
+        run: npm run lint
+
       - name: Compilar el bundle de producción
         # server.js arma este bundle al arrancar y, si falla, cae a servir los
         # <script> individuales sin avisar. Acá el fallo es ruidoso.
