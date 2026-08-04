@@ -1653,12 +1653,21 @@ Si no hay datos suficientes, indicalo claramente. Si detectás algo preocupante,
     const respuesta = data.respuesta || 'Sin respuesta';
 
     document.getElementById('ia-loading')?.remove();
-    chat.innerHTML += `<div style="align-self:flex-start;background:var(--bg3);padding:10px 14px;border-radius:12px 12px 12px 2px;font-size:13px;max-width:85%;line-height:1.5">${respuesta.replace(/\n/g,'<br>')}</div>`;
+    // La respuesta se ESCAPA antes de entrar al innerHTML, y recién después se
+    // convierten los saltos de línea. Al revés no sirve: escapar después
+    // convertiría los <br> en texto.
+    //
+    // No es paranoia por venir de un modelo. El prompt que se manda arriba
+    // incluye descripciones de anomalías cargadas por usuarios; si alguien
+    // escribe una etiqueta en la observación de un ticket y la IA la repite en
+    // su respuesta, sin escapar se ejecutaba en el navegador de quien abre el
+    // panel — que son dueño y gerencia, los dos roles con más permisos.
+    chat.innerHTML += `<div style="align-self:flex-start;background:var(--bg3);padding:10px 14px;border-radius:12px 12px 12px 2px;font-size:13px;max-width:85%;line-height:1.5">${escapeHtml(respuesta).replace(/\n/g, '<br>')}</div>`;
     chat.scrollTop = chat.scrollHeight;
 
   } catch(e) {
     document.getElementById('ia-loading')?.remove();
-    chat.innerHTML += `<div style="align-self:flex-start;background:rgba(239,68,68,.1);color:var(--danger);padding:8px 12px;border-radius:12px;font-size:12px">Error al consultar la IA: ${e.message}</div>`;
+    chat.innerHTML += `<div style="align-self:flex-start;background:rgba(239,68,68,.1);color:var(--danger);padding:8px 12px;border-radius:12px;font-size:12px">Error al consultar la IA: ${escapeHtml(e.message)}</div>`;
   }
 }
 

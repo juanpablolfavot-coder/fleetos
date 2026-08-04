@@ -184,7 +184,6 @@ function buildReporteMensualPdf(d, dPrev) {
 
 // ── Envío + control de duplicados ─────────────────────────────────────
 async function _yaEnviado(ym) {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key = 'reporte_mensual_last'`);
   return r.rows[0] && String(r.rows[0].value).replace(/"/g, '') === ym;
 }

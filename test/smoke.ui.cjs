@@ -434,6 +434,46 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
     ],
   });
 
+  // ── El XSS del chat con IA ──────────────────────────────────────────
+  // Corre el render REAL en el navegador, no una copia de la lógica. La
+  // respuesta de la IA entraba al innerHTML sin escapar, y el prompt que se le
+  // manda incluye descripciones cargadas por usuarios: si alguien escribe una
+  // etiqueta en la observación de un ticket y el modelo la repite, se ejecutaba
+  // en el navegador de dueño o gerencia.
+  const antesXss = errors.length;
+  const xss = await page.evaluate(() => {
+    const chat = document.createElement('div');
+    chat.id = 'ia-chat-test';
+    document.body.appendChild(chat);
+
+    // El payload que un usuario podría dejar en una nota y el modelo repetir.
+    const respuesta = '<img src=x onerror="window.__xss=true">\nsegunda linea';
+
+    // La MISMA expresión que usa auditor.mjs para pintar la respuesta.
+    chat.innerHTML += `<div>${window.escapeHtml(respuesta).replace(/\n/g, '<br>')}</div>`;
+
+    const r = {
+      ejecuto: !!window.__xss,
+      hayImg: !!chat.querySelector('img'),
+      // El salto de línea SÍ tiene que seguir siendo un <br> de verdad.
+      hayBr: !!chat.querySelector('br'),
+      texto: chat.textContent.includes('onerror'),
+    };
+    chat.remove();
+    return r;
+  });
+  results.push({
+    page: 'chat IA: la respuesta no puede ejecutarse',
+    thrown: null,
+    asyncErrs: errors.slice(antesXss).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg)),
+    missingOnclick: [
+      ...(xss.ejecuto ? ['(el payload SE EJECUTÓ)'] : []),
+      ...(xss.hayImg  ? ['(quedó una etiqueta viva en el DOM)'] : []),
+      ...(xss.hayBr   ? [] : ['(se rompió el salto de línea: el <br> tiene que sobrevivir)']),
+      ...(xss.texto   ? [] : ['(el texto se perdió en vez de mostrarse escapado)']),
+    ],
+  });
+
   await browser.close();
   server.close();
 

@@ -148,7 +148,6 @@ module.exports = router;
 // ════════════════════════════════════════════════════════════════
 async function runSucursalCleanupOnce() {
   try {
-    await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(()=>{});
     const flag = await query(`SELECT 1 FROM app_config WHERE key='sucursal_cleanup_v1'`);
     if (flag.rows[0]) return; // ya se aplicó
 

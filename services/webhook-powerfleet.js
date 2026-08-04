@@ -354,7 +354,6 @@ async function alta({ url, nombre, accountId, dias = DIAS_ALTA } = {}) {
     // enteraba de nada y el día que la suscripción se cayera no había forma de
     // notarlo. Ahora el resultado viaja en la respuesta.
     try {
-      await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`);
       await query(`INSERT INTO app_config(key,value) VALUES('gps_webhook',$1)
                    ON CONFLICT(key) DO UPDATE SET value=$1`,
         [JSON.stringify({
@@ -402,7 +401,6 @@ function _log(motivo) {
 }
 
 async function renovarSiHaceFalta() {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key='gps_webhook'`).catch(() => ({ rows: [] }));
   const guardado = r.rows[0] && r.rows[0].value;
   if (!guardado || !guardado.cuerpo) {

@@ -192,7 +192,6 @@ function _firma(planes) {
 }
 
 async function _leerEstado() {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key = 'mantenimiento_last'`);
   if (!r.rows[0]) return null;
   try {
