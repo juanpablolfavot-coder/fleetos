@@ -52,6 +52,12 @@ let _tokenExp = null;
 let _lastSync = null;
 let _lastResult = null;
 let _running  = false;
+// El detalle completo de la respuesta del proveedor se loguea una sola vez por
+// arranque. Ver fetchFleet() para el porqué.
+let _primeraVez = true;
+let _volcadoPendiente = true;   // el detalle de las unidades sale 1 vez por arranque
+let _ultimoConteo = null;       // …y cuando cambia cuántas se actualizaron
+let _ioConsultados = 0;
 
 // ── HTTPS helper ────────────────────────────────────────────
 function httpsReq(path, opts = {}) {
@@ -185,12 +191,11 @@ async function fetchFleet() {
     '/fleetcore.api/api/fleetview/vehicles',
   ];
 
-  for (const path of paths) {
-    console.log('[GPS] GET', path);
+  for (const [i, path] of paths.entries()) {
+    // El segundo path es el fallback en minúsculas. Que haga falta SÍ es un
+    // evento: el proveedor devolvió algo raro por el camino normal.
+    if (i > 0) console.log('[GPS] el path normal no sirvió; probando', path);
     const res = await httpsReq(path, { timeout: 12000 });
-
-    console.log('[GPS] Fleet status:', res.status, '| len:', res.body.length, '| partial:', !!res.partial);
-    if (res.body.length > 0) console.log('[GPS] Fleet preview:', res.body.slice(0, 300));
 
     if (res.status === 200 && res.body.length > 5) {
       try {
@@ -205,22 +210,34 @@ async function fetchFleet() {
           }
         }
         if (vehicles.length > 0) {
-          console.log('[GPS] Vehículos encontrados:', vehicles.length);
-          console.log('[GPS] Keys 1er vehículo:', Object.keys(vehicles[0]).join(', '));
+          // El detalle de la respuesta (preview del JSON, keys del primer
+          // vehículo) se emite SOLO la primera vez. Servía para descubrir la
+          // forma de la API; repetirlo 720 veces por día entierra las líneas
+          // que sí importan y las empuja fuera de la retención de logs.
+          if (_primeraVez) {
+            _primeraVez = false;
+            console.log('[GPS] primera respuesta OK ·', path, '·', res.body.length, 'bytes');
+            console.log('[GPS] campos por vehículo:', Object.keys(vehicles[0]).join(', '));
+          }
           return vehicles;
         }
 
         // Estructura alternativa: array directo o Vehicles[]
         const alt = d.Vehicles || d.vehicles || d.data || (Array.isArray(d) ? d : []);
         if (alt.length > 0) {
-          console.log('[GPS] Vehículos (alt):', alt.length);
+          console.log('[GPS] estructura alternativa:', alt.length, 'vehículos');
           return alt;
         }
 
-        console.log('[GPS] JSON recibido pero sin vehículos. Keys:', Object.keys(d).join(', '));
+        console.log('[GPS] JSON sin vehículos por', path, '· keys:', Object.keys(d).join(', '));
       } catch(e) {
-        console.log('[GPS] Error parseando fleet:', e.message, '| raw:', res.body.slice(0,100));
+        console.log('[GPS] error parseando fleet:', e.message, '| raw:', res.body.slice(0, 200));
       }
+    } else {
+      // Fuera del camino feliz sí se quiere ver todo: es cuando hace falta.
+      console.log('[GPS] fleet status', res.status, 'por', path,
+        '| len:', res.body.length, res.partial ? '| parcial' : '',
+        res.body.length ? '| ' + res.body.slice(0, 200) : '');
     }
   }
   return [];
@@ -347,6 +364,7 @@ async function syncGPSData() {
 
   try {
     console.log('[GPS] === Inicio sync ===');
+    _ioConsultados = 0;
 
     if (!(await login())) {
       _lastResult = { ok: false, error: 'Login fallido' };
@@ -387,7 +405,9 @@ async function syncGPSData() {
         if (io) {
           km        = parseFloat(io.odometer || io.Odometer || km) || km;
           hourMeter = parseFloat(io.hourMeter || io.HourMeter || hourMeter) || hourMeter;
-          console.log(`[GPS] IO ${vehicleId}: km=${km} h=${hourMeter}`);
+          // Antes se logueaba una línea por unidad y por sync. Es información
+          // de descubrimiento, no un evento: si el IO falla, fetchIO ya avisa.
+          _ioConsultados++;
         }
       }
 
@@ -469,8 +489,21 @@ async function syncGPSData() {
         hourMeter:    fleet[0].hourMeter,
       } : null,
     };
-    console.log(`[GPS] Sync OK: ${updated}/${fleet.length} actualizados`);
-    if (log.length) console.log('[GPS]', log.join(', '));
+    // Una línea por sync. El volcado de las 42 unidades con patente, km y horas
+    // era ~1.400 caracteres repetidos 720 veces por día: enterraba las líneas
+    // que sí importan y las empujaba fuera de la retención de logs de Render.
+    // Sale igual la primera vez (para poder confirmar que el mapeo de patentes
+    // quedó bien) y cuando el conteo de unidades CAMBIA, que es lo que
+    // significa que se sumó o desapareció un equipo.
+    console.log(`[GPS] Sync OK: ${updated}/${fleet.length} actualizados` +
+      (_ioConsultados ? ` (${_ioConsultados} por /api/io)` : ''));
+    const cambioElConteo = _ultimoConteo !== null && _ultimoConteo !== updated;
+    if (log.length && (_volcadoPendiente || cambioElConteo)) {
+      if (cambioElConteo) console.log(`[GPS] el conteo cambió: ${_ultimoConteo} → ${updated}`);
+      console.log('[GPS]', log.join(', '));
+      _volcadoPendiente = false;
+    }
+    _ultimoConteo = updated;
 
   } catch(e) {
     console.log('[GPS] Error sync:', e.message);

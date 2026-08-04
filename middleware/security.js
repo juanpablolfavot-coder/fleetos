@@ -52,8 +52,49 @@ const checkAccountLock = async (req, res, next) => {
 };
 
 // ── SANITIZACIÓN DE INPUT ──────────────────────────────────
-// Campos que NO se deben mutar: las contraseñas pueden contener legítimamente
-// secuencias como "onX=" o "<...>"; alterarlas en silencio rompería el login.
+//
+// Esto es defensa en profundidad, NO la defensa principal. Lo que impide que un
+// dato de usuario se ejecute como HTML es escapar al RENDERIZAR: escapeHtml()
+// en public/js/timezone.js, con 422 usos en el frontend. Esa es la capa
+// correcta, porque el mismo dato puede ser peligroso en un lugar e inofensivo
+// en otro, y eso solo se sabe al mostrarlo.
+//
+// ── Por qué se sacó el filtro de "onX=" ──
+// Acá había además:
+//
+//     .replace(/on\w+\s*=/gi, '')
+//
+// pensado para borrar handlers inline tipo onclick=. Hacía dos cosas mal.
+//
+// 1. Rompía datos reales, en silencio y sin vuelta atrás. El patrón engancha
+//    CUALQUIER palabra con "on" en el medio seguida de "=", que en castellano
+//    es escritura común:
+//
+//        "monto=15000"                     →  "m15000"
+//        "consumo=35 L/100km"              →  "c35 L/100km"
+//        "Cambio de aceite. Monto = 42000" →  "Cambio de aceite. M 42000"
+//
+//    El comentario que estaba acá ya decía que las contraseñas "pueden contener
+//    legítimamente secuencias como onX=" y las excluía por eso. El razonamiento
+//    era correcto; lo que faltó es que vale igual para las notas de una orden de
+//    trabajo, el detalle de una OC y la observación de un ticket.
+//
+// 2. Y no protegía. Al ser un reemplazo de una sola pasada, se lo puede hacer
+//    ARMAR el handler que supuestamente borra:
+//
+//        entra:  <img src=x oonerror=nerror=alert(1)>
+//        sale:   <img src=x onerror=alert(1)>
+//
+//    Ese mismo payload pasado por escapeHtml queda inerte.
+//
+// Un filtro que daña datos legítimos y además se puede esquivar es peor que no
+// tenerlo: el daño es permanente y la sensación de cobertura es falsa.
+//
+// Lo que queda —<script> y javascript:— no aparece nunca en texto legítimo de
+// este dominio, así que no rompe nada, y es barato dejarlo puesto.
+//
+// Las contraseñas siguen sin tocarse: un .trim() sobre una contraseña que
+// empieza o termina con espacio rompería el login.
 const SANITIZE_SKIP_KEYS = new Set(['password', 'currentPassword', 'newPassword', 'password_hash']);
 const sanitize = (req, res, next) => {
     const clean = (obj) => {
@@ -61,7 +102,6 @@ const sanitize = (req, res, next) => {
                   return obj
                     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                     .replace(/javascript:/gi, '')
-                    .replace(/on\w+\s*=/gi, '')
                     .trim();
           }
           if (typeof obj === 'object' && obj !== null) {
