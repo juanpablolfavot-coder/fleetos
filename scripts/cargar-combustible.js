@@ -45,6 +45,8 @@ const CARGAS = [
   { code:'AF041MB', fecha:'2026-07-20 07:53:06', litros:81.4664,  total:200000.01, km:267868, estacion:'YPF — Operadora de Estaciones de Servicios, Leones (CBA)', ticket:'07894-00059157', nota:'pagado con Visa Electrón' },
   { code:'AF041MB', fecha:'2026-07-24 11:03:01', litros:80.939,   total:210900.75, km:268428, estacion:'YPF — Mi Destino SRL, Escobar (BA)',                        ticket:'00013-00025899', nota:'contado · anotado en ticket: Jorge/Gino' },
   { code:'AA508SW', fecha:'2026-07-28 14:14:09', litros:86.2813,  total:210172.94, km:500579, estacion:'YPF — Operadora de Estaciones de Servicios',                ticket:'06394-00035090', nota:'pagado con Mercado Pago (anotado: transferencia + efectivo)' },
+  { code:'AA508SW', fecha:'2026-08-03 07:38:30', litros:86.2813,  total:200000.06, km:501198, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                ticket:'00027-00052727', nota:'pagado con Mercado Pago' },
+  { code:'AE517UM', fecha:'2026-08-03 08:28:00', litros:122.6994, total:300000.00, km:287388, estacion:'La Fuente Combustibles SRL, Río Tercero (CBA)',            ticket:'00004-00015699', nota:'pagado en efectivo' },
 ];
 
 async function main() {
