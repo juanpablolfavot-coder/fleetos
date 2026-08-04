@@ -197,6 +197,68 @@ test('una unidad dada de baja no aparece', { skip: SKIP }, async () => {
   assert.strictEqual(planes.length, 0, 'el service de un camión que ya no está no es una alerta');
 });
 
+// ── La línea de base tiene que VOLVER en la respuesta ──────────────────
+// No es un detalle de la API: la pantalla llena el campo "último service" del
+// modal de edición con este valor. Cuando no venía, el campo salía vacío, y al
+// guardar mandaba ultimo_valor:null — o sea que editar el NOMBRE de un plan le
+// borraba la línea de base y lo dejaba en 'sin_base'.
+//
+// Silencioso y destructivo: el módulo entero existe para no inventar números
+// sobre un motor, y lo que hacía era perder el único número real que había.
+test('estadoPlanes devuelve la línea de base, que es lo que la pantalla edita', { skip: SKIP }, async () => {
+  await unidadConPlan({ km: 194200, ultimo: 180000 });
+  const p = (await mant.estadoPlanes()).find((x) => x.nombre.startsWith('MTEST'));
+  assert.strictEqual(Number(p.ultimo_valor), 180000, 'sin esto el modal de edición abre vacío');
+  assert.ok('ultima_fecha' in p, 'y la fecha también, para los planes por días');
+});
+
+test('un plan por días también devuelve su fecha de base', { skip: SKIP }, async () => {
+  _n++;
+  const v = await client.query(
+    `INSERT INTO vehicles (code, plate, active) VALUES ($1,$2,TRUE) RETURNING id`,
+    [`MTEST-${_n}`, `MT${String(_n).padStart(5, '0')}`]);
+  await client.query(
+    `INSERT INTO maintenance_schedules (vehicle_id, nombre, tipo, intervalo, aviso_antes, ultima_fecha)
+     VALUES ($1, $2, 'dias', 365, 30, '2026-02-20')`, [v.rows[0].id, `MTEST matafuegos ${_n}`]);
+  const p = (await mant.estadoPlanes()).find((x) => x.nombre.startsWith('MTEST matafuegos'));
+  assert.ok(p.ultima_fecha, 'el modal de un plan por días necesita la fecha para prellenarse');
+  assert.strictEqual(String(p.ultima_fecha).slice(0, 10), '2026-02-20');
+});
+
+// El recorrido completo, tal cual lo hace la pantalla: leer → prellenar el
+// modal → guardar. Es el que reproduce el borrado; los dos de arriba solo
+// miran la respuesta.
+test('editar solo el nombre NO borra la línea de base', { skip: SKIP }, async () => {
+  const vid = await unidadConPlan({ km: 194200, ultimo: 180000 });
+  const antes = (await mant.estadoPlanes()).find((x) => x.vehicle_id === vid);
+  assert.strictEqual(antes.estado, 'proximo');
+
+  // openPlanMantModal(): con qué valor se llena el input "último service".
+  const enElInput = antes.tipo === 'dias'
+    ? (antes.ultima_fecha || '')
+    : (antes.ultimo_valor == null ? '' : antes.ultimo_valor);
+
+  // guardarPlanMant(): qué se manda al tocar Guardar sin haber tocado ese campo.
+  const base = String(enElInput).trim();
+  const cuerpo = { nombre: 'MTEST aceite renombrado', tipo: antes.tipo, intervalo: antes.intervalo, aviso_antes: antes.aviso_antes };
+  if (antes.tipo === 'dias') cuerpo.ultima_fecha = base || null;
+  else cuerpo.ultimo_valor = base === '' ? null : base;
+
+  const { error, datos } = leerPlan(cuerpo, { parcial: true });
+  assert.strictEqual(error, undefined);
+  const campos = Object.keys(datos);
+  const params = campos.map((c) => datos[c]);
+  params.push(antes.id);
+  await client.query(
+    `UPDATE maintenance_schedules SET ${campos.map((c, i) => `${c} = $${i + 1}`).join(', ')}
+      WHERE id = $${params.length}`, params);
+
+  const despues = (await mant.estadoPlanes()).find((x) => x.id === antes.id);
+  assert.strictEqual(despues.estado, 'proximo', 'seguía siendo "próximo", no "sin_base"');
+  assert.strictEqual(despues.restante, 800, 'y sigue sabiendo cuánto falta');
+  assert.strictEqual(Number(despues.ultimo_valor), 180000);
+});
+
 test('avisa, y no repite el mismo día', { skip: SKIP }, async () => {
   const id = await unidadConPlan({ km: 196500, ultimo: 180000 });   // vencido
   const codigo = (await client.query('SELECT code FROM vehicles WHERE id=$1', [id])).rows[0].code;
@@ -245,6 +307,59 @@ test('un plan sin base no dispara aviso', { skip: SKIP }, async () => {
   assert.strictEqual(mio.estado, 'sin_base');
   assert.strictEqual(mio.restante, null, 'sin línea de base no hay nada que afirmar');
   assert.strictEqual(mant.armarCuerpo([mio]), null, 'y por lo tanto no arma aviso');
+});
+
+// ── Migración 005 ─────────────────────────────────────────────────────
+test('un plan dado de baja no le quema el nombre a la unidad', { skip: SKIP }, async () => {
+  _n++;
+  const v = await client.query(
+    `INSERT INTO vehicles (code, plate, active) VALUES ($1,$2,TRUE) RETURNING id`,
+    [`MTEST-${_n}`, `MT${String(_n).padStart(5, '0')}`]);
+  const id = v.rows[0].id;
+  const nombre = `MTEST aceite ${_n}`;
+  const crear = () => client.query(
+    `INSERT INTO maintenance_schedules (vehicle_id, nombre, tipo, intervalo, aviso_antes)
+     VALUES ($1,$2,'km',15000,1000)`, [id, nombre]);
+
+  await crear();
+  // Duplicar uno ACTIVO tiene que seguir prohibido.
+  await assert.rejects(crear, (e) => e.code === '23505', 'dos planes activos con el mismo nombre no');
+
+  // Baja lógica, como hace el DELETE del módulo.
+  await client.query('UPDATE maintenance_schedules SET activo = FALSE WHERE vehicle_id = $1', [id]);
+
+  // Y ahora sí se puede volver a crear. Antes de la 005 esto devolvía 23505 y
+  // el plan culpable no aparecía en ninguna pantalla: el nombre quedaba quemado.
+  await crear();
+  const r = await client.query(
+    'SELECT count(*) FILTER (WHERE activo) AS activos, count(*) AS todos FROM maintenance_schedules WHERE vehicle_id = $1',
+    [id]);
+  assert.strictEqual(Number(r.rows[0].activos), 1);
+  assert.strictEqual(Number(r.rows[0].todos), 2, 'el de baja se conserva como historial');
+});
+
+test('la base rechaza un aviso previo mayor o igual al intervalo', { skip: SKIP }, async () => {
+  _n++;
+  const v = await client.query(
+    `INSERT INTO vehicles (code, plate, active) VALUES ($1,$2,TRUE) RETURNING id`,
+    [`MTEST-${_n}`, `MT${String(_n).padStart(5, '0')}`]);
+  // leerPlan() ya lo rechaza, pero esa validación vive solo en el camino HTTP.
+  // Un INSERT directo la esquivaba y dejaba el plan en "próximo" para siempre.
+  await assert.rejects(
+    () => client.query(
+      `INSERT INTO maintenance_schedules (vehicle_id, nombre, tipo, intervalo, aviso_antes)
+       VALUES ($1,$2,'km',15000,15000)`, [v.rows[0].id, `MTEST absurdo ${_n}`]),
+    (e) => e.code === '23514' && /aviso_menor_intervalo/.test(e.constraint || ''));
+});
+
+// ── La fecha de "ya se hizo" es argentina, no UTC ─────────────────────
+test('"ya se hizo" a las 22 hs anota hoy, no mañana', () => {
+  // 2026-08-04T01:30:00Z = 22:30 del 3 de agosto en Argentina.
+  const noche = new Date('2026-08-04T01:30:00Z');
+  const argentina = noche.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+  assert.strictEqual(argentina, '2026-08-03', 'el service se hizo el 3, no el 4');
+  assert.strictEqual(noche.toISOString().slice(0, 10), '2026-08-04',
+    'y así es como se equivocaba: toISOString() ya pasó a mañana');
 });
 
 // ── La migración 004 y el helper de la pantalla vieja ─────────────────
