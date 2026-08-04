@@ -58,6 +58,22 @@ function _horaAR(now = new Date()) {
   return parseInt(now.toLocaleString('en-US', { timeZone: TZ, hour: '2-digit', hour12: false }), 10);
 }
 
+// Una columna DATE vuelve de pg como Date, no como texto, y String(date) da
+// "Fri Feb 20 2026 …", no "2026-02-20". Cortarle 10 caracteres a eso daba
+// "Fri Feb 2", y new Date("Fri Feb 2T00:00:00Z") es Invalid Date: alcanzaba UN
+// plan por días en la base para que estadoPlanes() tirara RangeError y la
+// pantalla entera devolviera 500.
+//
+// Se leen los campos locales en vez de toISOString() porque pg construye el
+// Date a medianoche LOCAL: con el server en un huso al este de UTC,
+// toISOString() devolvería el día anterior.
+function _fechaISO(v) {
+  if (!v) return null;
+  if (!(v instanceof Date)) return String(v).slice(0, 10);
+  if (Number.isNaN(v.getTime())) return null;
+  return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+}
+
 // ── Estado de cada plan ───────────────────────────────────────────────
 /**
  * Devuelve cada plan activo con cuánto le falta y en qué estado está:
@@ -91,11 +107,21 @@ function calcular(plan, hoy = new Date()) {
     id: plan.id, vehicle_id: plan.vehicle_id,
     unidad: plan.vehicle_code || plan.vehicle_plate || '?',
     nombre: plan.nombre, tipo: plan.tipo, intervalo, aviso_antes: aviso,
+    // La línea de base viaja tal cual, aparte del cálculo. No es redundante con
+    // `proximo`: la pantalla la necesita para prellenar el campo "último
+    // service" al editar. Sin ella, ese campo abría vacío y al guardar mandaba
+    // ultimo_valor:null, así que editar el NOMBRE de un plan le borraba la base
+    // y lo dejaba en 'sin_base'. Silencioso, y justo lo contrario de lo que este
+    // módulo promete: en vez de no inventar un número, perdía el único real.
+    ultimo_valor: plan.ultimo_valor == null ? null : Number(plan.ultimo_valor),
+    ultima_fecha: _fechaISO(plan.ultima_fecha),
+    notas: plan.notas ?? null,
   };
 
   if (plan.tipo === 'dias') {
-    if (!plan.ultima_fecha) return { ...base, estado: 'sin_base', restante: null };
-    const desde = new Date(`${String(plan.ultima_fecha).slice(0, 10)}T00:00:00Z`);
+    const desdeISO = _fechaISO(plan.ultima_fecha);
+    if (!desdeISO) return { ...base, estado: 'sin_base', restante: null };
+    const desde = new Date(`${desdeISO}T00:00:00Z`);
     const vence = new Date(desde.getTime() + intervalo * 86400000);
     const hoyUTC = new Date(`${_hoyAR(hoy)}T00:00:00Z`);
     const restante = Math.round((vence - hoyUTC) / 86400000);

@@ -17,6 +17,19 @@ const puedeEditar = requireRole('dueno', 'gerencia', 'jefe_mantenimiento');
 
 const TIPOS = ['km', 'horas', 'dias'];
 
+// Los CHECK de la tabla son la última línea: leerPlan() ya rechaza estas cosas,
+// pero en un PUT parcial no siempre puede —si mandan aviso_antes sin intervalo,
+// no tiene contra qué compararlo— y ahí la que responde es la base. Sin esto,
+// una restricción violada salía como 500 "Error al crear el plan", que no le
+// dice a nadie qué corregir.
+function errorDeCheck(err) {
+  const c = String(err.constraint || '');
+  if (c.includes('aviso_menor_intervalo')) return 'El aviso previo tiene que ser menor que el intervalo';
+  if (c.includes('intervalo')) return 'El intervalo tiene que ser un número mayor a cero';
+  if (c.includes('tipo')) return `El tipo tiene que ser uno de: ${TIPOS.join(', ')}`;
+  return 'Los valores del plan no son válidos';
+}
+
 // Valida y normaliza lo que llega del cliente. Devuelve { error } o { datos }.
 function leerPlan(body, { parcial = false } = {}) {
   const d = {};
@@ -91,6 +104,7 @@ router.post('/planes', authenticate, puedeEditar, async (req, res) => {
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Esa unidad ya tiene un plan con ese nombre' });
     if (err.code === '23503') return res.status(400).json({ error: 'La unidad no existe' });
+    if (err.code === '23514') return res.status(400).json({ error: errorDeCheck(err) });
     console.error('[mantenimiento POST]', err.message);
     res.status(500).json({ error: 'Error al crear el plan' });
   }
@@ -113,6 +127,7 @@ router.put('/planes/:id', authenticate, puedeEditar, validateUUID('id'), async (
     res.json(r.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Esa unidad ya tiene un plan con ese nombre' });
+    if (err.code === '23514') return res.status(400).json({ error: errorDeCheck(err) });
     console.error('[mantenimiento PUT]', err.message);
     res.status(500).json({ error: 'Error al actualizar el plan' });
   }
@@ -131,7 +146,12 @@ router.post('/planes/:id/realizado', authenticate, puedeEditar, validateUUID('id
     if (!p.rows[0]) return res.status(404).json({ error: 'Plan no encontrado' });
 
     const plan = p.rows[0];
-    const fecha = req.body?.fecha || new Date().toISOString().slice(0, 10);
+    // Fecha ARGENTINA, no UTC. Con toISOString(), un service registrado después
+    // de las 21 quedaba anotado con la fecha de mañana — y esa fecha es contra
+    // lo que se cuenta el próximo vencimiento de los planes por días.
+    // Mismo criterio que services/mantenimiento.js y services/vencimientos.js.
+    const fecha = req.body?.fecha
+      || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
     let valor = req.body?.valor !== undefined && req.body.valor !== null && req.body.valor !== ''
       ? Number(req.body.valor)
       : (plan.tipo === 'km' ? plan.km_current : plan.tipo === 'horas' ? plan.gps_hour_meter : null);

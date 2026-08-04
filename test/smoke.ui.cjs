@@ -193,17 +193,25 @@ function stubFor(url) {
   // Planes de mantenimiento en los 4 estados posibles: así el smoke ejercita el
   // dibujo de la tabla (barra, badges, botones) y no solo el estado vacío.
   if (u.includes('/mantenimiento/planes')) return [
+    // Con ultimo_valor / ultima_fecha, que es lo que el modal de edición usa para
+    // prellenar el campo "último service". Cuando no venían, ese campo abría
+    // vacío y guardar borraba la línea de base.
     { id: 'm1', vehicle_id: 'v1', unidad: 'AH327RZ', nombre: 'Cambio de aceite', tipo: 'km',
       intervalo: 15000, aviso_antes: 1000, actual: 194200, proximo: 195000, restante: 800,
-      unidad_medida: 'km', estado: 'proximo' },
+      unidad_medida: 'km', estado: 'proximo', ultimo_valor: 180000, ultima_fecha: null },
     { id: 'm2', vehicle_id: 'v2', unidad: 'AD235FE', nombre: 'Service mayor', tipo: 'km',
       intervalo: 60000, aviso_antes: 5000, actual: 196500, proximo: 195000, restante: -1500,
-      unidad_medida: 'km', estado: 'vencido' },
+      unidad_medida: 'km', estado: 'vencido', ultimo_valor: 135000, ultima_fecha: null },
     { id: 'm3', vehicle_id: 'v3', unidad: 'OKQ888', nombre: 'Hidráulico', tipo: 'horas',
       intervalo: 500, aviso_antes: 50, actual: 187, proximo: 500, restante: 313,
-      unidad_medida: 'h', estado: 'ok' },
+      unidad_medida: 'h', estado: 'ok', ultimo_valor: 0, ultima_fecha: null },
+    // Un plan por FECHA, que es el que hacía explotar la pantalla entera con 500.
     { id: 'm4', vehicle_id: 'v4', unidad: 'AF823RB', nombre: 'Matafuegos', tipo: 'dias',
-      intervalo: 365, aviso_antes: 30, restante: null, estado: 'sin_base' },
+      intervalo: 365, aviso_antes: 30, restante: 201, proximo: '2027-02-20',
+      unidad_medida: 'días', estado: 'ok', ultimo_valor: null, ultima_fecha: '2026-02-20' },
+    { id: 'm5', vehicle_id: 'v5', unidad: 'AC901KL', nombre: 'VTV', tipo: 'dias',
+      intervalo: 365, aviso_antes: 30, restante: null, estado: 'sin_base',
+      ultimo_valor: null, ultima_fecha: null },
   ];
   if (u.endsWith('/api/documents')) return FIX.documents;
   if (u.endsWith('/fuel/tanks')) return FIX.tanks;

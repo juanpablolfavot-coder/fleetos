@@ -35,6 +35,18 @@ function credencialesOk() {
   return !!(PF_USER && PF_PASS);
 }
 
+// Validación del certificado del proveedor. Estaba en `rejectUnauthorized:
+// false` fijo en el código —ni siquiera miraba GPS_TLS_INSECURE, que
+// .env.example venía documentando— así que la conexión aceptaba cualquier
+// certificado. Por ahí van el usuario, la contraseña y la posición de las 42
+// unidades: sin validar, cualquiera que se meta en el camino puede leerlas y
+// modificarlas sin que se note.
+//
+// Ahora valida por defecto. Si el certificado del proveedor está mal y el sync
+// se cae, GPS_TLS_INSECURE=true lo vuelve al comportamiento anterior —pero
+// avisando en cada arranque, para que sea una decisión y no un olvido.
+const TLS_INSECURE = /^(1|true|yes)$/i.test(String(process.env.GPS_TLS_INSECURE || ''));
+
 let _token    = null;
 let _tokenExp = null;
 let _lastSync = null;
@@ -56,7 +68,7 @@ function httpsReq(path, opts = {}) {
     const options = {
       hostname: PF_HOST, port: 443,
       path, method: opts.method || 'GET',
-      headers, rejectUnauthorized: false,
+      headers, rejectUnauthorized: !TLS_INSECURE,
     };
 
     let data = '';
@@ -109,7 +121,12 @@ async function login() {
     timeout: 15000,
   }).catch(e => ({ status: 0, body: '' }));
 
-  console.log('[GPS] Login status:', res.status, '| body:', res.body.slice(0, 150));
+  // El cuerpo de un login exitoso ES el token. Loguearlo lo dejaba escrito en
+  // los logs de Render, que son otro lugar donde una credencial no tiene que
+  // estar. En el camino de error sí conviene verlo: ahí el cuerpo es el mensaje
+  // del proveedor ("Host not in allowlist", "invalid credentials") y sin eso
+  // diagnosticar una caída del GPS es a ciegas.
+  console.log('[GPS] Login status:', res.status, res.status === 200 ? '' : '| ' + res.body.slice(0, 150));
 
   if (res.status === 200) {
     try {
@@ -137,7 +154,7 @@ async function login() {
     timeout: 15000,
   }).catch(e => ({ status: 0, body: '' }));
 
-  console.log('[GPS] Login fallback status:', res2.status, '| body:', res2.body.slice(0,100));
+  console.log('[GPS] Login fallback status:', res2.status, res2.status === 200 ? '' : '| ' + res2.body.slice(0, 150));
 
   if (res2.status === 200) {
     try {
@@ -476,6 +493,11 @@ function startGPSSync(intervalMin) {
     console.error('[GPS]   Sin eso no hay posiciones, ni odómetro, ni horómetro, ni avisos');
     console.error('[GPS]   de velocidad o ralentí. Cargalas en Render → Environment.');
     return;
+  }
+  if (TLS_INSECURE) {
+    console.warn('[GPS] ⚠ GPS_TLS_INSECURE=true: no se valida el certificado del proveedor.');
+    console.warn('[GPS]   Por esta conexión viajan la contraseña y la posición de la flota.');
+    console.warn('[GPS]   Es una salida de emergencia, no una configuración para dejar puesta.');
   }
   _intervalMin = Math.max(1, parseInt(intervalMin != null ? intervalMin : process.env.GPS_SYNC_MINUTES || '2', 10) || 2);
   console.log(`[GPS] Servicio iniciado. Sync cada ${_intervalMin} min`);

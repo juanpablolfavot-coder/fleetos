@@ -237,6 +237,11 @@ function openPlanMantModal(planId) {
   // La base es una fecha cuando el plan va por días, y un número si no.
   const base = document.getElementById('pm-base');
   if (base && p) base.value = p.tipo === 'dias' ? (p.ultima_fecha || '') : (p.ultimo_valor == null ? '' : p.ultimo_valor);
+  // Con qué valor se abrió el campo. guardarPlanMant() solo manda la línea de
+  // base si CAMBIÓ, así un campo que nadie tocó no puede borrarla — ni siquiera
+  // si el servidor dejara de mandar ultimo_valor y el campo abriera vacío, que
+  // es exactamente como se rompió la primera vez.
+  window._baseMantOriginal = base ? base.value : '';
   actualizarUnidadPlanMant();
 }
 
@@ -263,8 +268,15 @@ async function guardarPlanMant(planId) {
     intervalo: document.getElementById('pm-intervalo')?.value,
     aviso_antes: document.getElementById('pm-aviso')?.value || 0,
   };
-  if (tipo === 'dias') cuerpo.ultima_fecha = base || null;
-  else cuerpo.ultimo_valor = base === '' ? null : base;
+  // La línea de base solo viaja si la tocaron. El PUT es parcial: lo que no se
+  // manda, no se toca. Borrarla sigue siendo posible —vaciar el campo a
+  // propósito es una acción legítima, "ya no sé cuál era"— pero deja de ser algo
+  // que pasa solo por abrir el modal y apretar Guardar.
+  const cambioLaBase = !planId || base !== String(window._baseMantOriginal ?? '').trim();
+  if (cambioLaBase) {
+    if (tipo === 'dias') cuerpo.ultima_fecha = base || null;
+    else cuerpo.ultimo_valor = base === '' ? null : base;
+  }
   if (!planId) cuerpo.vehicle_id = document.getElementById('pm-vehiculo')?.value;
 
   const res = await apiFetch(planId ? `/api/mantenimiento/planes/${planId}` : '/api/mantenimiento/planes', {

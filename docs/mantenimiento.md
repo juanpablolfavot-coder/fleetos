@@ -128,7 +128,51 @@ mandárselo.
 
 Una validación que vale la pena nombrar: `aviso_antes` tiene que ser **menor**
 que `intervalo`. Avisar con más anticipación que el propio intervalo deja el plan
-en estado `proximo` para siempre — el aviso nunca se apaga.
+en estado `proximo` para siempre — el aviso nunca se apaga. Lo rechazan las dos
+puntas: `leerPlan()` en el camino HTTP y un `CHECK` en la tabla, porque la
+validación del route no cubre un `INSERT` hecho desde `psql` ni un import.
+
+### La respuesta del GET incluye la línea de base
+
+`ultimo_valor` y `ultima_fecha` viajan aparte del cálculo, aunque parezcan
+redundantes con `proximo`. **No lo son**: la pantalla los usa para prellenar el
+campo "último service" del modal de edición.
+
+Cuando no venían, ese campo abría vacío y al guardar mandaba `ultimo_valor:
+null` — o sea que **editar el nombre de un plan le borraba la línea de base** y
+lo dejaba en `sin_base`. Silencioso, y lo contrario de lo que este módulo
+promete: en vez de no inventar un número sobre un motor, perdía el único real.
+
+Hay dos defensas, a propósito:
+
+1. El GET manda los campos (`test/mantenimiento.test.js` fija el contrato).
+2. La pantalla **solo manda la línea de base si cambió**. El `PUT` es parcial:
+   lo que no se manda no se toca. Así, aunque el servidor volviera a no mandar
+   esos campos, un campo que nadie tocó no puede borrar nada.
+
+Vaciar el campo a propósito sigue borrándola — "ya no sé cuál era" es una acción
+legítima. Lo que dejó de ser posible es que pase solo por abrir el modal.
+
+### Planes dados de baja
+
+El `DELETE` es baja lógica. El índice único de nombre es **parcial**
+(`WHERE activo`): un plan de baja se conserva como historial pero **no reserva
+el nombre**. Antes sí lo reservaba, así que dar de baja "Cambio de aceite" y
+volver a crearlo devolvía 409 — y el plan culpable no aparecía en ninguna
+pantalla, porque estaba dado de baja. El nombre quedaba quemado.
+
+### Planes por fecha (`dias`)
+
+Una columna `DATE` vuelve de `pg` como `Date`, no como texto, y
+`String(fecha).slice(0,10)` da `"Fri Feb 20"`, no `"2026-02-20"`. Con eso,
+`new Date("Fri Feb 2T00:00:00Z")` es `Invalid Date` y `toISOString()` tira
+`RangeError`: **un solo plan por días en la base hacía que `estadoPlanes()`
+explotara**, o sea 500 en el GET, pantalla en blanco y sin aviso por push —
+para todos los planes, no solo el de fecha.
+
+Lo normaliza `_fechaISO()`, que lee los campos locales del `Date` en vez de
+`toISOString()`, porque `pg` construye el `Date` a medianoche **local**: con el
+server en un huso al este de UTC, `toISOString()` devolvería el día anterior.
 
 ## `tech_spec` después de la migración
 
