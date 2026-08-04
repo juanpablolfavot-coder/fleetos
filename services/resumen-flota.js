@@ -125,7 +125,6 @@ function armarCuerpo(estado, nov) {
 
 // ── Control de "ya lo mandé" ──────────────────────────────────────────
 async function _ultimoEnvio() {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key = 'resumen_flota_last'`);
   const raw = r.rows[0] && String(r.rows[0].value).replace(/"/g, '');
   const d = raw ? new Date(raw) : null;
@@ -155,7 +154,6 @@ async function _guardarUltimo(datos) {
 const VIGENCIA_MIN = Math.max(60, (INTERVALO_MIN || 120) * 2);
 
 async function ultimoResumen() {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key='resumen_flota_ultimo'`).catch(() => ({ rows: [] }));
   const d = r.rows[0] && r.rows[0].value;
   if (!d || !d.cuando) return null;

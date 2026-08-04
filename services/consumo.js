@@ -233,14 +233,30 @@ function armarCuerpo(evaluadas) {
 //
 // La firma lleva la fecha del tramo, no solo la unidad: si la misma unidad
 // vuelve a cargar y sigue alta, es un dato NUEVO y merece avisar de nuevo.
+// La clave lleva el instante COMPLETO de la carga, no la fecha. Con slice(0,10)
+// dos cargas del mismo día daban la misma clave, así que la segunda —que es un
+// dato nuevo, medido después— quedaba tapada hasta el día siguiente. Justo lo
+// contrario de lo que este comentario decía que hacía.
+function _clave(e) {
+  const t = e.cuando instanceof Date ? e.cuando.toISOString() : String(e.cuando);
+  return `${e.vehicle_id}:${t}`;
+}
+
 function _firma(evaluadas) {
-  return evaluadas.filter((e) => e.alerta)
-    .map((e) => `${e.vehicle_id}:${String(e.cuando).slice(0, 10)}`)
-    .sort().join('|');
+  return evaluadas.filter((e) => e.alerta).map(_clave).sort().join('|');
+}
+
+// ¿Hay alguna unidad alertada que NO estuviera en el aviso anterior?
+//
+// Se compara por conjunto y no por igualdad de firma: si de dos unidades altas
+// una se normaliza, la firma CAMBIA pero no hay nada nuevo que contar, y volver
+// a avisar con menos información que la vez anterior es ruido.
+function _hayNuevas(firma, previo) {
+  const antes = new Set(String(previo?.firma || '').split('|').filter(Boolean));
+  return String(firma).split('|').filter(Boolean).some((k) => !antes.has(k));
 }
 
 async function _leerEstado() {
-  await query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`).catch(() => {});
   const r = await query(`SELECT value FROM app_config WHERE key = 'consumo_last'`);
   if (!r.rows[0]) return null;
   try {
@@ -273,9 +289,17 @@ async function generarYEnviarAviso({ force = false, now = new Date(), notificar 
     if (hora < HORA || hora > HORA_HASTA) {
       return { skipped: `fuera de la ventana de ${HORA} a ${HORA_HASTA} (son las ${hora})` };
     }
-    if (previo && previo.dia === hoy) return { skipped: 'ya se avisó hoy' };
-    if (previo && previo.firma === firma && _diasEntre(previo.dia, hoy) < RECORDAR_DIAS) {
-      return { skipped: `sin cambios; el recordatorio sale cada ${RECORDAR_DIAS} días` };
+    // Una anomalía NUEVA se avisa cuando aparece, aunque ya se haya avisado hoy.
+    // Antes el corte por día iba primero, así que una unidad que se disparaba a
+    // las 10 quedaba callada hasta mañana si otra había disparado a las 8. Para
+    // documentación y mantenimiento eso casi no se nota —cambian de a poco— pero
+    // acá cada carga de combustible es un evento, y avisar un día tarde de un
+    // consumo raro es avisar cuando ya se fue el camión.
+    if (!_hayNuevas(firma, previo)) {
+      if (previo && previo.dia === hoy) return { skipped: 'ya se avisó hoy y no hay nada nuevo' };
+      if (previo && _diasEntre(previo.dia, hoy) < RECORDAR_DIAS) {
+        return { skipped: `sin novedades; el recordatorio sale cada ${RECORDAR_DIAS} días` };
+      }
     }
   }
 
@@ -319,6 +343,9 @@ function programarConsumo() {
 
 module.exports = {
   estadoConsumo, tramosPorUnidad, evaluar, armarCuerpo, generarYEnviarAviso, programarConsumo,
+  // Expuestos para poder testear la lógica anti-ruido sin base: es donde vivían
+  // los dos defectos que tapaban avisos legítimos.
+  _firma, _hayNuevas,
   mediana, variacionPropia,
   L100_MIN, L100_MAX, KM_MAX_ENTRE_CARGAS, MIN_TRAMOS, DIAS_FRESCO,
   FACTOR_MAD, UMBRAL_MIN, HORA, HORA_HASTA, RECORDAR_DIAS, ROLES,

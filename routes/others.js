@@ -1157,23 +1157,14 @@ function mergeVehicleTypes(value) {
   return clean;
 }
 
-// Evita ejecutar CREATE TABLE en cada carga de configuración.
-// Se crea una sola vez por proceso y luego se reutiliza.
-let appConfigReadyPromise = null;
-function ensureAppConfigTable() {
-  if (!appConfigReadyPromise) {
-    appConfigReadyPromise = query(`CREATE TABLE IF NOT EXISTS app_config (key TEXT PRIMARY KEY, value JSONB NOT NULL)`)
-      .catch((err) => {
-        appConfigReadyPromise = null;
-        throw err;
-      });
-  }
-  return appConfigReadyPromise;
-}
+// Acá había un ensureAppConfigTable() con memoización, para no correr el
+// CREATE TABLE en cada carga de configuración. Se sacó entero: app_config la
+// declara db/schema.sql:1113, así que ese CREATE era un no-op sobre cualquier
+// base migrada — y la memoización existía para abaratar algo que no hacía falta
+// hacer. Ver docs/migraciones.md.
 
 configRouter.get('/', authenticate, async (req, res) => {
   try {
-    await ensureAppConfigTable();
     const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas','stock_categories')`);
     const map = Object.fromEntries(cfg.rows.map(r => [r.key, r.value]));
     res.json({
@@ -1191,7 +1182,6 @@ configRouter.get('/', authenticate, async (req, res) => {
 
 configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   try {
-    await ensureAppConfigTable();
     const { bases, vehicle_types, labor_rate, areas, stock_categories } = req.body;
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
     if (Array.isArray(stock_categories)) {

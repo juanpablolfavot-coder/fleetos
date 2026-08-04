@@ -47,6 +47,39 @@ No hay reglas de comillas, punto y coma ni indentación. Un linter que grita por
 
 Esos nombres están declarados en `eslint.config.js` para que `no-undef` siga sirviendo para lo que importa —un nombre mal escrito— en vez de tapar 210 avisos. **A medida que un módulo pasa a `need()` del puente (`dom.mjs`), su nombre sale de esa lista.** Cuando la lista quede vacía, la migración terminó.
 
+## Dónde se escapa, y dónde se escapó tarde
+
+La defensa contra XSS de este sistema es **escapar al renderizar**: `escapeHtml()`
+en `public/js/timezone.js`, con más de 420 usos. No hay saneo de entrada que
+valga —se probó, rompía datos y era esquivable (ver `middleware/security.js`)—.
+
+Eso funciona **siempre que no falte ningún punto de render**. Y faltó uno:
+
+```js
+// auditor.mjs — la respuesta de la IA, sin escapar
+chat.innerHTML += `<div ...>${respuesta.replace(/\n/g,'<br>')}</div>`;
+```
+
+El camino era indirecto pero real: alguien carga una etiqueta en la observación
+de un ticket → esa descripción entra en el prompt que se le manda al modelo → el
+modelo la repite en su respuesta → se ejecuta en el navegador de quien abrió el
+panel, que son **dueño y gerencia**, los dos roles con más permisos.
+
+Dos cosas que vale la pena registrar:
+
+1. **Que el texto venga de un modelo no lo hace confiable.** Es texto de
+   terceros que pasó por un intermediario; se trata igual que cualquier otro.
+2. **Una búsqueda por nombres de campo no encuentra esto.** Al revisar si sacar
+   el saneo de entrada abría algo, se buscó `notas|description|observaciones|…`
+   y este render quedó afuera porque la variable se llama `respuesta`. El orden
+   correcto es al revés: buscar los `innerHTML` y ver cuáles interpolan algo,
+   no buscar los datos y ver dónde caen.
+
+`test/smoke.ui.cjs` ahora ejercita ese render **en el navegador de verdad**, con
+un payload real, y verifica tres cosas: que no se ejecute, que no quede una
+etiqueta viva en el DOM, y que el salto de línea siga siendo un `<br>`. Fallaba
+contra el código anterior.
+
 ## Lo que el CI todavía no cubre
 
 Vale tenerlo escrito, porque un CI verde da confianza y conviene saber sobre qué.

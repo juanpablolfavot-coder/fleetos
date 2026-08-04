@@ -278,6 +278,62 @@ test('si no se entregó a nadie, NO queda como avisado', { skip: SKIP }, async (
   assert.ok(b.sent, 'el aviso no quedó tapado');
 });
 
+test('una anomalía NUEVA avisa el mismo día', { skip: SKIP }, async () => {
+  // Antes el corte por día iba antes que el de firma, así que una unidad que se
+  // disparaba a las 10 quedaba callada hasta mañana si otra había disparado a
+  // las 8. Para combustible eso es avisar cuando ya se fue el camión.
+  const a = await cargarUnidad({ normal: 30, n: 10, ultimo: 42 });
+  const r1 = await avisar();
+  assert.ok(r1.sent, 'la primera avisa');
+  assert.match(ultimoAviso.body, new RegExp(a.code));
+
+  // Segunda unidad, mismo día, también alta.
+  const b = await cargarUnidad({ normal: 25, n: 10, ultimo: 40 });
+  const r2 = await avisar();
+  assert.ok(r2.sent, 'la segunda TAMBIÉN avisa, aunque ya se avisó hoy');
+  assert.match(ultimoAviso.body, new RegExp(b.code), 'y nombra a la nueva');
+
+  // Y sin nada nuevo, se calla.
+  const r3 = await avisar();
+  assert.ok(!r3.sent);
+  assert.match(r3.skipped, /no hay nada nuevo/);
+});
+
+test('que una unidad se normalice NO dispara un aviso', { skip: SKIP }, async () => {
+  // Si de dos altas una vuelve a lo normal, el conjunto cambia pero no hay nada
+  // nuevo que contar. Volver a avisar con menos información que la vez anterior
+  // es ruido.
+  const a = await cargarUnidad({ normal: 30, n: 10, ultimo: 42 });
+  const b = await cargarUnidad({ normal: 25, n: 10, ultimo: 40 });
+  assert.ok((await avisar()).sent);
+
+  // Se "normaliza" la segunda borrando su última carga.
+  await client.query(
+    `DELETE FROM fuel_logs WHERE id = (SELECT f.id FROM fuel_logs f
+       JOIN vehicles v ON v.id = f.vehicle_id WHERE v.code = $1
+       ORDER BY f.logged_at DESC LIMIT 1)`, [b.code]);
+
+  const r = await avisar();
+  assert.ok(!r.sent, 'sigue habiendo una alta, pero no es novedad');
+  assert.ok(a.code);
+});
+
+test('la firma distingue dos cargas del MISMO día', { skip: SKIP }, async () => {
+  // Con slice(0,10) las dos cargas daban la misma clave y la segunda quedaba
+  // tapada. La clave lleva el instante completo.
+  const base = [
+    { alerta: true, vehicle_id: 'v1', cuando: '2026-08-03T08:00:00.000Z' },
+  ];
+  const despues = [
+    { alerta: true, vehicle_id: 'v1', cuando: '2026-08-03T17:00:00.000Z' },
+  ];
+  const f1 = consumo._firma(base);
+  const f2 = consumo._firma(despues);
+  assert.notStrictEqual(f1, f2, 'dos cargas del mismo día NO pueden dar la misma firma');
+  assert.ok(consumo._hayNuevas(f2, { firma: f1 }), 'la segunda carga es novedad');
+  assert.ok(!consumo._hayNuevas(f1, { firma: f1 }), 'la misma no');
+});
+
 test('fuera de la ventana horaria no molesta', { skip: SKIP }, async () => {
   await cargarUnidad({ normal: 30, n: 10, ultimo: 42 });
   const madrugada = new Date('2026-08-03T07:00:00Z');   // 04:00 AR
