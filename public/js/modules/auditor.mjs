@@ -617,6 +617,7 @@ async function renderAuditorCombustible(el) {
   const ROTULO = {
     fecha:'Fecha', unidad:'Unidad', chofer:'Chofer', litros:'Litros', precio:'Precio/L',
     lugar:'Lugar', km_del_tramo:'Km del tramo', rinde:'Rindió', lo_normal_suyo:'Lo normal suyo',
+    litros_de_mas:'Litros de más', km_esperado:'Km esperado',
     desvio:'Desvío', que_mirar:'Qué mirar', primera:'Primera', segunda:'Segunda',
     litros_1:'Litros 1ª', litros_2:'Litros 2ª', minutos_entre:'Minutos entre',
   };
@@ -626,7 +627,8 @@ async function renderAuditorCombustible(el) {
     if (esFecha(k)) return new Date(v).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
     if (k === 'precio')  return '$' + Number(v).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 });
     if (k === 'rinde' || k === 'lo_normal_suyo') return Number(v).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' km/L';
-    if (k === 'km_del_tramo') return Math.round(v).toLocaleString('es-AR') + ' km';
+    if (k === 'km_del_tramo' || k === 'km_esperado') return Math.round(v).toLocaleString('es-AR') + ' km';
+    if (k === 'litros_de_mas') return '+' + Number(v).toLocaleString('es-AR') + ' L';
     if (/^litros/.test(k)) return Number(v).toLocaleString('es-AR') + ' L';
     if (k === 'minutos_entre') return v + ' min';
     return escapeHtml(String(v));
@@ -648,7 +650,7 @@ async function renderAuditorCombustible(el) {
       <div class="table-wrap">
         <table style="font-size:12px">
           <thead><tr>${cols.map(k=>`<th>${ROTULO[k] || k.replace(/_/g,' ')}</th>`).join('')}</tr></thead>
-          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${cols.map(k=>`<td${['litros','precio','km_del_tramo','rinde','lo_normal_suyo','minutos_entre'].includes(k)||/^litros/.test(k)?' class="td-mono"':''}>${celda(k, r[k])}</td>`).join('')}</tr>`).join('')}</tbody>
+          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${cols.map(k=>`<td${['precio','km_del_tramo','km_esperado','rinde','lo_normal_suyo','minutos_entre'].includes(k)||/^litros/.test(k)?' class="td-mono"':''}${k==='litros_de_mas'?' style="color:var(--danger);font-weight:600"':''}>${celda(k, r[k])}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>
       ${a.registros.length > 10 ? `<div style="font-size:11px;color:var(--text3);margin-top:8px;padding:4px">… y ${a.registros.length-10} más</div>` : ''}

@@ -227,8 +227,16 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
       porVeh.get(r.vehicle_id).push(r);
     }
 
-    const rendAnomalo = [];
-    let unidadesEvaluadas = 0, unidadesSinBase = 0;
+    // POR QUÉ NO ALCANZA CON MIRAR UN TRAMO SUELTO
+    // El tanque no se llena siempre al mismo nivel. Si una carga fue parcial, ese
+    // tramo parece rendir de más (pocos litros para esos km) y el siguiente parece
+    // rendir de menos (muchos litros, porque incluye lo que faltó cargar antes).
+    // Son dos tramos marcados por UN mismo hecho, que además no es un problema:
+    // sumados dan el consumo normal de la unidad. Por eso, antes de marcar un
+    // tramo, se lo junta con el de al lado: si juntos vuelven a la normalidad, era
+    // nivel de tanque y no se informa. Sólo queda lo que no se compensa con nada.
+    const consumoDeMas = [], odometroDudoso = [];
+    let unidadesEvaluadas = 0, unidadesSinBase = 0, compensados = 0;
     for (const filas of porVeh.values()) {
       const tramos = [];
       for (let i = 1; i < filas.length; i++) {
@@ -238,45 +246,84 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
         // de hace meses (ahí el tramo no representa a esa carga).
         const dias = (new Date(filas[i].logged_at) - new Date(filas[i - 1].logged_at)) / 86400000;
         if (!(km > 0 && km < 20000 && litros > 0 && dias <= 45)) continue;
-        tramos.push({ fila: filas[i], km, litros, l100: litros / km * 100 });
+        tramos.push({ i, fila: filas[i], km, litros, l100: litros / km * 100 });
       }
       if (tramos.length < 5) { if (tramos.length) unidadesSinBase++; continue; }
       unidadesEvaluadas++;
       const orden = tramos.map(t => t.l100).sort((a, b) => a - b);
       const med = orden[Math.floor(orden.length / 2)];
       if (!(med > 0)) continue;
-      for (const t of tramos) {
+      const normal = l100 => l100 / med >= 0.5 && l100 / med <= 1.5;
+
+      for (let j = 0; j < tramos.length; j++) {
+        const t = tramos[j];
+        if (normal(t.l100)) continue;
+
+        // ¿Se compensa con el tramo pegado (el anterior o el siguiente)?
+        // Dos condiciones, y hacen falta las dos: el vecino tiene que estar
+        // desviado para el LADO CONTRARIO —esa es la firma del tanque llenado a
+        // distinto nivel— y los dos juntos tienen que dar un consumo normal.
+        // Sin la primera condición cualquier vecino promedio "diluiría" el tramo
+        // y taparíamos justo lo que hay que ver.
+        const alto = t.l100 > med;
+        let compensa = false;
+        for (const k of [j - 1, j + 1]) {
+          const o = tramos[k];
+          if (!o || Math.abs(o.i - t.i) !== 1) continue;    // tienen que ser consecutivos de verdad
+          if (alto ? !(o.l100 < med) : !(o.l100 > med)) continue;
+          if (normal((t.litros + o.litros) / (t.km + o.km) * 100)) { compensa = true; break; }
+        }
+        if (compensa) { compensados++; continue; }
+
         const veces = t.l100 / med;
-        // 1,5× la mediana: consumió mucho más de lo suyo para esos km.
-        // 0,5×: rindió el doble de lo posible — casi siempre el odómetro de la
-        // carga anterior estaba viejo y el tramo quedó inflado.
-        if (veces <= 1.5 && veces >= 0.5) continue;
-        rendAnomalo.push({
+        const base = {
           unidad: t.fila.unidad,
           fecha: t.fila.logged_at,
           chofer: t.fila.chofer,
           km_del_tramo: t.km,
-          litros: parseFloat(t.fila.liters),
+          litros: t.litros,
           rinde: +(t.km / t.litros).toFixed(2),
           lo_normal_suyo: +(100 / med).toFixed(2),
-          desvio: (veces > 1.5 ? '+' : '') + Math.round((veces - 1) * 100) + '%',
-          que_mirar: veces > 1.5 ? 'Consumió de más para esos km' : 'Rinde imposible — revisar el odómetro anotado',
-        });
+        };
+        if (veces > 1.5) {
+          // Consumió de más y no hay tramo vecino que lo explique.
+          consumoDeMas.push({ ...base, litros_de_mas: Math.round(t.litros - t.km * med / 100) });
+        } else {
+          // Rinde el doble de lo posible: el odómetro de la carga anterior venía
+          // viejo, así que el tramo quedó inflado. Es un dato mal anotado.
+          odometroDudoso.push({ ...base, km_esperado: Math.round(t.litros / med * 100) });
+        }
       }
     }
-    rendAnomalo.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    const porFecha = (a, b) => new Date(b.fecha) - new Date(a.fecha);
+    consumoDeMas.sort(porFecha); odometroDudoso.sort(porFecha);
 
-    if (rendAnomalo.length > 0) {
-      const deMas = rendAnomalo.filter(r => r.desvio.startsWith('+')).length;
+    const baseCriterio = 'Cada tramo se compara con la mediana de consumo de ESA MISMA unidad, no con una tabla fija para toda la flota. '
+      + 'Se excluye la urea, las autoelevadoras y los tramos ilegibles (odómetro que retrocede, saltos de más de 20.000 km, más de 45 días entre cargas). '
+      + 'Antes de marcar un tramo se lo suma con el de al lado: si juntos dan un consumo normal, la diferencia era sólo que el tanque no se llenó al mismo nivel, y no se informa'
+      + (compensados ? ` (${num(compensados)} tramo(s) descartados así)` : '') + '. '
+      + `Una unidad necesita 5 tramos sanos para tener costumbre propia${unidadesSinBase ? `; ${num(unidadesSinBase)} todavía no la tienen y no se evalúan` : ''}.`;
+
+    if (consumoDeMas.length > 0) {
       anomalias.push({
-        tipo: 'rendimiento_anomalo',
-        severidad: deMas > 0 ? 'alta' : 'media',
-        titulo: 'Tramos fuera de la costumbre de la unidad',
-        descripcion: `${num(rendAnomalo.length)} tramo(s) sobre ${num(unidadesEvaluadas)} unidades evaluadas · ${num(deMas)} con consumo de más, ${num(rendAnomalo.length - deMas)} con rendimiento imposible`,
-        criterio: 'Cada tramo se compara con la mediana de esa misma unidad: se marca por encima de 1,5× (consumo de más) o por debajo de 0,5× (rinde imposible, casi siempre odómetro mal anotado). '
-          + 'Se excluye la urea, las autoelevadoras y los tramos ilegibles (odómetro que retrocede, saltos de más de 20.000 km, más de 45 días entre cargas). '
-          + `Una unidad necesita 5 tramos sanos para tener costumbre propia${unidadesSinBase ? `; ${num(unidadesSinBase)} todavía no la tienen y no se evalúan` : ''}.`,
-        registros: rendAnomalo,
+        tipo: 'consumo_de_mas',
+        severidad: 'alta',
+        titulo: 'Consumió más gasoil del que esa unidad suele usar',
+        descripcion: `${num(consumoDeMas.length)} tramo(s) sobre ${num(unidadesEvaluadas)} unidades evaluadas · ${num(consumoDeMas.reduce((a, r) => a + r.litros_de_mas, 0))} litros por encima de lo habitual en total`,
+        criterio: baseCriterio + ' Se marca por encima de 1,5× su propia mediana. Esto es lo que hay que mirar de verdad: gasoil que no se explica con los km hechos.',
+        registros: consumoDeMas,
+      });
+    }
+
+    if (odometroDudoso.length > 0) {
+      anomalias.push({
+        tipo: 'odometro_dudoso',
+        severidad: 'media',
+        titulo: 'Odómetro probablemente mal anotado',
+        descripcion: `${num(odometroDudoso.length)} tramo(s) que dan un rendimiento imposible para esa unidad`,
+        criterio: baseCriterio + ' Se marca por debajo de 0,5× su propia mediana. No es un problema de gasoil: un camión no puede rendir el doble de lo suyo. '
+          + 'Casi siempre el odómetro de la carga ANTERIOR quedó viejo y el tramo salió inflado. La columna "km esperado" es lo que ese tramo debería haber dado según el consumo normal de la unidad.',
+        registros: odometroDudoso,
       });
     }
 
