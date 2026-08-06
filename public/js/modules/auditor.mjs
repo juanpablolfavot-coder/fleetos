@@ -611,23 +611,49 @@ async function renderAuditorCombustible(el) {
     </div>`; return;
   }
 
-  el.innerHTML = d.anomalias.map(a => `
-    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--${a.severidad==='alta'?'danger':'warn'})">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <span style="font-size:20px">${a.severidad==='alta'?'🔴':'🟡'}</span>
-        <div>
-          <div style="font-weight:700;font-size:14px">${a.titulo}</div>
-          <div style="font-size:12px;color:var(--text3)">${escapeHtml(a.descripcion)}</div>
+  // Encabezados legibles y formato por tipo de dato. Sin esto la tabla salía con
+  // los nombres crudos de la base ("km_del_tramo", "logged_at") y las fechas con
+  // microsegundos, que es la mitad de por qué el panel se leía como un revoltijo.
+  const ROTULO = {
+    fecha:'Fecha', unidad:'Unidad', chofer:'Chofer', litros:'Litros', precio:'Precio/L',
+    lugar:'Lugar', km_del_tramo:'Km del tramo', rinde:'Rindió', lo_normal_suyo:'Lo normal suyo',
+    desvio:'Desvío', que_mirar:'Qué mirar', primera:'Primera', segunda:'Segunda',
+    litros_1:'Litros 1ª', litros_2:'Litros 2ª', minutos_entre:'Minutos entre',
+  };
+  const esFecha = k => ['fecha','primera','segunda'].includes(k);
+  const celda = (k, v) => {
+    if (v === null || v === undefined || v === '') return '—';
+    if (esFecha(k)) return new Date(v).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+    if (k === 'precio')  return '$' + Number(v).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+    if (k === 'rinde' || k === 'lo_normal_suyo') return Number(v).toLocaleString('es-AR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' km/L';
+    if (k === 'km_del_tramo') return Math.round(v).toLocaleString('es-AR') + ' km';
+    if (/^litros/.test(k)) return Number(v).toLocaleString('es-AR') + ' L';
+    if (k === 'minutos_entre') return v + ' min';
+    return escapeHtml(String(v));
+  };
+
+  el.innerHTML = d.anomalias.map(a => {
+    const cols = Object.keys(a.registros[0] || {});
+    return `
+    <div class="card" style="margin-bottom:16px;border-left:4px solid var(--${a.severidad==='alta'?'danger':a.severidad==='baja'?'text3':'warn'})">
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px">
+        <span style="font-size:20px;line-height:1.2">${a.severidad==='alta'?'🔴':a.severidad==='baja'?'⚪':'🟡'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:14px">${escapeHtml(a.titulo)}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">${escapeHtml(a.descripcion)}</div>
+          ${a.criterio ? `<div style="font-size:11px;color:var(--text3);margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:6px;line-height:1.5">
+            <b>Cómo se detecta:</b> ${escapeHtml(a.criterio)}</div>` : ''}
         </div>
       </div>
       <div class="table-wrap">
         <table style="font-size:12px">
-          <thead><tr>${Object.keys(a.registros[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
-          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${Object.values(r).map(v=>`<td>${v||'—'}</td>`).join('')}</tr>`).join('')}</tbody>
+          <thead><tr>${cols.map(k=>`<th>${ROTULO[k] || k.replace(/_/g,' ')}</th>`).join('')}</tr></thead>
+          <tbody>${a.registros.slice(0,10).map(r=>`<tr>${cols.map(k=>`<td${['litros','precio','km_del_tramo','rinde','lo_normal_suyo','minutos_entre'].includes(k)||/^litros/.test(k)?' class="td-mono"':''}>${celda(k, r[k])}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>
-      ${a.registros.length > 10 ? `<div style="font-size:11px;color:var(--text3);margin-top:8px;padding:4px">... y ${a.registros.length-10} más</div>` : ''}
-    </div>`).join('');
+      ${a.registros.length > 10 ? `<div style="font-size:11px;color:var(--text3);margin-top:8px;padding:4px">… y ${a.registros.length-10} más</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 // ── Tab 3: Anomalías OTs ──────────────────────────────────
