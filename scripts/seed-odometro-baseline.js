@@ -69,14 +69,18 @@ const REHACER = process.argv.includes('--rehacer');   // volver a calcular los y
     console.log(`\n${APPLY ? '⚡ MODO EJECUCIÓN (--apply)' : '🔎 MODO SIMULACIÓN (agregá --apply para ejecutar)'}\n`);
     await ensureTablas();
 
-    // Primera foto de cada unidad (la que sirve de referencia para restar).
+    // Primera foto REAL de cada unidad: la que tomó el servicio, no el punto de
+    // partida que este mismo script escribe. Sin excluirlo, una segunda corrida
+    // con --rehacer tomaría como "foto" el valor ya calculado y le volvería a
+    // restar los km de agosto, dejando el punto de partida un mes atrás.
     const primeras = await client.query(`
       SELECT DISTINCT ON (o.vehicle_id)
              o.vehicle_id, o.fecha, o.odometro_km,
              UPPER(COALESCE(v.plate, v.code)) AS patente
         FROM vehicle_gps_odometro o
         JOIN vehicles v ON v.id = o.vehicle_id
-       ORDER BY o.vehicle_id, o.fecha ASC`);
+       WHERE o.fecha > $1::date
+       ORDER BY o.vehicle_id, o.fecha ASC`, [BASELINE]);
 
     if (!primeras.rows.length) {
       console.log('Todavía no hay ninguna foto de odómetro guardada.');
