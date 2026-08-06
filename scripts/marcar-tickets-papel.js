@@ -27,11 +27,16 @@ const APPLY = process.argv.includes('--apply');
 // Carga de estación (sin cisterna), sin foto, sin estado, y con el número de
 // ticket anotado en las notas. Esa última condición es la que garantiza que el
 // comprobante existe: no se marca nada que no lo tenga.
+//
+// Las columnas van calificadas con "fl." y el UPDATE aliasea la tabla igual, para
+// poder usar la MISMA condición en los dos lados: lo que se lista es exactamente
+// lo que se marca. Sin el alias, el SELECT —que hace join con vehicles, que
+// también tiene una columna notes— no sabe de cuál de las dos hablamos.
 const CONDICION = `
-  tank_id IS NULL
-  AND (ticket_image IS NULL OR ticket_image = '')
-  AND ticket_estado IS NULL
-  AND COALESCE(notes,'') ILIKE 'ticket %'`;
+  fl.tank_id IS NULL
+  AND (fl.ticket_image IS NULL OR fl.ticket_image = '')
+  AND fl.ticket_estado IS NULL
+  AND COALESCE(fl.notes,'') ILIKE 'ticket %'`;
 
 (async () => {
   const client = await pool.connect();
@@ -58,7 +63,7 @@ const CONDICION = `
     }
 
     if (APPLY) {
-      const u = await client.query(`UPDATE fuel_logs SET ticket_estado='papel' WHERE ${CONDICION}`);
+      const u = await client.query(`UPDATE fuel_logs fl SET ticket_estado='papel' WHERE ${CONDICION}`);
       console.log(`\n✅ ${u.rowCount} carga(s) marcadas como respaldadas en papel.`);
       console.log('   Dejan de aparecer en "Cargas en estación sin ningún respaldo".\n');
     } else {
