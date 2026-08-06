@@ -12,10 +12,22 @@
  * reconcilian con el propio informe: junio 143.633 km (cobertura 05→30/06) y
  * julio 169.267 km (mes completo).
  *
- * ATENCIÓN — junio queda PARCIAL: el informe disponible arranca el 05/06, así
- * que faltan los días 1 al 4. Se guarda con su cobertura real (campos desde y
- * hasta) para que quede explícito y no se lea como un mes completo. Para
- * cerrarlo basta exportar del GPS el rango 01→04/06 y sumarlo.
+ * JUNIO 01→04: ese informe arrancaba el 05/06, así que junio quedó parcial. Los
+ * cuatro días que faltaban salen de un segundo informe —"Información de viajes"
+ * del 01/06 00:00 al 05/06 23:37— del que se tomó SOLO lo de los días 1 a 4
+ * (viaje por viaje, según la fecha de inicio de cada viaje), para no pisar el 05
+ * que ya venía contado en el primero. Ese informe reconcilia perfecto: sus 27
+ * unidades cierran una por una en cantidad de viajes y en km contra su propio
+ * resumen, y el total da los 40.360 km que declara.
+ *
+ * Los dos tramos se guardan por separado abajo y se suman acá, para que se pueda
+ * auditar de dónde sale cada parte. Con eso junio queda COMPLETO: 178.191 km.
+ *
+ * OJO — dos informes distintos: el grueso de junio viene del "Informe de
+ * actividades" y los cuatro primeros días de "Información de viajes". Son dos
+ * formas de medir de Powerfleet y no tienen por qué dar idéntico. Si se quiere
+ * junio medido con una sola vara, hay que re-exportar el de actividades desde el
+ * 01/06 y reemplazar la columna de junio entera.
  *
  * Uso (Shell de Render):
  *   node scripts/backfill-gps-km.js            → SIMULACIÓN (no toca nada)
@@ -39,9 +51,26 @@ const KM = {
   AH327SG: [ 9904, 12487], AH462JI: [12240, 15431],
 };
 
+// Junio 01→04, del informe "Información de viajes" (01/06 00:00 → 05/06 23:37),
+// contando sólo los viajes iniciados los días 1 a 4. Suma 34.614 km sobre 27
+// unidades; los 5.746 km restantes del informe son del día 5, que ya viene
+// contado arriba y por eso NO se toca.
+const KM_JUN_1A4 = {
+  AA147OT:  240, AA508SW:  696, AB120EF:    4, AB902MF:   65, AD225WO:  686,
+  AD235FE: 2992, AD644VD: 2650, AE517UM:  453, AE919NN:  255, AF041MB:  749,
+  AF159UC:  889, AF614LB: 1714, AF823RB:  789, AF931PD: 2625, AG468LK:  332,
+  AG468LQ: 1832, AG470AG: 1181, AH035AN:  799, AH035AO:  790, AH327AU: 1077,
+  AH327CF:  644, AH327RZ: 2976, AH327SA: 2858, AH327SB: 2339, AH327SG: 2064,
+  AH462JI: 2859,
+  // OBE019 hizo 56 km del 1 al 4, pero no figura en el informe de actividades que
+  // cubre el resto de junio: cargarlo con esos 56 daría un junio incompleto para
+  // esa unidad. Queda afuera hasta tener su mes entero. (En agosto sí está.)
+};
+
 const PERIODOS = [
-  { periodo: '2026-06', idx: 0, desde: '2026-06-05', hasta: '2026-06-30',
-    nota: 'Informe de actividades GPS Powerfleet. PARCIAL: cobertura 05→30/06 (faltan 01→04/06).', esperado: 143633 },
+  { periodo: '2026-06', idx: 0, extra: KM_JUN_1A4, desde: '2026-06-01', hasta: '2026-06-30',
+    nota: 'GPS Powerfleet, mes completo: informe de actividades del 05 al 30/06 más "Información de viajes" para los días 01 al 04/06.',
+    esperado: 143633 + 34614 - 56 },
   { periodo: '2026-07', idx: 1, desde: '2026-07-01', hasta: '2026-07-31',
     nota: 'Informe de actividades GPS Powerfleet. Mes completo.', esperado: 169267 },
 ];
@@ -62,7 +91,10 @@ const PERIODOS = [
       let ok = 0, faltan = [], suma = 0;
       const sinCargas = [];   // km del GPS pero sin combustible registrado en FleetOS
       for (const [pat, kms] of Object.entries(KM)) {
-        const km = kms[P.idx];
+        // El km del período es lo del informe base más, si corresponde, el tramo
+        // que ese informe no cubría (hoy sólo junio 01→04). Se suma acá y no en la
+        // tabla para que quede visible de dónde viene cada parte.
+        const km = kms[P.idx] + ((P.extra && P.extra[pat]) || 0);
         const id = porPat.get(pat);
         if (!id) { faltan.push(pat); continue; }
         if (!(km > 0)) continue;                       // sin actividad ese mes: no se guarda
@@ -88,7 +120,11 @@ const PERIODOS = [
       const dif = suma - P.esperado;
       console.log(`${P.periodo}: ${ok} unidades · ${num(suma)} km` +
         `  (informe: ${num(P.esperado)} km${dif === 0 ? ' ✓ reconcilia' : ` ⚠ difiere ${num(dif)}`})`);
-      console.log(`   cobertura ${P.desde} → ${P.hasta}${P.periodo === '2026-06' ? '  ⚠ PARCIAL (faltan 01→04/06)' : ''}`);
+      console.log(`   cobertura ${P.desde} → ${P.hasta}  ✓ mes completo`);
+      if (P.extra) {
+        const ex = Object.entries(P.extra).filter(([p]) => porPat.get(p)).reduce((a, [, k]) => a + k, 0);
+        console.log(`   incluye ${num(ex)} km de los días 01→04/06 ("Información de viajes", viaje por viaje)`);
+      }
       if (faltan.length) console.log(`   ⚠ sin vehículo en FleetOS: ${faltan.join(', ')}`);
       if (sinCargas.length) {
         console.log(`   ⚠ ${sinCargas.length} unidad(es) con km del GPS pero SIN combustible registrado ese mes:`);
@@ -104,7 +140,11 @@ const PERIODOS = [
 
     console.log('Notas:');
     console.log(' · Agosto en adelante se completa solo con la foto diaria del odómetro.');
-    console.log(' · Para cerrar junio: exportar del GPS el rango 01→04/06 y sumar esos km.\n');
+    console.log(' · Junio queda completo. El grueso sale del "Informe de actividades" y los días');
+    console.log('   01→04 de "Información de viajes": son dos formas de medir de Powerfleet. Para');
+    console.log('   junio medido con una sola vara, re-exportar actividades desde el 01/06.');
+    console.log(' · OBE019 hizo 56 km del 01 al 04 pero no está en el informe del resto de junio:');
+    console.log('   queda afuera del mes para no cargarlo incompleto.\n');
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR:', e.message);
