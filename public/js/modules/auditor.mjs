@@ -1439,15 +1439,48 @@ function exportHistorialPDF() {
   window.showToast?.('ok', 'PDF descargado');
 }
 
+// Mismo criterio que ralentí: se elige el mes. Antes traía los últimos 200
+// eventos de toda la historia mezclados, así que no se podía acotar a un mes ni
+// comparar uno contra otro. '' = todo el historial, para no perder esa vista.
+let _excesosMes = '';
+
 async function renderAuditorExcesos(el) {
-  const res = await apiFetch('/api/auditor/excesos-velocidad');
+  const meses = _mesesRecientes();
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:var(--text3)">Mes</span>
+        <select class="form-select" id="excesos-mes" style="max-width:240px;padding:6px 10px;font-size:12px" onchange="loadAuditorExcesos()">
+          <option value="" ${_excesosMes === '' ? 'selected' : ''}>Todo el historial</option>
+          ${meses.map(m => `<option value="${m.valor}" ${m.valor === _excesosMes ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="excesos-result"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div></div>`;
+  await loadAuditorExcesos();
+}
+
+async function loadAuditorExcesos() {
+  const sel = document.getElementById('excesos-mes');
+  if (sel) _excesosMes = sel.value;
+  const el = document.getElementById('excesos-result');
+  if (!el) return;
+  el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div>`;
+
+  let url = '/api/auditor/excesos-velocidad';
+  if (_excesosMes) {
+    const [y, m] = _excesosMes.split('-').map(Number);
+    const ultimo = new Date(y, m, 0).getDate();
+    url += `?desde=${_excesosMes}-01&hasta=${_excesosMes}-${String(ultimo).padStart(2, '0')}`;
+  }
+  const res = await apiFetch(url);
   if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar excesos</div>`; return; }
   const { eventos } = await res.json();
 
   if (!eventos || !eventos.length) {
     el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
       <div style="font-size:32px;margin-bottom:12px">✅</div>
-      <div style="font-weight:600;color:var(--ok)">Sin excesos de velocidad registrados</div>
+      <div style="font-weight:600;color:var(--ok)">Sin excesos de velocidad registrados${_excesosMes ? ' en ese mes' : ''}</div>
       <div style="font-size:13px;color:var(--text3);margin-top:8px">Se registran automáticamente cuando una unidad supera el límite. Requiere las alertas de velocidad configuradas.</div>
     </div>`;
     return;
@@ -1510,6 +1543,7 @@ async function renderAuditorExcesos(el) {
         (según la frecuencia del GPS). "En curso" = la unidad todavía va excedida en el último reporte.
       </div>
     </div>`;
+  _applyTableLabels(el);
 }
 
 // Genera un "cartelito" (imagen) del exceso y lo comparte por el menú del celular
@@ -1564,18 +1598,56 @@ async function compartirExceso(code, kmh, isoFecha) {
 }
 
 // ── Tab: Ralentí (historial + estadísticas del mes) ───────
+// El mes se elige: sin selector, la solapa mostraba siempre el mes en curso y no
+// había forma de ver el anterior ni de comparar. El backend ya aceptaba ?mes=.
+let _ralentiMes = null;   // 'YYYY-MM' · null = mes en curso
+
+// Los últimos 12 meses, del más nuevo al más viejo.
+function _mesesRecientes(n = 12) {
+  const out = [], hoy = new Date();
+  for (let i = 0; i < n; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    out.push({
+      valor: d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'),
+      label: d.toLocaleString('es-AR', { month: 'long', year: 'numeric' }).replace(/^./, c => c.toUpperCase())
+        + (i === 0 ? ' (en curso)' : ''),
+    });
+  }
+  return out;
+}
+
 async function renderAuditorRalenti(el) {
-  const now = new Date();
-  const mes = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-  const res = await apiFetch(`/api/auditor/ralenti?mes=${mes}`);
-  if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ralentí</div>`; return; }
+  const meses = _mesesRecientes();
+  if (!_ralentiMes) _ralentiMes = meses[0].valor;
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:var(--text3)">Mes</span>
+        <select class="form-select" id="ralenti-mes" style="max-width:240px;padding:6px 10px;font-size:12px" onchange="loadAuditorRalenti()">
+          ${meses.map(m => `<option value="${m.valor}" ${m.valor === _ralentiMes ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="ralenti-result"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div></div>`;
+  await loadAuditorRalenti();
+}
+
+async function loadAuditorRalenti() {
+  const sel = document.getElementById('ralenti-mes');
+  if (sel) _ralentiMes = sel.value;
+  const wrap = document.getElementById('ralenti-result');
+  if (!wrap) return;
+  wrap.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div>`;
+
+  const res = await apiFetch(`/api/auditor/ralenti?mes=${encodeURIComponent(_ralentiMes)}`);
+  if (!res.ok) { wrap.innerHTML = `<div class="card" style="color:var(--danger)">Error al cargar ralentí</div>`; return; }
   const d = await res.json();
   const r = d.resumen || {};
   const fAr = n => '$' + (Number(n) || 0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
   const nombreMes = new Date(d.periodo.anio, d.periodo.mes - 1, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
   if (!d.por_unidad || !d.por_unidad.length) {
-    el.innerHTML = `<div class="card" style="text-align:center;padding:40px">
+    wrap.innerHTML = `<div class="card" style="text-align:center;padding:40px">
       <div style="font-size:32px;margin-bottom:12px">🕒</div>
       <div style="font-weight:600;color:var(--ok)">Sin ralentí registrado en ${nombreMes}</div>
       <div style="font-size:13px;color:var(--text3);margin-top:8px">Se registra automáticamente cuando una unidad queda con el motor encendido y detenida más de ${d.umbral_min} min. Requiere el dato de ignición del GPS.</div>
@@ -1585,7 +1657,7 @@ async function renderAuditorRalenti(el) {
 
   const maxTot = Math.max(...d.por_unidad.map(u => u.total_seconds), 1);
 
-  el.innerHTML = `
+  wrap.innerHTML = `
     <div class="kpi-row" style="margin-bottom:16px">
       <div class="kpi-card info">
         <div class="kpi-label">🕒 Tiempo total en ralentí</div>
@@ -1650,6 +1722,7 @@ async function renderAuditorRalenti(el) {
         </table>
       </div>
     </div>`;
+  _applyTableLabels(wrap);
 }
 
 // ── Tab 6: Log de acciones ────────────────────────────────
@@ -1874,8 +1947,10 @@ expose('renderAuditorHistorial', renderAuditorHistorial);
 expose('loadAuditorHistorialUnidad', loadAuditorHistorialUnidad);
 expose('exportHistorialPDF', exportHistorialPDF);
 expose('renderAuditorExcesos', renderAuditorExcesos);
+expose('loadAuditorExcesos', loadAuditorExcesos);
 expose('compartirExceso', compartirExceso);
 expose('renderAuditorRalenti', renderAuditorRalenti);
+expose('loadAuditorRalenti', loadAuditorRalenti);
 expose('renderAuditorLog', renderAuditorLog);
 expose('cargarMasAuditLog', cargarMasAuditLog);
 expose('openAuditorIA', openAuditorIA);
