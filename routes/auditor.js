@@ -441,6 +441,10 @@ auditorRouter.get('/log-acciones', authenticate, canAudit, async (req, res) => {
 // ── 6. Reporte comparativo mensual ───────────────────────
 auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
   try {
+    // Los km del GPS (tabla vehicle_gps_km) son la cifra principal: miden el mes
+    // calendario exacto, sin depender de cuándo cargó cada unidad. Si la tabla
+    // todavía no existe (base nueva, servicio sin correr) se sigue sin ella.
+    const hayGps = !!(await query(`SELECT to_regclass('public.vehicle_gps_km') AS t`)).rows[0]?.t;
     const meses = [];
     for (let i = 5; i >= 0; i--) {
       const d     = new Date();
@@ -452,7 +456,9 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
       const lastDay = new Date(yr, mo, 0).getDate(); // último día real del mes
     const hasta = `${yr}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
 
-      const [fuel, ots, km, tramos] = await Promise.all([
+      const periodo = `${yr}-${String(mo).padStart(2,'0')}`;
+
+      const [fuel, ots, km, tramos, gps] = await Promise.all([
         query(`SELECT
                  COALESCE(SUM(liters*price_per_l) FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as costo_fuel,
                  COALESCE(SUM(liters)             FILTER (WHERE COALESCE(LOWER(fuel_type),'') <> 'urea'),0) as litros,
@@ -511,10 +517,27 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
                  FROM tramos
                  WHERE logged_at > $1::timestamptz AND fecha_prev < $2::timestamptz
                ) t`, [desde, hasta+' 23:59:59']),
+        // Km del GPS. Se separan los de las unidades que SÍ registran combustible:
+        // son las únicas que pueden entrar al rendimiento. Sumar el km de una unidad
+        // que no carga en FleetOS (hoy Córdoba y Rosario) contra los litros de las
+        // que sí cargan daría un km/L falsamente bueno.
+        hayGps ? query(`
+          SELECT COALESCE(SUM(km),0)                                       AS km_gps,
+                 COALESCE(SUM(km)     FILTER (WHERE COALESCE(litros,0)>0),0) AS km_rend,
+                 COALESCE(SUM(litros) FILTER (WHERE COALESCE(litros,0)>0),0) AS litros_rend,
+                 COUNT(*)                                                  AS unidades,
+                 COUNT(*)             FILTER (WHERE COALESCE(litros,0)=0)  AS sin_litros,
+                 MIN(desde) AS desde, MAX(hasta) AS hasta
+            FROM vehicle_gps_km WHERE periodo = $1`, [periodo])
+                : Promise.resolve({ rows: [{}] }),
       ]);
 
+      const g = gps.rows[0] || {};
+      const iso = v => (v instanceof Date ? v.toISOString().slice(0,10) : (v ? String(v).slice(0,10) : null));
+      const gpsDesde = iso(g.desde), gpsHasta = iso(g.hasta);
+
       meses.push({
-        periodo: `${yr}-${String(mo).padStart(2,'0')}`,
+        periodo,
         label:   d.toLocaleString('es-AR', { month:'short', year:'2-digit' }),
         costo_combustible: parseFloat(fuel.rows[0].costo_fuel),
         litros:            parseFloat(fuel.rows[0].litros),
@@ -526,6 +549,17 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         cargas_cisterna:   parseInt(fuel.rows[0].cargas_cisterna),
         cargas_estacion:   parseInt(fuel.rows[0].cargas_estacion),
         km:                parseFloat(km.rows[0].km_total),
+        // Km del GPS: total del mes, y el subconjunto apareado con litros (rendimiento).
+        km_gps:            parseFloat(g.km_gps || 0),
+        km_gps_rend:       parseFloat(g.km_rend || 0),
+        litros_gps_rend:   parseFloat(g.litros_rend || 0),
+        gps_unidades:      parseInt(g.unidades || 0),
+        gps_sin_litros:    parseInt(g.sin_litros || 0),
+        gps_desde:         gpsDesde,
+        gps_hasta:         gpsHasta,
+        // Parcial = la cobertura del GPS no abarca todo el mes (junio arranca el 05,
+        // y el mes en curso todavía no terminó). Se marca para no leerlo como completo.
+        gps_parcial:       !!(gpsDesde && (gpsDesde > desde || gpsHasta < hasta)),
         km_tramos:         parseFloat(tramos.rows[0].km_tramos),
         litros_tramos:     parseFloat(tramos.rows[0].litros_tramos),
         costo_mantenimiento: parseFloat(ots.rows[0].costo_mant),
@@ -535,6 +569,60 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
     }
     res.json({ meses });
   } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
+});
+
+// ── 6a. Km del GPS por unidad y período ──────────────────────────────
+// El respaldo del número del comparativo: qué unidad hizo cuántos km cada mes
+// según el satelital, y cuántos litros cargó en FleetOS ese mismo mes. Una unidad
+// con km y sin litros (hoy Córdoba y Rosario) queda marcada y fuera del km/L.
+auditorRouter.get('/km-gps', authenticate, canAudit, async (req, res) => {
+  try {
+    const chk = await query(`SELECT to_regclass('public.vehicle_gps_km') AS t`);
+    if (!chk.rows[0]?.t) return res.json({ periodos: [], unidades: [], nota: 'Todavía no hay km del GPS cargados' });
+
+    const r = await query(`
+      SELECT g.periodo, COALESCE(v.code, v.plate) AS unidad, v.base,
+             g.km, COALESCE(g.litros,0) AS litros, g.fuente, g.desde, g.hasta, g.notas
+        FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
+       ORDER BY g.periodo, COALESCE(v.code, v.plate)`);
+
+    const periodos = [...new Set(r.rows.map(x => x.periodo))].sort();
+    const por = new Map();
+    const cobertura = {};   // periodo → { desde, hasta, fuente }
+    for (const row of r.rows) {
+      if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.base || null, meses: {} });
+      const km = parseFloat(row.km) || 0, litros = parseFloat(row.litros) || 0;
+      por.get(row.unidad).meses[row.periodo] = {
+        km, litros,
+        km_l: (km > 0 && litros > 0) ? +(km / litros).toFixed(2) : null,
+        sin_cargas: !(litros > 0),
+      };
+      const c = cobertura[row.periodo] || (cobertura[row.periodo] = { desde: null, hasta: null, fuente: row.fuente });
+      const d = row.desde instanceof Date ? row.desde.toISOString().slice(0,10) : row.desde;
+      const h = row.hasta instanceof Date ? row.hasta.toISOString().slice(0,10) : row.hasta;
+      if (d && (!c.desde || d < c.desde)) c.desde = d;
+      if (h && (!c.hasta || h > c.hasta)) c.hasta = h;
+    }
+
+    const totales = {};
+    for (const p of periodos) {
+      const filas = [...por.values()].map(u => u.meses[p]).filter(Boolean);
+      totales[p] = {
+        km:         filas.reduce((a, m) => a + m.km, 0),
+        km_rend:    filas.filter(m => !m.sin_cargas).reduce((a, m) => a + m.km, 0),
+        litros:     filas.reduce((a, m) => a + m.litros, 0),
+        unidades:   filas.length,
+        sin_cargas: filas.filter(m => m.sin_cargas).length,
+      };
+      totales[p].km_l = (totales[p].km_rend > 0 && totales[p].litros > 0)
+        ? +(totales[p].km_rend / totales[p].litros).toFixed(2) : null;
+    }
+
+    res.json({
+      periodos, cobertura, totales,
+      unidades: [...por.values()].sort((a, b) => a.unidad.localeCompare(b.unidad)),
+    });
+  } catch (err) { console.error('[auditor km-gps]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
 // ── 6b. Historial de cargas por unidad (auditoría general) ──────────

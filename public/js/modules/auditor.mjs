@@ -722,9 +722,13 @@ async function loadAuditorTrazabilidad() {
 
 // ── Tab 5: Comparativo mensual ────────────────────────────
 async function renderAuditorComparativo(el) {
-  const res = await apiFetch('/api/auditor/comparativo');
+  const [res, resGps] = await Promise.all([
+    apiFetch('/api/auditor/comparativo'),
+    apiFetch('/api/auditor/km-gps').catch(() => null),
+  ]);
   if (!res.ok) { el.innerHTML = `<div class="card" style="color:var(--danger)">Error</div>`; return; }
   const d = await res.json();
+  const gps = (resGps && resGps.ok) ? await resGps.json().catch(() => null) : null;
 
   const hayDatos = d.meses.some(m => m.total > 0);
 
@@ -740,7 +744,7 @@ async function renderAuditorComparativo(el) {
             <th>Período</th>
             <th style="color:#3b82f6">Combustible</th>
             <th style="color:#3b82f6">Litros</th>
-            <th>Km</th>
+            <th>Km ${gps && gps.periodos?.length ? '<span style="font-weight:400;color:var(--text3)">(GPS)</span>' : ''}</th>
             <th>Rendimiento</th>
             <th style="color:#06b6d4">Urea</th>
             <th style="color:#f59e0b">Mantenimiento</th>
@@ -754,17 +758,41 @@ async function renderAuditorComparativo(el) {
             const varColor = varPct === null ? 'var(--text3)' : parseFloat(varPct) > 10 ? 'var(--danger)' : parseFloat(varPct) > 0 ? 'var(--warn)' : 'var(--ok)';
             const km = m.km || 0, l = m.litros || 0;
             const f1 = (n) => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-            const kmCell = km > 0 ? Math.round(km).toLocaleString('es-AR') + ' km' : '—';
-            // Rendimiento por TRAMOS (asigna cada carga al período en que ese gasoil se
-            // quemó, prorrateando los tramos que cruzan el cambio de mes) = cifra auditable.
-            // El cálculo por calendario queda como secundario: se distorsiona cuando los
-            // camiones tanquean a la vuelta del viaje cruzando el cambio de mes.
+            const f0 = (n) => Math.round(n).toLocaleString('es-AR');
+            // ── Km: manda el GPS ──────────────────────────────────────────────
+            // Mide el mes calendario exacto y no depende de cuándo cargó cada unidad
+            // (el odómetro de las cargas reparte los km del que tanquea a fin de mes
+            // entre dos meses; eso fue lo que hizo ver un faltante que no existía).
+            // El de odómetro queda abajo, como referencia de contraste.
+            const kmG = m.km_gps || 0, kmGr = m.km_gps_rend || 0, lGr = m.litros_gps_rend || 0;
+            const cob = (m.gps_parcial && m.gps_desde && m.gps_hasta)
+              ? ` · parcial ${m.gps_desde.slice(8)}/${m.gps_desde.slice(5,7)}→${m.gps_hasta.slice(8)}/${m.gps_hasta.slice(5,7)}`
+              : '';
+            const kmCell = kmG > 0
+              ? `<span style="font-weight:600" title="Odómetro del GPS: última lectura del mes menos la del mes anterior">${f0(kmG)} km</span>
+                 <div style="font-size:10px;color:${m.gps_parcial ? 'var(--warn)' : 'var(--text3)'}">🛰 GPS · ${m.gps_unidades} unid.${cob}</div>
+                 ${m.gps_sin_litros > 0 ? `<div style="font-size:10px;color:var(--text3)" title="Unidades con km del GPS pero sin combustible registrado en FleetOS: su km no entra al rendimiento">para rendimiento: ${f0(kmGr)} km (${m.gps_sin_litros} unid. sin cargas afuera)</div>` : ''}
+                 <div style="font-size:10px;color:var(--text3)">odómetro cargas: ${km > 0 ? f0(km) : '—'}</div>`
+              : (km > 0 ? `${f0(km)} km<div style="font-size:10px;color:var(--text3)">odómetro cargas</div>` : '—');
+            // ── Rendimiento ───────────────────────────────────────────────────
+            // Con GPS: km exactos del mes ÷ litros de ESAS MISMAS unidades. Sin GPS,
+            // el cálculo por TRAMOS (asigna cada carga al período en que ese gasoil se
+            // quemó, prorrateando los tramos que cruzan el cambio de mes). El de
+            // calendario por odómetro queda último: se distorsiona cuando los camiones
+            // tanquean a la vuelta del viaje cruzando el cambio de mes.
             const kmT = m.km_tramos || 0, lT = m.litros_tramos || 0;
-            const rendCell = (kmT > 0 && lT > 0)
-              ? `<span title="Por tramos: el gasoil se asigna al mes en que se quemó">${f1(kmT / lT)} km/L</span><div style="font-size:10px;color:var(--text3)">${f1(lT / kmT * 100)} L/100km · calendario: ${(km > 0 && l > 0) ? f1(km / l) : '—'}</div>`
-              : (km > 0 && l > 0)
-                ? `${f1(km / l)} km/L<div style="font-size:10px;color:var(--text3)">${f1(l / km * 100)} L/100km</div>`
-                : '—';
+            const refs = [
+              (kmT > 0 && lT > 0) ? `tramos: ${f1(kmT / lT)}` : null,
+              (km > 0 && l > 0)   ? `calendario: ${f1(km / l)}` : null,
+            ].filter(Boolean).join(' · ');
+            const rendCell = (kmGr > 0 && lGr > 0)
+              ? `<span style="font-weight:600" title="Km del GPS de las unidades que registran combustible ÷ los litros que cargaron ese mes">${f1(kmGr / lGr)} km/L</span>
+                 <div style="font-size:10px;color:var(--text3)">🛰 ${f1(lGr / kmGr * 100)} L/100km${refs ? ' · ' + refs : ''}</div>`
+              : (kmT > 0 && lT > 0)
+                ? `<span title="Por tramos: el gasoil se asigna al mes en que se quemó">${f1(kmT / lT)} km/L</span><div style="font-size:10px;color:var(--text3)">${f1(lT / kmT * 100)} L/100km · calendario: ${(km > 0 && l > 0) ? f1(km / l) : '—'}</div>`
+                : (km > 0 && l > 0)
+                  ? `${f1(km / l)} km/L<div style="font-size:10px;color:var(--text3)">${f1(l / km * 100)} L/100km</div>`
+                  : '—';
             const litrosBreak = (l > 0 && ((m.litros_cisterna || 0) > 0 || (m.litros_estacion || 0) > 0))
               ? `<div style="font-size:10px;color:var(--text3)">cist. ${Math.round(m.litros_cisterna || 0).toLocaleString()} · est. ${Math.round(m.litros_estacion || 0).toLocaleString()}</div>`
               : '';
@@ -783,13 +811,130 @@ async function renderAuditorComparativo(el) {
           }).join('')}</tbody>
         </table>
       </div>
-      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2)">
-        <b>Rendimiento por tramos:</b> cada carga se asigna al período en que ese gasoil se quemó (el tramo desde la carga
-        anterior), prorrateando los tramos que cruzan el cambio de mes. Evita que las cargas de la vuelta de viaje a
-        principios de mes "regalen" litros al mes anterior. El valor chico ("calendario") es el cálculo simple por fecha de carga.
-        El mes en curso consolida con las primeras cargas del mes siguiente.
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2);line-height:1.6">
+        <b>🛰 Km del GPS:</b> odómetro satelital del último día del mes menos el del último día del mes anterior. Mide el mes
+        calendario exacto y no depende de cuándo tanqueó cada unidad — es el mismo número que ve el satelital.
+        <b>Km "odómetro cargas"</b> es el cálculo anterior (diferencia entre la primera y la última lectura anotada en las cargas):
+        queda como contraste, y difiere del GPS porque los km del camión que carga a fin de mes se reparten entre dos meses.<br>
+        <b>Rendimiento:</b> km del GPS ÷ litros, tomando <u>sólo las unidades que registran combustible en FleetOS</u>. Las que
+        tienen km del satelital pero todavía no cargan en el sistema quedan afuera del km/L (si entraran, el rendimiento de la
+        flota daría falsamente bueno). <b>"tramos"</b> y <b>"calendario"</b> son los cálculos por odómetro de cargas, de referencia.
       </div>`}
+    </div>
+    ${renderKmGpsPorUnidad(gps)}`;
+}
+
+// ── Respaldo del número: km del GPS unidad por unidad y mes ──────────
+// Es la tabla que se muestra cuando alguien pregunta "¿de dónde sale ese km?".
+// Cada fila es una unidad; cada mes, sus km del satelital y el km/L contra los
+// litros que cargó. La unidad sin cargas registradas se marca y no promedia.
+function renderKmGpsPorUnidad(gps) {
+  if (!gps || !gps.periodos || !gps.periodos.length) return '';
+  const P = gps.periodos, fmt = n => Math.round(n || 0).toLocaleString('es-AR');
+  const f1 = n => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const label = p => {
+    const [y, m] = p.split('-');
+    return new Date(+y, +m - 1, 1).toLocaleString('es-AR', { month: 'short', year: '2-digit' }).toUpperCase();
+  };
+  const cel = m => {
+    if (!m) return `<td class="td-mono" style="text-align:right;color:var(--text3)">—</td>`;
+    return `<td class="td-mono" style="text-align:right">
+      ${fmt(m.km)}<div style="font-size:10px;color:${m.sin_cargas ? 'var(--warn)' : 'var(--text3)'}">${
+        m.sin_cargas ? '⚠ sin cargas' : (m.km_l ? f1(m.km_l) + ' km/L' : '—')}</div></td>`;
+  };
+  const sinCargas = gps.unidades.filter(u => P.some(p => u.meses[p] && u.meses[p].sin_cargas));
+
+  return `
+    <div class="card" style="padding:0">
+      <div style="padding:16px 20px 12px;border-bottom:1px solid var(--border2);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin:0">🛰 Km del GPS por unidad</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">El respaldo del km de arriba, unidad por unidad</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="exportKmGpsPDF()">📄 Descargar PDF</button>
+      </div>
+      <div class="table-wrap" style="max-height:600px;overflow:auto">
+        <table>
+          <thead><tr>
+            <th>Unidad</th><th>Base</th>
+            ${P.map(p => `<th style="text-align:right">${label(p)}${
+              (gps.cobertura?.[p]?.desde && gps.cobertura[p].hasta) ? `<div style="font-size:10px;font-weight:400;color:var(--text3)">${gps.cobertura[p].desde.slice(8)}/${gps.cobertura[p].desde.slice(5,7)}→${gps.cobertura[p].hasta.slice(8)}/${gps.cobertura[p].hasta.slice(5,7)}</div>` : ''
+            }</th>`).join('')}
+          </tr></thead>
+          <tbody>
+            ${gps.unidades.map(u => `<tr>
+              <td class="td-mono" style="font-weight:600">${escapeHtml(u.unidad)}</td>
+              <td style="font-size:12px;color:var(--text3)">${escapeHtml(u.base || '—')}</td>
+              ${P.map(p => cel(u.meses[p])).join('')}
+            </tr>`).join('')}
+          </tbody>
+          <tfoot><tr style="border-top:2px solid var(--border2);font-weight:700">
+            <td colspan="2">TOTAL</td>
+            ${P.map(p => {
+              const t = gps.totales?.[p] || {};
+              return `<td class="td-mono" style="text-align:right">${fmt(t.km)}
+                <div style="font-size:10px;font-weight:400;color:var(--text3)">${
+                  t.sin_cargas ? `rend.: ${fmt(t.km_rend)} km · ` : ''}${t.km_l ? f1(t.km_l) + ' km/L' : '—'}</div></td>`;
+            }).join('')}
+          </tr></tfoot>
+        </table>
+      </div>
+      <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2);line-height:1.6">
+        Cada celda: km del satelital en ese mes y, abajo, el km/L contra los litros que esa unidad cargó en FleetOS.
+        ${sinCargas.length ? `<b style="color:var(--warn)">⚠ ${sinCargas.length} unidad(es) con km del GPS y sin combustible registrado</b>
+          (${sinCargas.map(u => escapeHtml(u.unidad)).join(', ')}): sus km se guardan —sirven para medir utilización— pero
+          quedan afuera del rendimiento hasta que esas bases empiecen a registrar las cargas.` : ''}
+      </div>
     </div>`;
+}
+
+// PDF de respaldo: la misma tabla, para adjuntar al informe mensual.
+async function exportKmGpsPDF() {
+  if (!window.jspdf || !window.jspdf.jsPDF) { window.showToast?.('error', 'jsPDF no cargado. Refrescá la página.'); return; }
+  const res = await apiFetch('/api/auditor/km-gps');
+  if (!res.ok) { window.showToast?.('error', 'No se pudo obtener el detalle'); return; }
+  const g = await res.json();
+  if (!g.periodos?.length) { window.showToast?.('error', 'Todavía no hay km del GPS cargados'); return; }
+  const { jsPDF } = window.jspdf;
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const fmt = n => Math.round(n || 0).toLocaleString('es-AR');
+  const f1 = n => n.toLocaleString('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const lbl = p => { const [y, m] = p.split('-'); return new Date(+y, +m - 1, 1).toLocaleString('es-AR', { month: 'short', year: '2-digit' }).toUpperCase(); };
+
+  doc.setFontSize(15); doc.text('Km recorridos según GPS — por unidad', 40, 40);
+  doc.setFontSize(9); doc.setTextColor(110);
+  doc.text('Odómetro satelital: última lectura del mes menos la del mes anterior. El km/L usa los litros cargados en FleetOS.', 40, 56);
+  doc.text(`Generado ${new Date().toLocaleString('es-AR')}`, 40, 68);
+  doc.setTextColor(0);
+
+  doc.autoTable({
+    startY: 84,
+    head: [['Unidad', 'Base', ...g.periodos.flatMap(p => [`${lbl(p)} km`, `${lbl(p)} km/L`])]],
+    body: [
+      ...g.unidades.map(u => [u.unidad, u.base || '—',
+        ...g.periodos.flatMap(p => {
+          const m = u.meses[p];
+          return m ? [fmt(m.km), m.sin_cargas ? 'sin cargas' : (m.km_l ? f1(m.km_l) : '—')] : ['—', '—'];
+        })]),
+      ['TOTAL', '', ...g.periodos.flatMap(p => {
+        const t = g.totales?.[p] || {};
+        return [fmt(t.km), t.km_l ? f1(t.km_l) : '—'];
+      })],
+    ],
+    styles: { fontSize: 7.5, cellPadding: 3 },
+    headStyles: { fillColor: [30, 41, 59], fontSize: 7.5 },
+    columnStyles: Object.fromEntries(g.periodos.flatMap((_, i) => [[2 + i * 2, { halign: 'right' }], [3 + i * 2, { halign: 'right' }]])),
+    didParseCell: d => { if (d.row.index === g.unidades.length && d.section === 'body') d.cell.styles.fontStyle = 'bold'; },
+  });
+
+  const sin = g.unidades.filter(u => g.periodos.some(p => u.meses[p]?.sin_cargas)).map(u => u.unidad);
+  if (sin.length) {
+    doc.setFontSize(8); doc.setTextColor(150, 90, 0);
+    doc.text(`Unidades con km del GPS y sin combustible registrado en FleetOS (excluidas del km/L): ${sin.join(', ')}`,
+      40, doc.lastAutoTable.finalY + 18, { maxWidth: 760 });
+  }
+  doc.save(`km-gps-por-unidad-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 // ── Tab: Rendimiento por unidad (km/L, L/100km, $/km histórico) ──
@@ -818,7 +963,10 @@ async function renderAuditorEficiencia(el) {
       <div style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
         Rendimiento por unidad calculado con las cargas de combustible. Los km surgen de la diferencia de odómetro
         (primera y última lectura del período, ≥2 cargas). Se excluye la urea. Las autoelevadoras operan por horas,
-        por eso no muestran km/L.
+        por eso no muestran km/L.<br>
+        🛰 <b>Los km medidos por el satelital</b> (mes calendario exacto, unidad por unidad) están en
+        <b>Comparativo mensual → Km del GPS por unidad</b>. Difieren de estos porque acá el corte lo pone la fecha de
+        cada carga, no el fin de mes.
       </div>
     </div>
     <div id="efi-result"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ Cargando…</div></div>`;
@@ -1634,10 +1782,14 @@ ANOMALÍAS DETECTADAS:
 - OTs (${anomOT.total_anomalias||0} anomalías): ${anomOT.anomalias?.map(a=>`${a.titulo}: ${a.descripcion}`).join(' | ')||'Ninguna'}
 
 COMPARATIVO ÚLTIMOS 6 MESES:
-${JSON.stringify(comparativo.meses?.map(m=>({periodo:m.periodo,combustible:Math.round(m.costo_combustible),mantenimiento:Math.round(m.costo_mantenimiento),total:Math.round(m.total)}))||[])}
+${JSON.stringify(comparativo.meses?.map(m=>({periodo:m.periodo,combustible:Math.round(m.costo_combustible),litros:Math.round(m.litros),mantenimiento:Math.round(m.costo_mantenimiento),total:Math.round(m.total),km_gps:Math.round(m.km_gps||0),km_gps_unidades_que_cargan:Math.round(m.km_gps_rend||0),litros_de_esas_unidades:Math.round(m.litros_gps_rend||0),km_odometro_cargas:Math.round(m.km||0),gps_parcial:!!m.gps_parcial}))||[])}
 
 Respondé en español, de forma concisa y profesional.
 Para preguntas sobre km del día, usá los datos de GPS de cada unidad.
+Para km de un MES, usá km_gps (odómetro satelital, mes calendario exacto), no km_odometro_cargas
+(ese depende de cuándo tanqueó cada unidad y por eso difiere del satelital). El rendimiento del mes
+se calcula km_gps_unidades_que_cargan ÷ litros_de_esas_unidades: las unidades con km del GPS pero sin
+cargas registradas en FleetOS quedan afuera del km/L. Si gps_parcial es true, el mes no está cubierto entero.
 Si no hay datos suficientes, indicalo claramente. Si detectás algo preocupante, mencionalo.`;
 
     // Llamar a Claude via proxy del backend (protege la API key)
@@ -1685,6 +1837,7 @@ expose('renderAuditorOTs', renderAuditorOTs);
 expose('renderAuditorTrazabilidad', renderAuditorTrazabilidad);
 expose('loadAuditorTrazabilidad', loadAuditorTrazabilidad);
 expose('renderAuditorComparativo', renderAuditorComparativo);
+expose('exportKmGpsPDF', exportKmGpsPDF);
 expose('renderAuditorEficiencia', renderAuditorEficiencia);
 expose('loadAuditorEficiencia', loadAuditorEficiencia);
 expose('sortAuditorEficiencia', sortAuditorEficiencia);
