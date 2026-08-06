@@ -155,108 +155,161 @@ auditorRouter.get('/resumen', authenticate, canAudit, async (req, res) => {
 });
 
 // ── 2. Anomalías de combustible ──────────────────────────
+// Una anomalía sólo sirve si el que la lee puede decidir qué hacer con ella. Por
+// eso acá cada aviso lleva su criterio escrito, y todo lo que se sabe que NO es
+// un problema queda afuera antes de contarlo:
+//
+//  · La cisterna emite su propio ticket interno: pedirle además una foto marcaba
+//    como "sin respaldo" a casi todas las cargas propias, que son la mayoría.
+//  · La urea no es combustible: medir su km/L da siempre un número absurdo.
+//  · Las autoelevadoras trabajan por horas, no por km: no tienen km/L.
+//  · El rendimiento no se compara contra una tabla fija igual para toda la flota
+//    —un reparto y un tractor de larga distancia no rinden igual— sino contra la
+//    MEDIANA DE LA PROPIA UNIDAD. Se marca lo que se sale de su propia costumbre.
 auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, res) => {
   try {
     const anomalias = [];
+    const num = n => Math.round(n).toLocaleString('es-AR');
 
-    // a) Cargas sin foto de ticket
-    const sinTicket = await query(`
-      SELECT fl.*, v.code as vehicle_code, u.name as driver_name
+    // ── a) Cargas de estación sin foto del ticket ──────────────────────────
+    // Sólo las de estación: la carga de cisterna ya queda respaldada por el
+    // movimiento del tanque, que es su ticket.
+    const sinTicketSQL = `
       FROM fuel_logs fl
       JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id
-      WHERE (fl.ticket_image IS NULL OR fl.ticket_image = '')
-      ORDER BY fl.logged_at DESC LIMIT 50`);
-    
+      WHERE fl.tank_id IS NULL
+        AND (fl.ticket_image IS NULL OR fl.ticket_image = '')`;
+    const [sinTicketTot, sinTicket] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE fl.logged_at > NOW() - INTERVAL '30 days')::int AS n30 ${sinTicketSQL}`),
+      query(`SELECT fl.logged_at, COALESCE(v.code, v.plate) AS unidad,
+                    COALESCE(NULLIF(fl.driver_name,''), u.name) AS chofer,
+                    fl.liters, fl.price_per_l, fl.location
+             ${sinTicketSQL} ORDER BY fl.logged_at DESC LIMIT 50`),
+    ]);
+
     if (sinTicket.rows.length > 0) {
+      const t = sinTicketTot.rows[0];
       anomalias.push({
         tipo: 'sin_ticket',
-        severidad: 'media',
-        titulo: 'Cargas sin foto de ticket',
-        descripcion: `${sinTicket.rows.length} cargas registradas sin foto de ticket como respaldo`,
+        severidad: t.n30 > 0 ? 'media' : 'baja',
+        titulo: 'Cargas en estación sin foto del ticket',
+        descripcion: `${num(t.n)} carga(s) en estación sin foto de respaldo${t.n30 ? ` · ${num(t.n30)} en los últimos 30 días` : ' · ninguna reciente'}`,
+        criterio: 'Sólo cargas de estación de servicio. Las de cisterna quedan respaldadas por el movimiento del tanque y no se piden acá.',
         registros: sinTicket.rows.map(r => ({
-          fecha: r.logged_at,
-          unidad: r.vehicle_code,
-          chofer: r.driver_name,
-          litros: r.liters,
-          precio: r.price_per_l,
-          lugar: r.location,
-        }))
+          fecha: r.logged_at, unidad: r.unidad, chofer: r.chofer,
+          litros: r.liters, precio: r.price_per_l, lugar: r.location,
+        })),
       });
     }
 
-    // b) Consumo anómalo: comparar litros cargados vs km recorridos por GPS
+    // ── b) Rendimiento fuera de la costumbre de la propia unidad ───────────
+    // Cada carga cubre el tramo desde la anterior. Se descartan los tramos que no
+    // se pueden leer (odómetro que retrocede, saltos absurdos) y se compara cada
+    // uno contra la mediana de esa misma unidad. Con menos de 5 tramos sanos no
+    // hay costumbre contra la cual comparar, así que esa unidad no se evalúa.
     const cargas = await query(`
-      SELECT fl.vehicle_id, fl.liters, fl.odometer_km, fl.logged_at, fl.price_per_l,
-             v.code as vehicle_code, v.gps_status,
-             u.name as driver_name
-      FROM fuel_logs fl
-      JOIN vehicles v ON v.id = fl.vehicle_id
-      LEFT JOIN users u ON u.id = fl.driver_id
-      WHERE fl.odometer_km > 0
-      ORDER BY fl.vehicle_id, fl.logged_at ASC`);
+      SELECT fl.vehicle_id, fl.liters, fl.odometer_km, fl.logged_at,
+             COALESCE(v.code, v.plate) AS unidad,
+             COALESCE(NULLIF(fl.driver_name,''), u.name) AS chofer
+        FROM fuel_logs fl
+        JOIN vehicles v ON v.id = fl.vehicle_id
+        LEFT JOIN users u ON u.id = fl.driver_id
+       WHERE fl.odometer_km > 0
+         AND COALESCE(fl.liters,0) > 0
+         AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+         AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'
+       ORDER BY fl.vehicle_id, fl.logged_at ASC, fl.id ASC`);
 
-    // Agrupar por vehículo y calcular rendimiento por intervalo
-    const byVeh = {};
-    cargas.rows.forEach(r => {
-      if (!byVeh[r.vehicle_id]) byVeh[r.vehicle_id] = { code: r.vehicle_code, cargas: [] };
-      byVeh[r.vehicle_id].cargas.push(r);
-    });
+    const porVeh = new Map();
+    for (const r of cargas.rows) {
+      if (!porVeh.has(r.vehicle_id)) porVeh.set(r.vehicle_id, []);
+      porVeh.get(r.vehicle_id).push(r);
+    }
 
     const rendAnomalo = [];
-    Object.values(byVeh).forEach(({ code, cargas }) => {
-      for (let i = 1; i < cargas.length; i++) {
-        const kmDiff   = cargas[i].odometer_km - cargas[i-1].odometer_km;
-        const litros   = parseFloat(cargas[i].liters);
-        const rend     = kmDiff > 0 && litros > 0 ? kmDiff / litros : 0;
-        // Rendimiento anómalo: < 1.5 km/L o > 8 km/L para un camión
-        if (rend > 0 && (rend < 1.5 || rend > 8)) {
-          rendAnomalo.push({
-            unidad: code,
-            fecha: cargas[i].logged_at,
-            chofer: cargas[i].driver_name,
-            km_recorridos: kmDiff,
-            litros_cargados: litros,
-            rendimiento: rend.toFixed(2),
-            anomalia: rend < 1.5 ? 'Consumo excesivo' : 'Consumo irreal (muy bajo)',
-          });
-        }
+    let unidadesEvaluadas = 0, unidadesSinBase = 0;
+    for (const filas of porVeh.values()) {
+      const tramos = [];
+      for (let i = 1; i < filas.length; i++) {
+        const km = filas[i].odometer_km - filas[i - 1].odometer_km;
+        const litros = parseFloat(filas[i].liters);
+        // Tramo sano: avanza, no es un salto imposible y no viene de una carga
+        // de hace meses (ahí el tramo no representa a esa carga).
+        const dias = (new Date(filas[i].logged_at) - new Date(filas[i - 1].logged_at)) / 86400000;
+        if (!(km > 0 && km < 20000 && litros > 0 && dias <= 45)) continue;
+        tramos.push({ fila: filas[i], km, litros, l100: litros / km * 100 });
       }
-    });
+      if (tramos.length < 5) { if (tramos.length) unidadesSinBase++; continue; }
+      unidadesEvaluadas++;
+      const orden = tramos.map(t => t.l100).sort((a, b) => a - b);
+      const med = orden[Math.floor(orden.length / 2)];
+      if (!(med > 0)) continue;
+      for (const t of tramos) {
+        const veces = t.l100 / med;
+        // 1,5× la mediana: consumió mucho más de lo suyo para esos km.
+        // 0,5×: rindió el doble de lo posible — casi siempre el odómetro de la
+        // carga anterior estaba viejo y el tramo quedó inflado.
+        if (veces <= 1.5 && veces >= 0.5) continue;
+        rendAnomalo.push({
+          unidad: t.fila.unidad,
+          fecha: t.fila.logged_at,
+          chofer: t.fila.chofer,
+          km_del_tramo: t.km,
+          litros: parseFloat(t.fila.liters),
+          rinde: +(t.km / t.litros).toFixed(2),
+          lo_normal_suyo: +(100 / med).toFixed(2),
+          desvio: (veces > 1.5 ? '+' : '') + Math.round((veces - 1) * 100) + '%',
+          que_mirar: veces > 1.5 ? 'Consumió de más para esos km' : 'Rinde imposible — revisar el odómetro anotado',
+        });
+      }
+    }
+    rendAnomalo.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
     if (rendAnomalo.length > 0) {
+      const deMas = rendAnomalo.filter(r => r.desvio.startsWith('+')).length;
       anomalias.push({
         tipo: 'rendimiento_anomalo',
-        severidad: 'alta',
-        titulo: 'Rendimiento de combustible anómalo',
-        descripcion: `${rendAnomalo.length} intervalos con consumo fuera del rango normal (1.5 - 8 km/L)`,
+        severidad: deMas > 0 ? 'alta' : 'media',
+        titulo: 'Tramos fuera de la costumbre de la unidad',
+        descripcion: `${num(rendAnomalo.length)} tramo(s) sobre ${num(unidadesEvaluadas)} unidades evaluadas · ${num(deMas)} con consumo de más, ${num(rendAnomalo.length - deMas)} con rendimiento imposible`,
+        criterio: 'Cada tramo se compara con la mediana de esa misma unidad: se marca por encima de 1,5× (consumo de más) o por debajo de 0,5× (rinde imposible, casi siempre odómetro mal anotado). '
+          + 'Se excluye la urea, las autoelevadoras y los tramos ilegibles (odómetro que retrocede, saltos de más de 20.000 km, más de 45 días entre cargas). '
+          + `Una unidad necesita 5 tramos sanos para tener costumbre propia${unidadesSinBase ? `; ${num(unidadesSinBase)} todavía no la tienen y no se evalúan` : ''}.`,
         registros: rendAnomalo,
       });
     }
 
-    // c) Cargas duplicadas (misma unidad, mismo día, litros similares)
+    // ── c) Cargas posiblemente duplicadas ──────────────────────────────────
+    // Duplicado de verdad = la misma carga cargada dos veces: mismo tipo de
+    // combustible, prácticamente los mismos litros (2%) y a menos de dos horas.
+    // El criterio viejo (±50 litros, cualquier tipo) apareaba una carga de gasoil
+    // con una de urea, o dos cargas legítimamente distintas de 100 y 140 litros.
     const duplicadas = await query(`
-      SELECT fl1.vehicle_id, v.code as vehicle_code, 
-             fl1.logged_at as carga1, fl2.logged_at as carga2,
-             fl1.liters as litros1, fl2.liters as litros2,
-             u1.name as chofer1, u2.name as chofer2
-      FROM fuel_logs fl1
-      JOIN fuel_logs fl2 ON fl1.vehicle_id = fl2.vehicle_id 
-        AND fl1.id != fl2.id
-        AND ABS(EXTRACT(EPOCH FROM (fl2.logged_at - fl1.logged_at))) < 3600
-        AND ABS(fl1.liters - fl2.liters) < 50
-      JOIN vehicles v ON v.id = fl1.vehicle_id
-      LEFT JOIN users u1 ON u1.id = fl1.driver_id
-      LEFT JOIN users u2 ON u2.id = fl2.driver_id
-      WHERE fl1.logged_at > fl2.logged_at
-      ORDER BY fl1.logged_at DESC LIMIT 20`);
+      SELECT COALESCE(v.code, v.plate) AS unidad,
+             fl2.logged_at AS primera, fl1.logged_at AS segunda,
+             fl2.liters AS litros_1, fl1.liters AS litros_2,
+             COALESCE(NULLIF(fl1.driver_name,''), u1.name) AS chofer,
+             ROUND(EXTRACT(EPOCH FROM (fl1.logged_at - fl2.logged_at))/60)::int AS minutos_entre
+        FROM fuel_logs fl1
+        JOIN fuel_logs fl2 ON fl2.vehicle_id = fl1.vehicle_id
+                          AND fl2.id <> fl1.id
+                          AND fl2.logged_at < fl1.logged_at
+                          AND fl1.logged_at - fl2.logged_at < INTERVAL '2 hours'
+                          AND COALESCE(LOWER(fl2.fuel_type),'') = COALESCE(LOWER(fl1.fuel_type),'')
+                          AND ABS(fl1.liters - fl2.liters) <= GREATEST(fl1.liters * 0.02, 1)
+        JOIN vehicles v ON v.id = fl1.vehicle_id
+        LEFT JOIN users u1 ON u1.id = fl1.driver_id
+       WHERE COALESCE(fl1.liters,0) > 0
+       ORDER BY fl1.logged_at DESC LIMIT 20`);
 
     if (duplicadas.rows.length > 0) {
       anomalias.push({
         tipo: 'posible_duplicado',
         severidad: 'alta',
-        titulo: 'Posibles cargas duplicadas',
-        descripcion: `${duplicadas.rows.length} pares de cargas muy similares en menos de 1 hora para la misma unidad`,
+        titulo: 'Posibles cargas cargadas dos veces',
+        descripcion: `${num(duplicadas.rows.length)} par(es) de cargas casi idénticas en la misma unidad`,
+        criterio: 'Mismo tipo de combustible, litros que no difieren más del 2% y menos de 2 horas entre una y otra.',
         registros: duplicadas.rows,
       });
     }
