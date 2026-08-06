@@ -106,6 +106,10 @@ const REHACER = process.argv.includes('--rehacer');   // volver a calcular los y
       console.log(`Ya hay ${yaSembradas.size} punto(s) de partida al ${BASELINE}: se respetan (--rehacer los recalcula).\n`);
 
     await client.query('BEGIN');
+    // Si algo quedara trabado, que falle rápido y con mensaje en vez de colgarse.
+    // (consolidarMes va después del COMMIT a propósito: corre por otra conexión del
+    // pool y dentro de la transacción se quedaría esperando a las filas bloqueadas.)
+    await client.query(`SET LOCAL lock_timeout = '15s'`);
     let ok = 0, sinDato = [], intactas = 0;
     for (const r of primeras.rows) {
       const km = KM_AGO[r.patente];

@@ -92,6 +92,8 @@ const PERIODOS = [
     vs.rows.forEach(v => { porPat.set(v.pat, v.id); porPat.set(v.cod, v.id); });
 
     await client.query('BEGIN');
+    // Si algo quedara trabado, que falle rápido y con mensaje en vez de colgarse.
+    await client.query(`SET LOCAL lock_timeout = '15s'`);
     for (const P of PERIODOS) {
       let ok = 0, faltan = [], suma = 0;
       const sinCargas = [];   // km del GPS pero sin combustible registrado en FleetOS
@@ -117,7 +119,6 @@ const PERIODOS = [
                  hasta=EXCLUDED.hasta, notas=EXCLUDED.notas, updated_at=NOW()`,
           [id, P.periodo, km, P.desde, P.hasta, P.nota]);
       }
-      await actualizarLitros(P.periodo);
       const conCargas = suma - sinCargas.reduce((a, [, k]) => a + k, 0);
       const dif = suma - P.esperado;
       console.log(`${P.periodo}: ${ok} unidades · ${num(suma)} km` +
@@ -133,8 +134,18 @@ const PERIODOS = [
       console.log(`   Km para rendimiento (unidades que sí registran combustible): ${num(conCargas)} km`);
     }
 
-    if (APPLY) { await client.query('COMMIT'); console.log('\n✅ Km del GPS cargados.\n'); }
-    else { await client.query('ROLLBACK'); console.log('\n🔎 SIMULACIÓN: no se guardó nada. Si está OK, corré con --apply.\n'); }
+    if (APPLY) {
+      await client.query('COMMIT');
+      // Los litros se completan DESPUÉS del commit, nunca dentro de la transacción:
+      // actualizarLitros() corre por otra conexión del pool y, si las filas que
+      // acabamos de tocar siguen bloqueadas, queda esperando a una transacción que
+      // a su vez espera a que él termine. Se cuelga sin error y sin timeout.
+      for (const P of PERIODOS) await actualizarLitros(P.periodo);
+      console.log('\n✅ Km del GPS cargados.\n');
+    } else {
+      await client.query('ROLLBACK');
+      console.log('\n🔎 SIMULACIÓN: no se guardó nada. Si está OK, corré con --apply.\n');
+    }
 
     console.log('Notas:');
     console.log(' · Junio y julio quedan completos y medidos con la MISMA vara: el informe');
