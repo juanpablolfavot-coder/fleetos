@@ -3,19 +3,50 @@
  * Carga los km del GPS por unidad y por mes para junio y julio 2026.
  * ────────────────────────────────────────────────────────────────────────────
  * De acá en adelante los km del mes salen de la foto diaria del odómetro
- * (services/gps-odometro.js). Para los meses ya pasados no hay fotas diarias,
- * así que se cargan desde el "Informe de actividades" de Powerfleet — el mismo
- * que se venía usando a mano para auditar.
+ * (services/gps-odometro.js). Para los meses ya pasados no hay fotas diarias, así
+ * que se cargan desde un informe de Powerfleet.
  *
- * FUENTE de estos números: informe de actividades Powerfleet del 05/06 al
- * 31/07/2026 (distancia por unidad y por día, agregada por mes). Los totales
- * reconcilian con el propio informe: junio 143.633 km (cobertura 05→30/06) y
- * julio 169.267 km (mes completo).
+ * FUENTE: tres exportaciones de "Información de viajes" de Powerfleet, que juntas
+ * cubren junio y julio completos sin huecos ni superposición:
  *
- * ATENCIÓN — junio queda PARCIAL: el informe disponible arranca el 05/06, así
- * que faltan los días 1 al 4. Se guarda con su cobertura real (campos desde y
- * hasta) para que quede explícito y no se lea como un mes completo. Para
- * cerrarlo basta exportar del GPS el rango 01→04/06 y sumarlo.
+ *     01/06 00:00 → 05/06 23:37   40.360 km   (se usan sólo los días 01 a 04)
+ *     05/06       → 30/06        138.737 km
+ *     01/07       → 31/07        181.411 km
+ *
+ * Las tres reconcilian: en cada una, cada unidad cierra viaje por viaje en
+ * cantidad de viajes y en km contra su propio resumen, y la suma de las unidades
+ * da el "Distancia Total" que el informe declara. El corte entre la primera y la
+ * segunda se hace por fecha de INICIO de cada viaje, así el día 05 se cuenta una
+ * sola vez.
+ *
+ *   junio  173.351 km (27 unidades)
+ *   julio  181.411 km (26 unidades)
+ *
+ * ─── POR QUÉ CAMBIARON LOS NÚMEROS ──────────────────────────────────────────
+ * Antes esto se cargaba del "Informe de actividades" (junio 143.633 parcial 05→30,
+ * julio 169.267). Los dos informes son de Powerfleet pero NO miden igual:
+ *
+ *     junio 05→30    actividades 143.633   viajes 138.737   −4.896  (−3,4%)
+ *     julio          actividades 169.267   viajes 181.411  +12.144  (+7,2%)
+ *
+ * En junio la diferencia es de ±17 km en casi todas las unidades (redondeo diario)
+ * con seis camiones de larga distancia bastante por debajo; en julio, en cambio,
+ * el de actividades queda sistemáticamente por debajo en TODAS. Un informe que
+ * cambia de comportamiento entre dos meses no sirve para comparar meses, que es
+ * justamente para lo que se usa este número.
+ *
+ * Por eso ahora los dos meses salen de la misma fuente, medidos igual. El de
+ * viajes se puede auditar hasta el último renglón (cada viaje con su hora de
+ * inicio, fin y distancia) y cierra solo; el de actividades da un total por día
+ * ya agregado, que no se puede verificar por dentro.
+ *
+ * CONSECUENCIA: julio pasa de 169.267 a 181.411 km y junio de 178.191 a 173.351.
+ * O sea que julio hizo 4,6% MÁS km que junio, no menos. No cambia la conclusión
+ * de fondo —los dos meses tuvieron actividad pareja y no hay faltante de gasoil—
+ * pero sí mejora el rendimiento de julio, que estaba calculado con km de menos.
+ *
+ * De septiembre en adelante nada de esto hace falta: el mes se mide de foto de
+ * odómetro de fin de mes a foto de fin de mes, sin informes de por medio.
  *
  * Uso (Shell de Render):
  *   node scripts/backfill-gps-km.js            → SIMULACIÓN (no toca nada)
@@ -26,24 +57,27 @@ const { ensureTablas, actualizarLitros } = require('../services/gps-odometro');
 const APPLY = process.argv.includes('--apply');
 const num = n => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
-// patente → { '2026-06': km (05→30/06), '2026-07': km (mes completo) }
+// patente → [ km junio (mes completo), km julio (mes completo) ]
+// Junio = días 01→04 del primer informe + el segundo informe entero (05→30).
 const KM = {
-  AA147OT: [  972,  1086], AA508SW: [ 2116,  3305], AB120EF: [   78,     0],
-  AB902MF: [ 2385,  3187], AD225WO: [ 3177,  3790], AD235FE: [ 7402, 11226],
-  AD644VD: [10906, 12555], AE517UM: [ 2722,  2669], AE919NN: [ 1549,  1264],
-  AF041MB: [ 3009,  3260], AF159UC: [ 3701,  4287], AF614LB: [11883,  9491],
-  AF823RB: [ 3124,  2181], AF931PD: [10186, 10340], AG468LK: [ 1326,  1812],
-  AG468LQ: [10342, 11058], AG470AG: [ 4969,  5868], AH035AN: [ 3537,  4268],
-  AH035AO: [ 3552,  4214], AH327AU: [ 4502,  5817], AH327CF: [ 2643,  3388],
-  AH327RZ: [ 9828, 12249], AH327SA: [10586, 12715], AH327SB: [ 6994, 11319],
-  AH327SG: [ 9904, 12487], AH462JI: [12240, 15431],
+  AA147OT: [ 1230,  1203], AA508SW: [ 2829,  3543], AB120EF: [   84,     0],
+  AB902MF: [ 2465,  3426], AD225WO: [ 3881,  4228], AD235FE: [10376, 12294],
+  AD644VD: [12695, 14018], AE517UM: [ 3192,  2869], AE919NN: [ 1821,  1476],
+  AF041MB: [ 3775,  3623], AF159UC: [ 4608,  4541], AF614LB: [13568, 10180],
+  AF823RB: [ 3935,  3350], AF931PD: [12483, 11961], AG468LK: [ 1675,  1951],
+  AG468LQ: [11825, 12010], AG470AG: [ 6168,  6217], AH035AN: [ 4353,  4574],
+  AH035AO: [ 4359,  4439], AH327AU: [ 5596,  6026], AH327CF: [ 3304,  3657],
+  AH327RZ: [12104, 13006], AH327SA: [12850, 13995], AH327SB: [ 9337, 12024],
+  AH327SG: [11711, 13075], AH462JI: [12669, 13087], OBE019:  [  458,   638],
 };
 
+const NOTA = 'GPS Powerfleet, informe "Información de viajes" (viaje por viaje). Mes completo.';
 const PERIODOS = [
-  { periodo: '2026-06', idx: 0, desde: '2026-06-05', hasta: '2026-06-30',
-    nota: 'Informe de actividades GPS Powerfleet. PARCIAL: cobertura 05→30/06 (faltan 01→04/06).', esperado: 143633 },
+  { periodo: '2026-06', idx: 0, desde: '2026-06-01', hasta: '2026-06-30',
+    nota: NOTA + ' Junio arma con dos exportaciones: días 01→04 de la del 01/06 y 05→30 de la del 05/06.',
+    esperado: 173351 },
   { periodo: '2026-07', idx: 1, desde: '2026-07-01', hasta: '2026-07-31',
-    nota: 'Informe de actividades GPS Powerfleet. Mes completo.', esperado: 169267 },
+    nota: NOTA, esperado: 181411 },
 ];
 
 (async () => {
@@ -88,7 +122,7 @@ const PERIODOS = [
       const dif = suma - P.esperado;
       console.log(`${P.periodo}: ${ok} unidades · ${num(suma)} km` +
         `  (informe: ${num(P.esperado)} km${dif === 0 ? ' ✓ reconcilia' : ` ⚠ difiere ${num(dif)}`})`);
-      console.log(`   cobertura ${P.desde} → ${P.hasta}${P.periodo === '2026-06' ? '  ⚠ PARCIAL (faltan 01→04/06)' : ''}`);
+      console.log(`   cobertura ${P.desde} → ${P.hasta}  ✓ mes completo`);
       if (faltan.length) console.log(`   ⚠ sin vehículo en FleetOS: ${faltan.join(', ')}`);
       if (sinCargas.length) {
         console.log(`   ⚠ ${sinCargas.length} unidad(es) con km del GPS pero SIN combustible registrado ese mes:`);
@@ -103,8 +137,12 @@ const PERIODOS = [
     else { await client.query('ROLLBACK'); console.log('\n🔎 SIMULACIÓN: no se guardó nada. Si está OK, corré con --apply.\n'); }
 
     console.log('Notas:');
-    console.log(' · Agosto en adelante se completa solo con la foto diaria del odómetro.');
-    console.log(' · Para cerrar junio: exportar del GPS el rango 01→04/06 y sumar esos km.\n');
+    console.log(' · Junio y julio quedan completos y medidos con la MISMA vara: el informe');
+    console.log('   "Información de viajes" de Powerfleet, que se audita viaje por viaje.');
+    console.log(' · Reemplaza los números del "Informe de actividades" que se habían cargado antes');
+    console.log('   (junio 143.633 parcial, julio 169.267). Ese informe medía distinto en cada mes,');
+    console.log('   así que no servía para comparar un mes contra otro.');
+    console.log(' · Agosto en adelante se completa solo con la foto diaria del odómetro.\n');
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('ERROR:', e.message);

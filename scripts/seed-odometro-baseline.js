@@ -26,8 +26,9 @@
  * exacto (re-exportar el informe hasta la fecha de la foto y reemplazar KM_AGO).
  *
  * Uso (Shell de Render, DESPUÉS de que se haya tomado la primera foto):
- *   node scripts/seed-odometro-baseline.js            → SIMULACIÓN
- *   node scripts/seed-odometro-baseline.js --apply    → EJECUTA
+ *   node scripts/seed-odometro-baseline.js                      → SIMULACIÓN
+ *   node scripts/seed-odometro-baseline.js --apply              → EJECUTA (solo lo que falta)
+ *   node scripts/seed-odometro-baseline.js --apply --rehacer    → recalcula también los ya sembrados
  */
 const { pool } = require('../db/pool');
 const { ensureTablas, consolidarMes } = require('../services/gps-odometro');
@@ -35,18 +36,32 @@ const APPLY = process.argv.includes('--apply');
 const num = n => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
 // Km por unidad según "Información de viajes" de Powerfleet.
-// Cobertura del informe usado: 01/08/2026 00:00 → 05/08/2026 22:00 (total 20.785 km,
-// del cual 20.766 corresponde a estas 23 unidades; el resto son unidades sin patente
-// en el informe). Arranca en el inicio del mes, que es lo que hace falta.
-const COBERTURA = { desde: '2026-08-01 00:00', hasta: '2026-08-05 22:00' };
+// Cobertura del informe usado: 01/08/2026 00:00 → 05/08/2026 23:33 (total 21.721 km,
+// que reconcilia exacto con el "Distancia Total" del propio informe sobre estas 26
+// unidades). Arranca en el inicio del mes, que es lo que hace falta.
+//
+// SEGUNDA EXPORTACIÓN: la primera corrida usó un informe generado más temprano el
+// mismo día, con 23 unidades y 20.785 km. Este trae tres unidades que allá no
+// figuraban (AD225WO, AB902MF y OBE019) y km algo mayores en varias — el propio
+// informe avisa que los datos son "los recibidos y procesados a la fecha y hora
+// indicadas", o sea que llegan mensajes con retraso.
+//
+// Por eso el script NO pisa un punto de partida ya sembrado (ver --rehacer): la foto
+// del odómetro se tomó en un momento del 05/08 que no conocemos, así que no sabemos
+// si esos km de más ya estaban dentro de la foto o no. Para las que ya tienen punto
+// de partida el cambio sería una apuesta; para las tres que no lo tienen es
+// claramente mejor tenerlo, porque hoy pierden los primeros cinco días de agosto.
+const COBERTURA = { desde: '2026-08-01 00:00', hasta: '2026-08-05 23:33' };
 const KM_AGO = {
-  AA147OT:  110, AA508SW:  337, AD235FE: 1444, AD644VD: 1684, AE517UM:  426,
-  AE919NN:  243, AF041MB:  520, AF159UC:  469, AF614LB:  618, AF823RB:  182,
-  AF931PD: 1329, AG468LK:  183, AG468LQ: 1917, AG470AG:  753, AH035AN:  429,
-  AH035AO:  528, AH327AU:  742, AH327CF:  362, AH327RZ: 2289, AH327SA: 1411,
-  AH327SB: 2026, AH327SG:  480, AH462JI: 2284,
+  AA147OT:  117, AA508SW:  337, AB902MF:   72, AD225WO:  466, AD235FE: 1445,
+  AD644VD: 1697, AE517UM:  426, AE919NN:  243, AF041MB:  520, AF159UC:  471,
+  AF614LB:  880, AF823RB:  192, AF931PD: 1329, AG468LK:  188, AG468LQ: 1944,
+  AG470AG:  759, AH035AN:  461, AH035AO:  546, AH327AU:  742, AH327CF:  363,
+  AH327RZ: 2289, AH327SA: 1411, AH327SB: 2026, AH327SG:  494, AH462JI: 2284,
+  OBE019:    19,
 };
 const BASELINE = '2026-07-31';   // fecha con la que se guarda la foto calculada
+const REHACER = process.argv.includes('--rehacer');   // volver a calcular los ya sembrados
 
 (async () => {
   const client = await pool.connect();
@@ -84,11 +99,18 @@ const BASELINE = '2026-07-31';   // fecha con la que se guarda la foto calculada
     }
     console.log('');
 
+    // Puntos de partida ya sembrados: no se tocan salvo --rehacer.
+    const yaSembradas = new Set((await client.query(
+      `SELECT vehicle_id FROM vehicle_gps_odometro WHERE fecha = $1::date`, [BASELINE])).rows.map(x => x.vehicle_id));
+    if (yaSembradas.size && !REHACER)
+      console.log(`Ya hay ${yaSembradas.size} punto(s) de partida al ${BASELINE}: se respetan (--rehacer los recalcula).\n`);
+
     await client.query('BEGIN');
-    let ok = 0, sinDato = [];
+    let ok = 0, sinDato = [], intactas = 0;
     for (const r of primeras.rows) {
       const km = KM_AGO[r.patente];
       if (km === undefined) { sinDato.push(r.patente); continue; }
+      if (yaSembradas.has(r.vehicle_id) && !REHACER) { intactas++; continue; }
       const odoInicial = parseFloat(r.odometro_km) - km;
       if (!(odoInicial > 0)) { console.log(`   ⚠ ${r.patente}: el cálculo da ${num(odoInicial)} — se saltea`); continue; }
       console.log(`   ${r.patente.padEnd(9)} foto ${num(r.odometro_km).padStart(9)} − ${num(km).padStart(5)} km = ${num(odoInicial).padStart(9)} al ${BASELINE}`);
@@ -99,8 +121,10 @@ const BASELINE = '2026-07-31';   // fecha con la que se guarda la foto calculada
         [r.vehicle_id, BASELINE, odoInicial]);
       ok++;
     }
+    if (intactas) console.log(`\n   ${intactas} unidad(es) ya tenían punto de partida: se dejan como están.`);
     if (sinDato.length) console.log(`\n   Sin km en el informe (no se siembran): ${sinDato.join(', ')}`);
     console.log(`\n   ${ok} punto(s) de partida ${APPLY ? 'guardados' : 'a guardar'} con fecha ${BASELINE}.`);
+    if (!ok && !REHACER) console.log(`   (nada nuevo que sembrar — todo lo del informe ya estaba)`);
 
     if (APPLY) {
       await client.query('COMMIT');
