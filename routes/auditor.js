@@ -171,31 +171,43 @@ auditorRouter.get('/anomalias-combustible', authenticate, canAudit, async (req, 
     const anomalias = [];
     const num = n => Math.round(n).toLocaleString('es-AR');
 
-    // ── a) Cargas de estación sin foto del ticket ──────────────────────────
-    // Sólo las de estación: la carga de cisterna ya queda respaldada por el
-    // movimiento del tanque, que es su ticket.
+    // ── a) Cargas de estación sin ningún respaldo ──────────────────────────
+    // Tres formas válidas de respaldar una carga, y las tres cuentan:
+    //  · cisterna (tank_id): el movimiento del tanque es su ticket interno;
+    //  · foto del ticket subida desde la app;
+    //  · ticket EN PAPEL, cuando la carga se tipeó después desde el comprobante
+    //    físico (ticket_estado='papel', con el número del ticket en las notas).
+    // Marcar estas últimas como "sin respaldo" era el error: el ticket existe,
+    // está en la carpeta, y lo que falta es sólo la foto — que para una carga
+    // tipeada a mano desde el papel no tiene sentido pedir.
     const sinTicketSQL = `
       FROM fuel_logs fl
       JOIN vehicles v ON v.id = fl.vehicle_id
       LEFT JOIN users u ON u.id = fl.driver_id
       WHERE fl.tank_id IS NULL
-        AND (fl.ticket_image IS NULL OR fl.ticket_image = '')`;
-    const [sinTicketTot, sinTicket] = await Promise.all([
+        AND (fl.ticket_image IS NULL OR fl.ticket_image = '')
+        AND COALESCE(fl.ticket_estado,'') <> 'papel'
+        AND COALESCE(fl.notes,'') NOT ILIKE 'ticket %'`;
+    const [sinTicketTot, sinTicket, enPapel] = await Promise.all([
       query(`SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE fl.logged_at > NOW() - INTERVAL '30 days')::int AS n30 ${sinTicketSQL}`),
       query(`SELECT fl.logged_at, COALESCE(v.code, v.plate) AS unidad,
                     COALESCE(NULLIF(fl.driver_name,''), u.name) AS chofer,
                     fl.liters, fl.price_per_l, fl.location
              ${sinTicketSQL} ORDER BY fl.logged_at DESC LIMIT 50`),
+      query(`SELECT COUNT(*)::int AS n FROM fuel_logs
+              WHERE tank_id IS NULL AND (ticket_image IS NULL OR ticket_image = '')
+                AND (COALESCE(ticket_estado,'') = 'papel' OR COALESCE(notes,'') ILIKE 'ticket %')`),
     ]);
 
     if (sinTicket.rows.length > 0) {
-      const t = sinTicketTot.rows[0];
+      const t = sinTicketTot.rows[0], papel = enPapel.rows[0].n;
       anomalias.push({
         tipo: 'sin_ticket',
         severidad: t.n30 > 0 ? 'media' : 'baja',
-        titulo: 'Cargas en estación sin foto del ticket',
-        descripcion: `${num(t.n)} carga(s) en estación sin foto de respaldo${t.n30 ? ` · ${num(t.n30)} en los últimos 30 días` : ' · ninguna reciente'}`,
-        criterio: 'Sólo cargas de estación de servicio. Las de cisterna quedan respaldadas por el movimiento del tanque y no se piden acá.',
+        titulo: 'Cargas en estación sin ningún respaldo',
+        descripcion: `${num(t.n)} carga(s) en estación sin foto ni ticket de papel${t.n30 ? ` · ${num(t.n30)} en los últimos 30 días` : ' · ninguna reciente'}`,
+        criterio: 'Sólo cargas de estación de servicio. No se cuentan las de cisterna (el movimiento del tanque es su ticket) '
+          + `ni las tipeadas desde el ticket físico, que llevan su número anotado${papel ? ` (${num(papel)} cargas)` : ''}.`,
         registros: sinTicket.rows.map(r => ({
           fecha: r.logged_at, unidad: r.unidad, chofer: r.chofer,
           litros: r.liters, precio: r.price_per_l, lugar: r.location,
@@ -735,7 +747,7 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
     const base = `
       SELECT COALESCE(v.code, v.plate) AS unidad, v.type AS vtype, v.base AS vbase, fl.id, fl.logged_at,
              fl.liters, fl.price_per_l, fl.odometer_km, fl.location, fl.tank_id,
-             (fl.ticket_image IS NOT NULL) AS tiene_foto, fl.ticket_estado,
+             (fl.ticket_image IS NOT NULL) AS tiene_foto, fl.ticket_estado, fl.notes,
              COALESCE(NULLIF(fl.driver_name,''), NULLIF(v.driver_name,'')) AS chofer,
              u2.name AS cargado_por
       FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id
@@ -753,7 +765,9 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
         u.cargas++; u.litros += litros; u.hasta = row.logged_at;
         u.costo += litros * (parseFloat(row.price_per_l) || 0);
         // Respaldo documental: carga de cisterna (ticket interno) o foto de ticket.
-        if (row.tank_id || row.tiene_foto) u.respaldo++;
+        // Respaldo válido: cisterna (ticket interno), foto del ticket, o ticket en
+        // papel cuando la carga se tipeó desde el comprobante físico.
+        if (row.tank_id || row.tiene_foto || row.ticket_estado === 'papel' || /^ticket /i.test(row.notes || '')) u.respaldo++;
         const odo = parseInt(row.odometer_km, 10) || 0;
         if (odo > 0) {
           if (u._odoPrev != null) {
@@ -811,7 +825,10 @@ auditorRouter.get('/historial-cargas', authenticate, canAudit, async (req, res) 
       const litros = parseFloat(row.liters) || 0;
       const precio = parseFloat(row.price_per_l) || null;
       // Respaldo documental: cisterna genera ticket interno; estación necesita foto.
-      const respaldo = row.tank_id ? 'interno' : (row.tiene_foto ? (row.ticket_estado || 'foto') : 'sin ticket');
+      const respaldo = row.tank_id ? 'interno'
+        : row.tiene_foto ? (row.ticket_estado || 'foto')
+        : (row.ticket_estado === 'papel' || /^ticket /i.test(row.notes || '')) ? 'papel'
+        : 'sin ticket';
       return {
         id: row.id, fecha: row.logged_at, litros, precio,
         costo: precio ? Math.round(litros * precio * 100) / 100 : null,

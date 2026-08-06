@@ -84,11 +84,14 @@ async function main() {
       console.log(`✔️  ${c.code}  ${c.fecha}  ${c.litros}L × $${ppu}/L = $${totalCalc.toLocaleString('es-AR')}  ·  ${c.km} km  ·  ${c.estacion}`);
       if (DRY_RUN) { ok++; continue; }
 
+      // ticket_estado='papel': no hay foto porque la carga se tipeó desde el ticket
+      // físico, cuyo número queda en notes. El respaldo existe, sólo que en papel.
+      // Sin esta marca, el panel del auditor las cuenta como cargas sin respaldo.
       await pool.query(
         `INSERT INTO fuel_logs
            (vehicle_id, driver_id, driver_name, tank_id, fuel_type, liters, price_per_l,
             odometer_km, location, notes, ticket_image, ticket_estado, logged_at)
-         VALUES ($1,$2,$3,NULL,'diesel',$4,$5,$6,$7,$8,NULL,NULL,$9::timestamptz)`,
+         VALUES ($1,$2,$3,NULL,'diesel',$4,$5,$6,$7,$8,NULL,'papel',$9::timestamptz)`,
         [vehId, registraId, v.rows[0].driver_name || null, c.litros, ppu, c.km, c.estacion,
          `Ticket ${c.ticket} · carga manual (script)${c.nota ? ' · ' + c.nota : ''}`, c.fecha]
       );

@@ -90,7 +90,7 @@ const CARGAS = [
       await client.query(
         `INSERT INTO fuel_logs (vehicle_id, driver_id, driver_name, tank_id, fuel_type, liters, price_per_l,
                                 odometer_km, location, notes, ticket_image, ticket_estado, logged_at)
-         VALUES ($1,$2,$3,$4,'diesel',$5,$6,$7,$8,$9,NULL,NULL,$10::timestamptz)`,
+         VALUES ($1,$2,$3,$4,'diesel',$5,$6,$7,$8,$9,NULL,'papel',$10::timestamptz)`,
         [v.rows[0].id, registraId, v.rows[0].driver_name || null, tank.id, litros, PPU, km, tank.location,
          'Planilla cisterna 01-04/06 · carga histórica sin tipear (script, precio del lote 05-06/06, sin descuento de stock)', fecha]);
     }
