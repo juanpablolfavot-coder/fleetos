@@ -51,7 +51,8 @@ const CONDICION = `
 
     console.log(`${r.rows.length} carga(s) tipeadas desde el ticket físico:\n`);
     for (const c of r.rows) {
-      const ticket = (c.notes.match(/^ticket\s+(\S+)/i) || [, '?'])[1];
+      const m = c.notes.match(/^ticket\s+(\S+)/i);
+      const ticket = m ? m[1] : '?';
       console.log(`   ${String(c.logged_at.toISOString().slice(0, 10))}  ${String(c.unidad).padEnd(9)} ` +
         `${String(Number(c.liters).toFixed(2)).padStart(8)} L  ticket ${String(ticket).padEnd(10)} ${c.location || ''}`);
     }
