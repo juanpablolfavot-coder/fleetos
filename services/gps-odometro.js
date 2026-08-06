@@ -112,7 +112,13 @@ async function capturarOdometros() {
 
 // ── Consolidar el km de un mes a partir de las fotas diarias ──
 // km del mes = última lectura del mes − última lectura del mes anterior.
-// Solo escribe si hay lectura de ambos meses (si no, no se puede medir).
+//
+// PRIMER MES: al arrancar el servicio no existe lectura del mes anterior (las
+// fotas empiezan hoy), así que ese mes quedaría sin dato para siempre. Para que
+// no se pierda, cuando falta la lectura previa se mide desde la PRIMERA lectura
+// del propio mes y la fila queda marcada como parcial en `desde` y en `notas`
+// —igual que junio, que también es parcial y se ve como tal—. Requiere al menos
+// dos fotas distintas: con una sola no hay distancia que medir.
 async function consolidarMes(periodo) {
   await ensureTablas();
   const r = await query(`
@@ -121,14 +127,27 @@ async function consolidarMes(periodo) {
              vehicle_id, TO_CHAR(fecha,'YYYY-MM') AS periodo, fecha, odometro_km
         FROM vehicle_gps_odometro
        ORDER BY vehicle_id, TO_CHAR(fecha,'YYYY-MM'), fecha DESC
+    ), pri AS (     -- primera lectura de cada unidad en cada mes (respaldo)
+      SELECT DISTINCT ON (vehicle_id, TO_CHAR(fecha,'YYYY-MM'))
+             vehicle_id, TO_CHAR(fecha,'YYYY-MM') AS periodo, fecha, odometro_km
+        FROM vehicle_gps_odometro
+       ORDER BY vehicle_id, TO_CHAR(fecha,'YYYY-MM'), fecha ASC
     )
     INSERT INTO vehicle_gps_km (vehicle_id, periodo, km, fuente, desde, hasta, notas, updated_at)
-    SELECT a.vehicle_id, a.periodo, a.odometro_km - p.odometro_km, 'odometro', p.fecha, a.fecha,
-           'Odómetro GPS: diferencia entre la última lectura del mes y la del mes anterior', NOW()
+    SELECT a.vehicle_id, a.periodo,
+           a.odometro_km - COALESCE(p.odometro_km, f.odometro_km), 'odometro',
+           COALESCE(p.fecha, f.fecha), a.fecha,
+           CASE WHEN p.vehicle_id IS NOT NULL
+                THEN 'Odómetro GPS: última lectura del mes menos la del mes anterior'
+                ELSE 'Odómetro GPS PARCIAL: primer mes con capturas, sin lectura del mes anterior; se mide desde la primera foto del mes'
+           END, NOW()
       FROM ult a
-      JOIN ult p ON p.vehicle_id = a.vehicle_id
-                AND p.periodo = TO_CHAR((a.periodo || '-01')::date - INTERVAL '1 month', 'YYYY-MM')
-     WHERE a.periodo = $1 AND a.odometro_km >= p.odometro_km
+      LEFT JOIN ult p ON p.vehicle_id = a.vehicle_id
+                     AND p.periodo = TO_CHAR((a.periodo || '-01')::date - INTERVAL '1 month', 'YYYY-MM')
+      LEFT JOIN pri f ON f.vehicle_id = a.vehicle_id AND f.periodo = a.periodo
+     WHERE a.periodo = $1
+       AND (p.vehicle_id IS NOT NULL OR f.fecha < a.fecha)   -- con una sola foto no hay distancia
+       AND a.odometro_km >= COALESCE(p.odometro_km, f.odometro_km)
     ON CONFLICT (vehicle_id, periodo) DO UPDATE
       SET km = EXCLUDED.km, fuente = EXCLUDED.fuente, desde = EXCLUDED.desde,
           hasta = EXCLUDED.hasta, notas = EXCLUDED.notas, updated_at = NOW()
