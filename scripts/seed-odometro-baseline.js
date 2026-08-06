@@ -18,13 +18,12 @@
  * Con esa fila sembrada, agosto se consolida completo igual que cualquier otro
  * mes, sin ningún caso especial.
  *
- * PRECISIÓN — IMPORTANTE
- * El informe cargado abajo cubre 01/08 21:56 → 05/08 21:56. Si la primera foto
- * se toma después, faltan esas horas y el punto de partida queda un poco alto,
- * o sea agosto quedaría corto por lo que se haya recorrido en el hueco.
- * Para que sea EXACTO: exportar de nuevo "Información de viajes" con el rango
- * 01/08 00:00 → (fecha y hora de la primera foto) y reemplazar la tabla KM_AGO
- * con esos valores. El script avisa del hueco al correrse.
+ * PRECISIÓN
+ * El informe cargado abajo cubre 01/08 00:00 → 05/08 22:00, o sea desde el inicio
+ * del mes. Lo único que puede faltar es lo recorrido entre esa hora y la primera
+ * foto: si se corre el mismo día, son unas pocas horas. El script compara ambas
+ * fechas y avisa si el hueco es de un día o más, con la instrucción para dejarlo
+ * exacto (re-exportar el informe hasta la fecha de la foto y reemplazar KM_AGO).
  *
  * Uso (Shell de Render, DESPUÉS de que se haya tomado la primera foto):
  *   node scripts/seed-odometro-baseline.js            → SIMULACIÓN
@@ -36,14 +35,16 @@ const APPLY = process.argv.includes('--apply');
 const num = n => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
 // Km por unidad según "Información de viajes" de Powerfleet.
-// Cobertura del informe usado: 01/08/2026 21:56 → 05/08/2026 21:56 (total 20.032 km).
-const COBERTURA = { desde: '2026-08-01 21:56', hasta: '2026-08-05 21:56' };
+// Cobertura del informe usado: 01/08/2026 00:00 → 05/08/2026 22:00 (total 20.785 km,
+// del cual 20.766 corresponde a estas 23 unidades; el resto son unidades sin patente
+// en el informe). Arranca en el inicio del mes, que es lo que hace falta.
+const COBERTURA = { desde: '2026-08-01 00:00', hasta: '2026-08-05 22:00' };
 const KM_AGO = {
-  AA147OT:  110, AA508SW:  337, AD235FE: 1138, AD644VD: 1436, AE517UM:  426,
-  AE919NN:  224, AF041MB:  520, AF159UC:  468, AF614LB:  617, AF823RB:  182,
-  AF931PD: 1329, AG468LK:  183, AG468LQ: 1917, AG470AG:  753, AH035AN:  428,
-  AH035AO:  527, AH327AU:  741, AH327CF:  361, AH327RZ: 2289, AH327SA: 1409,
-  AH327SB: 2026, AH327SG:  327, AH462JI: 2284,
+  AA147OT:  110, AA508SW:  337, AD235FE: 1444, AD644VD: 1684, AE517UM:  426,
+  AE919NN:  243, AF041MB:  520, AF159UC:  469, AF614LB:  618, AF823RB:  182,
+  AF931PD: 1329, AG468LK:  183, AG468LQ: 1917, AG470AG:  753, AH035AN:  429,
+  AH035AO:  528, AH327AU:  742, AH327CF:  362, AH327RZ: 2289, AH327SA: 1411,
+  AH327SB: 2026, AH327SG:  480, AH462JI: 2284,
 };
 const BASELINE = '2026-07-31';   // fecha con la que se guarda la foto calculada
 
@@ -72,11 +73,14 @@ const BASELINE = '2026-07-31';   // fecha con la que se guarda la foto calculada
     const fechaFoto = primeras.rows[0].fecha.toISOString ? primeras.rows[0].fecha.toISOString().slice(0, 10) : String(primeras.rows[0].fecha).slice(0, 10);
     console.log(`Primera foto guardada: ${fechaFoto} · ${primeras.rows.length} unidades`);
     console.log(`Informe de viajes usado: ${COBERTURA.desde} → ${COBERTURA.hasta}`);
-    if (fechaFoto > COBERTURA.hasta.slice(0, 10)) {
-      console.log(`\n⚠ HUECO: la foto es del ${fechaFoto} y el informe llega al ${COBERTURA.hasta.slice(0,10)}.`);
-      console.log(`  Los km de ese hueco no están contemplados y agosto quedará corto por esa diferencia.`);
-      console.log(`  Para que sea exacto: exportar "Información de viajes" 01/08 00:00 → ${fechaFoto}`);
+    const diasHueco = Math.round((new Date(fechaFoto) - new Date(COBERTURA.hasta.slice(0, 10))) / 86400000);
+    if (diasHueco >= 1) {
+      console.log(`\n⚠ HUECO de ${diasHueco} día(s): la foto es del ${fechaFoto} y el informe llega al ${COBERTURA.hasta}.`);
+      console.log(`  Lo recorrido en ese hueco no está contemplado: agosto quedará corto por esa diferencia.`);
+      console.log(`  Para dejarlo exacto: exportar "Información de viajes" 01/08 00:00 → ${fechaFoto}`);
       console.log(`  y reemplazar la tabla KM_AGO de este script con esos valores.`);
+    } else {
+      console.log(`Hueco: ninguno significativo (la foto es del mismo día que el cierre del informe) ✓`);
     }
     console.log('');
 
