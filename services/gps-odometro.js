@@ -48,6 +48,12 @@ async function ensureTablas() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (vehicle_id, periodo)
     )`);
+  // Litros cargados por esa unidad en ese mes. Va en la misma fila a propósito:
+  // una unidad con km del GPS pero SIN cargas registradas (hoy Córdoba y Rosario,
+  // que todavía no cargan en FleetOS) tiene que quedar afuera del rendimiento, o
+  // el km/L de la flota da falsamente bueno. Guardamos su km igual —sirve para
+  // utilización y para cuando esas bases empiecen a registrar— pero marcado.
+  await query(`ALTER TABLE vehicle_gps_km ADD COLUMN IF NOT EXISTS litros NUMERIC(12,2)`).catch(()=>{});
   await query(`CREATE INDEX IF NOT EXISTS idx_gps_odo_fecha ON vehicle_gps_odometro(fecha DESC)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_gps_km_periodo ON vehicle_gps_km(periodo)`);
 }
@@ -128,7 +134,23 @@ async function consolidarMes(periodo) {
           hasta = EXCLUDED.hasta, notas = EXCLUDED.notas, updated_at = NOW()
      WHERE vehicle_gps_km.fuente <> 'informe'   -- un dato cargado del informe no se pisa
     RETURNING vehicle_id`, [periodo]);
+  await actualizarLitros(periodo);
   return { periodo, unidades: r.rowCount };
+}
+
+// ── Litros cargados por unidad en el período ───────────────
+// Sirve para separar las unidades que SÍ registran combustible (las únicas que
+// pueden entrar al rendimiento) de las que hoy no lo registran.
+async function actualizarLitros(periodo) {
+  await query(`
+    UPDATE vehicle_gps_km g
+       SET litros = COALESCE((
+             SELECT SUM(fl.liters) FROM fuel_logs fl
+              WHERE fl.vehicle_id = g.vehicle_id
+                AND COALESCE(LOWER(fl.fuel_type),'') <> 'urea'
+                AND TO_CHAR(fl.logged_at AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM') = g.periodo
+           ),0)
+     WHERE g.periodo = $1`, [periodo]);
 }
 
 // ── Programación: una captura por día ──────────────────────
@@ -160,5 +182,5 @@ function programarCaptura() {
   console.log('[GPS-ODO] Captura diaria de odómetro programada');
 }
 
-module.exports = { capturarOdometros, consolidarMes, programarCaptura, ensureTablas,
+module.exports = { capturarOdometros, consolidarMes, actualizarLitros, programarCaptura, ensureTablas,
   estado: () => ({ ultimaCaptura: _ultimaCaptura }) };

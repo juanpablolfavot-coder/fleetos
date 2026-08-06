@@ -22,7 +22,7 @@
  *   node scripts/backfill-gps-km.js --apply    → EJECUTA
  */
 const { pool } = require('../db/pool');
-const { ensureTablas } = require('../services/gps-odometro');
+const { ensureTablas, actualizarLitros } = require('../services/gps-odometro');
 const APPLY = process.argv.includes('--apply');
 const num = n => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
@@ -60,12 +60,21 @@ const PERIODOS = [
     await client.query('BEGIN');
     for (const P of PERIODOS) {
       let ok = 0, faltan = [], suma = 0;
+      const sinCargas = [];   // km del GPS pero sin combustible registrado en FleetOS
       for (const [pat, kms] of Object.entries(KM)) {
         const km = kms[P.idx];
         const id = porPat.get(pat);
         if (!id) { faltan.push(pat); continue; }
         if (!(km > 0)) continue;                       // sin actividad ese mes: no se guarda
         suma += km; ok++;
+        // ¿Esta unidad registró combustible ese mes? Si no (hoy Córdoba y Rosario),
+        // su km NO puede entrar al rendimiento: daría km sin litros.
+        const lt = await client.query(
+          `SELECT COALESCE(SUM(liters),0) l FROM fuel_logs
+            WHERE vehicle_id=$1 AND COALESCE(LOWER(fuel_type),'') <> 'urea'
+              AND TO_CHAR(logged_at AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYY-MM')=$2`,
+          [id, P.periodo]);
+        if (!(parseFloat(lt.rows[0].l) > 0)) sinCargas.push([pat, km]);
         await client.query(
           `INSERT INTO vehicle_gps_km (vehicle_id, periodo, km, fuente, desde, hasta, notas, updated_at)
            VALUES ($1,$2,$3,'informe',$4::date,$5::date,$6,NOW())
@@ -74,11 +83,20 @@ const PERIODOS = [
                  hasta=EXCLUDED.hasta, notas=EXCLUDED.notas, updated_at=NOW()`,
           [id, P.periodo, km, P.desde, P.hasta, P.nota]);
       }
+      await actualizarLitros(P.periodo);
+      const conCargas = suma - sinCargas.reduce((a, [, k]) => a + k, 0);
       const dif = suma - P.esperado;
       console.log(`${P.periodo}: ${ok} unidades · ${num(suma)} km` +
         `  (informe: ${num(P.esperado)} km${dif === 0 ? ' ✓ reconcilia' : ` ⚠ difiere ${num(dif)}`})`);
       console.log(`   cobertura ${P.desde} → ${P.hasta}${P.periodo === '2026-06' ? '  ⚠ PARCIAL (faltan 01→04/06)' : ''}`);
       if (faltan.length) console.log(`   ⚠ sin vehículo en FleetOS: ${faltan.join(', ')}`);
+      if (sinCargas.length) {
+        console.log(`   ⚠ ${sinCargas.length} unidad(es) con km del GPS pero SIN combustible registrado ese mes:`);
+        sinCargas.forEach(([p, k]) => console.log(`        ${p.padEnd(9)} ${num(k).padStart(7)} km`));
+        console.log(`     → su km se guarda igual (sirve para utilización), pero NO debe entrar al`);
+        console.log(`       rendimiento: sin litros, el km/L de la flota daría falsamente bueno.`);
+      }
+      console.log(`   Km para rendimiento (unidades que sí registran combustible): ${num(conCargas)} km`);
     }
 
     if (APPLY) { await client.query('COMMIT'); console.log('\n✅ Km del GPS cargados.\n'); }
