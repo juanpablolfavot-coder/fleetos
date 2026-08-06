@@ -286,6 +286,10 @@ httpServer = app.listen(PORT, () => {
   // Iniciar sync GPS con Powerfleet. Intervalo por defecto 2 min (configurable
   // con GPS_SYNC_MINUTES): cuanto menor, más a tiempo llegan las alertas de velocidad.
   startGPSSync();
+  // Foto diaria del odómetro del GPS: es la fuente de los km del mes (ver
+  // services/gps-odometro.js). Va aparte del sync de posiciones porque el
+  // odómetro solo viene en el detalle de cada unidad y alcanza con una vez por día.
+  require('./services/gps-odometro').programarCaptura();
 
   // P7 — limpieza global periódica de refresh tokens vencidos. El refresh por
   // usuario solo borra los suyos; los de dispositivos abandonados quedaban
