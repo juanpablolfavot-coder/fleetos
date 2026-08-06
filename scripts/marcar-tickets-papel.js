@@ -24,6 +24,14 @@
 const { pool } = require('../db/pool');
 const APPLY = process.argv.includes('--apply');
 
+// db/pool.js le pide a pg que NO convierta los timestamps: llegan como texto tal
+// cual los guarda Postgres ('2026-07-24 10:30:00+00'), no como Date. Por eso el
+// día se saca cortando la cadena. Se contempla igual el caso Date por si alguna
+// vez se saca ese parser.
+const soloFecha = v => (v && typeof v.toISOString === 'function')
+  ? v.toISOString().slice(0, 10)
+  : String(v || '').slice(0, 10);
+
 // Carga de estación (sin cisterna), sin foto, sin estado, y con el número de
 // ticket anotado en las notas. Esa última condición es la que garantiza que el
 // comprobante existe: no se marca nada que no lo tenga.
@@ -58,7 +66,7 @@ const CONDICION = `
     for (const c of r.rows) {
       const m = c.notes.match(/^ticket\s+(\S+)/i);
       const ticket = m ? m[1] : '?';
-      console.log(`   ${String(c.logged_at.toISOString().slice(0, 10))}  ${String(c.unidad).padEnd(9)} ` +
+      console.log(`   ${soloFecha(c.logged_at)}  ${String(c.unidad).padEnd(9)} ` +
         `${String(Number(c.liters).toFixed(2)).padStart(8)} L  ticket ${String(ticket).padEnd(10)} ${c.location || ''}`);
     }
 
