@@ -4,8 +4,9 @@
  * cargadas a mano están atrasadas respecto de la realidad.
  * ────────────────────────────────────────────────────────────────────────────
  * SOLO LECTURA. El km del reporte sale del odómetro que se anota en cada carga de
- * combustible (fuel_logs.odometer_km). El GPS (Powerfleet) trae el odómetro REAL y
- * el servicio lo guarda en vehicles.km_current (= GREATEST de todo lo visto).
+ * combustible (fuel_logs.odometer_km). El GPS (Powerfleet) mide la distancia REAL
+ * y el servicio la va sumando a vehicles.km_current (por diferencia entre
+ * lecturas; el valor absoluto del odómetro del GPS tiene su propio origen).
  *
  * Si km_current (GPS/real) está muy por ENCIMA del último odómetro de los tickets,
  * los tickets están subcargados: se anota el km más bajo que el real → el reporte

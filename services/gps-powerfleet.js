@@ -8,6 +8,7 @@
 
 const https  = require('https');
 const { query } = require('../db/pool');
+const { avanceKm } = require('./km-por-gps');
 const speeding = require('./speeding');
 const idle = require('./idle');
 
@@ -351,7 +352,12 @@ async function ensureColumns() {
       -- Id interno de la unidad en Powerfleet. El sync ya lo tenía y lo tiraba.
       -- Hace falta para el webhook: si el aviso identifica la unidad por id y no
       -- por patente, sin esto no hay forma de saber de quién habla.
-      ADD COLUMN IF NOT EXISTS gps_vehicle_id  VARCHAR(60)`);
+      ADD COLUMN IF NOT EXISTS gps_vehicle_id  VARCHAR(60),
+      -- Última lectura CONTADA del odómetro del GPS y cuándo se vio. km_current
+      -- avanza por la diferencia entre lecturas (services/km-por-gps.js), no por
+      -- el valor absoluto: el odómetro del GPS tiene su propio origen.
+      ADD COLUMN IF NOT EXISTS gps_odometer    NUMERIC(12,2),
+      ADD COLUMN IF NOT EXISTS gps_odometer_at TIMESTAMPTZ`);
     await query(`CREATE INDEX IF NOT EXISTS idx_vehicles_gps_id ON vehicles(gps_vehicle_id) WHERE gps_vehicle_id IS NOT NULL`).catch(() => {});
     _colsReady = true;
   } catch(e) { /* ya existen */ }
@@ -421,24 +427,47 @@ async function syncGPSData() {
 
       const status = speed > 2 ? 'moving' : 'stopped';
 
-      const r = await query(`
-        UPDATE vehicles
-        SET
-          km_current     = CASE WHEN $1 > 0 THEN GREATEST(km_current, $1) ELSE km_current END,
-          gps_lat        = COALESCE(NULLIF($3::text,'0')::numeric, gps_lat),
-          gps_lng        = COALESCE(NULLIF($4::text,'0')::numeric, gps_lng),
-          gps_speed      = $5,
-          gps_status     = $6,
-          gps_hour_meter = CASE WHEN $2 > 0 THEN $2 ELSE gps_hour_meter END,
-          gps_address    = COALESCE($8, gps_address),
-          gps_state      = COALESCE($9, gps_state),
-          gps_vehicle_id = COALESCE($10, gps_vehicle_id),
-          gps_updated_at = NOW()
-        WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
-              UPPER(REGEXP_REPLACE($7,    '[^A-Z0-9]', '', 'g'))
-        RETURNING id, code, plate, base, type, km_current
-      `, [km, hourMeter, lat, lng, speed, status, searchPlate, address, vState,
-          vehicleId != null ? String(vehicleId) : null]);
+      // km_current avanza por la DIFERENCIA entre esta lectura del odómetro y la
+      // anterior guardada, nunca por el valor absoluto (ver services/km-por-gps.js).
+      // Por eso se lee primero: la decisión es pura y está testeada aparte.
+      const prev = await query(`
+        SELECT id, km_current, gps_odometer,
+               EXTRACT(EPOCH FROM (NOW() - gps_odometer_at)) / 3600 AS horas
+          FROM vehicles
+         WHERE UPPER(REGEXP_REPLACE(plate, '[^A-Z0-9]', '', 'g')) =
+               UPPER(REGEXP_REPLACE($1,    '[^A-Z0-9]', '', 'g'))
+      `, [searchPlate]);
+
+      const r = { rows: [] };
+      for (const p of prev.rows) {
+        const av = avanceKm({ kmActual: p.km_current, odoGuardado: p.gps_odometer, odoNuevo: km, horas: p.horas });
+        if (av.motivo === 'salto' || av.motivo === 'retroceso') {
+          console.warn(`[GPS] ${searchPlate}: odómetro ${av.motivo === 'salto' ? 'saltó' : 'retrocedió'} ` +
+            `${p.gps_odometer} → ${km}; se re-ancla sin sumar km`);
+        }
+        const upd = await query(`
+          UPDATE vehicles
+          SET
+            km_current     = CASE WHEN $2::int > 0 THEN COALESCE(km_current, 0) + $2
+                                  WHEN $3::text = 'inicial' THEN $4::int
+                                  ELSE km_current END,
+            gps_odometer    = $5,
+            gps_odometer_at = CASE WHEN $6::numeric > 0 THEN NOW() ELSE gps_odometer_at END,
+            gps_lat        = COALESCE(NULLIF($7::text,'0')::numeric, gps_lat),
+            gps_lng        = COALESCE(NULLIF($8::text,'0')::numeric, gps_lng),
+            gps_speed      = $9,
+            gps_status     = $10,
+            gps_hour_meter = CASE WHEN $11 > 0 THEN $11 ELSE gps_hour_meter END,
+            gps_address    = COALESCE($12, gps_address),
+            gps_state      = COALESCE($13, gps_state),
+            gps_vehicle_id = COALESCE($14, gps_vehicle_id),
+            gps_updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, code, plate, base, type, km_current
+        `, [p.id, av.delta, av.motivo, av.km, av.odo, km, lat, lng, speed, status, hourMeter,
+            address, vState, vehicleId != null ? String(vehicleId) : null]);
+        r.rows.push(...upd.rows);
+      }
 
       if (r.rows.length > 0) {
         updated++;
