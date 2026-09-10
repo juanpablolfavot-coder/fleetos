@@ -71,9 +71,27 @@ planes aparecen en la pantalla pidiendo el dato, y no disparan aviso.
 
 | Tipo | Columna | Quién la actualiza |
 |---|---|---|
-| `km` | `vehicles.km_current` | sync del GPS y cada carga de combustible con odómetro |
+| `km` | `vehicles.km_current` | el GPS lo mueve por **diferencia** entre lecturas; cada carga de combustible con odómetro lo sube si quedó atrás |
 | `horas` | `vehicles.gps_hour_meter` | horómetro de Powerfleet (autoelevadoras) |
 | `dias` | — | el calendario |
+
+### El GPS suma, no fija
+
+El odómetro de Powerfleet tiene su propio origen: no es el del tablero. Antes el
+sync hacía `km_current = GREATEST(km_current, odómetro_gps)`, y en varias
+unidades eso dejó el "Actual" muy por encima del real (AG468LQ: 3.625.518 km
+contra 393.719 en el tablero). Peor: corregirlo a mano duraba dos minutos,
+hasta el sync siguiente.
+
+Ahora el GPS suma lo que **creció** su odómetro entre una lectura y la
+siguiente (`services/km-por-gps.js`, con tests). El tablero lo fija una
+persona —el lápiz de km en la ficha de la unidad, o un ticket de combustible—
+y desde ahí el GPS lo va moviendo. Una corrección queda.
+
+Para corregir varias unidades de una vez, sin pasar por la pantalla:
+`node scripts/fijar-km-unidades.js` (simula) y `--apply` (ejecuta). Deja
+rastro en `audit_log` y avisa si un plan tiene el "último service" por encima
+del km nuevo, que es señal de que se cargó con el km inflado.
 
 ## No genera órdenes de trabajo solo
 
