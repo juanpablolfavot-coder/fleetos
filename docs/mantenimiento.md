@@ -54,6 +54,29 @@ salen del mismo cálculo, así que no pueden dar distinto. Es el mismo criterio
 que usa `services/flota-datos.js` para que el asistente y la pantalla de flota no
 se contradigan.
 
+### El Panel ejecutivo y el Inicio leen la misma lista
+
+Hubo una segunda calculadora, y se notó. El Panel ejecutivo estimaba "vencido"
+por múltiplos del kilometraje (`km % intervalo ≥ 95 %`, con el intervalo viejo
+de `tech_spec` o un default de 15.000), mientras la pantalla de Mantenimiento
+usaba los planes cargados. Resultado: el panel decía 3 vencidos y 5 próximos,
+Mantenimiento decía 8 y 1, y **AD235FE figuraba "VENCIDO" en el panel con su
+plan "Al día" a 23.260 km**. Nadie sabía cuál creer.
+
+Ahora `loadInitialData()` (`public/js/roles.js`) trae `GET
+/api/mantenimiento/planes` una vez, a `App.data.maintPlanes`, y de ahí leen los
+tres: el Panel ejecutivo, el Inicio y la pantalla de Mantenimiento (que además
+la actualiza cada vez que recarga, así "Ya se hizo" se refleja en el panel sin
+volver a pedirla). `maintResumen()` en `app.js` es el único lugar que agrupa por
+estado. Ningún cliente calcula por su cuenta.
+
+Si la lista no se pudo cargar, el panel muestra **"—"**, no `0`: "no sé" no es
+lo mismo que "nada vencido". El smoke de UI (`test/smoke.ui.cjs`) verifica que
+el conteo de vencidos del panel y el de Mantenimiento sean el mismo número.
+
+Las palabras también se unificaron: la pantalla decía "Pasado" y el panel
+"VENCIDO" para la misma cosa. Queda **vencido** en todos lados.
+
 ## Los cuatro estados
 
 | Estado | Qué significa |
@@ -100,7 +123,7 @@ aparecerían órdenes que nadie cargó moviendo los KPI de mantenimiento, el con
 del panel auditor y los costos del mes. Primero hay que poder confiar en los
 números.
 
-La pantalla tiene un botón **"Crear OTs de los pasados"** para hacerlo en lote
+La pantalla tiene un botón **"Crear OTs de los vencidos"** para hacerlo en lote
 cuando se quiere — con confirmación, y por decisión de quien aprieta.
 
 ## El botón que se usa todos los días

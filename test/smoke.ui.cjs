@@ -434,6 +434,54 @@ const IGNORE = /cdnjs|Failed to load resource|net::ERR|favicon|chart\.js|jspdf|a
     ],
   });
 
+  // ── Panel ejecutivo y Mantenimiento tienen que decir lo mismo ─────────
+  // El panel estimaba "vencido" por múltiplos del kilometraje y Mantenimiento
+  // usaba los planes: 3 vencidos en un lado, 8 en el otro, y una unidad
+  // "VENCIDA" en el panel con su plan "al día". Los dos leen ahora la misma
+  // lista (App.data.maintPlanes); este chequeo hace que no puedan volver a
+  // separarse sin que se note. El stub trae exactamente 1 vencido y 1 próximo.
+  current = 'panel-vs-mantenimiento';
+  const antesMant = errors.length;
+  await page.evaluate(() => window.renderPage('dashboard'));
+  await page.waitForTimeout(350);
+  const panelMant = await page.evaluate(() => {
+    const tile = document.getElementById('cmd-mant');
+    return { valor: tile ? tile.children[1]?.textContent.trim() : null, sub: tile ? tile.children[2]?.textContent.trim() : '' };
+  });
+  await page.evaluate(() => window.renderPage('maintenance'));
+  await page.waitForTimeout(350);
+  const pantallaMant = await page.evaluate(() => ({
+    vencidos: document.getElementById('mant-cnt-vencido')?.querySelector('.mant-resumen-n')?.textContent.trim() ?? null,
+    proximos: document.getElementById('mant-cnt-proximo')?.querySelector('.mant-resumen-n')?.textContent.trim() ?? null,
+    hayBuscador: !!document.getElementById('mant-buscar'),
+  }));
+  // Buscar por patente tiene que dejar solo esa unidad; el filtro, solo ese estado.
+  const filtroMant = await page.evaluate(() => {
+    window.buscarMant('AD235FE');
+    const soloUna = document.querySelectorAll('#mant-lista tbody tr').length;
+    window.buscarMant('');
+    window.filtrarMant('vencido');
+    const soloVencidos = [...document.querySelectorAll('#mant-lista tbody tr')].map((tr) => tr.className);
+    window.limpiarFiltroMant();
+    const todas = document.querySelectorAll('#mant-lista tbody tr').length;
+    return { soloUna, soloVencidos, todas };
+  });
+  results.push({
+    page: 'panel vs mantenimiento: mismo conteo de vencidos',
+    thrown: null,
+    asyncErrs: errors.slice(antesMant).filter((e) => e.kind === 'pageerror' && !IGNORE.test(e.msg)),
+    missingOnclick: [
+      ...(panelMant.valor === '1' ? [] : [`(el panel dice ${JSON.stringify(panelMant.valor)} vencidos; el stub tiene 1)`]),
+      ...(/1 próximo/.test(panelMant.sub) ? [] : [`(el panel dice "${panelMant.sub}"; el stub tiene 1 próximo)`]),
+      ...(pantallaMant.vencidos === '1' ? [] : [`(Mantenimiento dice ${JSON.stringify(pantallaMant.vencidos)} vencidos; el stub tiene 1)`]),
+      ...(pantallaMant.proximos === '1' ? [] : [`(Mantenimiento dice ${JSON.stringify(pantallaMant.proximos)} próximos; el stub tiene 1)`]),
+      ...(pantallaMant.hayBuscador ? [] : ['(Mantenimiento no tiene buscador)']),
+      ...(filtroMant.soloUna === 1 ? [] : [`(buscar "AD235FE" dejó ${filtroMant.soloUna} filas, no 1)`]),
+      ...(filtroMant.soloVencidos.length === 1 && filtroMant.soloVencidos.every((c) => /mant-danger/.test(c)) ? [] : ['(el filtro "Vencidos" no dejó solo los vencidos)']),
+      ...(filtroMant.todas === 5 ? [] : [`(al limpiar el filtro quedaron ${filtroMant.todas} filas, no 5)`]),
+    ],
+  });
+
   // ── El XSS del chat con IA ──────────────────────────────────────────
   // Corre el render REAL en el navegador, no una copia de la lógica. La
   // respuesta de la IA entraba al innerHTML sin escapar, y el prompt que se le

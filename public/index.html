@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="FleetOS">
 
-  <link rel="stylesheet" href="css/main.css?v=v2light-inter-20260419b">
+  <link rel="stylesheet" href="css/main.css?v=20260915-menu">
   <link rel="stylesheet" href="css/login.css?v=v2light-inter-20260419b">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -203,7 +203,8 @@ html, body {
 </div>
 
 <div id="app-shell" style="display:none">
-  <nav class="sidebar">
+  <div class="sidebar-backdrop" onclick="toggleSidebarNav(false)"></div>
+  <nav class="sidebar" id="sidebar-nav" aria-label="Menú principal">
     <div class="sidebar-logo">
       <div class="logo-mark">EB</div>
       <div>
@@ -251,6 +252,9 @@ html, body {
   </nav>
   <main class="main">
     <div class="topbar">
+      <!-- Menú con nombres (tablet y celular): despliega la misma barra lateral
+           encima del contenido. En escritorio no se ve. -->
+      <button id="btn-menu" class="btn btn-secondary btn-sm topbar-menu-btn" onclick="toggleSidebarNav()" title="Menú" aria-label="Abrir menú" aria-expanded="false" aria-controls="sidebar-nav">☰ Menú</button>
       <div>
         <div class="topbar-title" id="topbar-title">Panel</div>
         <div class="topbar-sub"   id="topbar-sub"></div>
