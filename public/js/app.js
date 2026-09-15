@@ -712,9 +712,12 @@ function renderDashboard() {
         <div class="kpi-value ${parseFloat(doRate)>=92?'ok':'warn'}">${doRate}%</div>
         <div class="kpi-trend ${parseFloat(doRate)>=92?'up':'down'}">Meta 92% · solo estado mecánico, no incluye papeles ni service</div>
       </div>
-      <div class="kpi-card ${unidadesAlDia>=v.length?'ok':'danger'}" onclick="navigate('${unidadesDocVencida.size >= unidadesMantVencido.size ? 'documents' : 'maintenance'}')" style="cursor:pointer" title="Unidades sin documentación vencida ni mantenimiento vencido">
+      <!-- Sin los planes de mantenimiento no se sabe quién está al día: el
+           número y el color quedan en "no sé", no en un N/N verde que
+           contradiga a su propio subtítulo. -->
+      <div class="kpi-card ${!mant.disponible ? '' : unidadesAlDia>=v.length?'ok':'danger'}" onclick="navigate('${unidadesDocVencida.size >= unidadesMantVencido.size ? 'documents' : 'maintenance'}')" style="cursor:pointer" title="Unidades sin documentación vencida ni mantenimiento vencido">
         <div class="kpi-label">Al día en papeles y service</div>
-        <div class="kpi-value ${unidadesAlDia>=v.length?'ok':'danger'}">${unidadesAlDia}<span style="font-size:14px;color:var(--text3)">/${v.length}</span></div>
+        <div class="kpi-value ${!mant.disponible ? '' : unidadesAlDia>=v.length?'ok':'danger'}">${mant.disponible ? `${unidadesAlDia}<span style="font-size:14px;color:var(--text3)">/${v.length}</span>` : '—'}</div>
         <div class="kpi-trend">${unidadesDocVencida.size} con doc. vencida · ${mant.disponible ? `${unidadesMantVencido.size} con service vencido` : 'service: sin datos'}</div>
       </div>
     </div>
