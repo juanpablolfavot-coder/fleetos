@@ -917,4 +917,5 @@ function buildNavForRole(role) {
     const allowed = role.modules.includes(page) || role.modules.includes('all');
     item.style.display = allowed ? '' : 'none';
   });
+  if (typeof refreshModernNav === 'function') refreshModernNav();
 }

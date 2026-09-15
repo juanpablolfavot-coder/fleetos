@@ -256,6 +256,8 @@ function navigate(page) {
   document.querySelector('.topbar-title').textContent = getPageTitle(page);
   document.querySelector('.topbar-sub').textContent = getPageSub(page);
   renderPage(page);
+  if (typeof uiCloseMenu === 'function') uiCloseMenu();
+  if (typeof refreshModernNav === 'function') refreshModernNav();
 }
 
 function getPageTitle(p) {
@@ -276,32 +278,7 @@ function renderPage(page) {
 // Pantalla de bienvenida neutra (logo EB grande, centrado). Es el aterrizaje de
 // todos los roles al entrar; no muestra datos sensibles. El panel con gastos/
 // totales pasó a llamarse "Panel ejecutivo" (solo Dueño/Gerencia).
-function renderHome() {
-  const el = document.getElementById('page-home');
-  if (!el) return;
-  const nombre = (App.currentUser?.name || '').trim();
-  el.innerHTML = `
-    <div style="min-height:70vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px">
-      <div style="width:140px;height:140px;border-radius:28px;background:#ea580c;display:flex;align-items:center;justify-content:center;box-shadow:0 16px 48px rgba(234,88,12,.35)">
-        <span style="font-size:64px;font-weight:800;color:#fff;letter-spacing:1px">EB</span>
-      </div>
-      <div>
-        <div style="font-size:30px;font-weight:800;color:var(--text)">Expreso Biletta</div>
-        <div style="font-size:14px;color:var(--text3);margin-top:6px">Sistema de gestión de flota — FleetOS</div>
-      </div>
-      ${nombre ? `<div style="font-size:15px;color:var(--text2);margin-top:4px">👋 Hola, <b>${escapeHtml(nombre)}</b></div>` : ''}
-      <div style="font-size:13px;color:var(--text3);margin-top:8px">Elegí una sección en el menú de la izquierda para empezar.</div>
-      ${App.currentUser?.role === 'dueno' ? `
-        <div style="margin-top:22px;max-width:420px">
-          <button class="btn btn-primary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">🔔 Activar alertas de velocidad</button>
-          <div style="font-size:12px;color:var(--text3);margin-top:8px;line-height:1.5">
-            Recibí un aviso en este celular cuando una unidad supere los <b>80 km/h</b>, aunque tengas la app cerrada.<br>
-            📱 En <b>iPhone</b>: primero agregá la app a la pantalla de inicio (Compartir → "Agregar a inicio") y activá desde ahí.
-          </div>
-        </div>` : ''}
-    </div>`;
-  if (App.currentUser?.role === 'dueno') _refreshSpeedAlertBtn();
-}
+function renderHome() { renderModernHome(); }
 
 // Deja el botón de alertas reflejando si este dispositivo ya está suscripto.
 async function _refreshSpeedAlertBtn() {
@@ -375,7 +352,21 @@ function _dashQuickAccess() {
   </div>`;
 }
 
-function renderDashboard() {
+let _dashboardRequest = 0;
+async function renderDashboard() {
+  const root = document.getElementById('page-dashboard');
+  const request = ++_dashboardRequest;
+  const userId = App.currentUser?.id;
+  root.innerHTML = uiHeading('Resumen operativo', 'Todo lo importante, en un solo lugar.') + '<div class="card" role="status">Cargando resumen…</div>';
+  let plans = [], maintenanceError = false;
+  try {
+    const res = await apiFetch('/api/mantenimiento/planes');
+    if (!res.ok) throw new Error('Planes no disponibles');
+    plans = await res.json();
+    if (!Array.isArray(plans)) throw new Error('Respuesta inválida');
+  } catch (_) { maintenanceError = true; }
+  if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
+
   const v = App.data.vehicles || [];
   const ok = v.filter(x=>x.status==='ok').length;
   const taller = v.filter(x=>x.status==='taller').length;
@@ -398,17 +389,10 @@ function renderDashboard() {
   const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'enviada_proveedor' || p.status === 'pagada');
   const fuelObs = (App.data.fuelLogs||[]).filter(f => f.ticket_estado === 'observado');
 
-  // Mantenimientos vencidos (>=95% del intervalo)
-  const maintAlerts = v.map(veh => {
-    const km = veh.km || 0;
-    const ts = veh.tech_spec || {};
-    const isFork = isAutoelevador(veh);
-    const interval = parseInt(ts.maint_interval_km) || (isFork ? 250 : 15000);
-    const pct = interval > 0 ? (km % interval / interval * 100) : 0;
-    return { code: veh.code, pct: Math.round(pct), km, interval, unit: isFork ? 'hs' : 'km', nextKm: Math.ceil(km/interval)*interval };
-  }).filter(m => m.pct >= 80).sort((a,b) => b.pct - a.pct);
-  const maintVencidos = maintAlerts.filter(m => m.pct >= 95);
-  const maintProximos = maintAlerts.filter(m => m.pct >= 80 && m.pct < 95);
+  // Mismo estado y umbral que la pantalla de planes y las notificaciones.
+  const maintVencidos = plans.filter(p => p.estado === 'vencido');
+  const maintProximos = plans.filter(p => p.estado === 'proximo');
+  const maintSinBase = plans.filter(p => p.estado === 'sin_base');
 
   // ═══ MÉTRICAS DEL MES ═══
   const ahora = new Date();
@@ -433,7 +417,7 @@ function renderDashboard() {
   const ocsMesTotal = ocsMes.reduce((a,p) => a + (parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0), 0);
 
   // Total pendientes críticos
-  const totalPendientes = dangerDocs.length + otsUrgentes.length + stockBajo.length + ocsRevision.length + maintVencidos.length;
+
 
   // ═══ ACTIVIDAD RECIENTE ═══
   const actividad = [];
@@ -481,26 +465,16 @@ function renderDashboard() {
   };
 
   // ═══ Centro de comando: helper de tarjeta (solo presentación) ═══
-  const _tones = {
-    danger: ['rgba(239,68,68,.12)', 'rgba(239,68,68,.30)', 'var(--danger)'],
-    warn:   ['rgba(245,158,11,.12)', 'rgba(245,158,11,.30)', 'var(--warn)'],
-    ok:     ['rgba(16,185,129,.10)', 'rgba(16,185,129,.28)', 'var(--ok)'],
-    info:   ['rgba(37,99,235,.10)',  'rgba(37,99,235,.28)',  'var(--accent)'],
-    muted:  ['var(--bg3)',           'var(--border)',        'var(--text3)'],
-  };
-  const cmdTile = ({ icon, label, value, sub, tone = 'muted', nav, id }) => {
-    const [bg, bd, fg] = _tones[tone] || _tones.muted;
-    const click = nav ? `onclick="navigate('${nav}')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'"` : '';
-    return `<div ${id ? `id="${id}"` : ''} ${click} style="${nav ? 'cursor:pointer;' : ''}background:${bg};border:1px solid ${bd};border-radius:var(--radius);padding:14px;transition:transform .15s">
-      <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px"><span style="font-size:14px">${icon}</span>${label}</div>
-      <div style="font-size:26px;font-weight:800;line-height:1;color:${fg}">${value}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:5px">${sub}</div>
-    </div>`;
+  const cmdTile = ({ label, value, sub, tone = 'muted', nav, id }) => {
+    const target = nav || (id ? 'tesoreria_panel' : null);
+    return `<button type="button" class="cmd-tile" data-tone="${tone}" ${id ? `id="${id}"` : ''} ${target ? `onclick="navigate('${target}')"` : ''}>
+      <div class="cmd-label">${label}</div><div class="cmd-value">${value}</div><div class="cmd-sub">${sub}</div></button>`;
   };
   const verPagos = ['dueno','gerencia','tesoreria'].includes(App.currentUser?.role);
 
   // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
+    ${uiHeading('Resumen operativo', 'Todo lo importante, en un solo lugar.')}
     ${_dashQuickAccess()}
     <!-- KPIs superiores -->
     <div class="kpi-row" style="margin-bottom:16px">
@@ -517,24 +491,24 @@ function renderDashboard() {
       <div class="kpi-card ${parseFloat(doRate)>=92?'ok':'warn'}">
         <div class="kpi-label">Disponibilidad operativa</div>
         <div class="kpi-value ${parseFloat(doRate)>=92?'ok':'warn'}">${doRate}%</div>
-        <div class="kpi-trend ${parseFloat(doRate)>=92?'up':'down'}">Meta: 92% · ${parseFloat(doRate)>=92?'Cumplida':'Debajo del objetivo'}</div>
+        <div class="kpi-trend ${parseFloat(doRate)>=92?'up':'down'}">Estado operativo · no incluye documentación</div>
       </div>
       <div class="kpi-card ${alerts===0?'ok':'danger'}">
         <div class="kpi-label">Alertas documentales</div>
         <div class="kpi-value ${alerts===0?'ok':'danger'}">${alerts}</div>
-        <div class="kpi-trend">documentos a vencer pronto</div>
+        <div class="kpi-trend">${dangerDocs.length} vencidos · ${warnDocs.length} próximos</div>
       </div>
     </div>
 
-    <!-- CENTRO DE COMANDO: indicadores accionables de un vistazo -->
-    <div class="card" style="margin-bottom:16px;${totalPendientes > 0 ? 'border-left:4px solid var(--danger)' : 'border-left:4px solid var(--ok)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div>
-          <div class="card-title" style="margin:0">🧭 Centro de comando</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${totalPendientes > 0 ? `${totalPendientes} pendientes críticos` : 'Ningún pendiente crítico ahora mismo'}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+    <section class="attention-panel" aria-label="Requiere atención">
+      <h2>Requiere atención</h2><p>Los pendientes que necesitan una decisión.</p>
+      ${uiAttentionRow('maintenance', maintenanceError ? 'Mantenimiento no disponible' : maintVencidos.length + ' planes vencidos', maintenanceError ? 'No se pudo consultar el estado. Reintentá desde Mantenimiento.' : maintProximos.length + ' próximos · ' + maintSinBase.length + ' sin último service registrado', 'maintenance', 'Revisar planes')}
+      ${uiAttentionRow('documents', dangerDocs.length + ' documentos vencidos', warnDocs.length + ' por vencer. Revisá la documentación antes de la salida.', 'documents', 'Ver documentos')}
+      ${uiAttentionRow('workorders', otsUrgentes.length + ' órdenes urgentes', otsAbiertas.length + ' órdenes de trabajo abiertas', 'workorders', 'Ver órdenes')}
+    </section>
+    <details class="command-summary">
+      <summary>Compras, stock y pagos · ver indicadores</summary>
+      <div class="command-tiles">
         ${cmdTile({ icon:'🛒', label:'OC por cotizar',      value:ocsRevision.length,  sub:`${ocsAprobadas.length} en curso`,                                tone:ocsRevision.length>0?'warn':'muted', nav:'purchase_orders' })}
         ${cmdTile({ icon:'📦', label:'OC por recibir',      value:ocsAprobadas.length, sub:'aprobadas / enviadas',                                           tone:ocsAprobadas.length>0?'info':'muted', nav:'purchase_orders' })}
         ${cmdTile({ icon:'🔧', label:'OT abiertas',         value:otsAbiertas.length,  sub:`${otsUrgentes.length} urgentes`,                                 tone:otsUrgentes.length>0?'danger':(otsAbiertas.length>0?'info':'ok'), nav:'workorders' })}
@@ -542,12 +516,12 @@ function renderDashboard() {
         ${cmdTile({ icon:'📥', label:'Stock crítico',       value:stockBajo.length,    sub:stockBajo.length>0?'necesitan reposición':'abastecido',          tone:stockBajo.length>0?'warn':'ok', nav:'stock' })}
         ${cmdTile({ icon:'⛽', label:'Combustible observado',value:fuelObs.length,      sub:fuelObs.length>0?'tickets a revisar':'sin observaciones',         tone:fuelObs.length>0?'warn':'ok', nav:'fuel' })}
         ${cmdTile({ icon:'📄', label:'Documentos',          value:dangerDocs.length+warnDocs.length, sub:`${dangerDocs.length} vencidos · ${warnDocs.length} por vencer`, tone:dangerDocs.length>0?'danger':(warnDocs.length>0?'warn':'ok'), nav:'documents' })}
-        ${cmdTile({ icon:'🛠️', label:'Mantenimiento',        value:maintVencidos.length, sub:`${maintProximos.length} próximos`,                              tone:maintVencidos.length>0?'danger':(maintProximos.length>0?'warn':'ok'), nav:'maintenance' })}
+        ${cmdTile({ icon:'🛠️', label:'Mantenimiento',        value:maintenanceError ? '—' : maintVencidos.length, sub:maintenanceError ? 'No disponible' : `${maintProximos.length} próximos`,                              tone:maintVencidos.length>0?'danger':(maintProximos.length>0?'warn':'ok'), nav:'maintenance' })}
         ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
         ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
         ${verPagos ? cmdTile({ icon:'🔴', label:'Pagos vencidos',       value:'…', sub:'facturas atrasadas', tone:'danger', id:'cmd-pag-vencidos' }) : ''}
       </div>
-    </div>
+    </details>
 
     <!-- BLOQUE 2: Mapa de flota + Alertas detalladas -->
     <div class="two-col" style="margin-bottom:16px">
@@ -567,7 +541,7 @@ function renderDashboard() {
     <!-- BLOQUE 3: NÚMEROS DEL MES -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">📈 Números del mes · ${['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mo]} ${yr}</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div class="month-metrics">
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⛽ Combustible</div>
           <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${(combustibleMesCosto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -654,11 +628,11 @@ function renderDashboard() {
   dangerDocs.forEach(d => {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
   });
-  maintVencidos.forEach(m => {
-    html += `<div class="alert-row danger"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.code)}</b> — Mantenimiento VENCIDO — ${m.km.toLocaleString('es-AR')} / ${m.nextKm.toLocaleString('es-AR')} ${escapeHtml(m.unit)}</span></div>`;
-  });
-  maintProximos.slice(0,3).forEach(m => {
-    html += `<div class="alert-row warn"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.code)}</b> — Mantenimiento próximo (${m.pct}%) — faltan ${(m.nextKm-m.km).toLocaleString('es-AR')} ${escapeHtml(m.unit)}</span></div>`;
+  if (maintenanceError) html += '<div class="alert-row warn">No se pudo consultar mantenimiento. Su estado no está confirmado.</div>';
+  [...maintVencidos, ...maintProximos.slice(0,3)].forEach(p => {
+    const label = p.estado === 'vencido' ? 'Vencido' : 'Próximo';
+    const remaining = p.restante == null ? 'Sin referencia' : Math.abs(p.restante).toLocaleString('es-AR') + ' ' + (p.unidad_medida || '');
+    html += `<div class="alert-row ${p.estado === 'vencido' ? 'danger' : 'warn'}"><span>🔧</span><span class="alert-text"><b>${escapeHtml(p.unidad)}</b> — ${escapeHtml(p.nombre)} · ${label} · ${p.estado === 'vencido' ? 'pasado por' : 'faltan'} ${escapeHtml(remaining)}</span></div>`;
   });
   warnDocs.slice(0,2).forEach(d => {
     const days = Math.ceil((new Date(d.expiry)-new Date())/86400000);
@@ -733,8 +707,10 @@ function renderDashboard() {
     (async () => {
       try {
         const res = await apiFetch('/api/payments/pendientes');
-        if (!res || !res.ok) return;
+        if (!res || !res.ok) throw new Error('Pagos no disponibles');
         const rows = await res.json();
+        if (!Array.isArray(rows)) throw new Error('Respuesta inválida');
+        if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
         const pend = rows.filter(r => !r.pagada);
         const suma = (arr) => arr.reduce((a, r) => a + (parseFloat(r.saldo) || 0), 0);
         const porVencer = pend.filter(r => r.por_vencer);
@@ -748,7 +724,13 @@ function renderDashboard() {
         setTile('cmd-fac-pend',      pend.length,      suma(pend),      'sin pendientes');
         setTile('cmd-pag-porvencer', porVencer.length, suma(porVencer), 'nada por vencer');
         setTile('cmd-pag-vencidos',  vencidas.length,  suma(vencidas),  'sin vencidas');
-      } catch (e) { /* la parte financiera es opcional; si falla, queda en '…' */ }
+      } catch (e) {
+        if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
+        ['cmd-fac-pend','cmd-pag-porvencer','cmd-pag-vencidos'].forEach(id => {
+          const tile = document.getElementById(id);
+          if (tile) { tile.children[1].textContent = '—'; tile.children[2].textContent = 'No se pudo cargar. Reintentá.'; }
+        });
+      }
     })();
   }
 }
@@ -897,6 +879,7 @@ function renderFleetTable(data) {
       <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail('${v.id}')">Ver ficha</button></td>
     </tr>`;
   }).join('');
+  labelResponsiveTable(document.getElementById('fleet-table'));
 }
 
 function filterFleetTable(q) {

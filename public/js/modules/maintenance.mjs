@@ -23,6 +23,9 @@ const closeModal = need('closeModal');
 const showToast = need('showToast');
 const apiFetch = need('apiFetch');
 const renderDashboard = need('renderDashboard');
+const labelResponsiveTable = need('labelResponsiveTable');
+let _maintenanceRequest = 0;
+let _filterText = '', _filterState = '';
 
 const ESTADOS = {
   vencido:  { badge: 'danger', label: 'Pasado',   orden: 0 },
@@ -99,14 +102,17 @@ function _cabecera(resumen) {
 async function _cargar() {
   const root = document.getElementById('page-maintenance');
   if (!root) return;
+  const request = ++_maintenanceRequest;
   let planes = [];
   try {
     const res = await apiFetch('/api/mantenimiento/planes');
     if (!res.ok) throw new Error('no se pudo');
     const datos = await res.json();
     // Si el endpoint devolviera algo que no es lista, no romper la pantalla entera.
-    planes = Array.isArray(datos) ? datos : [];
+    if (!Array.isArray(datos)) throw new Error('Respuesta inválida');
+    planes = datos;
   } catch (_) {
+    if (request !== _maintenanceRequest) return;
     root.innerHTML = _cabecera() + `
       <div class="card" style="text-align:center;padding:40px;color:var(--text3)">
         No se pudieron cargar los planes. Probá recargar la página.
@@ -114,8 +120,10 @@ async function _cargar() {
     return;
   }
 
+  if (request !== _maintenanceRequest) return;
+
   window._planesMant = planes;   // lo leen los onclick por id
-  const resumen = planes.reduce((a, p) => { a[p.estado] = (a[p.estado] || 0) + 1; return a; }, {});
+  const resumen = planes.reduce((a, p) => { a[p.estado] = (a[p.estado] || 0) + 1; return a; }, {vencido:0, proximo:0, ok:0, sin_base:0});
 
   if (!planes.length) {
     root.innerHTML = _cabecera(resumen) + `
@@ -133,7 +141,7 @@ async function _cargar() {
   }
 
   // Lo que exige acción va arriba.
-  planes.sort((a, b) => (ESTADOS[a.estado].orden - ESTADOS[b.estado].orden)
+  planes.sort((a, b) => ((ESTADOS[a.estado] || ESTADOS.sin_base).orden - (ESTADOS[b.estado] || ESTADOS.sin_base).orden)
     || (a.restante == null ? 1e9 : a.restante) - (b.restante == null ? 1e9 : b.restante)
     || String(a.unidad).localeCompare(String(b.unidad)));
 
@@ -151,7 +159,7 @@ async function _cargar() {
           </div>
         </td>
         <td><span class="badge badge-info">${p.tipo === 'km' ? 'Por km' : p.tipo === 'horas' ? 'Por horas' : 'Por fecha'}</span></td>
-        <td class="td-mono">${p.proximo == null ? '—' : escapeHtml(String(p.proximo))}</td>
+        <td class="td-mono">${p.proximo == null ? '—' : p.tipo === 'dias' ? escapeHtml(String(p.proximo).slice(0,10).split('-').reverse().join('/')) : Number(p.proximo).toLocaleString('es-AR')}</td>
         <td class="td-mono">${p.actual == null ? '—' : p.actual.toLocaleString('es-AR')}</td>
         <td style="width:150px">
           ${pct == null ? '<span style="font-size:11px;color:var(--text3)">sin línea de base</span>' : `
@@ -164,24 +172,50 @@ async function _cargar() {
         <td style="white-space:nowrap">
           ${puedeEditar() ? `
             <button class="btn btn-secondary btn-sm" onclick="marcarMantRealizado('${p.id}')" title="Mover la línea de base al contador actual">✓ Ya se hizo</button>
-            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')">✎</button>
-            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')">🗑</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')" aria-label="Editar plan de ${escapeHtml(p.unidad)}" title="Editar plan">✎</button>
+            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')" aria-label="Eliminar plan de ${escapeHtml(p.unidad)}" title="Eliminar plan">🗑</button>` : ''}
         </td>
       </tr>`;
   }).join('');
 
   root.innerHTML = _cabecera(resumen) + `
+    <div class="maintenance-filters">
+      <label>Buscar unidad o plan<input id="maintenance-search" type="search" placeholder="Patente, aceite, engrase…" value="${escapeHtml(_filterText)}" oninput="filterMaintenancePlans()"></label>
+      <label>Estado<select id="maintenance-state" onchange="filterMaintenancePlans()"><option value="">Todos los planes</option><option value="vencido">Vencidos</option><option value="proximo">Próximos</option><option value="sin_base">Sin último service</option><option value="ok">Al día</option></select></label>
+    </div>
     <div class="card" style="padding:0;overflow:hidden">
       <div style="overflow-x:auto">
-        <table class="table">
+        <table class="table maintenance-table">
           <thead><tr>
-            <th>Unidad</th><th>Plan</th><th>Tipo</th><th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th><th></th>
+            <th>Unidad</th><th>Plan</th><th>Tipo</th><th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th><th>Acciones</th>
           </tr></thead>
           <tbody>${filas}</tbody>
         </table>
       </div>
-    </div>`;
+    </div><p class="empty-filter" id="maintenance-empty" hidden>No hay planes para esta búsqueda.</p><p id="maintenance-results" role="status" class="muted"></p>`;
+  document.getElementById('maintenance-state').value = _filterState;
+  labelResponsiveTable(root.querySelector('table'));
+  filterMaintenancePlans();
 }
+
+function filterMaintenancePlans() {
+  _filterText = document.getElementById('maintenance-search')?.value || '';
+  _filterState = document.getElementById('maintenance-state')?.value || '';
+  const search = _filterText.trim().toLocaleLowerCase('es');
+  const plans = window._planesMant || [];
+  let visible = 0;
+  document.querySelectorAll('.maintenance-table tbody tr').forEach((row, i) => {
+    const p = plans[i];
+    const match = p && (!_filterState || p.estado === _filterState) && `${p.unidad} ${p.nombre}`.toLocaleLowerCase('es').includes(search);
+    row.hidden = !match;
+    if (match) visible++;
+  });
+  const empty = document.getElementById('maintenance-empty');
+  if (empty) empty.hidden = visible !== 0;
+  const status = document.getElementById('maintenance-results');
+  if (status) status.textContent = `${visible} de ${plans.length} planes`;
+}
+expose('filterMaintenancePlans', filterMaintenancePlans);
 
 // ── Alta / edición ────────────────────────────────────────────────────
 function openPlanMantModal(planId) {
