@@ -22,14 +22,20 @@ const openModal = need('openModal');
 const closeModal = need('closeModal');
 const showToast = need('showToast');
 const apiFetch = need('apiFetch');
-const renderDashboard = need('renderDashboard');
 
+// Mismas palabras que el Panel ejecutivo y el Inicio ("vencido"), para que la
+// misma cosa no se llame "pasado" en una pantalla y "vencido" en la otra.
 const ESTADOS = {
-  vencido:  { badge: 'danger', label: 'Pasado',   orden: 0 },
-  proximo:  { badge: 'warn',   label: 'Próximo',  orden: 1 },
-  sin_base: { badge: 'info',   label: 'Sin base', orden: 2 },
-  ok:       { badge: 'ok',     label: 'Al día',   orden: 3 },
+  vencido:  { badge: 'danger', label: 'Vencido',  plural: 'Vencidos', orden: 0 },
+  proximo:  { badge: 'warn',   label: 'Próximo',  plural: 'Próximos', orden: 1 },
+  sin_base: { badge: 'info',   label: 'Sin base', plural: 'Sin base', orden: 2 },
+  ok:       { badge: 'ok',     label: 'Al día',   plural: 'Al día',   orden: 3 },
 };
+
+// Filtro y búsqueda de la pantalla. Viven acá (no en el DOM) para sobrevivir a
+// un re-render después de "Ya se hizo" o de guardar un plan.
+let _filtro = 'todos';     // 'todos' | 'accion' | uno de ESTADOS
+let _busqueda = '';
 
 const puedeEditar = () => ['dueno', 'gerencia', 'jefe_mantenimiento'].includes(App.currentUser?.role);
 
@@ -70,11 +76,18 @@ function renderMaintenance() {
 
 function _cabecera(resumen) {
   const r = resumen || {};
-  const tarjeta = (n, txt, color) => `
-    <div class="card" style="padding:12px 16px;flex:1;min-width:120px">
-      <div style="font-size:22px;font-weight:800;color:var(--${color})">${n == null ? '—' : n}</div>
-      <div style="font-size:12px;color:var(--text3)">${txt}</div>
+  // Las tarjetas de resumen también filtran: tocar "Vencidos" deja solo esos.
+  const tarjeta = (estado, color) => {
+    const n = r[estado];
+    const activa = _filtro === estado;
+    return `
+    <div class="card mant-resumen${activa ? ' activa' : ''}" id="mant-cnt-${estado}" role="button" tabindex="0"
+         onclick="filtrarMant('${activa ? 'todos' : estado}')" onkeydown="if(event.key==='Enter')this.click()"
+         style="--c:var(--${color})">
+      <div class="mant-resumen-n">${n == null ? '—' : n}</div>
+      <div class="mant-resumen-txt">${ESTADOS[estado].plural}</div>
     </div>`;
+  };
   return `
     <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
       <div>
@@ -85,15 +98,63 @@ function _cabecera(resumen) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${puedeEditar() ? '<button class="btn btn-primary" onclick="openPlanMantModal()">+ Nuevo plan</button>' : ''}
-        ${puedeEditar() ? '<button class="btn btn-secondary" onclick="crearOTsDeVencidos()">🔧 Crear OTs de los pasados</button>' : ''}
+        ${puedeEditar() ? '<button class="btn btn-secondary" onclick="crearOTsDeVencidos()">🔧 Crear OTs de los vencidos</button>' : ''}
       </div>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-      ${tarjeta(r.vencido, 'Pasados', 'danger')}
-      ${tarjeta(r.proximo, 'Próximos', 'warn')}
-      ${tarjeta(r.ok, 'Al día', 'ok')}
-      ${tarjeta(r.sin_base, 'Sin base', 'info')}
+    <div class="mant-resumen-fila">
+      ${tarjeta('vencido', 'danger')}
+      ${tarjeta('proximo', 'warn')}
+      ${tarjeta('sin_base', 'info')}
+      ${tarjeta('ok', 'ok')}
     </div>`;
+}
+
+// Buscador + filtros. El input NO se re-dibuja al escribir (solo la lista),
+// así no pierde el foco a cada tecla.
+function _barra() {
+  const chip = (valor, txt) => `<button class="mant-chip${_filtro === valor ? ' activo' : ''}" onclick="filtrarMant('${valor}')">${txt}</button>`;
+  return `
+    <div class="card mant-barra">
+      <input class="form-input" id="mant-buscar" type="search" placeholder="🔍 Buscar por patente, unidad o plan…"
+             value="${escapeHtml(_busqueda)}" oninput="buscarMant(this.value)" autocomplete="off">
+      <div class="mant-chips">
+        ${chip('todos', 'Todos')}
+        ${chip('accion', '⚠ Requieren acción')}
+        ${chip('vencido', 'Vencidos')}
+        ${chip('proximo', 'Próximos')}
+        ${chip('sin_base', 'Sin base')}
+        ${chip('ok', 'Al día')}
+      </div>
+    </div>`;
+}
+
+function _normalizar(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function _planesVisibles() {
+  const q = _normalizar(_busqueda).trim();
+  return (window._planesMant || []).filter((p) => {
+    if (_filtro === 'accion' && p.estado !== 'vencido' && p.estado !== 'proximo') return false;
+    if (_filtro !== 'todos' && _filtro !== 'accion' && p.estado !== _filtro) return false;
+    if (!q) return true;
+    return _normalizar(`${p.unidad} ${p.nombre}`).includes(q);
+  });
+}
+
+function filtrarMant(valor) {
+  _filtro = valor;
+  // La cabecera y los chips cambian de estado activo; la lista, de contenido.
+  const root = document.getElementById('page-maintenance');
+  if (!root) return;
+  const resumen = (window._planesMant || []).reduce((a, p) => { a[p.estado] = (a[p.estado] || 0) + 1; return a; }, {});
+  root.innerHTML = _cabecera(resumen) + _barra() + '<div id="mant-lista"></div>';
+  _dibujarLista();
+}
+
+function buscarMant(texto) {
+  _busqueda = texto || '';
+  _dibujarLista();
 }
 
 async function _cargar() {
@@ -115,6 +176,9 @@ async function _cargar() {
   }
 
   window._planesMant = planes;   // lo leen los onclick por id
+  // La misma lista que lee el Panel ejecutivo y el Inicio (ver maintResumen en
+  // app.js): así "Ya se hizo" acá se refleja allá sin volver a pedirla.
+  App.data.maintPlanes = planes;
   const resumen = planes.reduce((a, p) => { a[p.estado] = (a[p.estado] || 0) + 1; return a; }, {});
 
   if (!planes.length) {
@@ -132,55 +196,82 @@ async function _cargar() {
     return;
   }
 
+  root.innerHTML = _cabecera(resumen) + _barra() + '<div id="mant-lista"></div>';
+  _dibujarLista();
+}
+
+function _dibujarLista() {
+  const cont = document.getElementById('mant-lista');
+  if (!cont) return;
+  const planes = _planesVisibles();
+
   // Lo que exige acción va arriba.
   planes.sort((a, b) => (ESTADOS[a.estado].orden - ESTADOS[b.estado].orden)
     || (a.restante == null ? 1e9 : a.restante) - (b.restante == null ? 1e9 : b.restante)
     || String(a.unidad).localeCompare(String(b.unidad)));
 
+  if (!planes.length) {
+    cont.innerHTML = `
+      <div class="card" style="text-align:center;padding:32px;color:var(--text3)">
+        <div style="font-weight:600;margin-bottom:6px">Ningún plan coincide</div>
+        <div style="font-size:13px">${_busqueda ? `No hay planes para "<b>${escapeHtml(_busqueda)}</b>"` : 'No hay planes en este estado'}.</div>
+        <div style="margin-top:14px"><button class="btn btn-secondary btn-sm" onclick="limpiarFiltroMant()">Ver todos</button></div>
+      </div>`;
+    return;
+  }
+
   const filas = planes.map((p) => {
     const est = ESTADOS[p.estado] || ESTADOS.ok;
     const pct = _pct(p);
     const u = _unidadDePlan(p);
+    const tipo = p.tipo === 'km' ? 'por km' : p.tipo === 'horas' ? 'por horas' : 'por fecha';
+    // Sin línea de base no hay "próximo": se muestra solo el contador actual.
+    const contador = p.tipo === 'dias'
+      ? (p.proximo == null ? '—' : `vence ${escapeHtml(String(p.proximo))}`)
+      : p.proximo == null
+        ? (p.actual == null ? '—' : `${p.actual.toLocaleString('es-AR')} ${escapeHtml(u)} hoy`)
+        : `${p.actual == null ? '—' : p.actual.toLocaleString('es-AR')} <span class="mant-sep">→</span> ${p.proximo.toLocaleString('es-AR')} ${escapeHtml(u)}`;
     return `
-      <tr>
-        <td class="td-mono td-main">${escapeHtml(p.unidad)}</td>
-        <td>
-          <div style="font-weight:500">${escapeHtml(p.nombre)}</div>
-          <div style="font-size:11px;color:var(--text3)">
-            cada ${p.intervalo.toLocaleString('es-AR')} ${escapeHtml(u)}${p.aviso_antes ? ` · avisa ${p.aviso_antes.toLocaleString('es-AR')} ${escapeHtml(u)} antes` : ''}
-          </div>
+      <tr class="mant-fila mant-${est.badge}">
+        <td data-label="Unidad" class="td-mono td-main mant-unidad">${escapeHtml(p.unidad)}</td>
+        <td data-label="Plan" class="mant-plan">
+          <div class="mant-plan-nombre">${escapeHtml(p.nombre)}</div>
+          <div class="mant-plan-sub">${tipo} · cada ${p.intervalo.toLocaleString('es-AR')} ${escapeHtml(u)}${p.aviso_antes ? ` · avisa ${p.aviso_antes.toLocaleString('es-AR')} ${escapeHtml(u)} antes` : ''}</div>
         </td>
-        <td><span class="badge badge-info">${p.tipo === 'km' ? 'Por km' : p.tipo === 'horas' ? 'Por horas' : 'Por fecha'}</span></td>
-        <td class="td-mono">${p.proximo == null ? '—' : escapeHtml(String(p.proximo))}</td>
-        <td class="td-mono">${p.actual == null ? '—' : p.actual.toLocaleString('es-AR')}</td>
-        <td style="width:150px">
-          ${pct == null ? '<span style="font-size:11px;color:var(--text3)">sin línea de base</span>' : `
-            <div style="background:var(--bg4);border-radius:4px;height:6px;overflow:hidden">
-              <div style="background:var(--${est.badge});width:${pct}%;height:100%"></div>
-            </div>`}
-          <div style="font-size:11px;color:var(--${est.badge});margin-top:2px">${escapeHtml(_cuanto(p))}</div>
+        <td data-label="Actual → próximo" class="td-mono mant-contador"><span>${contador}</span></td>
+        <td data-label="Restante" class="mant-restante">
+          ${pct == null ? '' : `
+            <div class="mant-barra-prog"><div style="background:var(--${est.badge});width:${pct}%"></div></div>`}
+          <div class="mant-cuanto" style="color:var(--${est.badge})">${escapeHtml(_cuanto(p))}</div>
         </td>
-        <td><span class="badge badge-${est.badge}">${est.label}</span></td>
-        <td style="white-space:nowrap">
+        <td data-label="Estado"><span class="badge badge-${est.badge}">${est.label}</span></td>
+        <td data-label="" class="mant-acciones">
           ${puedeEditar() ? `
             <button class="btn btn-secondary btn-sm" onclick="marcarMantRealizado('${p.id}')" title="Mover la línea de base al contador actual">✓ Ya se hizo</button>
-            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')">✎</button>
-            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')">🗑</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')" title="Editar">✎</button>
+            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')" title="Dar de baja">🗑</button>` : ''}
         </td>
       </tr>`;
   }).join('');
 
-  root.innerHTML = _cabecera(resumen) + `
+  const total = (window._planesMant || []).length;
+  cont.innerHTML = `
     <div class="card" style="padding:0;overflow:hidden">
-      <div style="overflow-x:auto">
-        <table class="table">
+      <div class="mant-conteo">${planes.length === total ? `${total} plan${total === 1 ? '' : 'es'}` : `${planes.length} de ${total} planes`}</div>
+      <div class="table-wrap">
+        <table class="table table-cards mant-tabla">
           <thead><tr>
-            <th>Unidad</th><th>Plan</th><th>Tipo</th><th>Próximo</th><th>Actual</th><th>Progreso</th><th>Estado</th><th></th>
+            <th>Unidad</th><th>Plan</th><th>Actual → próximo</th><th>Restante</th><th>Estado</th><th></th>
           </tr></thead>
           <tbody>${filas}</tbody>
         </table>
       </div>
     </div>`;
+}
+
+function limpiarFiltroMant() {
+  _busqueda = '';
+  filtrarMant('todos');
 }
 
 // ── Alta / edición ────────────────────────────────────────────────────
@@ -305,8 +396,9 @@ async function marcarMantRealizado(planId) {
     return;
   }
   showToast('ok', 'Registrado. La cuenta arranca de nuevo.');
+  // El Panel ejecutivo no se redibuja acá: lee App.data.maintPlanes cuando se
+  // abre, y _cargar() la actualiza con lo que devuelva el servidor.
   renderMaintenance();
-  renderDashboard();
 }
 
 async function bajaPlanMant(planId) {
@@ -323,7 +415,7 @@ async function bajaPlanMant(planId) {
 // cargó ensucia los KPI de mantenimiento y los costos del mes.
 async function crearOTsDeVencidos() {
   const pasados = (window._planesMant || []).filter((p) => p.estado === 'vencido');
-  if (!pasados.length) { showToast('warn', 'No hay mantenimientos pasados'); return; }
+  if (!pasados.length) { showToast('warn', 'No hay mantenimientos vencidos'); return; }
   if (!confirm(`Se van a crear ${pasados.length} orden(es) de trabajo preventivas. ¿Seguir?`)) return;
 
   let creadas = 0, errores = 0;
@@ -352,8 +444,12 @@ expose('guardarPlanMant', guardarPlanMant);
 expose('marcarMantRealizado', marcarMantRealizado);
 expose('bajaPlanMant', bajaPlanMant);
 expose('crearOTsDeVencidos', crearOTsDeVencidos);
+expose('filtrarMant', filtrarMant);
+expose('buscarMant', buscarMant);
+expose('limpiarFiltroMant', limpiarFiltroMant);
 
 export {
   renderMaintenance, openPlanMantModal, actualizarUnidadPlanMant,
   guardarPlanMant, marcarMantRealizado, bajaPlanMant, crearOTsDeVencidos,
+  filtrarMant, buscarMant, limpiarFiltroMant,
 };

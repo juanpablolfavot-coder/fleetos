@@ -741,8 +741,19 @@ async function loadInitialData() {
     const canLoadSuppliers = ['dueno','gerencia','compras','proveedores','contador','jefe_mantenimiento','paniol'].includes(roleCode);
     const usersFetch     = canLoadUsers ? apiFetch('/api/users') : Promise.resolve({ ok: false, json: async () => [] });
     const suppliersFetch = canLoadSuppliers ? apiFetch('/api/suppliers') : Promise.resolve({ ok: false, json: async () => [] });
+    // Planes de mantenimiento con su estado YA calculado por el servidor
+    // (services/mantenimiento.js). Se cargan acá, una vez, para que el Panel
+    // ejecutivo, el Inicio y la pantalla de Mantenimiento lean la MISMA lista.
+    // Antes el panel estimaba "vencido" por múltiplos del kilometraje y la
+    // pantalla usaba los planes cargados: una misma unidad salía VENCIDA en un
+    // lado y "al día" en el otro. Solo lo piden los roles que ven alguna de
+    // esas pantallas; para el resto queda `undefined` ("no se sabe"), que es
+    // distinto de "no hay nada vencido".
+    const modulosRol = App.currentUser?.roleData?.modules || [];
+    const canLoadMant = ['maintenance', 'dashboard'].some((m) => modulosRol.includes(m));
+    const mantFetch = canLoadMant ? apiFetch('/api/mantenimiento/planes').catch(() => null) : Promise.resolve(null);
 
-    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes, purchaseOrdersRes] = await Promise.all([
+    const [vehiclesRes, workordersRes, fuelRes, stockRes, docsRes, configRes, tanksRes, usersRes, tiresRes, tireHistoryRes, suppliersRes, assetsRes, stockHistRes, tankEntriesRes, dispatchesRes, purchaseOrdersRes, mantRes] = await Promise.all([
       apiFetch('/api/vehicles'),
       apiFetch('/api/workorders?limit=100'),
       apiFetch('/api/fuel?limit=100'),
@@ -759,6 +770,7 @@ async function loadInitialData() {
       apiFetch('/api/fuel/tank-entries?limit=50'),
       apiFetch('/api/fuel/dispatches?limit=50'),
       apiFetch('/api/purchase-orders?limit=100'),
+      mantFetch,
     ]);
 
     if (vehiclesRes?.ok)    App.data.vehicles    = await vehiclesRes.json();
@@ -818,6 +830,13 @@ async function loadInitialData() {
     App.data.fuel = App.data.fuelLogs;
     if (purchaseOrdersRes?.ok) App.data.purchaseOrders = await purchaseOrdersRes.json();
     else App.data.purchaseOrders = App.data.purchaseOrders || [];
+
+    // Si la llamada falló se conserva lo que había (si había): mostrar 0
+    // vencidos por un error de red sería mentir; `undefined` se dibuja como "—".
+    if (mantRes?.ok) {
+      const planes = await mantRes.json().catch(() => null);
+      if (Array.isArray(planes)) App.data.maintPlanes = planes;
+    }
     if (configRes?.ok) {
       const cfg = await configRes.json();
       App.config = App.config || {};
@@ -912,6 +931,10 @@ function buildNavForRole(role) {
     }
   }
   document.querySelectorAll('.nav-item').forEach(item => {
+    // En tablet el menú se achica a solo íconos: el nombre queda como tooltip
+    // (y para lectores de pantalla), así no hay que adivinar qué es cada emoji.
+    const label = item.querySelector('span:not(.nav-icon)')?.textContent?.trim();
+    if (label && !item.title) { item.title = label; item.setAttribute('aria-label', label); }
     const page = item.dataset.page;
     if (!page) return;
     const allowed = role.modules.includes(page) || role.modules.includes('all');
