@@ -64,6 +64,10 @@ table td { font-size: 13px; padding: 15px 12px; }
 .home-shortcuts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 13px; }
 .shortcut { display: flex; align-items: center; gap: 14px; text-align: left; background: #fff; border: 1px solid var(--border); border-radius: 13px; padding: 21px 17px; cursor: pointer; font-family: var(--font); }
 .shortcut:hover { border-color: #edac8c; background: #fffaf7; }
+.home-shortcuts .home-acceso { min-height: 90px; border-radius: 13px; padding: 20px; font-size: 13px; background: #fff; gap: 15px; }
+.home-shortcuts .home-acceso-icon { color: var(--accent); background: #fff0e7; border-radius: 10px; padding: 10px; }
+.mant-chip.activo { color: #fff; background: var(--accent); border-color: var(--accent); }
+.mant-cuanto { font-size: 13px; }
 .shortcut-icon { background: #fff0e7; color: var(--accent); padding: 11px; border-radius: 11px; }
 .shortcut strong { font-size: 13px; }
 .shortcut-arrow { margin-left: auto; color: var(--text3); }

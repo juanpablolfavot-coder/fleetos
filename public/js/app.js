@@ -246,6 +246,7 @@ App.data.stockHistory= App.data.stockHistory|| [];
 
 // ── NAVEGACIÓN ──
 function navigate(page) {
+  toggleSidebarNav(false);   // si el menú estaba desplegado (tablet/celular), se cierra
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const el = document.getElementById('page-' + page);
@@ -256,8 +257,46 @@ function navigate(page) {
   document.querySelector('.topbar-title').textContent = getPageTitle(page);
   document.querySelector('.topbar-sub').textContent = getPageSub(page);
   renderPage(page);
-  if (typeof uiCloseMenu === 'function') uiCloseMenu();
-  if (typeof refreshModernNav === 'function') refreshModernNav();
+  uiCloseMenu();
+  refreshModernNav();
+}
+
+// Menú desplegable (≤900px). En tablet la barra lateral se achica a solo
+// íconos y en celular pasa a ser una tira abajo con etiquetas de 8px: en los
+// dos casos hay que acordarse de qué es cada emoji. El botón ☰ de la cabecera
+// despliega el mismo menú con los nombres completos, encima del contenido.
+// Es solo CSS (body.nav-open) — no se duplica el HTML del menú.
+function toggleSidebarNav(force) {
+  const abrir = typeof force === 'boolean' ? force : !document.body.classList.contains('nav-open');
+  document.body.classList.toggle('nav-open', abrir);
+  const btn = document.getElementById('btn-menu');
+  if (btn) btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+}
+
+// ── MANTENIMIENTO: un solo criterio ──
+// El estado de cada plan (vencido / próximo / ok / sin_base) lo calcula el
+// SERVIDOR y llega en App.data.maintPlanes (ver loadInitialData). El Panel
+// ejecutivo, el Inicio y la pantalla de Mantenimiento leen esa lista; ninguno
+// calcula por su cuenta. Antes el panel estimaba "vencido" por múltiplos del
+// kilometraje (km % intervalo ≥ 95 %) mientras Mantenimiento usaba los planes
+// cargados, y AD235FE salía "VENCIDO" en el panel y "al día" en su plan.
+// `disponible: false` = la lista no se cargó (rol sin acceso o error): se
+// muestra "—", no 0, porque "no sé" no es lo mismo que "nada vencido".
+function maintResumen() {
+  const planes = App.data.maintPlanes;
+  if (!Array.isArray(planes)) return { disponible: false, vencidos: [], proximos: [], sinBase: [], alDia: [] };
+  const por = (estado) => planes.filter(p => p.estado === estado)
+    .sort((a, b) => (a.restante == null ? 1e9 : a.restante) - (b.restante == null ? 1e9 : b.restante));
+  return { disponible: true, vencidos: por('vencido'), proximos: por('proximo'), sinBase: por('sin_base'), alDia: por('ok') };
+}
+// "Cambio de aceite · pasado por 1.500 km" — misma frase que usa la pantalla
+// de Mantenimiento, para que el panel no diga otra cosa.
+function maintCuanto(p) {
+  if (p.estado === 'sin_base') return 'falta cargar el último service';
+  const u = p.unidad_medida || (p.tipo === 'km' ? 'km' : p.tipo === 'horas' ? 'h' : 'días');
+  if (p.restante < 0) return `pasado por ${Math.abs(p.restante).toLocaleString('es-AR')} ${u}`;
+  if (p.restante === 0) return 'toca AHORA';
+  return `faltan ${Number(p.restante).toLocaleString('es-AR')} ${u}`;
 }
 
 function getPageTitle(p) {
@@ -275,9 +314,77 @@ function renderPage(page) {
 }
 
 // ── INICIO ──
-// Pantalla de bienvenida neutra (logo EB grande, centrado). Es el aterrizaje de
-// todos los roles al entrar; no muestra datos sensibles. El panel con gastos/
-// totales pasó a llamarse "Panel ejecutivo" (solo Dueño/Gerencia).
+// Aterrizaje de todos los roles al entrar. Antes era el logo centrado y "elegí
+// una sección": no aportaba nada y había que salir a buscar qué había pendiente.
+// Ahora abre con lo que requiere acción en las secciones que ESE rol tiene, y
+// accesos directos a sus pantallas (con el mismo ícono y nombre del menú).
+// Sigue sin mostrar plata ni totales: eso es del Panel ejecutivo (Dueño/
+// Gerencia). Acá van conteos operativos: papeles vencidos, OTs urgentes,
+// mantenimientos vencidos, stock bajo mínimo.
+function _homePendientes(modulos) {
+  const tiene = (m) => modulos.includes(m) || modulos.includes('all');
+  const v = App.data.vehicles || [];
+  const items = [];
+  const push = (mod, icon, n, texto, tone, nav) => { if (tiene(mod) && n > 0) items.push({ icon, n, texto, tone, nav }); };
+
+  if (tiene('documents')) {
+    const docs = App.data.documents || [];
+    const venc = docs.filter(d => d.status === 'danger').length;
+    const porVencer = docs.filter(d => d.status === 'warn').length;
+    push('documents', '📄', venc, `documento${venc === 1 ? '' : 's'} vencido${venc === 1 ? '' : 's'}`, 'danger', 'documents');
+    push('documents', '📄', porVencer, `documento${porVencer === 1 ? '' : 's'} por vencer en 30 días`, 'warn', 'documents');
+  }
+  if (tiene('workorders')) {
+    const urg = (App.data.workOrders || []).filter(o => o.priority === 'Urgente' && o.status !== 'Cerrada').length;
+    push('workorders', '🔧', urg, `OT${urg === 1 ? '' : 's'} urgente${urg === 1 ? '' : 's'} abierta${urg === 1 ? '' : 's'}`, 'danger', 'workorders');
+  }
+  if (tiene('maintenance')) {
+    const m = maintResumen();
+    push('maintenance', '🛠️', m.vencidos.length, `mantenimiento${m.vencidos.length === 1 ? '' : 's'} vencido${m.vencidos.length === 1 ? '' : 's'}`, 'danger', 'maintenance');
+    push('maintenance', '🛠️', m.proximos.length, `mantenimiento${m.proximos.length === 1 ? '' : 's'} próximo${m.proximos.length === 1 ? '' : 's'}`, 'warn', 'maintenance');
+  }
+  if (tiene('fleet') || tiene('dashboard')) {
+    const det = v.filter(x => x.status === 'detenida' || x.status === 'taller').length;
+    push(tiene('fleet') ? 'fleet' : 'dashboard', '🚛', det, `unidad${det === 1 ? '' : 'es'} en taller o detenida${det === 1 ? '' : 's'}`, 'warn', tiene('fleet') ? 'fleet' : 'dashboard');
+  }
+  if (tiene('stock')) {
+    const bajo = (App.data.stock || []).filter(s => {
+      const cur = parseFloat(s.qty_current ?? s.qty) || 0;
+      const min = parseFloat(s.qty_min ?? s.min) || 0;
+      return min > 0 && cur <= min;
+    }).length;
+    push('stock', '📥', bajo, `ítem${bajo === 1 ? '' : 's'} de stock bajo mínimo`, 'warn', 'stock');
+  }
+  if (tiene('purchase_orders')) {
+    const oc = (App.data.purchaseOrders || []).filter(p => p.status === 'pendiente_cotizacion' || p.status === 'en_cotizacion').length;
+    push('purchase_orders', '🛒', oc, `orden${oc === 1 ? '' : 'es'} de compra por cotizar`, 'warn', 'purchase_orders');
+  }
+  if (tiene('fuel')) {
+    const obs = (App.data.fuelLogs || []).filter(f => f.ticket_estado === 'observado').length;
+    push('fuel', '⛽', obs, `ticket${obs === 1 ? '' : 's'} de combustible observado${obs === 1 ? '' : 's'}`, 'warn', 'fuel');
+  }
+  const orden = { danger: 0, warn: 1 };
+  items.sort((a, b) => orden[a.tone] - orden[b.tone] || b.n - a.n);
+  return items;
+}
+
+// Accesos del rol: los mismos ítems (ícono + nombre) que el menú lateral, para
+// que la pantalla de Inicio y el menú digan lo mismo.
+function _homeAccesos(modulos) {
+  // encargado_panel no está: quedó fusionado dentro del Panel ejecutivo y
+  // solo existe por compatibilidad con links viejos.
+  const orden = ['dashboard','chofer_panel','proveedor_panel','tesoreria_panel','auditor_panel','contador_panel',
+    'fleet','flota','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs','assets','users','config'];
+  // Íconos para las pantallas que no tienen ítem en el menú lateral.
+  const paginas = orden.filter(p => modulos.includes(p) || (modulos.includes('all') && p !== 'home'));
+  return paginas.map(p => {
+    const nav = document.querySelector(`.nav-item[data-page="${p}"]`);
+    if (nav && nav.style.display === 'none') return '';
+    const label = nav?.querySelector('span:not(.nav-icon)')?.textContent?.trim() || getPageTitle(p);
+    return `<button class="home-acceso" onclick="navigate('${p}')"><span class="home-acceso-icon">${uiIcon(p)}</span><span>${escapeHtml(label)}</span></button>`;
+  }).join('');
+}
+
 function renderHome() { renderModernHome(); }
 
 // Deja el botón de alertas reflejando si este dispositivo ya está suscripto.
@@ -352,28 +459,13 @@ function _dashQuickAccess() {
   </div>`;
 }
 
-let _dashboardRequest = 0;
-async function renderDashboard() {
-  const root = document.getElementById('page-dashboard');
-  const request = ++_dashboardRequest;
-  const userId = App.currentUser?.id;
-  root.innerHTML = uiHeading('Resumen operativo', 'Todo lo importante, en un solo lugar.') + '<div class="card" role="status">Cargando resumen…</div>';
-  let plans = [], maintenanceError = false;
-  try {
-    const res = await apiFetch('/api/mantenimiento/planes');
-    if (!res.ok) throw new Error('Planes no disponibles');
-    plans = await res.json();
-    if (!Array.isArray(plans)) throw new Error('Respuesta inválida');
-  } catch (_) { maintenanceError = true; }
-  if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
-
+function renderDashboard() {
   const v = App.data.vehicles || [];
   const ok = v.filter(x=>x.status==='ok').length;
   const taller = v.filter(x=>x.status==='taller').length;
   const detenida = v.filter(x=>x.status==='detenida').length;
   const warn = v.filter(x=>x.status==='warn').length;
   const doRate = v.length > 0 ? ((ok+warn)/v.length*100).toFixed(1) : '0';
-  const alerts = (App.data.documents||[]).filter(d=>d.status!=='ok').length;
 
   // ═══ MÉTRICAS PARA PENDIENTES CRÍTICOS ═══
   const dangerDocs  = (App.data.documents||[]).filter(d=>d.status==='danger');
@@ -389,10 +481,18 @@ async function renderDashboard() {
   const ocsAprobadas = (App.data.purchaseOrders||[]).filter(p => p.status === 'aprobada_compras' || p.status === 'enviada_proveedor' || p.status === 'pagada');
   const fuelObs = (App.data.fuelLogs||[]).filter(f => f.ticket_estado === 'observado');
 
-  // Mismo estado y umbral que la pantalla de planes y las notificaciones.
-  const maintVencidos = plans.filter(p => p.estado === 'vencido');
-  const maintProximos = plans.filter(p => p.estado === 'proximo');
-  const maintSinBase = plans.filter(p => p.estado === 'sin_base');
+  // Mantenimiento: la MISMA lista que la pantalla de Mantenimiento (ver
+  // maintResumen). Nada de estimar por múltiplos del kilometraje.
+  const mant = maintResumen();
+  const maintVencidos = mant.vencidos;
+  const maintProximos = mant.proximos;
+
+  // "Al día" en papeles y service, por unidad. Es OTRA pregunta que "puede
+  // salir": una unidad puede estar en ruta con la VTV vencida, y el 100 % de
+  // disponibilidad convivía con documentación vencida sin que se entendiera.
+  const unidadesDocVencida  = new Set(dangerDocs.filter(d => !d.isUser).map(d => d.vehicle));
+  const unidadesMantVencido = new Set(maintVencidos.map(m => m.unidad));
+  const unidadesAlDia = v.filter(x => !unidadesDocVencida.has(x.code) && !unidadesMantVencido.has(x.code)).length;
 
   // ═══ MÉTRICAS DEL MES ═══
   const ahora = new Date();
@@ -417,7 +517,7 @@ async function renderDashboard() {
   const ocsMesTotal = ocsMes.reduce((a,p) => a + (parseFloat(p.factura_monto) || parseFloat(p.total_estimado) || 0), 0);
 
   // Total pendientes críticos
-
+  const totalPendientes = dangerDocs.length + otsUrgentes.length + stockBajo.length + ocsRevision.length + maintVencidos.length;
 
   // ═══ ACTIVIDAD RECIENTE ═══
   const actividad = [];
@@ -472,16 +572,36 @@ async function renderDashboard() {
   };
   const verPagos = ['dueno','gerencia','tesoreria'].includes(App.currentUser?.role);
 
+  // ═══ Tarjetas del centro de comando, ordenadas por urgencia ═══
+  // Lo rojo primero, después lo amarillo, después lo informativo. Así lo que
+  // requiere acción queda arriba a la izquierda y no mezclado con lo que está bien.
+  const rango = { danger: 0, warn: 1, info: 2, ok: 3, muted: 3 };
+  const tiles = [
+    { tone: otsUrgentes.length>0?'danger':(otsAbiertas.length>0?'info':'ok'), t: { icon:'🔧', label:'OT abiertas',         value:otsAbiertas.length,  sub:`${otsUrgentes.length} urgentes`, nav:'workorders' } },
+    { tone: dangerDocs.length>0?'danger':(warnDocs.length>0?'warn':'ok'),       t: { icon:'📄', label:'Documentos',          value:dangerDocs.length+warnDocs.length, sub:`${dangerDocs.length} vencidos · ${warnDocs.length} por vencer`, nav:'documents' } },
+    { tone: !mant.disponible?'muted':(maintVencidos.length>0?'danger':(maintProximos.length>0?'warn':'ok')),
+      t: { icon:'🛠️', label:'Mantenimiento', value: mant.disponible ? maintVencidos.length : '—',
+           sub: mant.disponible ? `vencidos · ${maintProximos.length} próximos · ${mant.sinBase.length} sin base` : 'no se pudieron cargar los planes', nav:'maintenance', id:'cmd-mant' } },
+    { tone: (taller+detenida)>0?'warn':'ok',      t: { icon:'🚛', label:'Unidades en taller',  value:taller+detenida,     sub:`${taller} taller · ${detenida} detenida${detenida===1?'':'s'}`, nav:'fleet' } },
+    { tone: stockBajo.length>0?'warn':'ok',       t: { icon:'📥', label:'Stock crítico',       value:stockBajo.length,    sub:stockBajo.length>0?'necesitan reposición':'abastecido', nav:'stock' } },
+    { tone: fuelObs.length>0?'warn':'ok',         t: { icon:'⛽', label:'Combustible observado',value:fuelObs.length,      sub:fuelObs.length>0?'tickets a revisar':'sin observaciones', nav:'fuel' } },
+    { tone: ocsRevision.length>0?'warn':'muted',  t: { icon:'🛒', label:'OC por cotizar',      value:ocsRevision.length,  sub:`${ocsAprobadas.length} en curso`, nav:'purchase_orders' } },
+    { tone: ocsAprobadas.length>0?'info':'muted', t: { icon:'📦', label:'OC por recibir',      value:ocsAprobadas.length, sub:'aprobadas / enviadas', nav:'purchase_orders' } },
+  ].sort((a, b) => rango[a.tone] - rango[b.tone]);
+
   // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
     ${uiHeading('Resumen operativo', 'Todo lo importante, en un solo lugar.')}
     ${_dashQuickAccess()}
-    <!-- KPIs superiores -->
+
+    <!-- 3. KPIs: "puede salir" (estado mecánico) es una cosa; "al día en papeles
+         y service" es otra. Antes el 100 % de disponibilidad convivía con
+         documentación vencida en la misma fila y no se entendía cuál creer. -->
     <div class="kpi-row" style="margin-bottom:16px">
       <div class="kpi-card ${ok>=v.length?'ok':'warn'}">
         <div class="kpi-label">Unidades operativas</div>
         <div class="kpi-value ${ok>=v.length?'ok':'warn'}">${ok}</div>
-        <div class="kpi-trend">de ${v.length} en flota</div>
+        <div class="kpi-trend">de ${v.length} · pueden salir hoy</div>
       </div>
       <div class="kpi-card ${taller+detenida===0?'ok':'warn'}">
         <div class="kpi-label">En taller / detenidas</div>
@@ -491,50 +611,44 @@ async function renderDashboard() {
       <div class="kpi-card ${parseFloat(doRate)>=92?'ok':'warn'}">
         <div class="kpi-label">Disponibilidad operativa</div>
         <div class="kpi-value ${parseFloat(doRate)>=92?'ok':'warn'}">${doRate}%</div>
-        <div class="kpi-trend ${parseFloat(doRate)>=92?'up':'down'}">Estado operativo · no incluye documentación</div>
+        <div class="kpi-trend ${parseFloat(doRate)>=92?'up':'down'}">Meta 92% · solo estado mecánico, no incluye papeles ni service</div>
       </div>
-      <div class="kpi-card ${alerts===0?'ok':'danger'}">
-        <div class="kpi-label">Alertas documentales</div>
-        <div class="kpi-value ${alerts===0?'ok':'danger'}">${alerts}</div>
-        <div class="kpi-trend">${dangerDocs.length} vencidos · ${warnDocs.length} próximos</div>
+      <!-- Sin los planes de mantenimiento no se sabe quién está al día: el
+           número y el color quedan en "no sé", no en un N/N verde que
+           contradiga a su propio subtítulo. -->
+      <div class="kpi-card ${!mant.disponible ? '' : unidadesAlDia>=v.length?'ok':'danger'}" onclick="navigate('${unidadesDocVencida.size >= unidadesMantVencido.size ? 'documents' : 'maintenance'}')" style="cursor:pointer" title="Unidades sin documentación vencida ni mantenimiento vencido">
+        <div class="kpi-label">Al día en papeles y service</div>
+        <div class="kpi-value ${!mant.disponible ? '' : unidadesAlDia>=v.length?'ok':'danger'}">${mant.disponible ? `${unidadesAlDia}<span style="font-size:14px;color:var(--text3)">/${v.length}</span>` : '—'}</div>
+        <div class="kpi-trend">${unidadesDocVencida.size} con doc. vencida · ${mant.disponible ? `${unidadesMantVencido.size} con service vencido` : 'service: sin datos'}</div>
       </div>
     </div>
 
     <section class="attention-panel" aria-label="Requiere atención">
-      <h2>Requiere atención</h2><p>Los pendientes que necesitan una decisión.</p>
-      ${uiAttentionRow('maintenance', maintenanceError ? 'Mantenimiento no disponible' : maintVencidos.length + ' planes vencidos', maintenanceError ? 'No se pudo consultar el estado. Reintentá desde Mantenimiento.' : maintProximos.length + ' próximos · ' + maintSinBase.length + ' sin último service registrado', 'maintenance', 'Revisar planes')}
+      <h2>Requiere atención</h2><p>${totalPendientes} pendientes críticos en las secciones operativas.</p>
+      ${uiAttentionRow('maintenance', !mant.disponible ? 'Mantenimiento no disponible' : maintVencidos.length + ' planes vencidos', !mant.disponible ? 'No se pudo consultar el estado. Reintentá desde Mantenimiento.' : maintProximos.length + ' próximos · ' + mant.sinBase.length + ' sin último service registrado', 'maintenance', 'Revisar planes')}
       ${uiAttentionRow('documents', dangerDocs.length + ' documentos vencidos', warnDocs.length + ' por vencer. Revisá la documentación antes de la salida.', 'documents', 'Ver documentos')}
       ${uiAttentionRow('workorders', otsUrgentes.length + ' órdenes urgentes', otsAbiertas.length + ' órdenes de trabajo abiertas', 'workorders', 'Ver órdenes')}
     </section>
-    <details class="command-summary">
-      <summary>Compras, stock y pagos · ver indicadores</summary>
-      <div class="command-tiles">
-        ${cmdTile({ icon:'🛒', label:'OC por cotizar',      value:ocsRevision.length,  sub:`${ocsAprobadas.length} en curso`,                                tone:ocsRevision.length>0?'warn':'muted', nav:'purchase_orders' })}
-        ${cmdTile({ icon:'📦', label:'OC por recibir',      value:ocsAprobadas.length, sub:'aprobadas / enviadas',                                           tone:ocsAprobadas.length>0?'info':'muted', nav:'purchase_orders' })}
-        ${cmdTile({ icon:'🔧', label:'OT abiertas',         value:otsAbiertas.length,  sub:`${otsUrgentes.length} urgentes`,                                 tone:otsUrgentes.length>0?'danger':(otsAbiertas.length>0?'info':'ok'), nav:'workorders' })}
-        ${cmdTile({ icon:'🚛', label:'Unidades en taller',  value:taller+detenida,     sub:`${taller} taller · ${detenida} detenida${detenida===1?'':'s'}`,  tone:(taller+detenida)>0?'warn':'ok', nav:'fleet' })}
-        ${cmdTile({ icon:'📥', label:'Stock crítico',       value:stockBajo.length,    sub:stockBajo.length>0?'necesitan reposición':'abastecido',          tone:stockBajo.length>0?'warn':'ok', nav:'stock' })}
-        ${cmdTile({ icon:'⛽', label:'Combustible observado',value:fuelObs.length,      sub:fuelObs.length>0?'tickets a revisar':'sin observaciones',         tone:fuelObs.length>0?'warn':'ok', nav:'fuel' })}
-        ${cmdTile({ icon:'📄', label:'Documentos',          value:dangerDocs.length+warnDocs.length, sub:`${dangerDocs.length} vencidos · ${warnDocs.length} por vencer`, tone:dangerDocs.length>0?'danger':(warnDocs.length>0?'warn':'ok'), nav:'documents' })}
-        ${cmdTile({ icon:'🛠️', label:'Mantenimiento',        value:maintenanceError ? '—' : maintVencidos.length, sub:maintenanceError ? 'No disponible' : `${maintProximos.length} próximos`,                              tone:maintVencidos.length>0?'danger':(maintProximos.length>0?'warn':'ok'), nav:'maintenance' })}
-        ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
-        ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
+    <details class="command-summary"><summary>Compras, stock y pagos · ver indicadores</summary><div class="command-tiles">
+        ${tiles.map(x => cmdTile({ ...x.t, tone: x.tone })).join('')}
         ${verPagos ? cmdTile({ icon:'🔴', label:'Pagos vencidos',       value:'…', sub:'facturas atrasadas', tone:'danger', id:'cmd-pag-vencidos' }) : ''}
+        ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
+        ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
       </div>
     </details>
 
-    <!-- BLOQUE 2: Mapa de flota + Alertas detalladas -->
+    <!-- 2. Detalle de alertas + mapa de flota -->
     <div class="two-col" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">Alertas activas</div>
+        <div id="dash-alerts" style="max-height:300px;overflow-y:auto"></div>
+      </div>
       <div class="card">
         <div class="card-title">Estado de la flota — ${v.length} unidades</div>
         <div class="fleet-grid" id="fleet-grid-mini"></div>
-        <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono)">
+        <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono);flex-wrap:wrap">
           <span>● Verde: operativo</span><span>● Naranja: alerta</span><span>● Rojo: taller/detenida</span>
         </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Alertas activas</div>
-        <div id="dash-alerts" style="max-height:260px;overflow-y:auto"></div>
       </div>
     </div>
 
@@ -622,17 +736,21 @@ async function renderDashboard() {
   const alertsEl = document.getElementById('dash-alerts');
   const detainedVehicles = v.filter(x => x.status === 'detenida');
   let html = '';
+  if (!mant.disponible) html += '<div class="alert-row warn">No se pudo consultar mantenimiento. Su estado no está confirmado.</div>';
   detainedVehicles.forEach(veh => {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${escapeHtml(veh.code)}</b> — Unidad detenida en base.</span></div>`;
   });
   dangerDocs.forEach(d => {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${d.vehicle||d.displayName||'—'}</b> — ${d.type} vencido (${d.expiry})</span></div>`;
   });
-  if (maintenanceError) html += '<div class="alert-row warn">No se pudo consultar mantenimiento. Su estado no está confirmado.</div>';
-  [...maintVencidos, ...maintProximos.slice(0,3)].forEach(p => {
-    const label = p.estado === 'vencido' ? 'Vencido' : 'Próximo';
-    const remaining = p.restante == null ? 'Sin referencia' : Math.abs(p.restante).toLocaleString('es-AR') + ' ' + (p.unidad_medida || '');
-    html += `<div class="alert-row ${p.estado === 'vencido' ? 'danger' : 'warn'}"><span>🔧</span><span class="alert-text"><b>${escapeHtml(p.unidad)}</b> — ${escapeHtml(p.nombre)} · ${label} · ${p.estado === 'vencido' ? 'pasado por' : 'faltan'} ${escapeHtml(remaining)}</span></div>`;
+  maintVencidos.forEach(m => {
+    html += `<div class="alert-row danger" onclick="navigate('maintenance')" style="cursor:pointer"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.unidad)}</b> — ${escapeHtml(m.nombre)} vencido — ${escapeHtml(maintCuanto(m))}</span></div>`;
+  });
+  otsUrgentes.slice(0,3).forEach(o => {
+    html += `<div class="alert-row danger" onclick="navigate('workorders')" style="cursor:pointer"><span>🔧</span><span class="alert-text"><b>${escapeHtml(o.vehicle||'—')}</b> — OT ${escapeHtml(o.id||o.code||'')} urgente · ${escapeHtml(o.status||'')}</span></div>`;
+  });
+  maintProximos.slice(0,3).forEach(m => {
+    html += `<div class="alert-row warn" onclick="navigate('maintenance')" style="cursor:pointer"><span>🔧</span><span class="alert-text"><b>${escapeHtml(m.unidad)}</b> — ${escapeHtml(m.nombre)} próximo — ${escapeHtml(maintCuanto(m))}</span></div>`;
   });
   warnDocs.slice(0,2).forEach(d => {
     const days = Math.ceil((new Date(d.expiry)-new Date())/86400000);
@@ -707,10 +825,8 @@ async function renderDashboard() {
     (async () => {
       try {
         const res = await apiFetch('/api/payments/pendientes');
-        if (!res || !res.ok) throw new Error('Pagos no disponibles');
+        if (!res || !res.ok) return;
         const rows = await res.json();
-        if (!Array.isArray(rows)) throw new Error('Respuesta inválida');
-        if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
         const pend = rows.filter(r => !r.pagada);
         const suma = (arr) => arr.reduce((a, r) => a + (parseFloat(r.saldo) || 0), 0);
         const porVencer = pend.filter(r => r.por_vencer);
@@ -724,13 +840,7 @@ async function renderDashboard() {
         setTile('cmd-fac-pend',      pend.length,      suma(pend),      'sin pendientes');
         setTile('cmd-pag-porvencer', porVencer.length, suma(porVencer), 'nada por vencer');
         setTile('cmd-pag-vencidos',  vencidas.length,  suma(vencidas),  'sin vencidas');
-      } catch (e) {
-        if (request !== _dashboardRequest || userId !== App.currentUser?.id) return;
-        ['cmd-fac-pend','cmd-pag-porvencer','cmd-pag-vencidos'].forEach(id => {
-          const tile = document.getElementById(id);
-          if (tile) { tile.children[1].textContent = '—'; tile.children[2].textContent = 'No se pudo cargar. Reintentá.'; }
-        });
-      }
+      } catch (e) { /* la parte financiera es opcional; si falla, queda en '…' */ }
     })();
   }
 }

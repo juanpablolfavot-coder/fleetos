@@ -70,11 +70,16 @@ function uiAttentionRow(icon, title, detail, page, action) {
 function renderModernHome() {
   const root = document.getElementById('page-home');
   if (!root) return;
-  const choices = [...document.querySelectorAll('.sidebar .nav-item[data-page]')].filter(l => l.dataset.page !== 'home' && l.style.display !== 'none');
+  const modules = App.currentUser?.roleData?.modules || [];
+  const pending = _homePendientes(modules);
+  const maintenance = maintResumen();
+  const attention = pending.length ? `<section class="attention-panel"><h2>Requiere tu atención</h2><p>Los pendientes de tus secciones, ordenados por prioridad.</p>${pending.map(p => uiAttentionRow(p.nav, `${p.n} ${p.texto}`, p.tone === 'danger' ? 'Requiere revisión' : 'Próximo a resolver', p.nav, 'Revisar')).join('')}</section>` : '';
   root.innerHTML = uiHeading(`Hola, ${(App.currentUser?.name || '').split(' ')[0]}`, 'Tu jornada, organizada. Encontrá lo que necesitás y seguí trabajando.') + `
-    <section class="home-welcome"><div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h2>Todo listo para<br>poner la flota en marcha.</h2><p>Vehículos, mantenimiento y gestión, en un mismo lugar.</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><div class="home-brand" aria-hidden="true">${uiIcon('fleet')}<span>EB</span></div></section>
+    <section class="home-welcome"><div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h2>Tu flota.<br>Una visión más clara.</h2><p>Vehículos, mantenimiento y gestión, en un mismo lugar.</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><div class="home-brand" aria-hidden="true">${uiIcon('fleet')}<span>EB</span></div></section>
+    ${attention}
+    ${uiAllowed('maintenance') && !maintenance.disponible ? '<p class="card">No se pudieron cargar los planes. Los pendientes de mantenimiento no están confirmados.</p>' : ''}
     <div class="section-header"><h2 class="section-title">Tus accesos</h2><span class="muted">${escapeHtml(App.currentUser?.roleData?.label || '')}</span></div>
-    <div class="home-shortcuts">${choices.map(l => `<button class="shortcut" onclick="navigate('${l.dataset.page}')"><span class="shortcut-icon">${uiIcon(l.dataset.page)}</span><strong>${escapeHtml(l.querySelector('span:not(.nav-icon)')?.textContent || l.dataset.page)}</strong><span class="shortcut-arrow" aria-hidden="true">↗</span></button>`).join('')}</div>
+    <div class="home-shortcuts">${_homeAccesos(modules)}</div>
     ${App.currentUser?.role === 'dueno' ? '<section class="home-notifications"><div><strong>La flota también te avisa</strong><p>Recibí alertas de velocidad aunque tengas la app cerrada. En iPhone, agregá primero FleetOS a la pantalla de inicio.</p></div><button class="btn btn-secondary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">Activar alertas de velocidad</button></section>' : ''}`;
   if (App.currentUser?.role === 'dueno') _refreshSpeedAlertBtn();
 }
