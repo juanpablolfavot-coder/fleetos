@@ -7,7 +7,7 @@
 // intercepta. Un handler no-op (que no llama respondWith) agrega overhead en cada
 // navegación y Chrome lo advierte ("no-op fetch handler"). Chrome moderno ya no
 // exige un fetch handler para permitir la instalación PWA.
-const SW_VERSION = 'fleetos-v1';
+const SW_VERSION = 'fleetos-v2';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -29,12 +29,19 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// Al tocar la notificación se va a la URL que trae (el exceso puntual en el
+// feed, el resumen en Control en vivo). Si la app ya está abierta se la
+// enfoca Y se la lleva ahí: antes con una ventana abierta sólo se enfocaba, y
+// el dueño quedaba en la pantalla en la que estaba, sin ver de qué le avisaron.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || '/';
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      for (const c of list) { if ('focus' in c) return c.focus(); }
+      for (const c of list) {
+        if (!('focus' in c)) continue;
+        return c.focus().then((w) => (w && 'navigate' in w ? w.navigate(url).catch(() => w) : w));
+      }
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })
   );

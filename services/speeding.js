@@ -115,8 +115,12 @@ async function processVehicle(v, speed) {
         `INSERT INTO speeding_events (vehicle_code, vehicle_plate, base, max_speed, limit_kmh)
          VALUES ($1,$2,$3,$4,$5) RETURNING id`,
         [code, v.plate || null, v.base || null, s, LIMIT]);
-      // Una notificación por evento (al abrirlo).
-      await push.notifyDuenos({
+      // Una notificación por evento (al abrirlo). El resultado NO se descarta:
+      // si no salió, se dice por qué (push sin claves, ningún dispositivo
+      // suscripto, claves rechazadas). Antes esto devolvía "+ notificación"
+      // pasara lo que pasara, y un exceso sin aviso era indistinguible de uno
+      // avisado: el historial decía que se notificó y el teléfono no sonaba.
+      const envio = await push.enviarARoles(['dueno'], {
         title: '⚠ Exceso de velocidad',
         body: `${code} a ${s} km/h${v.base ? ' — ' + v.base : ''} (límite ${LIMIT})`,
         tag: `speed-${code}`,
@@ -125,8 +129,15 @@ async function processVehicle(v, speed) {
         // chofer. Sin el id caía en la lista entera y había que buscar cuál de
         // todos era el que acababa de avisar.
         url: `/?ir=flota&tab=feed&evento=${nuevo.rows[0].id}`,
-      }).catch(() => {});
-      return 'exceso abierto + notificación';
+      }).catch((e) => ({ enabled: true, dispositivos: -1, sent: 0, errores: [e.message] }));
+      const detalle = envio.dispositivos === -1
+        ? `SIN notificación: error al enviar — ${envio.errores[0]}`
+        : push.describirEnvio(envio);
+      // Una línea por exceso en el log del server. Es la única huella de que el
+      // sondeo abrió un evento (el resto pasa en silencio) y la primera pregunta
+      // cuando "no llegó la alerta" es si el exceso se detectó siquiera.
+      console.log(`[velocidad] ${code} a ${s} km/h (límite ${LIMIT}): exceso abierto, ${detalle}`);
+      return `exceso abierto, ${detalle}`;
     }
   } else if (open && s <= LIMIT) {
     // Volvió al límite (o menos): cerrar el evento y calcular la duración.

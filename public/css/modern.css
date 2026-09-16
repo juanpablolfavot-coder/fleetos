@@ -74,6 +74,7 @@ table td { font-size: 13px; padding: 15px 12px; }
 .home-notifications { display: flex; align-items: center; gap: 24px; padding: 24px; margin-top: 24px; border: 1px solid var(--border); border-radius: 14px; }
 .home-notifications p { max-width: 620px; font-size: 12px; color: var(--text3); margin-top: 6px; }
 .home-notifications button { flex-shrink: 0; }
+.home-notifications-actions { display: flex; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
 .attention-panel { border: 1px solid #efb28e; border-radius: 15px; background: #fff7f1; padding: 22px; margin-bottom: 24px; }
 .attention-panel h2 { font-size: 19px; color: #9b3508; letter-spacing: -.4px; }
 .attention-panel > p { margin: 4px 0 16px; font-size: 13px; color: var(--text3); }
@@ -150,6 +151,7 @@ table td { font-size: 13px; padding: 15px 12px; }
   .shortcut-arrow { display: none; }
   .home-notifications { padding: 19px; }
   .home-notifications .btn { width: 100%; white-space: normal; }
+  .home-notifications-actions { width: 100%; }
   .kpi-row { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
   .kpi-card { padding: 16px; min-width: 0; }
   .kpi-value { font-size: 29px; }
