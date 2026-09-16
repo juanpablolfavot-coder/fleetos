@@ -248,8 +248,8 @@ function _dibujarLista() {
         <td data-label="" class="mant-acciones">
           ${puedeEditar() ? `
             <button class="btn btn-secondary btn-sm" onclick="marcarMantRealizado('${p.id}')" title="Mover la línea de base al contador actual">✓ Ya se hizo</button>
-            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')" title="Editar">✎</button>
-            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')" title="Dar de baja">🗑</button>` : ''}
+            <button class="btn btn-secondary btn-sm" onclick="openPlanMantModal('${p.id}')" title="Editar" aria-label="Editar plan de ${escapeHtml(p.unidad)}">✎</button>
+            <button class="btn btn-secondary btn-sm" onclick="bajaPlanMant('${p.id}')" title="Dar de baja" aria-label="Dar de baja plan de ${escapeHtml(p.unidad)}">🗑</button>` : ''}
         </td>
       </tr>`;
   }).join('');

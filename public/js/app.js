@@ -257,6 +257,8 @@ function navigate(page) {
   document.querySelector('.topbar-title').textContent = getPageTitle(page);
   document.querySelector('.topbar-sub').textContent = getPageSub(page);
   renderPage(page);
+  uiCloseMenu();
+  refreshModernNav();
 }
 
 // Menú desplegable (≤900px). En tablet la barra lateral se achica a solo
@@ -374,76 +376,16 @@ function _homeAccesos(modulos) {
   const orden = ['dashboard','chofer_panel','proveedor_panel','tesoreria_panel','auditor_panel','contador_panel',
     'fleet','flota','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','documents','costs','assets','users','config'];
   // Íconos para las pantallas que no tienen ítem en el menú lateral.
-  const iconoExtra = { contador_panel: '🧮', proveedor_panel: '📄', tesoreria_panel: '💳' };
   const paginas = orden.filter(p => modulos.includes(p) || (modulos.includes('all') && p !== 'home'));
   return paginas.map(p => {
     const nav = document.querySelector(`.nav-item[data-page="${p}"]`);
     if (nav && nav.style.display === 'none') return '';
-    const icon = nav?.querySelector('.nav-icon')?.textContent || iconoExtra[p] || '▪';
     const label = nav?.querySelector('span:not(.nav-icon)')?.textContent?.trim() || getPageTitle(p);
-    return `<button class="home-acceso" onclick="navigate('${p}')"><span class="home-acceso-icon">${icon}</span><span>${escapeHtml(label)}</span></button>`;
+    return `<button class="home-acceso" onclick="navigate('${p}')"><span class="home-acceso-icon">${uiIcon(p)}</span><span>${escapeHtml(label)}</span></button>`;
   }).join('');
 }
 
-function renderHome() {
-  const el = document.getElementById('page-home');
-  if (!el) return;
-  const u = App.currentUser || {};
-  const nombre = (u.name || '').trim().split(' ')[0];
-  const modulos = u.roleData?.modules || [];
-  const rolLabel = u.roleData?.label || '';
-  const hoy = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const pend = _homePendientes(modulos);
-  // Solo se ofrece la tarjeta de pendientes a los roles que ven alguna sección
-  // con pendientes; a un chofer o un auditor no le sirve un "nada pendiente".
-  const veSecciones = ['documents','workorders','maintenance','fleet','dashboard','stock','purchase_orders','fuel'].some(m => modulos.includes(m) || modulos.includes('all'));
-  const mant = maintResumen();
-  const tone = { danger: 'var(--danger)', warn: 'var(--warn)' };
-
-  el.innerHTML = `
-    <div class="home-hero">
-      <div class="home-logo">EB</div>
-      <div>
-        <div class="home-saludo">${nombre ? `Hola, ${escapeHtml(nombre)}` : 'Expreso Biletta'}</div>
-        <div class="home-sub">${escapeHtml(rolLabel)}${rolLabel ? ' · ' : ''}${hoy}</div>
-      </div>
-    </div>
-
-    ${veSecciones ? `
-    <div class="card home-card" style="border-left:4px solid ${pend.length ? (pend[0].tone === 'danger' ? 'var(--danger)' : 'var(--warn)') : 'var(--ok)'}">
-      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <span>${pend.length ? '⚠️ Requiere tu atención' : '✓ Sin pendientes'}</span>
-        <span style="font-size:11px;font-weight:400;color:var(--text3)">${pend.length ? `${pend.length} asunto${pend.length === 1 ? '' : 's'}` : 'en tus secciones'}</span>
-      </div>
-      ${pend.length ? `<div class="home-pendientes">
-        ${pend.map(p => `
-          <div class="home-pend" onclick="navigate('${p.nav}')">
-            <span class="home-pend-icon">${p.icon}</span>
-            <span class="home-pend-n" style="color:${tone[p.tone]}">${p.n}</span>
-            <span class="home-pend-txt">${escapeHtml(p.texto)}</span>
-            <span class="home-pend-ir">Ver →</span>
-          </div>`).join('')}
-      </div>` : `<div style="font-size:13px;color:var(--text3)">No hay documentos vencidos, OTs urgentes ni mantenimientos vencidos en lo que te corresponde.</div>`}
-      ${(modulos.includes('maintenance') || modulos.includes('all')) && !mant.disponible
-        ? '<div style="font-size:12px;color:var(--text3);margin-top:8px">No se pudieron cargar los planes de mantenimiento: ese pendiente no está contado.</div>' : ''}
-    </div>` : ''}
-
-    <div class="card home-card">
-      <div class="card-title">Tus secciones</div>
-      <div class="home-accesos">${_homeAccesos(modulos)}</div>
-    </div>
-
-    ${u.role === 'dueno' ? `
-      <div class="card home-card" style="display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px">
-        <button class="btn btn-secondary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">🔔 Activar alertas de velocidad</button>
-        <div style="font-size:12px;color:var(--text3);line-height:1.5;flex:1;min-width:220px">
-          Aviso en este celular cuando una unidad supere los <b>80 km/h</b>, aunque tengas la app cerrada.
-          En <b>iPhone</b>: primero agregá la app a la pantalla de inicio (Compartir → "Agregar a inicio").
-        </div>
-      </div>` : ''}
-  `;
-  if (u.role === 'dueno') _refreshSpeedAlertBtn();
-}
+function renderHome() { renderModernHome(); }
 
 // Deja el botón de alertas reflejando si este dispositivo ya está suscripto.
 async function _refreshSpeedAlertBtn() {
@@ -623,21 +565,10 @@ function renderDashboard() {
   };
 
   // ═══ Centro de comando: helper de tarjeta (solo presentación) ═══
-  const _tones = {
-    danger: ['rgba(239,68,68,.12)', 'rgba(239,68,68,.30)', 'var(--danger)'],
-    warn:   ['rgba(245,158,11,.12)', 'rgba(245,158,11,.30)', 'var(--warn)'],
-    ok:     ['rgba(16,185,129,.10)', 'rgba(16,185,129,.28)', 'var(--ok)'],
-    info:   ['rgba(37,99,235,.10)',  'rgba(37,99,235,.28)',  'var(--accent)'],
-    muted:  ['var(--bg3)',           'var(--border)',        'var(--text3)'],
-  };
-  const cmdTile = ({ icon, label, value, sub, tone = 'muted', nav, id }) => {
-    const [bg, bd, fg] = _tones[tone] || _tones.muted;
-    const click = nav ? `onclick="navigate('${nav}')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'"` : '';
-    return `<div ${id ? `id="${id}"` : ''} ${click} style="${nav ? 'cursor:pointer;' : ''}background:${bg};border:1px solid ${bd};border-radius:var(--radius);padding:14px;transition:transform .15s">
-      <div style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px"><span style="font-size:14px">${icon}</span>${label}</div>
-      <div style="font-size:26px;font-weight:800;line-height:1;color:${fg}">${value}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:5px">${sub}</div>
-    </div>`;
+  const cmdTile = ({ label, value, sub, tone = 'muted', nav, id }) => {
+    const target = nav || (id ? 'tesoreria_panel' : null);
+    return `<button type="button" class="cmd-tile" data-tone="${tone}" ${id ? `id="${id}"` : ''} ${target ? `onclick="navigate('${target}')"` : ''}>
+      <div class="cmd-label">${label}</div><div class="cmd-value">${value}</div><div class="cmd-sub">${sub}</div></button>`;
   };
   const verPagos = ['dueno','gerencia','tesoreria'].includes(App.currentUser?.role);
 
@@ -660,38 +591,8 @@ function renderDashboard() {
 
   // ═══ HTML DEL PANEL ═══
   document.getElementById('page-dashboard').innerHTML = `
+    ${uiHeading('Resumen operativo', 'Todo lo importante, en un solo lugar.')}
     ${_dashQuickAccess()}
-
-    <!-- 1. LO QUE REQUIERE ACCIÓN, arriba de todo -->
-    <div class="card" style="margin-bottom:16px;${totalPendientes > 0 ? 'border-left:4px solid var(--danger)' : 'border-left:4px solid var(--ok)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap">
-        <div>
-          <div class="card-title" style="margin:0">${totalPendientes > 0 ? '⚠️ Requiere acción' : '✓ Nada urgente'}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${totalPendientes > 0 ? `${totalPendientes} pendiente${totalPendientes===1?'':'s'} crítico${totalPendientes===1?'':'s'} · rojo primero` : 'Ningún pendiente crítico ahora mismo'}</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
-        ${tiles.map(x => cmdTile({ ...x.t, tone: x.tone })).join('')}
-        ${verPagos ? cmdTile({ icon:'🔴', label:'Pagos vencidos',       value:'…', sub:'facturas atrasadas', tone:'danger', id:'cmd-pag-vencidos' }) : ''}
-        ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
-        ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
-      </div>
-    </div>
-
-    <!-- 2. Detalle de alertas + mapa de flota -->
-    <div class="two-col" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-title">Alertas activas</div>
-        <div id="dash-alerts" style="max-height:300px;overflow-y:auto"></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Estado de la flota — ${v.length} unidades</div>
-        <div class="fleet-grid" id="fleet-grid-mini"></div>
-        <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono);flex-wrap:wrap">
-          <span>● Verde: operativo</span><span>● Naranja: alerta</span><span>● Rojo: taller/detenida</span>
-        </div>
-      </div>
-    </div>
 
     <!-- 3. KPIs: "puede salir" (estado mecánico) es una cosa; "al día en papeles
          y service" es otra. Antes el 100 % de disponibilidad convivía con
@@ -722,10 +623,39 @@ function renderDashboard() {
       </div>
     </div>
 
+    <section class="attention-panel" aria-label="Requiere atención">
+      <h2>Requiere atención</h2><p>${totalPendientes} pendientes críticos en las secciones operativas.</p>
+      ${uiAttentionRow('maintenance', !mant.disponible ? 'Mantenimiento no disponible' : maintVencidos.length + ' planes vencidos', !mant.disponible ? 'No se pudo consultar el estado. Reintentá desde Mantenimiento.' : maintProximos.length + ' próximos · ' + mant.sinBase.length + ' sin último service registrado', 'maintenance', 'Revisar planes')}
+      ${uiAttentionRow('documents', dangerDocs.length + ' documentos vencidos', warnDocs.length + ' por vencer. Revisá la documentación antes de la salida.', 'documents', 'Ver documentos')}
+      ${uiAttentionRow('workorders', otsUrgentes.length + ' órdenes urgentes', otsAbiertas.length + ' órdenes de trabajo abiertas', 'workorders', 'Ver órdenes')}
+    </section>
+    <details class="command-summary"><summary>Compras, stock y pagos · ver indicadores</summary><div class="command-tiles">
+        ${tiles.map(x => cmdTile({ ...x.t, tone: x.tone })).join('')}
+        ${verPagos ? cmdTile({ icon:'🔴', label:'Pagos vencidos',       value:'…', sub:'facturas atrasadas', tone:'danger', id:'cmd-pag-vencidos' }) : ''}
+        ${verPagos ? cmdTile({ icon:'⏰', label:'Pagos por vencer',     value:'…', sub:'próximos 7 días',    tone:'warn',   id:'cmd-pag-porvencer' }) : ''}
+        ${verPagos ? cmdTile({ icon:'🧾', label:'Facturas pendientes', value:'…', sub:'cargando…',          tone:'info',   id:'cmd-fac-pend' }) : ''}
+      </div>
+    </details>
+
+    <!-- 2. Detalle de alertas + mapa de flota -->
+    <div class="two-col" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">Alertas activas</div>
+        <div id="dash-alerts" style="max-height:300px;overflow-y:auto"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Estado de la flota — ${v.length} unidades</div>
+        <div class="fleet-grid" id="fleet-grid-mini"></div>
+        <div style="display:flex;gap:12px;font-size:11px;color:var(--text3);font-family:var(--mono);flex-wrap:wrap">
+          <span>● Verde: operativo</span><span>● Naranja: alerta</span><span>● Rojo: taller/detenida</span>
+        </div>
+      </div>
+    </div>
+
     <!-- BLOQUE 3: NÚMEROS DEL MES -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">📈 Números del mes · ${['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mo]} ${yr}</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+      <div class="month-metrics">
         <div style="background:var(--bg3);border-radius:var(--radius);padding:12px">
           <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⛽ Combustible</div>
           <div style="font-size:20px;font-weight:700;color:var(--text);font-family:var(--mono)">$${(combustibleMesCosto).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -806,6 +736,7 @@ function renderDashboard() {
   const alertsEl = document.getElementById('dash-alerts');
   const detainedVehicles = v.filter(x => x.status === 'detenida');
   let html = '';
+  if (!mant.disponible) html += '<div class="alert-row warn">No se pudo consultar mantenimiento. Su estado no está confirmado.</div>';
   detainedVehicles.forEach(veh => {
     html += `<div class="alert-row danger"><span>⚠</span><span class="alert-text"><b>${escapeHtml(veh.code)}</b> — Unidad detenida en base.</span></div>`;
   });
@@ -1058,6 +989,7 @@ function renderFleetTable(data) {
       <td><button class="btn btn-secondary btn-sm" onclick="openVehicleDetail('${v.id}')">Ver ficha</button></td>
     </tr>`;
   }).join('');
+  labelResponsiveTable(document.getElementById('fleet-table'));
 }
 
 function filterFleetTable(q) {
