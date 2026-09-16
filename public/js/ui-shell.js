@@ -80,7 +80,7 @@ function renderModernHome() {
     ${uiAllowed('maintenance') && !maintenance.disponible ? '<p class="card">No se pudieron cargar los planes. Los pendientes de mantenimiento no están confirmados.</p>' : ''}
     <div class="section-header"><h2 class="section-title">Tus accesos</h2><span class="muted">${escapeHtml(App.currentUser?.roleData?.label || '')}</span></div>
     <div class="home-shortcuts">${_homeAccesos(modules)}</div>
-    ${App.currentUser?.role === 'dueno' ? '<section class="home-notifications"><div><strong>La flota también te avisa</strong><p>Recibí alertas de velocidad aunque tengas la app cerrada. En iPhone, agregá primero FleetOS a la pantalla de inicio.</p></div><button class="btn btn-secondary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">Activar alertas de velocidad</button></section>' : ''}`;
+    ${App.currentUser?.role === 'dueno' ? '<section class="home-notifications"><div><strong>La flota también te avisa</strong><p>Recibí alertas de velocidad aunque tengas la app cerrada. En iPhone, agregá primero FleetOS a la pantalla de inicio.</p></div><div class="home-notifications-actions"><button class="btn btn-secondary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">Activar alertas de velocidad</button><button class="btn btn-secondary" id="btn-speed-test" onclick="probarNotificacion()" style="display:none" title="Manda una notificación de prueba a este dispositivo">Probar notificación</button></div></section>' : ''}`;
   if (App.currentUser?.role === 'dueno') _refreshSpeedAlertBtn();
 }
 

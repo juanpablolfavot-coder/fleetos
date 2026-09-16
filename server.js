@@ -310,6 +310,16 @@ httpServer = app.listen(PORT, () => {
   try { require('./services/reporte-mensual').programarReporteMensual(); }
   catch (e) { console.error('[reporte-mensual] no se pudo programar:', e.message); }
 
+  // Una línea al arranque que diga si el push puede salir. Sin esto, con las
+  // claves VAPID sin cargar, el server arrancaba en silencio y la única señal
+  // era un dueño diciendo "no me llega nada".
+  try {
+    const push = require('./services/push');
+    console.log(push.pushEnabled()
+      ? '[push] activo: las alertas de velocidad y el resumen de flota salen por notificación'
+      : '[push] DESACTIVADO: faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY en el Environment — no sale ninguna notificación');
+  } catch (e) { console.error('[push] no se pudo verificar:', e.message); }
+
   // Resumen periódico de la flota por push a los dueños (default cada 2 hs,
   // de 6 a 22). Se desactiva con RESUMEN_FLOTA_MIN=0.
   try { require('./services/resumen-flota').programarResumenFlota(); }
