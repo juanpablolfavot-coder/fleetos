@@ -277,6 +277,7 @@ window._autoRefreshSuppressPatterns = [
   // No auto-refresh para estos endpoints (son internos o no cambian data visible)
   '/api/auth/',         // login/refresh/logout
   '/api/gps/',          // sync GPS es automático
+  '/api/push/',         // la suscripción se re-sincroniza al abrir Inicio: con refresh sería un loop
   '/api/admin/backup',  // streaming de backup
 ];
 

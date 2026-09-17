@@ -388,15 +388,70 @@ function _homeAccesos(modulos) {
 function renderHome() { renderModernHome(); }
 
 // Deja el botón de alertas reflejando si este dispositivo ya está suscripto.
+//
+// Además, si el navegador tiene una suscripción, la vuelve a mandar al server
+// (una vez por sesión). El navegador y la base pueden desengancharse sin que
+// nada lo avise: si se borró la fila (usuario recreado, tabla vaciada) o si el
+// server cambió sus claves VAPID, el botón decía "Desactivar" —o sea, "está
+// activo"— y ninguna alerta salía. Con esto la fila se recompone sola y, si
+// las claves cambiaron, se avisa que hay que volver a activar.
+let _pushSincronizado = false;
 async function _refreshSpeedAlertBtn() {
   const btn = document.getElementById('btn-speed-alerts');
+  const btnProbar = document.getElementById('btn-speed-test');
   if (!btn || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
   try {
     const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !_pushSincronizado) {
+      _pushSincronizado = true;
+      sub = await _sincronizarSuscripcion(sub);
+    }
     if (sub) { btn.textContent = '🔕 Desactivar alertas de velocidad'; btn.onclick = disableSpeedAlerts; }
     else     { btn.textContent = '🔔 Activar alertas de velocidad';   btn.onclick = enableSpeedAlerts; }
+    if (btnProbar) btnProbar.style.display = sub ? '' : 'none';
   } catch (e) { /* dejar el botón por defecto */ }
+}
+
+// Devuelve la suscripción vigente, o null si hubo que darla de baja porque el
+// server ya no la puede usar (cambió la clave VAPID).
+async function _sincronizarSuscripcion(sub) {
+  try {
+    const keyRes = await apiFetch('/api/push/public-key');
+    if (!keyRes || !keyRes.ok) return sub;
+    const { publicKey, enabled } = await keyRes.json();
+    if (!enabled || !publicKey) return sub;      // sin claves en el server no hay nada que comparar
+    const propia = _keyBase64Url(sub.options && sub.options.applicationServerKey);
+    if (propia && propia !== publicKey.replace(/=+$/, '')) {
+      await sub.unsubscribe().catch(() => {});
+      showToast('warn', 'Cambiaron las claves de notificación del servidor: volvé a activar las alertas de velocidad.');
+      return null;
+    }
+    await apiFetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify({ subscription: sub }) });
+  } catch (e) { /* sin red o sin server: se deja como está */ }
+  return sub;
+}
+
+function _keyBase64Url(buf) {
+  if (!buf) return null;
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Manda una notificación de prueba a este usuario y dice qué pasó: es la
+// forma de saber en un toque si el canal anda, sin esperar a que un camión se pase.
+async function probarNotificacion() {
+  const btn = document.getElementById('btn-speed-test');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await apiFetch('/api/push/probar', { method: 'POST', body: '{}' });
+    const d = r ? await r.json().catch(() => ({})) : {};
+    if (!r || !r.ok) { showToast('error', d.error || 'No se pudo probar'); return; }
+    showToast(d.ok ? 'ok' : 'warn', d.mensaje || (d.ok ? 'Enviada' : 'No salió'));
+  } catch (e) { showToast('error', 'No se pudo probar: ' + (e.message || e)); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 function _urlBase64ToUint8Array(base64String) {
