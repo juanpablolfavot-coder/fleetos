@@ -3255,9 +3255,67 @@ function openFuelTankEntryTicket(entryOrId) {
       </div>
     </div>
   `, [
+    ...(_fuelPuedeEditarTickets(App.currentUser?.role) ? [{ label:'✏️ Editar', cls:'btn-secondary', fn: () => openEditFuelTankEntry(entry.id) }] : []),
     { label:'🖨 Imprimir ticket', cls:'btn-primary', fn: () => printFuelTankEntryTicket(entry.id) },
     { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+// Edición de tickets de combustible: SOLO dueño y gerencia (administrador).
+// El backend valida lo mismo (requireOwner); esto solo oculta los botones.
+function _fuelPuedeEditarTickets(role) {
+  return role === 'dueno' || role === 'gerencia';
+}
+
+function openEditFuelTankEntry(entryId) {
+  if (!_fuelPuedeEditarTickets(App.currentUser?.role)) { showToast('error', 'Solo el dueño o el administrador pueden editar tickets'); return; }
+  const e = (App.data.tankEntries || []).find(x => x.id === entryId);
+  if (!e) { showToast('error', 'No se encontró el ticket de cisterna'); return; }
+  const val = v => escapeHtml(v === null || v === undefined ? '' : String(v));
+  openModal(`✏️ Editar ticket ${_fuelTankEntryCode(e)}`, `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Litros ingresados</label><input class="form-input" type="number" id="fee-liters" min="1" value="${val(e.liters)}"></div>
+      <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" id="fee-ppu" step="0.01" value="${val(e.price_per_l)}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Proveedor</label><input class="form-input" id="fee-supplier" value="${val(e.supplier)}"></div>
+      <div class="form-group"><label class="form-label">Remito</label><input class="form-input" id="fee-remito" value="${val(e.remito)}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notas</label><input class="form-input" id="fee-notes" value="${val(e.notes)}"></div>
+    <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px">
+      Si cambiás los litros, el nivel de la cisterna se ajusta por la diferencia. El cambio queda registrado en auditoría.
+    </div>
+  `, [
+    { label:'Guardar cambios', cls:'btn-primary', fn: () => saveEditFuelTankEntry(entryId) },
+    { label:'Cancelar', cls:'btn-secondary', fn: () => openFuelTankEntryTicket(entryId) }
+  ]);
+}
+
+async function saveEditFuelTankEntry(entryId) {
+  const liters = parseFloat(document.getElementById('fee-liters')?.value);
+  if (!Number.isFinite(liters) || liters <= 0) { showToast('error', 'Ingresá litros válidos'); return; }
+  const ppuRaw = (document.getElementById('fee-ppu')?.value || '').trim();
+  const res = await apiFetch(`/api/fuel/tank-entries/${entryId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      liters,
+      price_per_l: ppuRaw === '' ? null : parseFloat(ppuRaw),
+      supplier: document.getElementById('fee-supplier')?.value || '',
+      remito:   document.getElementById('fee-remito')?.value || '',
+      notes:    document.getElementById('fee-notes')?.value || '',
+    })
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch(_) {}
+    showToast('error', err.error || 'Error al editar el ticket');
+    return;
+  }
+  closeModal();
+  showToast('ok', '✅ Ticket de cisterna actualizado');
+  try { await loadInitialData(); } catch(_) {}
+  renderFuel();
+  setTimeout(() => openFuelTankEntryTicket(entryId), 150);
 }
 
 function printFuelTankEntryTicket(entryId) {
@@ -11238,9 +11296,68 @@ function openFuelVehicleTicket(logId) {
       </div>
     </div>
   `, [
+    ...(_fuelPuedeEditarTickets(App.currentUser?.role) ? [{ label:'✏️ Editar', cls:'btn-secondary', fn: () => openEditFuelLog(logId) }] : []),
     { label:'🖨 Imprimir ticket', cls:'btn-primary', fn: () => printFuelVehicleTicket(logId) },
     { label:'Cerrar', cls:'btn-secondary', fn: closeModal }
   ]);
+}
+
+// Editar ticket de carga de combustible a vehículo — solo dueño y gerencia.
+function openEditFuelLog(logId) {
+  if (!_fuelPuedeEditarTickets(App.currentUser?.role)) { showToast('error', 'Solo el dueño o el administrador pueden editar tickets'); return; }
+  const f = (App.data.fuelLogs || []).find(x => x.id === logId);
+  if (!f) { showToast('error', 'No se encontró la carga'); return; }
+  const val = v => escapeHtml(v === null || v === undefined ? '' : String(v));
+  const _v = (App.data.vehicles||[]).find(x => x.code === f.vehicle);
+  const lectura = (_v && isAutoelevador(_v)) ? 'Horómetro (h)' : 'Odómetro (km)';
+  openModal(`✏️ Editar carga ${_fuelVehicleTicketCode(f)}`, `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px">Unidad <b>${escapeHtml(f.vehicle || '—')}</b> · ${escapeHtml(f.date || '')}</div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Litros</label><input class="form-input" type="number" id="efl-liters" min="1" value="${val(f.liters)}"></div>
+      <div class="form-group"><label class="form-label">Precio por litro ($)</label><input class="form-input" type="number" id="efl-ppu" step="0.01" value="${f.ppu ? val(f.ppu) : ''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">${lectura}</label><input class="form-input" type="number" id="efl-km" value="${f.km ? val(f.km) : ''}"></div>
+      <div class="form-group"><label class="form-label">Chofer</label><input class="form-input" id="efl-driver" value="${f.driver && f.driver !== '—' ? val(f.driver) : ''}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Lugar</label><input class="form-input" id="efl-place" value="${val(f.place)}"></div>
+      <div class="form-group"><label class="form-label">Notas</label><input class="form-input" id="efl-notes" value="${val(f.notes)}"></div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px">
+      Si la carga salió de cisterna y cambiás los litros, el stock de la cisterna se ajusta por la diferencia. El cambio queda registrado en auditoría.
+    </div>
+  `, [
+    { label:'Guardar cambios', cls:'btn-primary', fn: () => saveEditFuelLog(logId) },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+async function saveEditFuelLog(logId) {
+  const liters = parseFloat(document.getElementById('efl-liters')?.value);
+  if (!Number.isFinite(liters) || liters <= 0) { showToast('error', 'Ingresá litros válidos'); return; }
+  const ppuRaw = (document.getElementById('efl-ppu')?.value || '').trim();
+  const res = await apiFetch(`/api/fuel/${logId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      liters,
+      price_per_l: ppuRaw === '' ? null : parseFloat(ppuRaw),
+      odometer_km: document.getElementById('efl-km')?.value || null,
+      driver_name: document.getElementById('efl-driver')?.value || '',
+      location:    document.getElementById('efl-place')?.value || '',
+      notes:       document.getElementById('efl-notes')?.value || '',
+    })
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch(_) {}
+    showToast('error', err.error || 'Error al editar la carga');
+    return;
+  }
+  closeModal();
+  showToast('ok', '✅ Carga de combustible actualizada');
+  try { await loadInitialData(); } catch(_) {}
+  renderFuel();
 }
 
 function printFuelVehicleTicket(logId) {
@@ -11335,6 +11452,7 @@ function _renderFuelLogRows(logs) {
         ${f.ticket_image && _fuelIsCisternaVehicleLog(f)
           ? `<button class="btn btn-secondary btn-sm" onclick="viewTicket('${f.id}')" title="Ver foto adjunta">📷</button>`
           : ''}
+        ${_fuelPuedeEditarTickets(App.currentUser?.role) ? `<button class="btn btn-secondary btn-sm" onclick="openEditFuelLog('${f.id}')" title="Editar carga" style="padding:4px 8px">✏️</button>` : ''}
         ${App.currentUser?.role === 'dueno' ? `<button class="btn btn-danger btn-sm" onclick="deleteFuelLog('${f.id}','${f.vehicle}',${f.liters})" title="Eliminar" style="padding:4px 8px">🗑</button>` : ''}
       </div>
     </td>
