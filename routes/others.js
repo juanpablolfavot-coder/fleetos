@@ -376,6 +376,73 @@ fuelRouter.post('/tank-entries', authenticate, requireRole('dueno','gerencia','e
   }
 });
 
+// Editar ticket de ingreso a cisterna. SOLO dueño y gerencia (administrador).
+// Si cambian los litros, se ajusta el nivel de la cisterna por la diferencia
+// y se recalcula el "nivel nuevo" del ticket.
+fuelRouter.patch('/tank-entries/:id', authenticate, requireOwner, validateUUID('id'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureFuelTankEntriesTable();
+    const body = req.body || {};
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM fuel_tank_entries WHERE id=$1 FOR UPDATE', [req.params.id]);
+    const old = cur.rows[0];
+    if (!old) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Ticket no encontrado' }); }
+
+    const oldLiters = parseFloat(old.liters) || 0;
+    let liters = oldLiters;
+    if (body.liters !== undefined) {
+      liters = parseFloat(body.liters);
+      if (!Number.isFinite(liters) || liters <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Ingresá litros válidos' }); }
+    }
+    let ppu = old.price_per_l;
+    if (body.price_per_l !== undefined) {
+      ppu = body.price_per_l === '' || body.price_per_l === null ? null : parseFloat(body.price_per_l);
+      if (ppu !== null && (!Number.isFinite(ppu) || ppu < 0)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Precio por litro inválido' }); }
+    }
+    const txt = (k) => body[k] === undefined ? old[k] : ((body[k] ?? '').toString().trim() || null);
+    const supplier = txt('supplier');
+    const remito   = txt('remito');
+    const notes    = txt('notes');
+
+    const delta = liters - oldLiters;
+    if (delta !== 0 && old.tank_id) {
+      const tq = await client.query('SELECT current_l, capacity_l FROM tanks WHERE id=$1 FOR UPDATE', [old.tank_id]);
+      const tank = tq.rows[0];
+      if (tank) {
+        const current  = parseFloat(tank.current_l) || 0;
+        const capacity = parseFloat(tank.capacity_l) || 0;
+        const next = current + delta;
+        if (next < 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: `No se puede bajar tanto: la cisterna quedaría en negativo (actual ${current.toFixed(0)} L)` }); }
+        if (capacity > 0 && next > capacity) { await client.query('ROLLBACK'); return res.status(409).json({ error: `Excede la capacidad de la cisterna (${capacity.toFixed(0)} L). Actual: ${current.toFixed(0)} L` }); }
+        await client.query('UPDATE tanks SET current_l=$1, updated_at=NOW() WHERE id=$2', [next, old.tank_id]);
+      }
+    }
+    const newL = (parseFloat(old.previous_l) || 0) + liters;
+
+    const upd = await client.query(`
+      UPDATE fuel_tank_entries
+         SET liters=$1, price_per_l=$2, supplier=$3, remito=$4, notes=$5, new_l=$6
+       WHERE id=$7
+      RETURNING *, ${arTsSql('created_at')} AS created_at_ar
+    `, [liters, ppu, supplier, remito, notes, newL, req.params.id]);
+    await client.query('COMMIT');
+
+    await auditChange(req, res, {
+      action: 'fuel_tank_entry_edit', table: 'fuel_tank_entries', recordId: req.params.id,
+      oldValue: { liters: old.liters, price_per_l: old.price_per_l, supplier: old.supplier, remito: old.remito, notes: old.notes, new_l: old.new_l },
+      newValue: { liters, price_per_l: ppu, supplier, remito, notes, new_l: newL },
+    });
+    res.json({ ok: true, entry: upd.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel tank-entries PATCH]', err.message);
+    res.status(500).json({ error: 'Error al editar ticket de cisterna' });
+  } finally {
+    client.release();
+  }
+});
+
 
 // Despachos internos: salida de cisterna hacia sucursal, bidones o tanque chico.
 // No se registra como consumo de una unidad: solo descuenta la cisterna y genera remito interno.
@@ -1443,6 +1510,71 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 });
 
 // ── Cargas pendientes de verificación ────────────────────
+// PATCH /api/fuel/:id — editar ticket de carga de combustible. SOLO dueño y gerencia (administrador).
+// Si cambian los litros de una carga desde cisterna, se ajusta el stock de la cisterna por la diferencia.
+fuelRouter.patch('/:id', authenticate, requireOwner, validateUUID('id'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const body = req.body || {};
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM fuel_logs WHERE id=$1 FOR UPDATE', [req.params.id]);
+    const old = cur.rows[0];
+    if (!old) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Carga no encontrada' }); }
+
+    const oldLiters = parseFloat(old.liters) || 0;
+    let liters = oldLiters;
+    if (body.liters !== undefined) {
+      liters = parseFloat(body.liters);
+      if (!Number.isFinite(liters) || liters <= 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Ingresá litros válidos' }); }
+    }
+    let ppu = old.price_per_l;
+    if (body.price_per_l !== undefined) {
+      ppu = body.price_per_l === '' || body.price_per_l === null ? null : parseFloat(body.price_per_l);
+      if (ppu !== null && (!Number.isFinite(ppu) || ppu < 0)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Precio por litro inválido' }); }
+    }
+    let km = old.odometer_km;
+    if (body.odometer_km !== undefined) {
+      const k = parseInt(body.odometer_km, 10);
+      km = Number.isFinite(k) && k > 0 ? k : null;
+    }
+    const txt = (k, max) => body[k] === undefined ? old[k] : ((body[k] ?? '').toString().trim().slice(0, max) || null);
+    const driverName = txt('driver_name', 150);
+    const location   = txt('location', 500);
+    const notes      = txt('notes', 2000);
+
+    const delta = liters - oldLiters;
+    if (delta !== 0 && old.tank_id) {
+      const t = await client.query('SELECT current_l, location FROM tanks WHERE id=$1 FOR UPDATE', [old.tank_id]);
+      if (t.rows[0]) {
+        const stock = parseFloat(t.rows[0].current_l) || 0;
+        if (stock - delta < 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: `Combustible insuficiente en ${t.rows[0].location} (${stock.toFixed(0)} L disponibles)` });
+        }
+        await client.query('UPDATE tanks SET current_l = current_l - $1, updated_at = NOW() WHERE id=$2', [delta, old.tank_id]);
+      }
+    }
+
+    const upd = await client.query(
+      `UPDATE fuel_logs SET liters=$1, price_per_l=$2, odometer_km=$3, driver_name=$4, location=$5, notes=$6
+        WHERE id=$7 RETURNING *`,
+      [liters, ppu, km, driverName, location, notes, req.params.id]
+    );
+    await client.query('COMMIT');
+
+    await auditChange(req, res, {
+      action: 'fuel_edit', table: 'fuel', recordId: req.params.id,
+      oldValue: { liters: old.liters, price_per_l: old.price_per_l, odometer_km: old.odometer_km, driver_name: old.driver_name, location: old.location, notes: old.notes },
+      newValue: { liters, price_per_l: ppu, odometer_km: km, driver_name: driverName, location, notes },
+    });
+    res.json({ ok: true, log: upd.rows[0] });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[fuel PATCH]', err.message);
+    res.status(500).json({ error: 'Error al editar carga' });
+  } finally { client.release(); }
+});
+
 // DELETE /api/fuel/:id — solo dueño puede eliminar cargas
 fuelRouter.delete('/:id', authenticate, requireRole('dueno'), validateUUID('id'), async (req, res) => {
   // Transacción con DELETE primero (RETURNING): antes se acreditaban los litros al
