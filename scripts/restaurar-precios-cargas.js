@@ -31,6 +31,16 @@
  *                        poné la fecha de ayer.
  *   --tanque <uuid>      Opcional: limitar a una cisterna. Por defecto usa las
  *                        cisternas que aparecen en la auditoría de la corrección.
+ *   --precio-inicial N   Opcional: precio para las cargas anteriores a cualquier
+ *                        dato conocido (si no se indica, esas quedan sin tocar).
+ *
+ * Fuentes de la reconstrucción, de más a menos confiable:
+ *   1. La auditoría de la carga misma (POST /api/fuel): el cuerpo trae el precio
+ *      que la pantalla copió del tanque en ese momento = lo que se guardó.
+ *   2. El precio vigente del tanque a esa fecha, según las cargas anteriores y
+ *      los cambios hechos en "Editar cisterna".
+ *   3. Los ingresos a cisterna con precio (menos confiable: según el rol de quien
+ *      lo cargó, el ingreso NO siempre actualizaba el precio del tanque).
  */
 const fs   = require('fs');
 const zlib = require('zlib');
@@ -44,6 +54,9 @@ const BACKUP  = opt('--backup');
 const RECON   = args.includes('--reconstruir');
 const HASTA   = opt('--hasta');
 const TANQUE  = opt('--tanque');
+// Precio a usar para las cargas anteriores a cualquier dato conocido (p. ej. las
+// de principios de junio, antes del primer ingreso a cisterna registrado).
+const PRECIO_INICIAL = opt('--precio-inicial') ? parseFloat(opt('--precio-inicial')) : null;
 
 const money = n => '$' + Number(n).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fechaAR = d => new Date(d).toLocaleString('es-AR', { timeZone: AR_TZ, hour12: false });
@@ -96,15 +109,38 @@ async function timelinePrecios(client, tankId) {
       FROM audit_log
      WHERE table_name='fuel' AND action='POST' AND new_value->>'tank_id'=$1
        AND new_value ? 'price_per_l' AND (new_value->>'price_per_l') ~ '^[0-9.]+$'`, [tankId]);
-  po.rows.forEach(r => ev.push({ at: new Date(r.at), ppu: parseFloat(r.ppu), src: 'ingreso (auditoría)' }));
+  // Ojo: acá caen tanto los ingresos a cisterna como las cargas a vehículo (las dos
+  // mandan tank_id + price_per_l). Las cargas son la mejor evidencia del precio
+  // vigente del tanque, porque la pantalla lo copia del tanque al cargar.
+  po.rows.forEach(r => ev.push({ at: new Date(r.at), ppu: parseFloat(r.ppu), src: 'carga/ingreso (auditoría)' }));
   ev.sort((a, b) => a.at - b.at);
-  // Quitar repetidos consecutivos (mismo precio, misma fuente en segundos).
   return ev.filter(e => Number.isFinite(e.ppu) && e.ppu > 0);
 }
+// Último evento anterior a `when`. Primero solo fuentes fuertes (cargas y
+// "editar cisterna"); si no hay ninguna, cualquier fuente.
 function precioVigente(timeline, when) {
+  const fuerte = e => e.src !== 'ingreso a cisterna';
   let cur = null;
+  for (const e of timeline) { if (e.at <= when) { if (fuerte(e)) cur = e; } else break; }
+  if (cur) return cur;
   for (const e of timeline) { if (e.at <= when) cur = e; else break; }
   return cur;
+}
+// Auditoría de la carga misma: POST /api/fuel con el mismo vehículo y litros,
+// registrada segundos después de la carga. Es el precio exacto que se guardó.
+async function precioPropio(client, c) {
+  const r = await client.query(`
+    SELECT new_value->>'price_per_l' AS ppu
+      FROM audit_log
+     WHERE table_name='fuel' AND action='POST'
+       AND new_value->>'vehicle_id' = $1
+       AND new_value->>'tank_id' = $2
+       AND (new_value->>'liters')::numeric = $3::numeric
+       AND created_at BETWEEN $4::timestamptz - interval '10 seconds' AND $4::timestamptz + interval '3 minutes'
+       AND (new_value->>'price_per_l') ~ '^[0-9.]+$'
+     ORDER BY created_at LIMIT 1`, [c.vehicle_id, c.tank_id, c.liters, c.logged_at]);
+  const ppu = r.rows[0] ? parseFloat(r.rows[0].ppu) : NaN;
+  return Number.isFinite(ppu) && ppu > 0 ? ppu : null;
 }
 
 (async () => {
@@ -125,7 +161,7 @@ function precioVigente(timeline, when) {
 
     // Cargas candidatas: de esas cisternas, anteriores al corte.
     const cargas = await client.query(`
-      SELECT fl.id, fl.tank_id, fl.liters, fl.price_per_l, fl.logged_at, v.code AS unidad, t.location AS cisterna
+      SELECT fl.id, fl.tank_id, fl.vehicle_id, fl.liters, fl.price_per_l, fl.logged_at, v.code AS unidad, t.location AS cisterna
         FROM fuel_logs fl
         JOIN vehicles v ON v.id = fl.vehicle_id
         LEFT JOIN tanks t ON t.id = fl.tank_id
@@ -154,9 +190,14 @@ function precioVigente(timeline, when) {
         if (!b) { sinDato.push({ c, why: 'no está en el backup (¿backup anterior a la carga?)' }); continue; }
         nuevo = b.ppu; fuente = 'backup';
       } else {
-        const e = precioVigente(timelines[c.tank_id] || [], new Date(c.logged_at));
-        if (!e) { sinDato.push({ c, why: 'sin precio de cisterna conocido a esa fecha' }); continue; }
-        nuevo = e.ppu; fuente = e.src;
+        const propio = await precioPropio(client, c);
+        if (propio !== null) { nuevo = propio; fuente = 'auditoría de la carga'; }
+        else {
+          const e = precioVigente(timelines[c.tank_id] || [], new Date(c.logged_at));
+          if (e) { nuevo = e.ppu; fuente = e.src; }
+          else if (PRECIO_INICIAL && PRECIO_INICIAL > 0) { nuevo = PRECIO_INICIAL; fuente = '--precio-inicial'; }
+          else { sinDato.push({ c, why: 'sin precio de cisterna conocido a esa fecha (usá --precio-inicial N)' }); continue; }
+        }
       }
       const actual = c.price_per_l === null ? null : parseFloat(c.price_per_l);
       if (nuevo === actual || (nuevo === null && actual === null)) continue;
@@ -164,6 +205,10 @@ function precioVigente(timeline, when) {
     }
 
     console.log(`Cambios a aplicar: ${cambios.length}   ·   Sin dato (no se tocan): ${sinDato.length}\n`);
+    const porFuente = {}; const porPrecio = {};
+    cambios.forEach(({ nuevo, fuente }) => { porFuente[fuente] = (porFuente[fuente] || 0) + 1; porPrecio[nuevo] = (porPrecio[nuevo] || 0) + 1; });
+    console.log('Por fuente:  ' + Object.entries(porFuente).map(([k, v]) => `${k}: ${v}`).join('  ·  '));
+    console.log('Por precio:  ' + Object.entries(porPrecio).sort((a, b) => parseFloat(a[0]) - parseFloat(b[0])).map(([k, v]) => `${money(k)}: ${v}`).join('  ·  ') + '\n');
     cambios.slice(0, 60).forEach(({ c, nuevo, fuente }) =>
       console.log(`  ${fechaAR(c.logged_at)}  ${String(c.unidad).padEnd(9)} ${String(Math.round(c.liters)).padStart(5)} L   ${money(c.price_per_l)} → ${money(nuevo)}   [${fuente}]`));
     if (cambios.length > 60) console.log(`  ... y ${cambios.length - 60} más`);
