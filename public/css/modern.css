@@ -10,10 +10,10 @@
 .ui-icon { width: 23px; height: 23px; flex: 0 0 auto; vertical-align: middle; color: inherit; }
 .ui-icon * { color: inherit; }
 .sidebar { width: 244px; background: #142331; border: 0; padding: 0 12px; color: #d9e2ec; scrollbar-width: thin; scrollbar-color: #405063 #142331; }
-.sidebar-logo { padding: 26px 10px; border-color: #ffffff15; gap: 12px; }
-.sidebar-logo .logo-mark { width: 43px; height: 43px; font: 800 21px var(--font); border-radius: 10px; background: #ea580c; }
-.sidebar-logo .logo-text { color: #fff; font-size: 15px; }
-.sidebar-logo .logo-sub { color: #a6b7c9; font: 12px var(--font); margin-top: 4px; }
+/* Foto del camión con la marca: ocupa todo el bloque de arriba del menú, de borde a
+   borde (el sidebar tiene 12px de padding lateral, por eso el margen negativo). */
+.sidebar-logo { padding: 0; margin: 0 -12px 8px; border-color: #ffffff15; display: block; }
+.sidebar-logo .logo-img { display: block; width: 100%; height: auto; object-fit: cover; }
 .nav-section { padding: 22px 0 0; }
 .nav-section-label { color: #94a9bc; font-size: 10px; letter-spacing: 1.3px; padding-left: 13px; margin-bottom: 10px; }
 .sidebar .nav-item { min-height: 43px; padding: 10px 12px; margin: 3px 0; color: #d3deea; gap: 12px; font-size: 13px; border: 0; }
