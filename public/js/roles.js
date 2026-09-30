@@ -407,6 +407,7 @@ function getRoleColor(role) {
 
 // ── ARRANCAR APP ──
 function bootApp() {
+  if (typeof uiVideoIntro === 'function') uiVideoIntro();
   const u    = App.currentUser;
   const role = u.roleData;
 
