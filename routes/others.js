@@ -1510,6 +1510,46 @@ fuelRouter.patch('/:id/verificar', authenticate, requireRole('dueno','gerencia',
 });
 
 // ── Cargas pendientes de verificación ────────────────────
+// POST /api/fuel/reprice — corregir en bloque el precio de las cargas hechas desde una
+// cisterna. SOLO dueño y gerencia. Sirve cuando el precio de la cisterna estaba mal
+// cargado: las cargas copian el precio del tanque al momento de registrarse, así que
+// corregir el tanque no corrige las cargas ya hechas. Filtra por cisterna y rango de
+// fechas (fecha AR). Sin fechas, toma todas las cargas de esa cisterna.
+fuelRouter.post('/reprice', authenticate, requireOwner, async (req, res) => {
+  try {
+    const { tank_id, price_per_l, from, to } = req.body || {};
+    if (!tank_id || !/^[0-9a-f-]{36}$/i.test(String(tank_id))) return res.status(400).json({ error: 'Falta seleccionar la cisterna' });
+    const ppu = parseFloat(price_per_l);
+    if (!Number.isFinite(ppu) || ppu <= 0) return res.status(400).json({ error: 'Ingresá un precio por litro válido' });
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && !dateRe.test(from)) return res.status(400).json({ error: 'Fecha desde inválida' });
+    if (to && !dateRe.test(to)) return res.status(400).json({ error: 'Fecha hasta inválida' });
+
+    const tank = (await query('SELECT id, location FROM tanks WHERE id=$1', [tank_id])).rows[0];
+    if (!tank) return res.status(404).json({ error: 'Cisterna no encontrada' });
+
+    const params = [ppu, tank_id];
+    let where = `tank_id=$2`;
+    if (from) { params.push(from); where += ` AND (logged_at AT TIME ZONE '${AR_TZ}')::date >= $${params.length}::date`; }
+    if (to)   { params.push(to);   where += ` AND (logged_at AT TIME ZONE '${AR_TZ}')::date <= $${params.length}::date`; }
+    // Solo las que realmente cambian, así el conteo y la auditoría dicen la verdad.
+    where += ` AND price_per_l IS DISTINCT FROM $1`;
+
+    const r = await query(`UPDATE fuel_logs SET price_per_l=$1 WHERE ${where} RETURNING id, price_per_l`, params);
+    const updated = r.rowCount || 0;
+
+    await auditChange(req, res, {
+      action: 'fuel_reprice', table: 'fuel', recordId: tank_id,
+      oldValue: { tank: tank.location, from: from || null, to: to || null },
+      newValue: { price_per_l: ppu, cargas_actualizadas: updated },
+    });
+    res.json({ ok: true, updated, tank: tank.location });
+  } catch (err) {
+    console.error('[fuel reprice]', err.message);
+    res.status(500).json({ error: 'Error al corregir precios de las cargas' });
+  }
+});
+
 // PATCH /api/fuel/:id — editar ticket de carga de combustible. SOLO dueño y gerencia (administrador).
 // Si cambian los litros de una carga desde cisterna, se ajusta el stock de la cisterna por la diferencia.
 fuelRouter.patch('/:id', authenticate, requireOwner, validateUUID('id'), async (req, res) => {
