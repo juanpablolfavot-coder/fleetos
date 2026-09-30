@@ -23,3 +23,4 @@ import './cuenta-proveedor.mjs';
 import './ranking-proveedores.mjs';
 import './config.mjs';
 import './flota.mjs';
+import './tiempos.mjs';

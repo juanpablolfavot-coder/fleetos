@@ -149,6 +149,7 @@ app.use('/api/purchase-orders',paymentsRouter);
 app.use('/api/purchase-orders',purchaseOrderInvoicesRouter);
 app.use('/api/purchase-orders',purchaseOrdersRouter);
 app.use('/api/sucursales',sucursalesRouter);
+app.use('/api/tiempos', require('./routes/tiempos').router);
 app.use('/api/admin',adminRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/suppliers', suppliersRouter);

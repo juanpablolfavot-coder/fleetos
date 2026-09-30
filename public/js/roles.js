@@ -369,15 +369,15 @@ function _destinoInicial() {
 // ── ROLES y PERMISOS ──
 function getRoleData(role) {
   const roles = {
-    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['home','dashboard','fleet','flota','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
-    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['home','encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
+    dueno:                 { label:'Dueño / Dirección',       badge:'role-dueno',      modules:['home','dashboard','fleet','flota','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','tiempos_panel','users','encargado_panel','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
+    gerencia:              { label:'Gerencia operativa',       badge:'role-gerencia',   modules:['home','encargado_panel','dashboard','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','documents','costs','tiempos_panel','users','contador_panel','auditor_panel','tesoreria_panel'], canEdit:['all'] },
     jefe_mantenimiento:    { label:'Jefe de mantenimiento',    badge:'role-jefe',       modules:['home','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','suppliers','assets','encargado_panel'], canEdit:['workorders','fleet','assets'] },
     mecanico:              { label:'Mecánico',                 badge:'role-mecanico',   modules:['home','encargado_panel','workorders','fuel','tires','stock'], canEdit:['workorders','fuel'] },
     chofer:                { label:'Chofer',                   badge:'role-chofer',     modules:['home','chofer_panel'], canEdit:[] },
     encargado_combustible: { label:'Encargado combustible',    badge:'role-combustible',modules:['home','encargado_panel','fuel'], canEdit:['fuel'] },
     paniol:                { label:'Stock / Depósito',                 badge:'role-stock',      modules:['home','stock','purchase_orders'], canEdit:['stock'] },
-    contador:              { label:'Administración',           badge:'role-contador',   modules:['home','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel'], canEdit:['stock','purchase_orders'] },
-    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['home','auditor_panel'], canEdit:[] },
+    contador:              { label:'Administración',           badge:'role-contador',   modules:['home','stock','purchase_orders','suppliers','costs','documents','contador_panel','auditor_panel','tiempos_panel'], canEdit:['stock','purchase_orders'] },
+    auditor:               { label:'Auditor',                  badge:'role-auditor',    modules:['home','auditor_panel','tiempos_panel'], canEdit:[] },
     compras:               { label:'Compras',                  badge:'role-compras',    modules:['home','purchase_orders','suppliers','fuel'], canEdit:['purchase_orders','fuel'] },
     tesoreria:             { label:'Tesorería',                badge:'role-tesoreria',  modules:['home','tesoreria_panel','purchase_orders'], canEdit:['purchase_orders'] },
     gerente_sucursal:      { label:'Gerente de sucursal',      badge:'role-gerencia',   modules:['home','fleet','workorders','maintenance','fuel','tires','stock','purchase_orders','documents','costs'], canEdit:['stock','purchase_orders'] },
@@ -846,6 +846,7 @@ async function loadInitialData() {
       App.config.labor_rate    = parseFloat(cfg.labor_rate) || 0;
       App.config.areas         = cfg.areas         || {};
       App.config.stock_categories = Array.isArray(cfg.stock_categories) ? cfg.stock_categories : [];
+      App.config.sla_plazos    = cfg.sla_plazos && typeof cfg.sla_plazos === 'object' ? cfg.sla_plazos : {};
     }
 
     // Inicializar arrays si alguna API falló
