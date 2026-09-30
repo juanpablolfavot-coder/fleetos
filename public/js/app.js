@@ -3801,7 +3801,10 @@ async function saveFuelReprice() {
   if (!Number.isFinite(ppu) || ppu <= 0) { showToast('error', 'Ingresá un precio por litro válido'); return; }
   const tank = (App.data.tanks || []).find(t => t.id === tank_id);
   const rango = from || to ? ` entre ${from || 'el inicio'} y ${to || 'hoy'}` : '';
-  if (!confirm(`¿Aplicar $${ppu.toLocaleString('es-AR')}/L a todas las cargas de ${tank?.location || 'la cisterna'}${rango}?`)) return;
+  if (!from && !to) {
+    if (!confirm(`⚠ NO pusiste fechas: se va a cambiar el precio de TODAS las cargas históricas de ${tank?.location || 'la cisterna'}.\n\nSi solo querés corregir las últimas, cancelá y poné la fecha "Desde".\n\n¿Seguir igual?`)) return;
+  }
+  if (!confirm(`¿Aplicar $${ppu.toLocaleString('es-AR')}/L a las cargas de ${tank?.location || 'la cisterna'}${rango}?`)) return;
   const res = await apiFetch('/api/fuel/reprice', { method: 'POST', body: JSON.stringify({ tank_id, price_per_l: ppu, from, to }) });
   let data = {};
   try { data = await res.json(); } catch(_) {}
