@@ -55,9 +55,14 @@ table td { font-size: 13px; padding: 15px 12px; }
 .eyebrow { font-size: 10px; letter-spacing: 1.6px; font-weight: 700; color: var(--text3); }
 .overview-date { color: var(--text3); white-space: nowrap; font-size: 12px; }
 .home-welcome { background: #142331; border-radius: 19px; padding: 36px; margin-bottom: 30px; display: flex; align-items: center; justify-content: space-between; gap: 20px; overflow: hidden; }
-.home-welcome h2 { color: #fff; font-size: clamp(26px, 3vw, 38px); letter-spacing: -1.3px; line-height: 1.22; margin: 13px 0; }
-.home-welcome p { color: #b8c7d6; margin: 15px 0 24px; }
-.home-welcome .eyebrow { color: #fba46d; }
+.home-welcome > div:first-child { flex: 1 1 44%; min-width: 0; }
+.home-welcome h2 { color: #fff; font-size: clamp(32px, 3.8vw, 50px); font-weight: 800; letter-spacing: -1.6px; line-height: 1.12; margin: 16px 0; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.home-welcome p { color: #d3deea; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.5; margin: 16px 0 28px; max-width: 34ch; }
+.home-welcome .btn-primary { font-size: 15px; font-weight: 700; padding: 13px 22px; border-radius: 12px; box-shadow: 0 8px 20px rgba(234,88,12,.35); }
+/* Etiqueta de la portada: más grande y nítida que el eyebrow genérico, con una
+   barrita naranja adelante para que se lea como título de sección. */
+.home-welcome .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: #fb923c; font-size: 14px; font-weight: 800; letter-spacing: 2.2px; text-transform: uppercase; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.home-welcome .eyebrow::before { content: ''; display: inline-block; width: 26px; height: 3px; border-radius: 2px; background: #ea580c; }
 .home-brand { width: 190px; height: 160px; display: grid; justify-items: center; align-content: center; gap: 10px; color: #f7893f; flex-shrink: 0; }
 .home-brand .ui-icon { width: 100px; height: 100px; color: #f7893f; stroke-width: 1; }
 .home-brand span { color: #fff; font-size: 26px; font-weight: 800; letter-spacing: 5px; }
