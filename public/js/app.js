@@ -3773,6 +3773,7 @@ function openFuelRepriceModal(tankId, price) {
     <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px;margin-bottom:12px">
       Aplica el precio por litro indicado a <b>todas las cargas registradas desde la cisterna elegida</b> en el rango de fechas.
       Los totales de esas cargas se recalculan. Dejá las fechas vacías para tomar todas las cargas de esa cisterna.
+      Si no ponés fecha "hasta", ese precio queda también como <b>precio vigente de la cisterna</b> para las cargas nuevas.
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Cisterna</label>
@@ -3800,13 +3801,16 @@ async function saveFuelReprice() {
   if (!Number.isFinite(ppu) || ppu <= 0) { showToast('error', 'Ingresá un precio por litro válido'); return; }
   const tank = (App.data.tanks || []).find(t => t.id === tank_id);
   const rango = from || to ? ` entre ${from || 'el inicio'} y ${to || 'hoy'}` : '';
-  if (!confirm(`¿Aplicar $${ppu.toLocaleString('es-AR')}/L a todas las cargas de ${tank?.location || 'la cisterna'}${rango}?`)) return;
+  if (!from && !to) {
+    if (!confirm(`⚠ NO pusiste fechas: se va a cambiar el precio de TODAS las cargas históricas de ${tank?.location || 'la cisterna'}.\n\nSi solo querés corregir las últimas, cancelá y poné la fecha "Desde".\n\n¿Seguir igual?`)) return;
+  }
+  if (!confirm(`¿Aplicar $${ppu.toLocaleString('es-AR')}/L a las cargas de ${tank?.location || 'la cisterna'}${rango}?`)) return;
   const res = await apiFetch('/api/fuel/reprice', { method: 'POST', body: JSON.stringify({ tank_id, price_per_l: ppu, from, to }) });
   let data = {};
   try { data = await res.json(); } catch(_) {}
   if (!res.ok) { showToast('error', data.error || 'Error al corregir precios'); return; }
   closeModal();
-  showToast('ok', `✅ ${data.updated} carga(s) actualizadas con $${ppu.toLocaleString('es-AR')}/L`);
+  showToast('ok', `✅ ${data.updated} carga(s) actualizadas con $${ppu.toLocaleString('es-AR')}/L${data.tank_price_updated ? ' · precio de cisterna actualizado' : ''}`);
   window._fuelAllLoaded = false;
   try { await loadInitialData(); } catch(_) {}
   renderFuel();
