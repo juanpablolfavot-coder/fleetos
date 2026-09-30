@@ -78,6 +78,19 @@ function mensual(items, dateFn, valFn) {
     .map(([mes, vals]) => ({ mes, n: vals.length, prom: round1(vals.reduce((a, b) => a + b, 0) / vals.length) }));
 }
 
+// Las dos columnas nuevas las declara db/migrations/007, pero si el deploy no corrió
+// la migración el panel se cae entero. Se aseguran acá UNA vez por proceso (mismo
+// patrón que el resto de las rutas), así el panel funciona igual.
+let _schemaReady = null;
+function ensureTiemposSchema() {
+  if (_schemaReady) return _schemaReady;
+  _schemaReady = (async () => {
+    await query('ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ').catch(e => console.error('[tiempos schema]', e.message));
+    await query('ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ').catch(e => console.error('[tiempos schema]', e.message));
+  })();
+  return _schemaReady;
+}
+
 async function cargarPlazos() {
   try {
     const r = await query(`SELECT value FROM app_config WHERE key='sla_plazos'`);
@@ -91,6 +104,7 @@ async function cargarPlazos() {
 // los últimos 90 días. Lo pendiente ("abiertas") se lista siempre, sin rango.
 router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'auditor'), async (req, res) => {
   try {
+    await ensureTiemposSchema();
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
     const to   = dateRe.test(req.query.to || '') ? req.query.to : new Date().toISOString().slice(0, 10);
     const from = dateRe.test(req.query.from || '') ? req.query.from : new Date(Date.now() - 90 * DAY_MS).toISOString().slice(0, 10);
@@ -147,7 +161,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
 
     // ── Órdenes de trabajo ───────────────────────────────────────────────
     const otRows = (await query(`
-      SELECT wo.id, wo.code, wo.status, wo.type, wo.priority, wo.title, wo.opened_at, wo.started_at, wo.closed_at,
+      SELECT wo.id, wo.code, wo.status, wo.type, wo.priority, LEFT(wo.description, 80) AS title, wo.opened_at, wo.started_at, wo.closed_at,
              v.code AS vehicle_code, v.base AS sucursal, m.name AS mecanico,
              po.code AS po_code, po.status AS po_status, po.created_at AS po_created_at, po.cotizado_at AS po_cotizado_at,
              po.aprobado_compras_at AS po_aprobado_at, po.pagado_at AS po_pagado_at, po.recibido_at AS po_recibido_at
@@ -262,8 +276,9 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
       despachos:   { etapa: despEtapa, pendientes: despPendientes, vencidas: despPendientes.filter(d => d.vencida).length },
     });
   } catch (err) {
-    console.error('[tiempos GET]', err.message);
-    res.status(500).json({ error: 'Error al calcular tiempos de respuesta' });
+    console.error('[tiempos GET]', err.message, err.stack?.split('\n')[1] || '');
+    // El detalle ayuda a diagnosticar desde la pantalla sin entrar a los logs.
+    res.status(500).json({ error: 'Error al calcular tiempos de respuesta', detail: err.message });
   }
 });
 

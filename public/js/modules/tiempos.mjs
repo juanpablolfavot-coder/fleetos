@@ -95,7 +95,11 @@ async function tiemposCargar() {
   const { from, to } = _fechasRango();
   content.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">⏳ Calculando tiempos…</div>`;
   const res = await apiFetch(`/api/tiempos?from=${from}&to=${to}`);
-  if (!res.ok) { content.innerHTML = `<div class="card" style="color:var(--danger)">No se pudieron calcular los tiempos de respuesta.</div>`; return; }
+  if (!res.ok) {
+    let e = {}; try { e = await res.json(); } catch (_) {}
+    content.innerHTML = `<div class="card" style="color:var(--danger)">No se pudieron calcular los tiempos de respuesta.${e.detail ? `<div style="font-size:11px;color:var(--text3);margin-top:6px;font-family:var(--mono)">${escapeHtml(e.detail)}</div>` : ''}</div>`;
+    return;
+  }
   _data = await res.json();
   tiemposTab(_tab);
 }
