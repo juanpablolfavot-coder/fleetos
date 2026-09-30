@@ -78,6 +78,19 @@ function mensual(items, dateFn, valFn) {
     .map(([mes, vals]) => ({ mes, n: vals.length, prom: round1(vals.reduce((a, b) => a + b, 0) / vals.length) }));
 }
 
+// Las dos columnas nuevas las declara db/migrations/007, pero si el deploy no corrió
+// la migración el panel se cae entero. Se aseguran acá UNA vez por proceso (mismo
+// patrón que el resto de las rutas), así el panel funciona igual.
+let _schemaReady = null;
+function ensureTiemposSchema() {
+  if (_schemaReady) return _schemaReady;
+  _schemaReady = (async () => {
+    await query('ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ').catch(e => console.error('[tiempos schema]', e.message));
+    await query('ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ').catch(e => console.error('[tiempos schema]', e.message));
+  })();
+  return _schemaReady;
+}
+
 async function cargarPlazos() {
   try {
     const r = await query(`SELECT value FROM app_config WHERE key='sla_plazos'`);
@@ -91,6 +104,7 @@ async function cargarPlazos() {
 // los últimos 90 días. Lo pendiente ("abiertas") se lista siempre, sin rango.
 router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'auditor'), async (req, res) => {
   try {
+    await ensureTiemposSchema();
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
     const to   = dateRe.test(req.query.to || '') ? req.query.to : new Date().toISOString().slice(0, 10);
     const from = dateRe.test(req.query.from || '') ? req.query.from : new Date(Date.now() - 90 * DAY_MS).toISOString().slice(0, 10);
@@ -262,8 +276,9 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
       despachos:   { etapa: despEtapa, pendientes: despPendientes, vencidas: despPendientes.filter(d => d.vencida).length },
     });
   } catch (err) {
-    console.error('[tiempos GET]', err.message);
-    res.status(500).json({ error: 'Error al calcular tiempos de respuesta' });
+    console.error('[tiempos GET]', err.message, err.stack?.split('\n')[1] || '');
+    // El detalle ayuda a diagnosticar desde la pantalla sin entrar a los logs.
+    res.status(500).json({ error: 'Error al calcular tiempos de respuesta', detail: err.message });
   }
 });
 
