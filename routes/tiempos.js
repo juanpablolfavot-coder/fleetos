@@ -161,7 +161,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
 
     // ── Órdenes de trabajo ───────────────────────────────────────────────
     const otRows = (await query(`
-      SELECT wo.id, wo.code, wo.status, wo.type, wo.priority, wo.title, wo.opened_at, wo.started_at, wo.closed_at,
+      SELECT wo.id, wo.code, wo.status, wo.type, wo.priority, LEFT(wo.description, 80) AS title, wo.opened_at, wo.started_at, wo.closed_at,
              v.code AS vehicle_code, v.base AS sucursal, m.name AS mecanico,
              po.code AS po_code, po.status AS po_status, po.created_at AS po_created_at, po.cotizado_at AS po_cotizado_at,
              po.aprobado_compras_at AS po_aprobado_at, po.pagado_at AS po_pagado_at, po.recibido_at AS po_recibido_at
