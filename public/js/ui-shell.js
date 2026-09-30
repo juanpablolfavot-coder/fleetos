@@ -59,6 +59,42 @@ function refreshModernNav() {
   }).join('') + `<button type="button" data-menu-toggle aria-controls="main-navigation" aria-expanded="false" onclick="uiToggleMenu()">${uiIcon('more')}<span>Más</span></button>`;
 }
 
+// ── Intro: el camión de Expreso Biletta cruza la pantalla al abrir la app ─────
+// Reproduce public/videos/camion-intro.mp4 a pantalla completa (silencioso, 8 s)
+// y se funde solo al terminar. Una vez por sesión del navegador; se puede saltar
+// con un clic o con Escape; se omite si el sistema pide menos animaciones o si
+// el navegador bloquea la reproducción automática.
+function uiVideoIntro() {
+  if (document.getElementById('video-intro')) return;
+  try { if (sessionStorage.getItem('fleetos-intro')) return; } catch (_) {}
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const layer = document.createElement('div');
+  layer.id = 'video-intro';
+  layer.className = 'video-intro';
+  layer.innerHTML = `
+    <video class="video-intro-media" src="/videos/camion-intro.mp4" muted playsinline autoplay preload="auto" aria-label="Camión de Expreso Biletta en ruta"></video>
+    <button type="button" class="video-intro-skip">Saltar ›</button>`;
+  document.body.appendChild(layer);
+  const video = layer.querySelector('video');
+  let closing = false;
+  const close = () => {
+    if (closing) return; closing = true;
+    try { sessionStorage.setItem('fleetos-intro', '1'); } catch (_) {}
+    layer.classList.add('is-leaving');
+    setTimeout(() => layer.remove(), 650);
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  layer.addEventListener('click', close);
+  video.addEventListener('ended', close);
+  video.addEventListener('error', close);
+  video.addEventListener('playing', () => layer.classList.add('is-playing'), { once: true });
+  const p = video.play();
+  if (p && p.catch) p.catch(close);   // autoplay bloqueado → no molestar
+  setTimeout(close, 12000);           // red de seguridad si el video no llega a "ended"
+}
+
 function uiHeading(title, subtitle) {
   return `<header class="overview-heading"><div><div class="eyebrow">EXPRESO BILETTA · FLEETOS</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(subtitle)}</p></div><span class="overview-date">${new Date().toLocaleDateString('es-AR', {day:'numeric',month:'long',year:'numeric'})}</span></header>`;
 }
