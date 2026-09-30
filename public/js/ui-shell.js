@@ -60,8 +60,8 @@ function refreshModernNav() {
 }
 
 // ── Intro: el camión de Expreso Biletta cruza la pantalla al abrir la app ─────
-// Reproduce public/videos/camion-intro.mp4 a pantalla completa (silencioso, 8 s)
-// y se funde solo al terminar. Una vez por sesión del navegador; se puede saltar
+// Reproduce los primeros 3 s de public/videos/camion-intro.mp4 a pantalla completa
+// (silencioso) y se funde solo. Una vez por sesión del navegador; se puede saltar
 // con un clic o con Escape; se omite si el sistema pide menos animaciones o si
 // el navegador bloquea la reproducción automática.
 function uiVideoIntro() {
@@ -87,12 +87,15 @@ function uiVideoIntro() {
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
   layer.addEventListener('click', close);
+  // Se muestra 3 segundos del video (el clip dura 8) y se funde.
+  const INTRO_SEGUNDOS = 3;
+  video.addEventListener('timeupdate', () => { if (video.currentTime >= INTRO_SEGUNDOS) close(); });
   video.addEventListener('ended', close);
   video.addEventListener('error', close);
   video.addEventListener('playing', () => layer.classList.add('is-playing'), { once: true });
   const p = video.play();
   if (p && p.catch) p.catch(close);   // autoplay bloqueado → no molestar
-  setTimeout(close, 12000);           // red de seguridad si el video no llega a "ended"
+  setTimeout(close, 7000);            // red de seguridad si el video no arranca
 }
 
 function uiHeading(title, subtitle) {
