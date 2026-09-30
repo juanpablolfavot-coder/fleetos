@@ -1537,13 +1537,21 @@ fuelRouter.post('/reprice', authenticate, requireOwner, async (req, res) => {
 
     const r = await query(`UPDATE fuel_logs SET price_per_l=$1 WHERE ${where} RETURNING id, price_per_l`, params);
     const updated = r.rowCount || 0;
+    // El precio "correcto" también es el que tienen que tomar las cargas NUEVAS: si no,
+    // se corrigen las viejas y las siguientes vuelven a salir con el precio equivocado.
+    // Solo si no se acotó "hasta" (una corrección histórica no cambia el precio vigente).
+    let tankUpdated = false;
+    if (!to) {
+      await query('UPDATE tanks SET price_per_l=$1, updated_at=NOW() WHERE id=$2', [ppu, tank_id]);
+      tankUpdated = true;
+    }
 
     await auditChange(req, res, {
       action: 'fuel_reprice', table: 'fuel', recordId: tank_id,
       oldValue: { tank: tank.location, from: from || null, to: to || null },
-      newValue: { price_per_l: ppu, cargas_actualizadas: updated },
+      newValue: { price_per_l: ppu, cargas_actualizadas: updated, precio_cisterna_actualizado: tankUpdated },
     });
-    res.json({ ok: true, updated, tank: tank.location });
+    res.json({ ok: true, updated, tank: tank.location, tank_price_updated: tankUpdated });
   } catch (err) {
     console.error('[fuel reprice]', err.message);
     res.status(500).json({ error: 'Error al corregir precios de las cargas' });
