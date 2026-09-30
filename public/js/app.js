@@ -2623,6 +2623,7 @@ function renderFuel() {
         </div>
         <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
           ${_fuelPuedeGestionarCisterna(App.currentUser?.role) ? `<button class="btn btn-primary" onclick="openFuelEntryModal()">+ Registrar ingreso a cisterna</button><button class="btn btn-secondary" onclick="openEditTankCapacityModal()">⚙ Editar capacidad</button>` : ''}
+          ${_fuelPuedeEditarTickets(App.currentUser?.role) && !esGerenteSucursal ? `<button class="btn btn-secondary" onclick="openFuelRepriceModal()" title="Aplicar el precio correcto a cargas ya registradas desde cisterna">💲 Corregir precios de cargas</button>` : ''}
           ${_fuelPuedeGestionarDespachos(App.currentUser?.role) ? `<button class="btn btn-secondary" onclick="openFuelDispatchModal()">🚚 Despacho interno</button>` : ''}
           ${esGerenteSucursal ? `<button class="btn btn-primary" onclick="openFuelLoadModal()">⛽ Cargar desde tanque de sucursal</button>` : ''}
           ${_fuelPuedeVerificarTickets(App.currentUser?.role) ? `<button class="btn btn-warn" onclick="openVerificacionTickets()" style="background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);color:var(--warn)">🧾 Verificar tickets</button>` : ''}
@@ -3743,11 +3744,73 @@ async function openEditTankCapacityModal() {
       closeModal();
       navigate('fuel');
       showToast('ok', 'Cisternas actualizadas');
+      // Si cambió un precio, ofrecer aplicarlo a las cargas ya registradas desde esa
+      // cisterna (las cargas copian el precio del tanque al momento de cargarse).
+      if (_fuelPuedeEditarTickets(App.currentUser?.role)) {
+        const cambios = [];
+        if (gasoilTank && gasoilPrice && parseFloat(gasoilTank.price_per_l || 0) !== gasoilPrice) cambios.push({ tank: gasoilTank, price: gasoilPrice });
+        if (ureaTank && ureaPrice && parseFloat(ureaTank.price_per_l || 0) !== ureaPrice) cambios.push({ tank: ureaTank, price: ureaPrice });
+        if (cambios.length) setTimeout(() => openFuelRepriceModal(cambios[0].tank.id, cambios[0].price), 200);
+      }
     }},
     { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
   ]);
 }
 
+
+// ── Corregir precios de cargas ya registradas (solo dueño y gerencia) ──
+// Las cargas desde cisterna guardan el precio del tanque al momento de cargar. Si el
+// precio del tanque estaba mal, todas esas cargas quedan con el precio equivocado;
+// este modal aplica el precio correcto en bloque, por cisterna y rango de fechas.
+function openFuelRepriceModal(tankId, price) {
+  if (!_fuelPuedeEditarTickets(App.currentUser?.role)) { showToast('error', 'Solo el dueño o el administrador pueden corregir precios'); return; }
+  const tanks = (App.data.tanks || []).filter(t => t.id);
+  if (!tanks.length) { showToast('error', 'No hay cisternas cargadas'); return; }
+  const sel = tanks.find(t => t.id === tankId) || tanks.find(t => t.type === 'fuel' || t.type === 'gasoil') || tanks[0];
+  const opts = tanks.map(t => `<option value="${t.id}" ${t.id === sel.id ? 'selected' : ''}>${escapeHtml(t.location || 'Cisterna')} (${_fuelTankTypeLabel(t.type)})</option>`).join('');
+  const precioInicial = price || (sel.price_per_l ? parseFloat(sel.price_per_l) : '');
+  openModal('💲 Corregir precios de cargas', `
+    <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px;margin-bottom:12px">
+      Aplica el precio por litro indicado a <b>todas las cargas registradas desde la cisterna elegida</b> en el rango de fechas.
+      Los totales de esas cargas se recalculan. Dejá las fechas vacías para tomar todas las cargas de esa cisterna.
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Cisterna</label>
+        <select class="form-select" id="frp-tank" onchange="(function(s){const t=(App.data.tanks||[]).find(x=>x.id===s.value);const p=document.getElementById('frp-ppu');if(t&&p&&t.price_per_l)p.value=parseFloat(t.price_per_l);})(this)">${opts}</select>
+      </div>
+      <div class="form-group"><label class="form-label">Precio por litro correcto ($)</label><input class="form-input" type="number" step="0.01" id="frp-ppu" value="${precioInicial}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Desde (opcional)</label><input class="form-input" type="date" id="frp-from"></div>
+      <div class="form-group"><label class="form-label">Hasta (opcional)</label><input class="form-input" type="date" id="frp-to"></div>
+    </div>
+    <div style="font-size:12px;color:var(--warn,#d97706)">⚠ Esta acción modifica cargas ya registradas. Queda asentada en auditoría.</div>
+  `, [
+    { label:'Aplicar a las cargas', cls:'btn-primary', fn: saveFuelReprice },
+    { label:'Cancelar', cls:'btn-secondary', fn: closeModal }
+  ]);
+}
+
+async function saveFuelReprice() {
+  const tank_id = document.getElementById('frp-tank')?.value;
+  const ppu = parseFloat(document.getElementById('frp-ppu')?.value);
+  const from = document.getElementById('frp-from')?.value || null;
+  const to   = document.getElementById('frp-to')?.value || null;
+  if (!tank_id) { showToast('error', 'Elegí la cisterna'); return; }
+  if (!Number.isFinite(ppu) || ppu <= 0) { showToast('error', 'Ingresá un precio por litro válido'); return; }
+  const tank = (App.data.tanks || []).find(t => t.id === tank_id);
+  const rango = from || to ? ` entre ${from || 'el inicio'} y ${to || 'hoy'}` : '';
+  if (!confirm(`¿Aplicar $${ppu.toLocaleString('es-AR')}/L a todas las cargas de ${tank?.location || 'la cisterna'}${rango}?`)) return;
+  const res = await apiFetch('/api/fuel/reprice', { method: 'POST', body: JSON.stringify({ tank_id, price_per_l: ppu, from, to }) });
+  let data = {};
+  try { data = await res.json(); } catch(_) {}
+  if (!res.ok) { showToast('error', data.error || 'Error al corregir precios'); return; }
+  closeModal();
+  showToast('ok', `✅ ${data.updated} carga(s) actualizadas con $${ppu.toLocaleString('es-AR')}/L`);
+  window._fuelAllLoaded = false;
+  try { await loadInitialData(); } catch(_) {}
+  renderFuel();
+}
 
 const AXLE_CONFIGS = {
   tractor: [
