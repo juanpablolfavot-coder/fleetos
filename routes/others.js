@@ -1230,9 +1230,13 @@ function mergeVehicleTypes(value) {
 // base migrada — y la memoización existía para abaratar algo que no hacía falta
 // hacer. Ver docs/migraciones.md.
 
+// Plazos objetivo (en días) por etapa, para el panel "Tiempos de respuesta".
+// Se pueden cambiar desde Configuración; estos son los valores por defecto.
+const { SLA_PLAZOS_DEFAULT } = require('./tiempos');
+
 configRouter.get('/', authenticate, async (req, res) => {
   try {
-    const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas','stock_categories')`);
+    const cfg = await query(`SELECT key, value FROM app_config WHERE key IN ('bases','vehicle_types','labor_rate','areas','stock_categories','sla_plazos')`);
     const map = Object.fromEntries(cfg.rows.map(r => [r.key, r.value]));
     res.json({
       bases: Array.isArray(map.bases) ? map.bases : DEFAULT_BASES,
@@ -1240,6 +1244,7 @@ configRouter.get('/', authenticate, async (req, res) => {
       labor_rate: map.labor_rate !== undefined ? parseFloat(map.labor_rate) : 0,
       areas: map.areas && typeof map.areas === 'object' ? map.areas : {},
       stock_categories: Array.isArray(map.stock_categories) ? map.stock_categories : [],
+      sla_plazos: { ...SLA_PLAZOS_DEFAULT, ...(map.sla_plazos && typeof map.sla_plazos === 'object' ? map.sla_plazos : {}) },
     });
   } catch (err) {
     console.error('[config GET]', err.message);
@@ -1249,7 +1254,16 @@ configRouter.get('/', authenticate, async (req, res) => {
 
 configRouter.put('/', authenticate, requireRole('dueno','gerencia'), async (req, res) => {
   try {
-    const { bases, vehicle_types, labor_rate, areas, stock_categories } = req.body;
+    const { bases, vehicle_types, labor_rate, areas, stock_categories, sla_plazos } = req.body;
+    if (sla_plazos && typeof sla_plazos === 'object') {
+      // Solo las claves conocidas, en días (admite decimales, p. ej. 0.5 = medio día).
+      const clean = {};
+      for (const k of Object.keys(SLA_PLAZOS_DEFAULT)) {
+        const v = parseFloat(sla_plazos[k]);
+        if (Number.isFinite(v) && v >= 0) clean[k] = v;
+      }
+      await query(`INSERT INTO app_config(key,value) VALUES('sla_plazos',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(clean)]);
+    }
     if (bases)         await query(`INSERT INTO app_config(key,value) VALUES('bases',$1) ON CONFLICT(key) DO UPDATE SET value=$1`, [JSON.stringify(bases)]);
     if (Array.isArray(stock_categories)) {
       // Lista de categorías de stock (definida por dueño/gerencia). Limpia, sin vacíos ni duplicados.

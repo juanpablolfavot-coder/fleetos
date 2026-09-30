@@ -421,7 +421,8 @@ CREATE TABLE IF NOT EXISTS work_orders (
     closed_at       TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at    TIMESTAMPTZ
+    completed_at    TIMESTAMPTZ,
+    started_at      TIMESTAMPTZ                      -- primera vez que pasa a 'En proceso' (tiempos de respuesta)
 );
 
 ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS ot_tipo  VARCHAR(20) DEFAULT 'vehiculo';
@@ -676,6 +677,7 @@ CREATE INDEX IF NOT EXISTS idx_po_area_created ON purchase_orders(area, created_
 CREATE INDEX IF NOT EXISTS idx_po_requested_created ON purchase_orders(requested_by, created_at DESC);
 
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS recibido_en TIMESTAMPTZ;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;   -- cuándo se cerró (tiempos de respuesta)
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(20) DEFAULT 'pendiente';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS invoice_status VARCHAR(20) DEFAULT 'pendiente';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) DEFAULT 'pendiente';

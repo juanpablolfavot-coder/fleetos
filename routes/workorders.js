@@ -47,6 +47,8 @@ async function ensureExternalPOFields(clientOrQuery = query) {
 
   await q(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_required BOOLEAN NOT NULL DEFAULT FALSE`).catch(()=>{});
   await q(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS external_po_id UUID`).catch(()=>{});
+  await q(`ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ`).catch(()=>{});
+  await q(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ`).catch(()=>{});
   await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS po_id UUID`).catch(()=>{});
   // Repuestos de pañol del modelo nuevo (catálogo + saldo por sucursal/área).
   await q(`ALTER TABLE work_order_parts ADD COLUMN IF NOT EXISTS catalog_id UUID`).catch(()=>{});
@@ -456,7 +458,8 @@ router.put('/:id', authenticate, requireRole('dueno','gerencia','jefe_mantenimie
     const newPartsCost = (parts_cost !== undefined && parts_cost !== null && parts_cost !== '') ? parseFloat(parts_cost) : null;
     const result = await query(
       `UPDATE work_orders SET status=$1, mechanic_id=$2, description=$3, labor_cost=0, priority=$4,
-         parts_cost = COALESCE($6, parts_cost)
+         parts_cost = COALESCE($6, parts_cost),
+         started_at = COALESCE(started_at, CASE WHEN $1 = 'En proceso' THEN NOW() END)
        WHERE id = $5 RETURNING *, parts_cost AS total_cost`,
       [status, mechanic_id||null, description, normPrioridad(priority), req.params.id, newPartsCost]
     );

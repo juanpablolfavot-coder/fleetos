@@ -1551,7 +1551,7 @@ router.post('/:id/cerrar', authenticate, requireRole('dueno','gerencia','compras
       return res.status(400).json({ error: 'Solo se puede cerrar una OC ya enviada al proveedor en adelante' });
     }
     const r = await client.query(
-      `UPDATE purchase_orders SET status = 'cerrada' WHERE id = $1 RETURNING *`,
+      `UPDATE purchase_orders SET status = 'cerrada', closed_at = NOW() WHERE id = $1 RETURNING *`,
       [req.params.id]
     );
     await client.query('COMMIT');

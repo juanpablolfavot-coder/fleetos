@@ -53,6 +53,9 @@ function renderConfig() {
 
     </div>
 
+    <!-- PLAZOS OBJETIVO (tiempos de respuesta) -->
+    ${_cfgPlazosCard()}
+
     <!-- MANO DE OBRA INTERNA -->
     <div class="card" style="max-width:900px;border-left:3px solid var(--accent)">
       <div class="card-title">⏱️ Mano de obra interna</div>
@@ -62,6 +65,35 @@ function renderConfig() {
         Si un trabajo sale a un externo, la OT genera una <b>OC pendiente para Compras</b>, donde se cotiza y negocia.
       </div>
     </div>`;
+}
+
+// Plazos objetivo por etapa, en días, para el panel "Tiempos de respuesta".
+const CFG_PLAZOS = [
+  ['oc_cotizar',       'Compras',               'OC: pedido → cotizada'],
+  ['oc_aprobar',       'Gerencia / Compras',    'OC: cotizada → aprobada'],
+  ['oc_pagar',         'Tesorería',             'OC: aprobada → pagada'],
+  ['oc_recibir',       'Proveedor / Recepción', 'OC: aprobada → recibida'],
+  ['oc_total',         'Todas',                 'OC: pedido → recibida (total)'],
+  ['ot_iniciar',       'Taller',                'OT: abierta → en proceso'],
+  ['ot_cerrar',        'Taller',                'OT: en proceso → cerrada'],
+  ['ot_total',         'Todas',                 'OT: abierta → cerrada (total)'],
+  ['fuel_verificar',   'Verificación',          'Combustible: carga → ticket verificado'],
+  ['despacho_recibir', 'Sucursal',              'Despacho: despachado → recibido'],
+];
+function _cfgPlazosCard() {
+  const p = App.config?.sla_plazos || {};
+  return `<div class="card" style="max-width:900px;margin-bottom:20px">
+    <div class="card-title">⏱ Plazos objetivo por etapa (días)</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:14px">Se usan en el panel <b>Tiempos de respuesta</b> para el semáforo y el % cumplido. Admite decimales (0,5 = medio día).</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px 16px;margin-bottom:14px">
+      ${CFG_PLAZOS.map(([k, area, label]) => `
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;font-size:12px"><b>${label}</b><br><span style="color:var(--text3);font-size:11px">${area}</span></div>
+          <input class="form-input" type="number" step="0.5" min="0" id="cfg-plazo-${k}" value="${p[k] ?? ''}" style="width:80px;text-align:right">
+        </div>`).join('')}
+    </div>
+    <button class="btn btn-primary" onclick="saveConfig()">Guardar cambios</button>
+  </div>`;
 }
 
 function addCfgBase() {
@@ -106,8 +138,16 @@ async function saveConfig() {
     if (!isNaN(lr) && lr >= 0) payload.labor_rate = lr;
   }
 
+  // Plazos objetivo (solo si la card está en pantalla)
+  if (document.getElementById('cfg-plazo-oc_total')) {
+    const sla = {};
+    CFG_PLAZOS.forEach(([k]) => { const v = parseFloat(document.getElementById('cfg-plazo-' + k)?.value); if (Number.isFinite(v) && v >= 0) sla[k] = v; });
+    payload.sla_plazos = sla;
+  }
+
   const res = await apiFetch('/api/config', { method:'PUT', body: JSON.stringify(payload) });
   if (!res.ok) { showToast('error','Error al guardar configuración'); return; }
+  if (payload.sla_plazos) App.config.sla_plazos = { ...(App.config.sla_plazos || {}), ...payload.sla_plazos };
   App.config.bases = bases;
   App.config.vehicle_types = vtypes;
   if (payload.labor_rate !== undefined) App.config.labor_rate = payload.labor_rate;
