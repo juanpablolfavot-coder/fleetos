@@ -84,6 +84,24 @@ const CARGAS = [
   { code:'AA508SW', fecha:'2026-08-26 11:31:00', litros:91.8695,  total:199999.90, km:503594, estacion:'Petal Servicios Petroleros — Calchaquí 851 (BA)',            ticket:'0201-00002336',  nota:'pagado con Mercado Pago', hueco:'2.396 km desde la carga del 03/08 (501.198) con una sola carga: faltan tickets entre el 03/08 y el 26/08' },
   { code:'AA508SW', fecha:'2026-08-31 11:26:26', litros:85.3971,  total:200000.01, km:504149, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00025-00026728', nota:'pagado con Mercado Pago / efectivo' },
   { code:'AA508SW', fecha:'2026-09-07 11:44:12', litros:80.032,   total:199999.97, km:504828, estacion:'Garín Combustibles S.A. — Panamericana km 40,8, Garín (BA)', ticket:'00020-00018684', nota:'pagado con Mercado Pago' },
+
+  // ── Tanda 3 · tickets recibidos el 01/10/2026 (15/09 al 29/09) ───────────
+  // En el lote venían 3 tickets ya cargados (04/09 AE517UM Buzancy, 04/09 AF041MB
+  // Argumal y 07/09 AA508SW Garín): el dedup los saltea. Faltan 3 tickets (uno por
+  // unidad, ver `hueco`): estimación en litros/$ en el PR, NO se cargan como reales.
+  // AE517UM (Muñoz Ariel). Km en serie: 289.931 (04/09) → 291.085 (29/09).
+  { code:'AE517UM', fecha:'2026-09-15 10:02:44', litros:124.7401, total:299999.94, km:290818, estacion:'Estación Integral Las Américas SA — Banfield (BA)',          ticket:'00012-00004621', nota:'pagado con Mercado Pago', hueco:'887 km desde la carga del 04/09 (289.931) con 124,7 L (14 L/100, lo normal ronda 23): probable ticket faltante entre el 04/09 y el 15/09' },
+  { code:'AE517UM', fecha:'2026-09-29 07:43:22', litros:78.1555,  total:200000.00, km:291085, estacion:'YPF — OPESSA, Macacha Güemes (CABA)',                         ticket:'07496-00035390', nota:'pagado con Mercado Pago' },
+  // AF041MB (Sabathier Jorge). Km en serie: 274.641 (04/09) → 277.460 (30/09).
+  { code:'AF041MB', fecha:'2026-09-16 06:43:47', litros:85.5066,  total:199999.94, km:275878, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00028-00015369', nota:'pagado con Visa', hueco:'1.237 km desde la carga del 04/09 (274.641) con 85,5 L: faltan tickets entre el 04/09 y el 16/09' },
+  { code:'AF041MB', fecha:'2026-09-21 15:21:13', litros:86.9565,  total:199999.95, km:276451, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00006-00024489', nota:'pagado en efectivo' },
+  { code:'AF041MB', fecha:'2026-09-24 17:17:23', litros:83.022,   total:200000.00, km:276900, estacion:'BUZANCY — Bella Vista (BA)',                                 ticket:'00016-00034903', nota:'pagado en efectivo' },
+  { code:'AF041MB', fecha:'2026-09-30 10:47:01', litros:86.9565,  total:199999.95, km:277460, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00009-00006532', nota:'pagado en efectivo' },
+  // AA508SW (Suárez Sebastián). Km en serie: 504.828 (07/09) → 507.097 (29/09).
+  { code:'AA508SW', fecha:'2026-09-21 06:48:25', litros:42.7533,  total:99999.96,  km:505924, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00025-00027040', nota:'pagado en efectivo', hueco:'1.096 km desde la carga del 07/09 (504.828) con 42,8 L: faltan tickets entre el 07/09 y el 21/09' },
+  { code:'AA508SW', fecha:'2026-09-22 12:38:11', litros:42.7533,  total:99999.96,  km:506174, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00027-00054017', nota:'pagado con Mercado Pago + efectivo' },
+  { code:'AA508SW', fecha:'2026-09-24 08:52:57', litros:85.6531,  total:199999.98, km:506433, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00028-00015463', nota:'pagado con Mercado Pago' },
+  { code:'AA508SW', fecha:'2026-09-29 14:10:26', litros:84.0689,  total:199999.93, km:507097, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00027-00054213', nota:'pagado en efectivo' },
 ];
 
 async function main() {
