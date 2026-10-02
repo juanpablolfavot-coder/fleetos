@@ -114,13 +114,17 @@ function renderModernHome() {
   const maintenance = maintResumen();
   const attention = pending.length ? `<section class="attention-panel"><h2>Requiere tu atención</h2><p>Los pendientes de tus secciones, ordenados por prioridad.</p>${pending.map(p => uiAttentionRow(p.nav, `${p.n} ${p.texto}`, p.tone === 'danger' ? 'Requiere revisión' : 'Próximo a resolver', p.nav, 'Revisar')).join('')}</section>` : '';
   root.innerHTML = uiHeading(`Hola, ${(App.currentUser?.name || '').split(' ')[0]}`, 'Tu jornada, organizada. Encontrá lo que necesitás y seguí trabajando.') + `
-    <section class="home-welcome"><div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h2>Tu flota.<br>Una visión más clara.</h2><p>Vehículos, mantenimiento y gestión, en un mismo lugar.</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><figure class="home-truck"><video src="/videos/inicio-portada.mp4" poster="/images/portada-expreso-biletta.png" muted loop playsinline autoplay preload="metadata" width="1280" height="720" aria-label="Camión de Expreso Biletta en el playón"></video></figure></section>
+    <section class="home-welcome"><div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h2>Tu flota.<br>Una visión más clara.</h2><p>Vehículos, mantenimiento y gestión, en un mismo lugar.</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><figure class="home-truck"><video src="/videos/inicio-portada.mp4" poster="/images/portada-final.jpg" muted playsinline autoplay preload="auto" width="1280" height="720" aria-label="Camión de Expreso Biletta. Tu carga, nuestro compromiso."></video></figure></section>
     ${attention}
     ${uiAllowed('maintenance') && !maintenance.disponible ? '<p class="card">No se pudieron cargar los planes. Los pendientes de mantenimiento no están confirmados.</p>' : ''}
     <div class="section-header"><h2 class="section-title">Tus accesos</h2><span class="muted">${escapeHtml(App.currentUser?.roleData?.label || '')}</span></div>
     <div class="home-shortcuts">${_homeAccesos(modules)}</div>
     ${App.currentUser?.role === 'dueno' ? '<section class="home-notifications"><div><strong>La flota también te avisa</strong><p>Recibí alertas de velocidad aunque tengas la app cerrada. En iPhone, agregá primero FleetOS a la pantalla de inicio.</p></div><div class="home-notifications-actions"><button class="btn btn-secondary" id="btn-speed-alerts" onclick="enableSpeedAlerts()">Activar alertas de velocidad</button><button class="btn btn-secondary" id="btn-speed-test" onclick="probarNotificacion()" style="display:none" title="Manda una notificación de prueba a este dispositivo">Probar notificación</button></div></section>' : ''}`;
   if (App.currentUser?.role === 'dueno') _refreshSpeedAlertBtn();
+  // El video se reproduce una sola vez y queda en el último cuadro (el lema).
+  // Con "reducir movimiento" no se anima: se ve directamente el cuadro final (el poster).
+  const hero = root.querySelector('.home-truck video');
+  if (hero && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { hero.removeAttribute('autoplay'); hero.pause(); }
 }
 
 // Etiquetas para transformar las tablas largas en tarjetas en pantallas chicas.
