@@ -124,7 +124,11 @@ function renderModernHome() {
   // El video se reproduce una sola vez y queda en el último cuadro (el lema).
   // Con "reducir movimiento" no se anima: se ve directamente el cuadro final (el poster).
   const hero = root.querySelector('.home-truck video');
-  if (hero && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { hero.removeAttribute('autoplay'); hero.pause(); }
+  if (!hero) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { hero.removeAttribute('autoplay'); hero.pause(); return; }
+  // Cuando termina (se abrió la lona y apareció el lema) se espera un momento para que se lea
+  // y la portada se achica suavemente, dejando más lugar a lo que sigue.
+  hero.addEventListener('ended', () => setTimeout(() => hero.closest('.home-truck')?.classList.add('is-compact'), 1800), { once: true });
 }
 
 // Etiquetas para transformar las tablas largas en tarjetas en pantallas chicas.

@@ -194,7 +194,8 @@ table td { font-size: 13px; padding: 15px 12px; }
 .video-intro-skip:hover { background: rgba(234,88,12,.85); border-color: transparent; }
 @media (max-width: 600px) { .video-intro-media { object-fit: contain; } }
 
-.home-truck { margin: -36px -36px 0; min-width: 0; }
+.home-truck { margin: 0 0 0 -36px; width: calc(100% + 72px); min-width: 0; margin-top: -36px; overflow: hidden; border-radius: 0; transition: width .9s ease, margin .9s ease, border-radius .9s ease, box-shadow .9s ease; }
+.home-truck.is-compact { width: 60%; margin-left: 20%; margin-top: 0; border-radius: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.35); }
 .home-truck img, .home-truck video { display: block; width: 100%; height: auto; }
 .home-truck figcaption { color: #b8c7d6; font-size: 11px; margin-top: 6px; text-align: right; }
-@media (max-width: 600px) { .home-truck { margin: -25px -25px 0; } }
+@media (max-width: 600px) { .home-truck { margin: -25px 0 0 -25px; width: calc(100% + 50px); } .home-truck.is-compact { width: calc(100% + 50px); margin-left: -25px; margin-top: -25px; border-radius: 0; box-shadow: none; } }
