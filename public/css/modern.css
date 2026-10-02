@@ -54,8 +54,8 @@ table td { font-size: 13px; padding: 15px 12px; }
 .overview-heading p { color: var(--text3); font-size: 14px; }
 .eyebrow { font-size: 10px; letter-spacing: 1.6px; font-weight: 700; color: var(--text3); }
 .overview-date { color: var(--text3); white-space: nowrap; font-size: 12px; }
-.home-welcome { background: #142331; border-radius: 19px; padding: 36px; margin-bottom: 30px; display: flex; align-items: center; justify-content: space-between; gap: 20px; overflow: hidden; }
-.home-welcome > div:first-child { flex: 1 1 44%; min-width: 0; }
+.home-welcome { background: #142331; border-radius: 19px; padding: 36px; margin-bottom: 30px; display: flex; flex-direction: column-reverse; align-items: stretch; gap: 28px; overflow: hidden; }
+.home-welcome > div:first-child { min-width: 0; }
 .home-welcome h2 { color: #fff; font-size: clamp(32px, 3.8vw, 50px); font-weight: 800; letter-spacing: -1.6px; line-height: 1.12; margin: 16px 0; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 .home-welcome p { color: #d3deea; font-size: clamp(15px, 1.3vw, 18px); line-height: 1.5; margin: 16px 0 28px; max-width: 34ch; }
 .home-welcome .btn-primary { font-size: 15px; font-weight: 700; padding: 13px 22px; border-radius: 12px; box-shadow: 0 8px 20px rgba(234,88,12,.35); }
@@ -194,7 +194,7 @@ table td { font-size: 13px; padding: 15px 12px; }
 .video-intro-skip:hover { background: rgba(234,88,12,.85); border-color: transparent; }
 @media (max-width: 600px) { .video-intro-media { object-fit: contain; } }
 
-.home-truck { margin: 0; flex: 0 1 48%; min-width: 0; }
-.home-truck img, .home-truck video { display: block; width: 100%; height: auto; border-radius: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.35); }
+.home-truck { margin: -36px -36px 0; min-width: 0; }
+.home-truck img, .home-truck video { display: block; width: 100%; height: auto; }
 .home-truck figcaption { color: #b8c7d6; font-size: 11px; margin-top: 6px; text-align: right; }
-@media (max-width: 600px) { .home-welcome { flex-direction: column; align-items: stretch; } .home-truck { width: 100%; } }
+@media (max-width: 600px) { .home-truck { margin: -25px -25px 0; } }
