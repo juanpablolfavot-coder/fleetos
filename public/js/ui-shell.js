@@ -127,8 +127,8 @@ function renderModernHome() {
   if (!hero) return;
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { hero.removeAttribute('autoplay'); hero.pause(); return; }
   // Cuando termina (se abrió la lona y apareció el lema) se espera un momento para que se lea
-  // y la portada se achica suavemente, dejando más lugar a lo que sigue.
-  hero.addEventListener('ended', () => setTimeout(() => hero.closest('.home-truck')?.classList.add('is-compact'), 1800), { once: true });
+  // y la portada se achica suavemente mientras el texto se centra y crece.
+  hero.addEventListener('ended', () => setTimeout(() => { hero.closest('.home-truck')?.classList.add('is-compact'); hero.closest('.home-welcome')?.classList.add('is-compact'); }, 1800), { once: true });
 }
 
 // Etiquetas para transformar las tablas largas en tarjetas en pantallas chicas.
