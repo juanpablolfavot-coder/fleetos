@@ -116,7 +116,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
     const ocRows = (await query(`
       SELECT po.id, po.code, po.status, po.area, po.sucursal, po.tipo, po.proveedor, po.total_estimado,
              po.created_at, po.cotizado_at, po.aprobado_compras_at, po.pagado_at, po.recibido_at, po.closed_at,
-             po.rechazado_at, po.ot_id, wo.code AS ot_code, u.name AS solicitante
+             po.rechazado_at, po.ot_id, po.cotizado_por, po.aprobado_compras_por, po.pagado_por, po.recibido_por, wo.code AS ot_code, u.name AS solicitante
         FROM purchase_orders po
         LEFT JOIN work_orders wo ON wo.id = po.ot_id
         LEFT JOIN users u ON u.id = po.requested_by
@@ -162,7 +162,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
     // ── Órdenes de trabajo ───────────────────────────────────────────────
     const otRows = (await query(`
       SELECT wo.id, wo.code, wo.status, wo.type, wo.priority, LEFT(wo.description, 80) AS title, wo.opened_at, wo.started_at, wo.closed_at,
-             v.code AS vehicle_code, v.base AS sucursal, m.name AS mecanico,
+             v.code AS vehicle_code, v.base AS sucursal, m.name AS mecanico, wo.mechanic_id,
              po.code AS po_code, po.status AS po_status, po.created_at AS po_created_at, po.cotizado_at AS po_cotizado_at,
              po.aprobado_compras_at AS po_aprobado_at, po.pagado_at AS po_pagado_at, po.recibido_at AS po_recibido_at
         FROM work_orders wo
@@ -227,7 +227,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
 
     // ── Tickets de combustible ───────────────────────────────────────────
     const fuelRows = (await query(`
-      SELECT fl.id, fl.logged_at, fl.ticket_verificado_at, fl.ticket_estado, fl.liters, v.code AS vehicle_code, u.name AS driver
+      SELECT fl.id, fl.logged_at, fl.ticket_verificado_at, fl.ticket_verificado_por, fl.ticket_estado, fl.liters, v.code AS vehicle_code, u.name AS driver
         FROM fuel_logs fl JOIN vehicles v ON v.id = fl.vehicle_id LEFT JOIN users u ON u.id = fl.driver_id
        WHERE fl.ticket_image IS NOT NULL
          AND (${rango('fl.logged_at')} OR fl.ticket_estado IS NULL OR fl.ticket_estado = 'pendiente')
@@ -242,7 +242,7 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
 
     // ── Despachos internos ───────────────────────────────────────────────
     const despRows = (await query(`
-      SELECT d.id, d.destination, d.liters, d.status, d.created_at, d.received_at
+      SELECT d.id, d.destination, d.liters, d.status, d.created_at, d.received_at, d.received_by
         FROM fuel_internal_dispatches d
        WHERE ${rango('d.created_at')} OR d.status <> 'recibido'
        ORDER BY d.created_at DESC`, [from, to])).rows;
@@ -254,8 +254,79 @@ router.get('/', authenticate, requireRole('dueno', 'gerencia', 'contador', 'audi
         dias_en_etapa: round1(dias(d.created_at, now)), plazo: P.despacho_recibir, vencida: dias(d.created_at, now) > P.despacho_recibir }))
       .sort((a, b) => b.dias_en_etapa - a.dias_en_etapa);
 
+    // ── Por área (una tarjeta por área, para leer de un vistazo) ─────────
+    // Cada área tiene UNA etapa propia (su promedio y su plazo se pueden comparar
+    // directo) y lo que tiene pendiente ahora mismo.
+    const etapaOc = k => ocEtapas.find(e => e.key === k);
+    const etapaOt = k => otEtapas.find(e => e.key === k);
+    const pend = (lista, filtro) => { const l = lista.filter(filtro); return { pendientes: l.length, atrasados: l.filter(x => x.vencida).length }; };
+    const ocArea = (...areas) => o => areas.includes(o.area);
+    // La etapa va primero en el spread: sus campos key/label/area no pisan los del área.
+    const area = (key, nombre, que, etapa, pendiente) => {
+      const { key: etapa_key, label, area: area_resp, ...st } = etapa;
+      return { ...st, etapa_key, etapa: label, area_resp, key, nombre, que, ...pendiente };
+    };
+    const areas = [
+      area('compras',      'Compras',                 'Cotizar los pedidos',                     etapaOc('cotizar'), pend(ocAbiertas, ocArea('Compras'))),
+      area('gerencia',     'Gerencia',                'Aprobar las compras cotizadas',           etapaOc('aprobar'), pend(ocAbiertas, ocArea('Gerencia / Compras'))),
+      area('tesoreria',    'Tesorería',               'Pagar las compras aprobadas',             etapaOc('pagar'),   pend(ocAbiertas, ocArea('Proveedor / Tesorería'))),
+      area('proveedores',  'Proveedores / Recepción', 'Entregar lo comprado',                    etapaOc('recibir'), pend(ocAbiertas, ocArea('Proveedor / Recepción'))),
+      area('taller',       'Taller',                  'Terminar las órdenes de trabajo',         etapaOt('total'),   pend(otAbiertas, () => true)),
+      area('verificacion', 'Control de combustible',  'Verificar los tickets de carga',          fuelEtapa,          pend(fuelPendientes, () => true)),
+      area('sucursales',   'Sucursales',              'Confirmar que recibieron el combustible', despEtapa,          pend(despPendientes, () => true)),
+    ];
+
+    // ── Por usuario: quién hizo cada paso y cuánto tardó ─────────────────
+    // Usa las columnas "_por" que el sistema ya guarda en cada transición
+    // (cotizó, aprobó, pagó, recibió, verificó) y el mecánico de la OT.
+    const users = new Map((await query('SELECT id, name, role FROM users')).rows.map(u => [String(u.id), u]));
+    const personas = new Map();
+    const persona = (id, nombreTxt) => {
+      const u = id ? users.get(String(id)) : null;
+      const key = u ? 'u:' + u.id : (nombreTxt ? 'n:' + String(nombreTxt).trim().toLowerCase() : null);
+      if (!key) return null;
+      if (!personas.has(key)) personas.set(key, { id: u ? u.id : null, nombre: u ? u.name : String(nombreTxt).trim(), rol: u ? u.role : null, eventos: [], pendientes: 0, atrasados: 0 });
+      return personas.get(key);
+    };
+    const evento = (p, etapa, area, d, plazo) => { if (p && Number.isFinite(d) && d >= 0) p.eventos.push({ etapa, area, d, plazo }); };
+    for (const o of ocPeriodo) {
+      const du = ocDur(o);
+      evento(persona(o.cotizado_por),        'Cotizar',              'Compras',               du.cotizar, P.oc_cotizar);
+      evento(persona(o.aprobado_compras_por),'Aprobar',              'Gerencia',              du.aprobar, P.oc_aprobar);
+      evento(persona(o.pagado_por),          'Pagar',                'Tesorería',             du.pagar,   P.oc_pagar);
+      evento(persona(o.recibido_por),        'Recibir',              'Proveedores / Recepción', du.recibir, P.oc_recibir);
+    }
+    for (const o of otPeriodo) if (o.closed_at) evento(persona(o.mechanic_id, o.mecanico), 'Terminar OT', 'Taller', otDur(o).total, P.ot_total);
+    for (const f of fuelPeriodo) evento(persona(f.ticket_verificado_por), 'Verificar ticket', 'Control de combustible', dias(f.logged_at, f.ticket_verificado_at), P.fuel_verificar);
+    for (const x of despPeriodo) evento(persona(null, x.received_by), 'Recibir despacho', 'Sucursales', dias(x.created_at, x.received_at), P.despacho_recibir);
+    // Lo que cada mecánico tiene abierto ahora.
+    for (const o of otRows) if (o.status !== 'Cerrada' && (o.mechanic_id || o.mecanico)) {
+      const p = persona(o.mechanic_id, o.mecanico); const a = otAbiertas.find(x => x.id === o.id);
+      if (p) { p.pendientes++; if (a && a.vencida) p.atrasados++; }
+    }
+    const porUsuario = [...personas.values()].map(p => {
+      const ev = p.eventos;
+      const aTiempo = ev.filter(e => e.d <= e.plazo).length;
+      const etapas = [...new Set(ev.map(e => e.etapa))].map(et => {
+        const de = ev.filter(e => e.etapa === et);
+        return { etapa: et, area: de[0].area, ...stats(de.map(e => e.d), de[0].plazo) };
+      }).sort((a, b) => b.n - a.n);
+      return {
+        id: p.id, nombre: p.nombre, rol: p.rol,
+        areas: [...new Set(ev.map(e => e.area))],
+        tareas: ev.length, a_tiempo: aTiempo, tarde: ev.length - aTiempo,
+        cumple_pct: ev.length ? Math.round(aTiempo / ev.length * 100) : null,
+        // Cuántas veces más de lo esperado tarda, en promedio (1 = justo el plazo).
+        ratio: ev.length ? round1(ev.reduce((a, e) => a + e.d / (e.plazo || 1), 0) / ev.length) : null,
+        pendientes: p.pendientes, atrasados: p.atrasados, etapas,
+      };
+    }).filter(p => p.tareas || p.pendientes)
+      .sort((a, b) => (a.cumple_pct ?? 101) - (b.cumple_pct ?? 101) || b.tareas - a.tareas);
+
     res.json({
       from, to, plazos: P,
+      areas,
+      usuarios: porUsuario,
       oc: {
         etapas: ocEtapas,
         por_area_solicitante: porGrupo(ocPeriodo, o => o.area, o => ocDur(o).total, P.oc_total),
