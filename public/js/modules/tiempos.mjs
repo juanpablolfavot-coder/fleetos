@@ -56,7 +56,7 @@ async function renderTiemposPanel() {
     <div class="section-header" style="margin-bottom:16px">
       <div>
         <div class="section-title">⏱ Tiempos de respuesta por área</div>
-        <div class="section-sub">Cuánto tarda cada área desde que se abre algo hasta que se termina · contra plazos objetivo</div>
+        <div class="section-sub">Cuánto tarda cada área y cada persona desde que se abre algo hasta que se termina · contra plazos objetivo</div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select class="form-select" id="tr-rango" onchange="tiemposCambiarRango(this.value)" style="width:auto">
@@ -75,7 +75,7 @@ async function renderTiemposPanel() {
       </div>
     </div>
     <div id="tiempos-tabs" style="display:flex;flex-wrap:wrap;gap:4px 2px;margin-bottom:16px;border-bottom:1px solid var(--border2)">
-      ${[['resumen', '📊 Resumen'], ['oc', '🛒 Órdenes de compra'], ['ot', '🔧 Taller (OT)'], ['cadena', '🔗 OT con compra: cadena completa'], ['pendientes', '⏳ Pendiente ahora'], ['otros', '⛽ Combustible y despachos']]
+      ${[['resumen', '📊 Cómo venimos'], ['personas', '👤 Por persona'], ['oc', '🛒 Órdenes de compra'], ['ot', '🔧 Taller (OT)'], ['cadena', '🔗 OT con compra: cadena completa'], ['pendientes', '⏳ Pendiente ahora'], ['otros', '⛽ Combustible y despachos']]
         .map(([id, label]) => `<button id="ttab-${id}" onclick="tiemposTab('${id}')" style="padding:8px 14px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:600;color:var(--text3);border-bottom:2px solid transparent;white-space:nowrap">${label}</button>`).join('')}
     </div>
     <div id="tiempos-content"><div style="text-align:center;padding:40px;color:var(--text3)">⏳ Calculando tiempos…</div></div>`;
@@ -111,7 +111,7 @@ function tiemposTab(tab) {
   if (b) { b.style.color = 'var(--accent)'; b.style.borderBottom = '2px solid var(--accent)'; }
   const el = document.getElementById('tiempos-content');
   if (!el || !_data) return;
-  const fns = { resumen: _resumen, oc: _oc, ot: _ot, cadena: _cadena, pendientes: _pendientes, otros: _otros };
+  const fns = { resumen: _resumen, personas: _personas, oc: _oc, ot: _ot, cadena: _cadena, pendientes: _pendientes, otros: _otros };
   el.innerHTML = (fns[tab] || _resumen)(_data);
   _labels(el);
 }
@@ -161,16 +161,81 @@ function _mensual(titulo, serie, plazo) {
   </div>`;
 }
 
-function _kpi(label, value, sub, cls) {
-  return `<div class="kpi-card ${cls || 'info'}"><div class="kpi-label">${label}</div><div class="kpi-value ${cls || ''}">${value}</div><div class="kpi-trend">${sub || ''}</div></div>`;
+// ── Lectura simple ───────────────────────────────────────────────────
+// Todo se traduce a 3 estados con color + palabra, para que se entienda sin
+// saber qué es una mediana: 🟢 Bien (≥85% a tiempo) · 🟡 Regular (≥60%) · 🔴 Atrasado.
+function nivel(pct) {
+  if (pct === null || pct === undefined) return { key: 'sin', emoji: '⚪', txt: 'Sin datos', color: 'var(--text3)', bg: 'var(--bg3)' };
+  if (pct >= 85) return { key: 'ok', emoji: '🟢', txt: 'Bien', color: 'var(--ok)', bg: 'var(--ok-bg, rgba(34,197,94,.08))' };
+  if (pct >= 60) return { key: 'warn', emoji: '🟡', txt: 'Regular', color: 'var(--warn)', bg: 'var(--warn-bg, rgba(245,158,11,.08))' };
+  return { key: 'bad', emoji: '🔴', txt: 'Atrasado', color: 'var(--danger)', bg: 'var(--danger-bg, rgba(239,68,68,.08))' };
+}
+// Duración en palabras: "10 horas", "1 día", "25,9 días".
+function durLargo(d) {
+  if (d === null || d === undefined || !Number.isFinite(d)) return '—';
+  if (d < 1) { const h = Math.max(1, Math.round(d * 24)); return h + (h === 1 ? ' hora' : ' horas'); }
+  const r = Math.round(d * 10) / 10;
+  return r.toLocaleString('es-AR', { maximumFractionDigits: 1 }) + (r === 1 ? ' día' : ' días');
+}
+// Barra horizontal de % a tiempo.
+function barra(pct, color) {
+  const p = pct === null || pct === undefined ? 0 : pct;
+  return `<div style="height:10px;background:var(--bg3);border-radius:6px;overflow:hidden"><div style="height:100%;width:${p}%;background:${color};border-radius:6px"></div></div>`;
+}
+// "Tarda 3,7 veces lo esperado" / "Dentro del objetivo".
+function vsObjetivo(prom, plazo) {
+  if (prom === null || prom === undefined || !plazo) return '';
+  if (prom <= plazo) return `<span style="color:var(--ok)">✔ dentro del objetivo</span>`;
+  const x = prom / plazo;
+  return `<span style="color:${x >= 1.5 ? 'var(--danger)' : 'var(--warn)'}">✖ tarda ${x >= 1.95 ? x.toLocaleString('es-AR', { maximumFractionDigits: 1 }) + ' veces' : Math.round((x - 1) * 100) + '% más de'} lo esperado</span>`;
+}
+const _ROLES = { dueno: 'Dirección', gerencia: 'Gerencia', jefe_mantenimiento: 'Jefe de mantenimiento', mecanico: 'Mecánico', chofer: 'Chofer',
+  encargado_combustible: 'Encargado combustible', paniol: 'Depósito', contador: 'Administración', gerente_sucursal: 'Gerente de sucursal',
+  auditor: 'Auditor', compras: 'Compras', tesoreria: 'Tesorería', proveedores: 'Proveedores' };
+
+function _tarjetaArea(a) {
+  const nv = nivel(a.n ? a.cumple_pct : null);
+  return `<div class="card" style="border-left:5px solid ${nv.color};margin:0;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div>
+        <div style="font-size:16px;font-weight:700">${escapeHtml(a.nombre)}</div>
+        <div style="font-size:12px;color:var(--text3)">${escapeHtml(a.que)}</div>
+      </div>
+      <span style="white-space:nowrap;font-size:12px;font-weight:700;color:${nv.color};background:${nv.bg};padding:4px 10px;border-radius:20px">${nv.emoji} ${nv.txt}</span>
+    </div>
+    ${a.n ? `
+      <div>
+        <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:30px;font-weight:800;color:${nv.color};line-height:1">${a.cumple_pct}%</span><span style="font-size:13px;color:var(--text2)">a tiempo</span></div>
+        <div style="margin-top:6px">${barra(a.cumple_pct, nv.color)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${Math.round(a.cumple_pct * a.n / 100)} de ${a.n} a tiempo</div>
+      </div>
+      <div style="font-size:13px;line-height:1.5">
+        Tarda <b>${durLargo(a.prom)}</b> en promedio · objetivo <b>${durLargo(a.plazo)}</b><br>
+        <span style="font-size:12px">${vsObjetivo(a.prom, a.plazo)}</span>
+      </div>` : `<div style="font-size:13px;color:var(--text3)">Sin casos terminados en este período.</div>`}
+    <div style="margin-top:auto;padding-top:8px;border-top:1px solid var(--border);font-size:13px">
+      ${a.pendientes ? `Tiene <b>${a.pendientes}</b> pendiente${a.pendientes === 1 ? '' : 's'} ahora${a.atrasados ? ` · <b style="color:var(--danger)">${a.atrasados} atrasado${a.atrasados === 1 ? '' : 's'}</b>` : ' · <span style="color:var(--ok)">ninguno atrasado</span>'}` : '<span style="color:var(--text3)">Nada pendiente ahora</span>'}
+    </div>
+  </div>`;
 }
 
-// ── Tabs ─────────────────────────────────────────────────────────────
 function _resumen(d) {
-  const ocT = d.oc.etapas.find(e => e.key === 'total');
-  const otT = d.ot.etapas.find(e => e.key === 'total');
-  const vencidas = d.oc.vencidas + d.ot.vencidas + d.combustible.vencidas + d.despachos.vencidas;
-  const kpiCls = (prom, plazo) => prom === null ? 'info' : prom <= plazo ? 'ok' : prom <= plazo * 1.5 ? 'warn' : 'danger';
+  const areas = (d.areas || []).slice();
+  const conDatos = areas.filter(a => a.n);
+  const total = conDatos.reduce((s, a) => s + a.n, 0);
+  const aTiempo = conDatos.reduce((s, a) => s + Math.round(a.cumple_pct * a.n / 100), 0);
+  const pctGral = total ? Math.round(aTiempo / total * 100) : null;
+  const nvG = nivel(pctGral);
+  const peor = conDatos.slice().sort((a, b) => a.cumple_pct - b.cumple_pct)[0];
+  const atrasadosHoy = areas.reduce((s, a) => s + (a.atrasados || 0), 0);
+  const pendHoy = areas.reduce((s, a) => s + (a.pendientes || 0), 0);
+  const masAtrasada = areas.slice().sort((a, b) => (b.atrasados || 0) - (a.atrasados || 0))[0];
+  // Peores primero: lo que hay que mirar arriba.
+  const orden = { bad: 0, warn: 1, ok: 2, sin: 3 };
+  areas.sort((a, b) => orden[nivel(a.n ? a.cumple_pct : null).key] - orden[nivel(b.n ? b.cumple_pct : null).key] || (a.cumple_pct ?? 999) - (b.cumple_pct ?? 999));
+  const personas = (d.usuarios || []).filter(u => u.tareas >= 3);
+  const peoresPersonas = personas.filter(u => u.cumple_pct < 60).slice(0, 5);
+
   const resumenEtapas = [
     ...d.oc.etapas.filter(e => e.key !== 'total').map(e => ({ ...e, proceso: 'Órdenes de compra' })),
     ...d.ot.etapas.filter(e => e.key !== 'total' && e.key !== 'repuestos').map(e => ({ ...e, proceso: 'Taller' })),
@@ -178,22 +243,94 @@ function _resumen(d) {
     { ...d.despachos.etapa, proceso: 'Despachos' },
   ];
   return `
-    <div class="kpi-row" style="margin-bottom:16px">
-      ${_kpi('OC: pedido → recibida', dur(ocT.prom), `${ocT.n} órdenes · plazo ${ocT.plazo} d`, kpiCls(ocT.prom, ocT.plazo))}
-      ${_kpi('OT: abierta → cerrada', dur(otT.prom), `${otT.n} órdenes · plazo ${otT.plazo} d`, kpiCls(otT.prom, otT.plazo))}
-      ${_kpi('Pendiente ahora', d.oc.abiertas.length + d.ot.abiertas.length + d.combustible.pendientes.length + d.despachos.pendientes.length, `${d.oc.abiertas.length} OC · ${d.ot.abiertas.length} OT · ${d.combustible.pendientes.length} tickets · ${d.despachos.pendientes.length} despachos`, 'info')}
-      ${_kpi('Fuera de plazo', vencidas, vencidas ? 'ver pestaña "Pendiente ahora"' : 'todo dentro del plazo', vencidas ? 'danger' : 'ok')}
+    <div class="card" style="border-left:6px solid ${nvG.color};margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em">Del ${fecha(d.from)} al ${fecha(d.to)}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:6px;line-height:1.4">
+        ${pctGral === null ? 'Todavía no hay casos terminados en este período.' : `${nvG.emoji} De cada 10 tareas, <span style="color:${nvG.color}">${Math.round(pctGral / 10)} se hicieron a tiempo</span> (${pctGral}%).`}
+      </div>
+      <div style="font-size:14px;color:var(--text2);margin-top:8px;line-height:1.6">
+        ${peor && peor.cumple_pct < 85 ? `👉 Donde más se traba: <b>${escapeHtml(peor.nombre)}</b> — ${escapeHtml(peor.que.toLowerCase())} tarda <b>${durLargo(peor.prom)}</b> y el objetivo es <b>${durLargo(peor.plazo)}</b>.<br>` : ''}
+        ${pendHoy ? `⏳ Hoy hay <b>${pendHoy}</b> cosas esperando${atrasadosHoy ? `, <b style="color:var(--danger)">${atrasadosHoy} ya atrasadas</b>${masAtrasada && masAtrasada.atrasados ? ` (la mayoría en ${escapeHtml(masAtrasada.nombre)}: ${masAtrasada.atrasados})` : ''}` : ', ninguna atrasada'}.` : '✅ Hoy no hay nada esperando.'}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">🟢 Bien = 85% o más a tiempo · 🟡 Regular = 60 a 84% · 🔴 Atrasado = menos de 60%</div>
     </div>
-    <div class="card"><div class="card-title">Semáforo por área y etapa · ${fecha(d.from)} a ${fecha(d.to)}</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Proceso</th><th>Etapa</th><th>Área responsable</th><th>Plazo</th><th>Cant.</th><th>Promedio</th><th>Cumplimiento</th></tr></thead>
+
+    <div style="font-size:14px;font-weight:700;margin:4px 0 10px">Cada área · primero las que más se atrasan</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-bottom:16px">
+      ${areas.map(_tarjetaArea).join('')}
+    </div>
+
+    ${peoresPersonas.length ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">👤 Personas con más demoras</div>
+      ${peoresPersonas.map(u => { const nv = nivel(u.cumple_pct); return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:0 0 180px;min-width:0"><b>${escapeHtml(u.nombre)}</b><div style="font-size:11px;color:var(--text3)">${escapeHtml(u.areas.join(' · '))}</div></div>
+        <div style="flex:1">${barra(u.cumple_pct, nv.color)}</div>
+        <div style="flex:0 0 150px;text-align:right;font-size:13px"><b style="color:${nv.color}">${u.cumple_pct}%</b> a tiempo <span style="color:var(--text3)">(${u.a_tiempo}/${u.tareas})</span></div>
+      </div>`; }).join('')}
+      <div style="margin-top:10px"><button class="btn btn-secondary btn-sm" onclick="tiemposTab('personas')">Ver todas las personas →</button></div>
+    </div>` : ''}
+
+    <details class="card">
+      <summary style="cursor:pointer;font-weight:600">📋 Ver el detalle técnico por etapa</summary>
+      <div class="table-wrap" style="margin-top:12px"><table>
+        <thead><tr><th>Proceso</th><th>Etapa</th><th>Área responsable</th><th>Objetivo</th><th>Casos</th><th>Promedio</th><th>A tiempo</th></tr></thead>
         <tbody>${resumenEtapas.map(e => { const s = semaforo(e.cumple_pct); return `<tr>
           <td>${e.proceso}</td><td><b>${escapeHtml(e.label)}</b></td><td>${escapeHtml(e.area)}</td>
           <td class="td-mono">${e.plazo ? e.plazo + ' d' : '—'}</td><td class="td-mono">${e.n}</td>
           <td class="td-mono" style="font-weight:700;color:${colorProm(e.prom, e.plazo)}">${dur(e.prom)}</td>
           <td>${e.n ? `<span class="badge ${s.cls}">${s.txt}</span>` : '<span style="color:var(--text3)">sin datos</span>'}</td></tr>`; }).join('')}
         </tbody></table></div>
-      <div style="font-size:11px;color:var(--text3);margin-top:10px">Promedio en días corridos desde que empieza la etapa hasta que termina. "Cumplimiento" = % de casos que terminaron dentro del plazo objetivo. Los plazos se cambian en Configuración.</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">Promedio en días corridos desde que empieza la etapa hasta que termina. "A tiempo" = % de casos que terminaron dentro del objetivo. Los objetivos se cambian en Configuración → Plazos objetivo.</div>
+    </details>`;
+}
+
+// ── Por persona ──────────────────────────────────────────────────────
+let _filtroArea = '';
+let _abierto = null;
+function tiemposFiltroArea(v) { _filtroArea = v; tiemposTab('personas'); }
+function tiemposVerPersona(i) { _abierto = _abierto === i ? null : i; tiemposTab('personas'); }
+
+function _personas(d) {
+  const todas = d.usuarios || [];
+  const areasDisp = [...new Set(todas.flatMap(u => u.areas))].sort();
+  const lista = todas.map((u, i) => ({ ...u, _i: i })).filter(u => !_filtroArea || u.areas.includes(_filtroArea));
+  if (!todas.length) return `<div class="card" style="color:var(--text3)">Todavía no hay tareas con responsable registrado en este período.</div>`;
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:16px;font-weight:700">¿Quién hace las cosas a tiempo?</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">Cada persona, con las tareas que terminó en el período (cotizar, aprobar, pagar, recibir, terminar OT, verificar tickets, recibir despachos). Tocá una fila para ver el detalle.</div>
+        </div>
+        <select class="form-select" style="width:auto" onchange="tiemposFiltroArea(this.value)">
+          <option value="">Todas las áreas</option>
+          ${areasDisp.map(a => `<option value="${escapeHtml(a)}" ${a === _filtroArea ? 'selected' : ''}>${escapeHtml(a)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table>
+        <thead><tr><th>Persona</th><th>Estado</th><th style="min-width:180px">A tiempo</th><th>Tareas hechas</th><th>Cuánto tarda</th><th>Pendiente ahora</th></tr></thead>
+        <tbody>${lista.map(u => {
+          const nv = nivel(u.tareas ? u.cumple_pct : null);
+          const abierto = _abierto === u._i;
+          return `<tr onclick="tiemposVerPersona(${u._i})" style="cursor:pointer;${abierto ? 'background:var(--bg3)' : ''}">
+            <td><b>${abierto ? '▾' : '▸'} ${escapeHtml(u.nombre)}</b><div style="font-size:11px;color:var(--text3)">${escapeHtml([_ROLES[u.rol] || u.rol, u.areas.join(', ')].filter(Boolean).join(' · '))}</div></td>
+            <td><span style="white-space:nowrap;font-size:12px;font-weight:700;color:${nv.color};background:${nv.bg};padding:3px 9px;border-radius:20px">${nv.emoji} ${nv.txt}</span></td>
+            <td>${u.tareas ? `<div style="display:flex;align-items:center;gap:8px"><div style="flex:1">${barra(u.cumple_pct, nv.color)}</div><b style="color:${nv.color};min-width:38px;text-align:right">${u.cumple_pct}%</b></div>` : '—'}</td>
+            <td class="td-mono">${u.tareas ? `${u.tareas} <span style="color:var(--text3);font-size:11px">(${u.tarde} tarde)</span>` : '—'}</td>
+            <td style="font-size:12px">${u.ratio === null ? '—' : u.ratio <= 1 ? '<span style="color:var(--ok)">dentro del objetivo</span>' : `<span style="color:${u.ratio >= 1.5 ? 'var(--danger)' : 'var(--warn)'}">${u.ratio.toLocaleString('es-AR')} veces lo esperado</span>`}</td>
+            <td>${u.pendientes ? `${u.pendientes}${u.atrasados ? ` · <b style="color:var(--danger)">${u.atrasados} atrasada${u.atrasados === 1 ? '' : 's'}</b>` : ''}` : '<span style="color:var(--text3)">—</span>'}</td>
+          </tr>${abierto ? `<tr><td colspan="6" style="background:var(--bg3);padding:12px 16px">
+            ${u.etapas.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">${u.etapas.map(e => { const n2 = nivel(e.cumple_pct); return `
+              <div style="background:var(--bg2, var(--bg));border:1px solid var(--border);border-left:4px solid ${n2.color};border-radius:8px;padding:10px">
+                <div style="font-weight:700">${escapeHtml(e.etapa)} <span style="font-weight:400;font-size:11px;color:var(--text3)">· ${escapeHtml(e.area)}</span></div>
+                <div style="font-size:13px;margin-top:4px">${n2.emoji} <b style="color:${n2.color}">${e.cumple_pct}%</b> a tiempo · ${e.n} ${e.n === 1 ? 'vez' : 'veces'}</div>
+                <div style="font-size:12px;color:var(--text2);margin-top:2px">Tarda ${durLargo(e.prom)} en promedio (objetivo ${durLargo(e.plazo)})<br>La que más tardó: ${durLargo(e.max)}</div>
+              </div>`; }).join('')}</div>` : '<div style="font-size:12px;color:var(--text3)">Sin tareas terminadas en el período.</div>'}
+          </td></tr>` : ''}`;
+        }).join('')}</tbody></table></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:10px">"Cuánto tarda" compara cada tarea con su objetivo y promedia: 1 vez = justo el objetivo, 2 veces = el doble. Primero aparecen las personas con menos tareas a tiempo.</div>
     </div>`;
 }
 
@@ -284,3 +421,5 @@ expose('renderTiemposPanel', renderTiemposPanel);
 expose('tiemposCargar', tiemposCargar);
 expose('tiemposTab', tiemposTab);
 expose('tiemposCambiarRango', tiemposCambiarRango);
+expose('tiemposFiltroArea', tiemposFiltroArea);
+expose('tiemposVerPersona', tiemposVerPersona);
