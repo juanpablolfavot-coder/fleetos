@@ -426,14 +426,42 @@ fuelRouter.patch('/tank-entries/:id', authenticate, requireOwner, validateUUID('
        WHERE id=$7
       RETURNING *, ${arTsSql('created_at')} AS created_at_ar
     `, [liters, ppu, supplier, remito, notes, newL, req.params.id]);
+
+    // Precio del ticket → precio de la cisterna. El flujo habitual es: se registran
+    // los litros al llegar el camión y el precio se carga después, editando el
+    // ticket, cuando llega la factura. Antes eso solo cambiaba el ticket y la
+    // cisterna seguía con el precio viejo (y las cargas siguientes también).
+    // Solo si es el ÚLTIMO ingreso de esa cisterna: corregir un ticket viejo no
+    // cambia el precio vigente.
+    let tankPriceUpdated = false;
+    let cargasPrev = [];
+    const priceChanged = ppu !== null && Number(ppu) !== Number(old.price_per_l);
+    if (priceChanged && old.tank_id) {
+      const last = await client.query(
+        'SELECT id FROM fuel_tank_entries WHERE tank_id=$1 ORDER BY created_at DESC, id DESC LIMIT 1', [old.tank_id]);
+      if (last.rows[0] && last.rows[0].id === old.id) {
+        await client.query('UPDATE tanks SET price_per_l=$1, updated_at=NOW() WHERE id=$2', [ppu, old.tank_id]);
+        tankPriceUpdated = true;
+        // Las cargas hechas desde la cisterna después de este ingreso salieron con
+        // el precio viejo: se corrigen al precio del ticket (opcional, por defecto sí).
+        if (body.reprice_cargas !== false) {
+          const where = 'tank_id=$2 AND logged_at >= $3 AND price_per_l IS DISTINCT FROM $1';
+          const params = [ppu, old.tank_id, old.created_at];
+          cargasPrev = (await client.query(`SELECT id, price_per_l FROM fuel_logs WHERE ${where}`, params)).rows;
+          if (cargasPrev.length) await client.query(`UPDATE fuel_logs SET price_per_l=$1 WHERE ${where}`, params);
+        }
+      }
+    }
     await client.query('COMMIT');
 
     await auditChange(req, res, {
       action: 'fuel_tank_entry_edit', table: 'fuel_tank_entries', recordId: req.params.id,
-      oldValue: { liters: old.liters, price_per_l: old.price_per_l, supplier: old.supplier, remito: old.remito, notes: old.notes, new_l: old.new_l },
-      newValue: { liters, price_per_l: ppu, supplier, remito, notes, new_l: newL },
+      oldValue: { liters: old.liters, price_per_l: old.price_per_l, supplier: old.supplier, remito: old.remito, notes: old.notes, new_l: old.new_l,
+                  cargas: cargasPrev.map(x => ({ id: x.id, price_per_l: x.price_per_l })) },
+      newValue: { liters, price_per_l: ppu, supplier, remito, notes, new_l: newL,
+                  precio_cisterna_actualizado: tankPriceUpdated, cargas_actualizadas: cargasPrev.length },
     });
-    res.json({ ok: true, entry: upd.rows[0] });
+    res.json({ ok: true, entry: upd.rows[0], tank_price_updated: tankPriceUpdated, cargas_actualizadas: cargasPrev.length });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[fuel tank-entries PATCH]', err.message);

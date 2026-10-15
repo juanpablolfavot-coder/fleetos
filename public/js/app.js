@@ -3284,8 +3284,12 @@ function openEditFuelTankEntry(entryId) {
     </div>
     <div class="form-group"><label class="form-label">Notas</label><input class="form-input" id="fee-notes" value="${val(e.notes)}"></div>
     <div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:10px">
-      Si cambiás los litros, el nivel de la cisterna se ajusta por la diferencia. El cambio queda registrado en auditoría.
+      Si cambiás los litros, el nivel de la cisterna se ajusta por la diferencia. Si cambiás el precio y es el último ingreso, pasa a ser el precio de la cisterna. El cambio queda registrado en auditoría.
     </div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="fee-reprice" checked>
+      Aplicar el nuevo precio también a las cargas hechas desde este ingreso
+    </label>
   `, [
     { label:'Guardar cambios', cls:'btn-primary', fn: () => saveEditFuelTankEntry(entryId) },
     { label:'Cancelar', cls:'btn-secondary', fn: () => openFuelTankEntryTicket(entryId) }
@@ -3304,6 +3308,7 @@ async function saveEditFuelTankEntry(entryId) {
       supplier: document.getElementById('fee-supplier')?.value || '',
       remito:   document.getElementById('fee-remito')?.value || '',
       notes:    document.getElementById('fee-notes')?.value || '',
+      reprice_cargas: document.getElementById('fee-reprice')?.checked !== false,
     })
   });
   if (!res.ok) {
@@ -3312,8 +3317,12 @@ async function saveEditFuelTankEntry(entryId) {
     showToast('error', err.error || 'Error al editar el ticket');
     return;
   }
+  const out = await res.json().catch(() => ({}));
   closeModal();
-  showToast('ok', '✅ Ticket de cisterna actualizado');
+  let msg = '✅ Ticket de cisterna actualizado';
+  if (out.tank_price_updated) msg += ' · precio de la cisterna actualizado';
+  if (out.cargas_actualizadas) msg += ` · ${out.cargas_actualizadas} carga(s) corregidas al nuevo precio`;
+  showToast('ok', msg);
   try { await loadInitialData(); } catch(_) {}
   renderFuel();
   setTimeout(() => openFuelTankEntryTicket(entryId), 150);
