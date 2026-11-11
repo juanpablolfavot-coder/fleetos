@@ -146,9 +146,12 @@ const CARGAS = [
 
   // Parte 2: 29/10 al 05/11.
   // AE517UM. Km en serie: 294.050 (28/10) → 295.212 (05/11).
-  // 03/11: el ticket es de "Diesel 500" (grado común), no Infinia.
+  // 03/11: el ticket es de "Diesel 500" (grado común), no Infinia. Los tramos
+  // sueltos dan 38 L/100 (03→04/11) y 11 L/100 (04→05/11, carga parcial de
+  // $120.000), pero juntos (03/11→05/11, 715 km, 149,5 L) dan 21: normal.
   { code:'AE517UM', fecha:'2026-11-03 07:48:08', litros:88.3002,  total:199999.96, km:294497, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00027-00055130', nota:'pagado con tarjeta (QR) · Diesel 500' },
-  { code:'AE517UM', fecha:'2026-11-05 13:51:35', litros:47.638,   total:120000.12, km:295212, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00029-00029658', nota:'pagado con Visa · anotado en ticket: Nicolás', hueco:'715 km desde la carga del 03/11 (294.497) con 47,6 L (7 L/100, lo normal ronda 23): carga parcial o ticket faltante entre el 03/11 y el 05/11' },
+  { code:'AE517UM', fecha:'2026-11-04 09:19:13', litros:101.874,  total:249998.80, km:294763, estacion:'Puma — Traslux SA, Ruta 9 km 88, Zárate (BA)',              ticket:'00033-00055987', nota:'anotado en ticket: Nicolás · Puma Diesel' },
+  { code:'AE517UM', fecha:'2026-11-05 13:51:35', litros:47.638,   total:120000.12, km:295212, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00029-00029658', nota:'pagado con Visa · anotado en ticket: Nicolás · carga parcial' },
   // AF041MB. Km en serie: 280.600 (26/10) → 281.743 (04/11).
   // El ticket del 04/11 suma $1.693,55 de percepción IIBB CABA: el total pagado
   // (201.693,47) la incluye.
