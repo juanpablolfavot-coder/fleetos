@@ -128,6 +128,20 @@ const CARGAS = [
   // 64,2071 L) en el mismo comprobante: va como una sola carga de 84,2713 L.
   { code:'AA508SW', fecha:'2026-10-08 14:54:24', litros:84.2713,  total:210004.08, km:508482, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00025-00027352', nota:'pagado con Mercado Pago · anotado en ticket: $200.000 del 08/10 + $10.000 del 02/10 (MP)' },
   { code:'AA508SW', fecha:'2026-10-16 11:38:04', litros:80.3536,  total:200000.11, km:509118, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00028-00015673', nota:'pagado con Mercado Pago' },
+
+  // ── Tanda 5 · tickets recibidos el 11/11/2026 (23/10 al 28/10) ───────────
+  // AE517UM (Muñoz Ariel). Km en serie: 292.988 (16/10) → 294.050 (28/10).
+  // El ticket del 28/10 suma $2.540,52 de percepción IIBB CABA (1%): el total
+  // pagado (302.540,47) la incluye. El número de comprobante sale borroso
+  // (06400-000…); se toma el 37119 anotado a mano en el ticket.
+  { code:'AE517UM', fecha:'2026-10-28 10:22:11', litros:119.952,  total:302540.47, km:294050, estacion:'YPF — OPESSA, Av. Cnel. Roca y Escalada (CABA)',             ticket:'06400-00037119', nota:'pagado con Mercado Pago (anotado: transferencia + efectivo) · incluye percepción IIBB CABA $2.540,52', hueco:'1.062 km desde la carga del 16/10 (292.988) con 120 L (11 L/100, lo normal ronda 23): probable ticket faltante entre el 16/10 y el 28/10' },
+  // AF041MB (Sabathier Jorge). Km en serie: 279.621 (19/10) → 280.600 (26/10).
+  { code:'AF041MB', fecha:'2026-10-23 07:23:41', litros:80.1603,  total:199999.96, km:280150, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00029-00029480', nota:'pagado con Visa' },
+  { code:'AF041MB', fecha:'2026-10-26 16:36:36', litros:86.9565,  total:199999.96, km:280600, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00009-00007011', nota:'pagado en efectivo' },
+  // AA508SW (Suárez Sebastián; en el ticket del 27/10 escrita "AA5C85W").
+  // Km en serie: 509.118 (16/10) → 510.355 (27/10).
+  { code:'AA508SW', fecha:'2026-10-23 08:49:53', litros:80.1603,  total:199999.96, km:509666, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00025-00027567', nota:'pagado con Mercado Pago' },
+  { code:'AA508SW', fecha:'2026-10-27 15:36:21', litros:79.1452,  total:199999.92, km:510355, estacion:'ACA — Norbayres, José León Suárez (BA)',                    ticket:'00003-00004518', nota:'pagado en efectivo' },
 ];
 
 async function main() {
