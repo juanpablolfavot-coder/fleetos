@@ -1784,7 +1784,7 @@ function openEditOTModal(id) {
 
   openModal(`Editar OT — ${id}`, `
     <div style="background:var(--bg3);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:12px;color:var(--text3);font-family:var(--mono)">
-      Abierta: ${ot.opened} &nbsp;·&nbsp; Vehículo: ${ot.vehicle}
+      Abierta: ${ot.opened} &nbsp;·&nbsp; Vehículo: ${ot.vehicle} &nbsp;·&nbsp; Reportó: ${escapeHtml(ot.reporter || '—')}
     </div>
     ${otClosed ? `<div style="background:rgba(16,185,129,.10);border:1px solid rgba(16,185,129,.35);color:var(--ok);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:12px;font-weight:600">✓ OT cerrada: queda en modo consulta. No permite agregar mano de obra ni repuestos.</div>` : ''}
     <div class="form-row">
@@ -2350,6 +2350,7 @@ async function printOT(id) {
         <div class="field"><div class="field-label">Tipo de trabajo</div><div class="field-value"><span class="${ot.type==='Preventivo'?'badge-prev':'badge-corr'}">${ot.type}</span></div></div>
         <div class="field"><div class="field-label">Prioridad</div><div class="field-value"><span class="${ot.priority==='Urgente'?'badge-urgente':'badge-normal'}">${ot.priority}</span></div></div>
         <div class="field"><div class="field-label">Mecánico asignado</div><div class="field-value">${ot.mechanic || '—'}</div></div>
+        <div class="field"><div class="field-label">Reportó la novedad</div><div class="field-value">${escapeHtml(ot.reporter || '—')}</div></div>
       </div>
       <div class="field"><div class="field-label">Descripción / diagnóstico</div></div>
       <div class="desc-box">${ot.desc || '—'}</div>
@@ -5355,7 +5356,7 @@ function openNewUserModal() {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Unidad asignada <span style="color:var(--text3)">(solo choferes)</span></label>
+        <label class="form-label">Unidad habitual <span style="color:var(--text3)">(respaldo para choferes)</span></label>
         <select class="form-select" id="nu-vehicle">
           <option value="">— Sin unidad —</option>
           ${vehiclesOpts}
@@ -5411,7 +5412,7 @@ function openEditUserModal(id) {
         <select class="form-select" id="eu-role">${rolesOpts}</select>
       </div>
       <div class="form-group">
-        <label class="form-label">Unidad asignada</label>
+        <label class="form-label">Unidad habitual / respaldo</label>
         <select class="form-select" id="eu-vehicle">
           <option value="">— Sin unidad —</option>
           ${vehiclesOpts}
@@ -5596,7 +5597,7 @@ function _otRenderRows() {
     if (T.type !== 'all' && o.type !== T.type) return false;
     if (T.search) {
       const q = T.search.toLowerCase();
-      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic].filter(Boolean).map(s=>String(s).toLowerCase());
+      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic, o.reporter].filter(Boolean).map(s=>String(s).toLowerCase());
       if (!hay.some(h => h.includes(q))) return false;
     }
     return true;
@@ -5626,6 +5627,7 @@ function _otRenderRows() {
     ['vehicle',  'Vehículo'],
     ['type',     'Tipo'],
     ['desc',     'Descripción'],
+    ['reporter', 'Reportó'],
     ['mechanic', 'Mecánico'],
     ['status',   'Estado'],
     ['priority', 'Prioridad'],
@@ -5711,6 +5713,8 @@ function _otRenderRow(o) {
     <td style="padding:10px 12px;max-width:150px;color:var(--text2);font-size:12px;line-height:1.35">
       ${(o.desc||'—').substring(0,80)}${(o.desc||'').length>80?'…':''}
     </td>
+
+    <td style="padding:10px 12px;font-size:12px;color:var(--text2);font-weight:600">${escapeHtml(o.reporter||'—')}</td>
 
     <td style="padding:10px 12px;font-size:12px;color:var(--text2)">${o.mechanic||'—'}</td>
 
@@ -5825,7 +5829,7 @@ function _otExportPDF() {
     if (T.type !== 'all' && o.type !== T.type) return false;
     if (T.search) {
       const q = T.search.toLowerCase();
-      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic].filter(Boolean).map(s=>String(s).toLowerCase());
+      const hay = [o.id, o.vehicle, o.plate, o.desc, o.mechanic, o.reporter].filter(Boolean).map(s=>String(s).toLowerCase());
       if (!hay.some(h => h.includes(q))) return false;
     }
     return true;
@@ -5843,6 +5847,7 @@ function _otExportPDF() {
     o.plate || '—',
     o.type || '—',
     (o.desc || '—').substring(0,60),
+    o.reporter || '—',
     o.mechanic || '—',
     o.status || '—',
     o.priority || '—',
@@ -5852,7 +5857,7 @@ function _otExportPDF() {
 
   doc.autoTable({
     startY: startY,
-    head: [['ID','Veh','Patente','Tipo','Descripción','Mecánico','Estado','Prioridad','Costo','Apertura']],
+    head: [['ID','Veh','Patente','Tipo','Descripción','Reportó','Mecánico','Estado','Prioridad','Costo','Apertura']],
     body: tableData,
     ..._pdfTableStyle(),
     columnStyles: {
@@ -5861,7 +5866,7 @@ function _otExportPDF() {
       2: { cellWidth: 60 },
       3: { cellWidth: 60 },
       4: { cellWidth: 180 },
-      8: { halign: 'right', fontStyle: 'bold' },
+      9: { halign: 'right', fontStyle: 'bold' },
     },
   });
 
