@@ -110,11 +110,23 @@ function renderModernHome() {
   const root = document.getElementById('page-home');
   if (!root) return;
   const modules = App.currentUser?.roleData?.modules || [];
+  const isDriver = App.currentUser?.role === 'chofer';
+  const heroCopy = isDriver
+    ? {
+        eyebrow: 'TU JORNADA EN RUTA',
+        title: 'Tu viaje.<br>Todo bajo control.',
+        description: 'Tu unidad, novedades y tareas del día, en un mismo lugar.',
+      }
+    : {
+        eyebrow: 'TU CENTRO DE OPERACIONES',
+        title: 'Tu flota.<br>Una visión más clara.',
+        description: 'Vehículos, mantenimiento y gestión, en un mismo lugar.',
+      };
   const pending = _homePendientes(modules);
   const maintenance = maintResumen();
   const attention = pending.length ? `<section class="attention-panel"><h2>Requiere tu atención</h2><p>Los pendientes de tus secciones, ordenados por prioridad.</p>${pending.map(p => uiAttentionRow(p.nav, `${p.n} ${p.texto}`, p.tone === 'danger' ? 'Requiere revisión' : 'Próximo a resolver', p.nav, 'Revisar')).join('')}</section>` : '';
   root.innerHTML = uiHeading(`Hola, ${(App.currentUser?.name || '').split(' ')[0]}`, 'Tu jornada, organizada. Encontrá lo que necesitás y seguí trabajando.') + `
-    <section class="home-welcome"><div><span class="eyebrow">TU CENTRO DE OPERACIONES</span><h2>Tu flota.<br>Una visión más clara.</h2><p>Vehículos, mantenimiento y gestión, en un mismo lugar.</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><figure class="home-truck"><video src="/videos/inicio-portada.mp4" poster="/images/portada-final.jpg" muted playsinline autoplay preload="auto" width="1280" height="720" aria-label="Camión de Expreso Biletta. Abrimos las lonas de tu centro de operaciones."></video></figure></section>
+    <section class="home-welcome"><div><span class="eyebrow">${heroCopy.eyebrow}</span><h2>${heroCopy.title}</h2><p>${heroCopy.description}</p>${uiAllowed('dashboard') ? '<button class="btn btn-primary" onclick="navigate(\'dashboard\')">Ver resumen operativo →</button>' : ''}</div><figure class="home-truck"><video src="/videos/inicio-portada.mp4" poster="/images/portada-final.jpg" muted playsinline autoplay preload="auto" width="1280" height="720" aria-label="Camión de Expreso Biletta. Abrimos las lonas de tu centro de operaciones."></video></figure></section>
     ${attention}
     ${uiAllowed('maintenance') && !maintenance.disponible ? '<p class="card">No se pudieron cargar los planes. Los pendientes de mantenimiento no están confirmados.</p>' : ''}
     <div class="section-header"><h2 class="section-title">Tus accesos</h2><span class="muted">${escapeHtml(App.currentUser?.roleData?.label || '')}</span></div>
