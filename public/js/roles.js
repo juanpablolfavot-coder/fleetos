@@ -549,6 +549,8 @@ function _mapWorkOrder(o) {
     priority:   o.priority || 'Normal',
     desc:       o.description || '—',
     mechanic:   o.mechanic_name || '—',
+    reporter:   o.reporter_name || '—',
+    reporter_id:o.reporter_id || null,
     opened:     o.opened_at ? (window.FleetTime?.displayAR(o.opened_at) || String(o.opened_at).slice(0,16).replace('T',' ')) : '—',
     closed:     o.closed_at ? (window.FleetTime?.displayAR(o.closed_at) || String(o.closed_at).slice(0,16).replace('T',' ')) : null,
     causa_raiz: o.root_cause || '',
