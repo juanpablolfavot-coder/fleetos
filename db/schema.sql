@@ -102,6 +102,13 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS vin         VARCHAR(100);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS engine_no   VARCHAR(100);
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS cost_center VARCHAR(100);
 
+-- Asignación operativa elegida por el chofer para el viaje actual. Se declara
+-- después de vehicles porque ambas columnas tienen FK hacia esa tabla.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS current_vehicle_id UUID REFERENCES vehicles(id) ON DELETE SET NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS current_trailer_id UUID REFERENCES vehicles(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_users_current_vehicle ON users(current_vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_users_current_trailer ON users(current_trailer_id);
+
 -- Datos de GPS (los completa el servicio Powerfleet en runtime; se declaran acá
 -- para que existan desde una base recién migrada y el panel auditor no falle).
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS gps_lat        NUMERIC(10,7);
