@@ -3,6 +3,7 @@ const { query } = require('../db/pool');
 const { authenticate, requireRole, auditAction } = require('../middleware/auth');
 const { auditChange } = require('../middleware/audit');
 const { validateUUID, sensitiveLimiter } = require('../middleware/security');
+const { isUuid, validateDriverAssignment } = require('../services/driver-assignment');
 
 const VEHICLE_TYPES = ['camion','tractor','semirremolque','acoplado','utilitario','autoelevador','furgon','moto','otro'];
 let vehicleSchemaReady = false;
@@ -91,6 +92,47 @@ async function ensureVehicleSchema() {
   vehicleSchemaReady = true;
 }
 
+function assignmentVehicle(row, prefix) {
+  const id = row[`${prefix}_id`];
+  if (!id) return null;
+  return {
+    id,
+    code: row[`${prefix}_code`],
+    plate: row[`${prefix}_plate`],
+    type: row[`${prefix}_type`],
+    brand: row[`${prefix}_brand`],
+    model: row[`${prefix}_model`],
+  };
+}
+
+async function getDriverAssignment(userId) {
+  const result = await query(
+    `SELECT
+       COALESCE(cv.id, legacy.id) AS primary_id,
+       COALESCE(cv.code, legacy.code) AS primary_code,
+       COALESCE(cv.plate, legacy.plate) AS primary_plate,
+       COALESCE(cv.type, legacy.type) AS primary_type,
+       COALESCE(cv.brand, legacy.brand) AS primary_brand,
+       COALESCE(cv.model, legacy.model) AS primary_model,
+       tv.id AS trailer_id, tv.code AS trailer_code, tv.plate AS trailer_plate,
+       tv.type AS trailer_type, tv.brand AS trailer_brand, tv.model AS trailer_model,
+       u.current_vehicle_id IS NULL AND legacy.id IS NOT NULL AS inherited_from_usual
+     FROM users u
+     LEFT JOIN vehicles cv ON cv.id = u.current_vehicle_id AND cv.active = TRUE
+     LEFT JOIN vehicles tv ON tv.id = u.current_trailer_id AND tv.active = TRUE
+     LEFT JOIN vehicles legacy
+       ON u.current_vehicle_id IS NULL AND legacy.code = u.vehicle_code AND legacy.active = TRUE
+     WHERE u.id = $1`,
+    [userId]
+  );
+  if (!result.rows[0]) return null;
+  return {
+    vehicle: assignmentVehicle(result.rows[0], 'primary'),
+    trailer: assignmentVehicle(result.rows[0], 'trailer'),
+    inherited_from_usual: result.rows[0].inherited_from_usual === true,
+  };
+}
+
 // GET /api/vehicles
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -117,6 +159,52 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) {
     console.error('GET vehicles error:', err.message);
     res.status(500).json({ error: 'Error al obtener vehículos' });
+  }
+});
+
+// Unidad operativa del viaje actual. Es independiente de vehicle_code, que se
+// conserva como asignación habitual para compatibilidad con cuentas existentes.
+router.get('/my-assignment', authenticate, requireRole('chofer'), async (req, res) => {
+  try {
+    const assignment = await getDriverAssignment(req.user.id);
+    if (!assignment) return res.status(404).json({ error: 'Chofer no encontrado' });
+    res.json(assignment);
+  } catch (err) {
+    console.error('GET driver assignment error:', err.message);
+    res.status(500).json({ error: 'Error al obtener la asignación del viaje' });
+  }
+});
+
+router.put('/my-assignment', authenticate, requireRole('chofer'), async (req, res) => {
+  try {
+    const vehicleId = req.body.vehicle_id || null;
+    const trailerId = req.body.trailer_id || null;
+    if (vehicleId && !isUuid(vehicleId)) return res.status(400).json({ error: 'Unidad principal inválida' });
+    if (trailerId && !isUuid(trailerId)) return res.status(400).json({ error: 'Remolcado inválido' });
+
+    const ids = [...new Set([vehicleId, trailerId].filter(Boolean))];
+    const found = ids.length
+      ? await query('SELECT id, type FROM vehicles WHERE id = ANY($1::uuid[]) AND active = TRUE', [ids])
+      : { rows: [] };
+    const byId = new Map(found.rows.map((v) => [String(v.id), v]));
+    const primary = vehicleId ? byId.get(String(vehicleId)) : null;
+    const trailer = trailerId ? byId.get(String(trailerId)) : null;
+    if (vehicleId && !primary) return res.status(404).json({ error: 'Unidad principal no encontrada o inactiva' });
+    if (trailerId && !trailer) return res.status(404).json({ error: 'Remolcado no encontrado o inactivo' });
+
+    const validationError = validateDriverAssignment(primary, trailer);
+    if (validationError) return res.status(400).json({ error: validationError });
+
+    await query(
+      `UPDATE users
+       SET current_vehicle_id = $1, current_trailer_id = $2, updated_at = NOW()
+       WHERE id = $3 AND role = 'chofer'`,
+      [vehicleId, trailerId, req.user.id]
+    );
+    res.json(await getDriverAssignment(req.user.id));
+  } catch (err) {
+    console.error('PUT driver assignment error:', err.message);
+    res.status(500).json({ error: 'Error al guardar la asignación del viaje' });
   }
 });
 

@@ -185,11 +185,13 @@ router.get('/', authenticate, async (req, res) => {
       SELECT wo.*,
              v.code AS vehicle_code, v.plate, v.brand, v.model,
              a.code AS asset_code, a.name AS asset_name, a.type AS asset_type,
-             m.name AS mechanic_name
+             m.name AS mechanic_name,
+             reporter.name AS reporter_name
       FROM work_orders wo
       LEFT JOIN vehicles v ON v.id = wo.vehicle_id
       LEFT JOIN assets a   ON a.id = wo.asset_id
       LEFT JOIN users m    ON m.id = wo.mechanic_id
+      LEFT JOIN users reporter ON reporter.id = wo.reporter_id
       WHERE 1=1
     `;
     const params = [];
@@ -229,10 +231,12 @@ router.get('/:id', authenticate, validateUUID('id'), async (req, res) => {
   try {
     const wo = await query(
       `SELECT wo.*, v.code AS vehicle_code, v.plate, v.brand, v.model,
-              v.km_current, v.base, m.name AS mechanic_name
+              v.km_current, v.base, m.name AS mechanic_name,
+              reporter.name AS reporter_name
        FROM work_orders wo
        LEFT JOIN vehicles v ON v.id = wo.vehicle_id
        LEFT JOIN users m ON m.id = wo.mechanic_id
+       LEFT JOIN users reporter ON reporter.id = wo.reporter_id
        WHERE wo.id = $1`,
       [req.params.id]
     );
@@ -310,12 +314,27 @@ router.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenimient
         return res.status(403).json({ error: 'Solo podés crear OTs sobre vehículos de tu sucursal' });
       }
     }
-    // Chofer: solo puede abrir OTs sobre SU unidad asignada (igual que en combustible).
+    // Chofer: puede reportar sobre la unidad motriz o el remolcado elegidos para
+    // el viaje. Si todavía no eligió, se respeta vehicle_code como respaldo.
     if (req.user.role === 'chofer' && ot_tipo === 'vehiculo') {
-      const veh = await client.query('SELECT code FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
-      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
-      if (veh.rows[0].code !== req.user.vehicle_code) {
-        return res.status(403).json({ error: 'Solo podés crear OTs sobre tu unidad asignada (' + (req.user.vehicle_code || 'sin asignar') + ')' });
+      const allowed = await client.query(
+        `SELECT v.id
+         FROM vehicles v
+         JOIN users u ON u.id = $2
+         WHERE v.id = $1 AND v.active = TRUE
+           AND (
+             v.id = u.current_vehicle_id
+             OR v.id = u.current_trailer_id
+             OR (
+               u.current_vehicle_id IS NULL
+               AND u.current_trailer_id IS NULL
+               AND v.code = u.vehicle_code
+             )
+           )`,
+        [vehicle_id, req.user.id]
+      );
+      if (!allowed.rows[0]) {
+        return res.status(403).json({ error: 'Seleccioná esta unidad en Mi panel antes de reportar la novedad' });
       }
     }
 

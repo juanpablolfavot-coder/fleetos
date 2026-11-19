@@ -9,12 +9,42 @@ import { expose } from './dom.mjs';
 
 const App = window.App;
 
-function renderChoferPanel() {
+const PRIMARY_TYPES = new Set(['camion', 'tractor', 'utilitario', 'furgon', 'moto', 'otro']);
+const TRAILER_TYPES = new Set(['semirremolque', 'acoplado']);
+
+function assignmentVehicle(kind) {
+  const selected = App.data.driverAssignment?.[kind];
+  if (!selected?.id) return null;
+  return (App.data.vehicles || []).find((v) => String(v.id) === String(selected.id)) || selected;
+}
+
+function vehicleOption(v, selectedId) {
+  const label = [v.code, v.plate && v.plate !== v.code ? v.plate : null].filter(Boolean).join(' · ');
+  return `<option value="${v.id}" ${String(v.id) === String(selectedId || '') ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+}
+
+async function loadDriverAssignment(force = false) {
+  if (!force && App.data.driverAssignmentLoaded) return App.data.driverAssignment || {};
+  const res = await apiFetch('/api/vehicles/my-assignment');
+  if (!res.ok) throw new Error('No se pudo obtener la asignación del viaje');
+  App.data.driverAssignment = await res.json();
+  App.data.driverAssignmentLoaded = true;
+  return App.data.driverAssignment;
+}
+
+async function renderChoferPanel() {
   const u = App.currentUser;
-  // Buscar el vehículo asignado al chofer
-  const myVehicle = (App.data.vehicles||[]).find(v =>
-    v.driver && v.driver.toLowerCase() === u?.name?.toLowerCase()
-  ) || (App.data.vehicles||[]).find(v => v.code === u?.vehicle_code);
+  try {
+    await loadDriverAssignment();
+  } catch (err) {
+    console.warn('[chofer assignment]', err.message);
+  }
+
+  const myVehicle = assignmentVehicle('vehicle')
+    || (App.data.vehicles || []).find((v) => v.code === u?.vehicle_code);
+  const myTrailer = assignmentVehicle('trailer');
+  const primaryVehicles = (App.data.vehicles || []).filter((v) => PRIMARY_TYPES.has(String(v.type || '').toLowerCase()));
+  const trailers = (App.data.vehicles || []).filter((v) => TRAILER_TYPES.has(String(v.type || '').toLowerCase()));
 
   // Últimas cargas del chofer
   const myFuel = (App.data.fuelLogs||[]).filter(f =>
@@ -23,9 +53,8 @@ function renderChoferPanel() {
   const lastFuel = myFuel[0];
 
   // Novedades del chofer (work orders abiertas)
-  const myOTs = (App.data.workOrders||[]).filter(o =>
-    (o.mechanic === u?.name || o.driver === u?.name) && o.status !== 'Cerrada'
-  );
+  // El endpoint ya limita al chofer autenticado por reporter_id.
+  const myOTs = (App.data.workOrders||[]).filter(o => o.status !== 'Cerrada');
 
   const statusLabel = { ok:'Operativo', warn:'Con alerta', taller:'En taller', detenida:'Detenida', inactiva:'Inactiva' };
   const statusClass = { ok:'badge-ok', warn:'badge-warn', taller:'badge-warn', detenida:'badge-danger', inactiva:'badge-warn' };
@@ -33,19 +62,34 @@ function renderChoferPanel() {
   document.getElementById('page-chofer_panel').innerHTML = `
     <div style="max-width:480px;margin:0 auto">
 
-      <!-- Card vehículo asignado -->
-      <div class="card" style="text-align:center;margin-bottom:16px;padding:24px 20px">
+      <!-- Asignación operativa del viaje -->
+      <div class="card" style="margin-bottom:16px;padding:20px">
+        <div style="font-weight:700;color:var(--text);font-size:15px;margin-bottom:4px">Unidades de este viaje</div>
+        <div style="color:var(--text3);font-size:12px;margin-bottom:14px">Elegí la unidad que manejás y, si corresponde, el semi o acoplado.</div>
+        <div class="form-group">
+          <label class="form-label">Camión / unidad de reparto</label>
+          <select class="form-select" id="driver-current-vehicle">
+            <option value="">— Sin unidad seleccionada —</option>
+            ${primaryVehicles.map((v) => vehicleOption(v, myVehicle?.id)).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Semirremolque / acoplado <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <select class="form-select" id="driver-current-trailer">
+            <option value="">— Sin remolcado —</option>
+            ${trailers.map((v) => vehicleOption(v, myTrailer?.id)).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="saveChoferAssignment()">Guardar unidades del viaje</button>
         ${myVehicle ? `
-          <div style="font-size:22px;font-weight:700;color:var(--info);letter-spacing:1px">${escapeHtml(myVehicle.code)}</div>
-          <div style="color:var(--text3);font-size:13px;margin:4px 0 10px">${escapeHtml(myVehicle.plate)} · ${escapeHtml(myVehicle.brand)} ${escapeHtml(myVehicle.model)}</div>
-          <div style="display:flex;align-items:center;justify-content:center;gap:12px">
-            <span class="badge ${statusClass[myVehicle.status]||'badge-ok'}">${statusLabel[myVehicle.status]||myVehicle.status}</span>
-            <span style="font-family:monospace;font-size:13px;color:var(--text2)">${(myVehicle.km||0).toLocaleString()} km</span>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div>
+              <div style="font-weight:700;color:var(--info)">${escapeHtml(myVehicle.code)}${myTrailer ? ' + ' + escapeHtml(myTrailer.code) : ''}</div>
+              <div style="color:var(--text3);font-size:11px">${escapeHtml(myVehicle.plate || '')}${myTrailer ? ' · Semi ' + escapeHtml(myTrailer.plate || myTrailer.code) : ''}</div>
+            </div>
+            <span class="badge ${statusClass[myVehicle.status]||'badge-ok'}">${statusLabel[myVehicle.status]||myVehicle.status||'Operativo'}</span>
           </div>
-        ` : `
-          <div style="color:var(--text3);font-size:14px">Sin vehículo asignado</div>
-          <div style="color:var(--text3);font-size:12px;margin-top:4px">Contactá al encargado</div>
-        `}
+        ` : '<div style="color:var(--warn);font-size:12px;margin-top:10px">Seleccioná una unidad antes de reportar novedades.</div>'}
       </div>
 
       <!-- Acciones rápidas -->
@@ -108,6 +152,24 @@ function renderChoferPanel() {
   `;
 }
 
+async function saveChoferAssignment() {
+  const vehicle_id = document.getElementById('driver-current-vehicle')?.value || null;
+  const trailer_id = document.getElementById('driver-current-trailer')?.value || null;
+  const res = await apiFetch('/api/vehicles/my-assignment', {
+    method: 'PUT',
+    body: JSON.stringify({ vehicle_id, trailer_id }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    showToast('error', data.error || 'No se pudo guardar la asignación');
+    return;
+  }
+  App.data.driverAssignment = data;
+  App.data.driverAssignmentLoaded = true;
+  showToast('ok', vehicle_id ? 'Unidades del viaje actualizadas' : 'Asignación del viaje eliminada');
+  await renderChoferPanel();
+}
+
 function openChoferCargaModal(tipo) {
   // Pre-seleccionar el tipo y abrir el modal de carga
   openFuelLoadModal();
@@ -117,24 +179,25 @@ function openChoferCargaModal(tipo) {
     // Pre-llenar el chofer con el nombre del usuario actual
     const driverEl = document.getElementById('fl-driver');
     if (driverEl && App.currentUser?.name) driverEl.value = App.currentUser.name;
-    // Pre-seleccionar el vehículo asignado
-    const myVehicle = (App.data.vehicles||[]).find(v =>
-      v.driver && v.driver.toLowerCase() === App.currentUser?.name?.toLowerCase()
-    );
+    // Pre-seleccionar la unidad motriz elegida para el viaje.
+    const myVehicle = assignmentVehicle('vehicle')
+      || (App.data.vehicles || []).find((v) => v.code === App.currentUser?.vehicle_code);
     const vehicleEl = document.getElementById('fl-vehicle');
     if (vehicleEl && myVehicle) vehicleEl.value = myVehicle.code;
   }, 100);
 }
 
 function openChoferNovedadModal() {
-  const myVehicle = (App.data.vehicles||[]).find(v =>
-    v.driver && v.driver.toLowerCase() === App.currentUser?.name?.toLowerCase()
-  );
+  const selectedVehicles = [assignmentVehicle('vehicle'), assignmentVehicle('trailer')].filter(Boolean);
+  if (!selectedVehicles.length) {
+    showToast('warn', 'Primero seleccioná las unidades de este viaje');
+    return;
+  }
   openModal('Reportar novedad', `
     <div class="form-group">
       <label class="form-label">Vehículo</label>
       <select class="form-select" id="cn-vehicle">
-        ${(App.data.vehicles||[]).map(v=>`<option value="${v.id}" ${myVehicle?.id===v.id?'selected':''}>${escapeHtml(v.code)} — ${escapeHtml(v.plate)}</option>`).join('')}
+        ${selectedVehicles.map((v) => `<option value="${v.id}">${escapeHtml(v.code)} — ${escapeHtml(v.plate || v.code)} · ${escapeHtml(v.type || 'unidad')}</option>`).join('')}
       </select>
     </div>
     <div class="form-group">
@@ -170,9 +233,12 @@ async function saveChoferNovedad() {
 }
 
 function openChoferChecklistModal() {
-  const myVehicle = (App.data.vehicles||[]).find(v =>
-    v.driver && v.driver.toLowerCase() === App.currentUser?.name?.toLowerCase()
-  ) || (App.data.vehicles||[]).find(v => v.code === App.currentUser?.vehicle_code);
+  const myVehicle = assignmentVehicle('vehicle')
+    || (App.data.vehicles || []).find((v) => v.code === App.currentUser?.vehicle_code);
+  if (!myVehicle) {
+    showToast('warn', 'Primero seleccioná la unidad de este viaje');
+    return;
+  }
 
   const items = [
     { id:'aceite',    label:'Nivel de aceite OK',                            critical:true },
@@ -257,6 +323,7 @@ async function saveChoferChecklist(myVehicle, items) {
 
 // Puente con el mundo legacy (dispatcher + onclick).
 expose('renderChoferPanel', renderChoferPanel);
+expose('saveChoferAssignment', saveChoferAssignment);
 expose('openChoferCargaModal', openChoferCargaModal);
 expose('openChoferNovedadModal', openChoferNovedadModal);
 expose('saveChoferNovedad', saveChoferNovedad);

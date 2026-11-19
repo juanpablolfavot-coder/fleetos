@@ -750,12 +750,22 @@ fuelRouter.post('/', authenticate, requireRole('dueno','gerencia','jefe_mantenim
     if (!tank_id && (!Number.isFinite(ppuFrontend) || ppuFrontend <= 0)) {
       return res.status(400).json({ error: 'Al cargar fuera de la cisterna, el precio por litro es obligatorio (del ticket)' });
     }
-    // Chofer solo puede cargar a su propia unidad asignada
+    // Chofer: combustible solo para la unidad motriz elegida en Mi panel. Si
+    // todavía no eligió una para el viaje, se conserva la unidad habitual.
     if (req.user.role === 'chofer') {
-      const veh = await client.query('SELECT code FROM vehicles WHERE id=$1 AND active=TRUE', [vehicle_id]);
-      if (!veh.rows[0]) return res.status(404).json({ error: 'Vehículo no encontrado' });
-      if (veh.rows[0].code !== req.user.vehicle_code) {
-        return res.status(403).json({ error: 'Solo podés cargar combustible a tu unidad asignada (' + (req.user.vehicle_code||'sin asignar') + ')' });
+      const allowed = await client.query(
+        `SELECT v.id
+         FROM vehicles v
+         JOIN users u ON u.id = $2
+         WHERE v.id = $1 AND v.active = TRUE
+           AND (
+             v.id = u.current_vehicle_id
+             OR (u.current_vehicle_id IS NULL AND v.code = u.vehicle_code)
+           )`,
+        [vehicle_id, req.user.id]
+      );
+      if (!allowed.rows[0]) {
+        return res.status(403).json({ error: 'Seleccioná esta unidad en Mi panel antes de cargar combustible' });
       }
     }
     // Gerente de sucursal: solo puede cargar consumos internos desde tanque de su sucursal
