@@ -550,6 +550,15 @@ auditorRouter.get('/log-acciones', authenticate, canAudit, async (req, res) => {
   } catch(err) { console.error(err && err.message); res.status(500).json({ error: 'Error del servidor' }); }
 });
 
+// Grupo de cada unidad para los km del GPS. Sólo 'flota' suma al km del mes y al
+// km/L. Los semis y acoplados tienen rastreador pero no motor: recorren los mismos
+// km que el tractor que los arrastra, sumarlos duplicaría km. Los autoelevadores
+// no circulan. Los dos se muestran aparte.
+const GRUPO_GPS_SQL = `CASE
+    WHEN COALESCE(LOWER(v.type),'') ~ '(semi|acoplad|remolque)' THEN 'semi'
+    WHEN COALESCE(LOWER(v.type),'') LIKE '%autoelev%'          THEN 'autoelev'
+    ELSE 'flota' END`;
+
 // ── 6. Reporte comparativo mensual ───────────────────────
 auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
   try {
@@ -634,25 +643,26 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         // que no carga en FleetOS (hoy Córdoba y Rosario) contra los litros de las
         // que sí cargan daría un km/L falsamente bueno.
         hayGps ? query(`
-          SELECT COALESCE(SUM(g.km),0)                                         AS km_gps,
-                 COALESCE(SUM(g.km)     FILTER (WHERE COALESCE(g.litros,0)>0),0) AS km_rend,
-                 COALESCE(SUM(g.litros) FILTER (WHERE COALESCE(g.litros,0)>0),0) AS litros_rend,
-                 COUNT(*)                                                      AS unidades,
-                 COUNT(*)               FILTER (WHERE COALESCE(g.litros,0)=0)  AS sin_litros,
-                 MIN(g.desde) AS desde, MAX(g.hasta) AS hasta
-            FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
-           WHERE g.periodo = $1
-             -- Semis y acoplados llevan rastreador propio, pero no tienen motor:
-             -- recorren los mismos km que el tractor que los arrastra. Sumarlos
-             -- duplica km. Las autoelevadoras van en horas.
-             AND COALESCE(LOWER(v.type),'') NOT LIKE '%semi%'
-             AND COALESCE(LOWER(v.type),'') NOT LIKE '%acoplad%'
-             AND COALESCE(LOWER(v.type),'') NOT LIKE '%remolque%'
-             AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'`, [periodo])
+          SELECT grupo,
+                 COALESCE(SUM(km),0)                                       AS km_gps,
+                 COALESCE(SUM(km)     FILTER (WHERE COALESCE(litros,0)>0),0) AS km_rend,
+                 COALESCE(SUM(litros) FILTER (WHERE COALESCE(litros,0)>0),0) AS litros_rend,
+                 COUNT(*)                                                  AS unidades,
+                 COUNT(*)             FILTER (WHERE COALESCE(litros,0)=0)  AS sin_litros,
+                 MIN(desde) AS desde, MAX(hasta) AS hasta
+            FROM (
+              SELECT g.*, ${GRUPO_GPS_SQL} AS grupo
+                FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
+               WHERE g.periodo = $1
+            ) t
+           GROUP BY grupo
+`, [periodo])
                 : Promise.resolve({ rows: [{}] }),
       ]);
 
-      const g = gps.rows[0] || {};
+      const g  = gps.rows.find(r => r.grupo === 'flota')    || {};
+      const ga = gps.rows.find(r => r.grupo === 'autoelev') || {};
+      const gs = gps.rows.find(r => r.grupo === 'semi')     || {};
       const iso = v => (v instanceof Date ? v.toISOString().slice(0,10) : (v ? String(v).slice(0,10) : null));
       const gpsDesde = iso(g.desde), gpsHasta = iso(g.hasta);
 
@@ -675,6 +685,11 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         litros_gps_rend:   parseFloat(g.litros_rend || 0),
         gps_unidades:      parseInt(g.unidades || 0),
         gps_sin_litros:    parseInt(g.sin_litros || 0),
+        // Autoelevadores y semis/acoplados, aparte: no se suman al km de la flota.
+        km_gps_autoelev:   parseFloat(ga.km_gps || 0),
+        gps_autoelev:      parseInt(ga.unidades || 0),
+        km_gps_semi:       parseFloat(gs.km_gps || 0),
+        gps_semi:          parseInt(gs.unidades || 0),
         gps_desde:         gpsDesde,
         gps_hasta:         gpsHasta,
         // Parcial = la cobertura del GPS no abarca todo el mes (junio arranca el 05,
@@ -702,19 +717,16 @@ auditorRouter.get('/km-gps', authenticate, canAudit, async (req, res) => {
 
     const r = await query(`
       SELECT g.periodo, COALESCE(v.code, v.plate) AS unidad, v.base,
+             ${GRUPO_GPS_SQL} AS grupo,
              g.km, COALESCE(g.litros,0) AS litros, g.fuente, g.desde, g.hasta, g.notas
         FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
-       WHERE COALESCE(LOWER(v.type),'') NOT LIKE '%semi%'      -- sin motor: repiten el km del tractor
-         AND COALESCE(LOWER(v.type),'') NOT LIKE '%acoplad%'
-         AND COALESCE(LOWER(v.type),'') NOT LIKE '%remolque%'
-         AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'   -- van en horas
        ORDER BY g.periodo, COALESCE(v.code, v.plate)`);
 
     const periodos = [...new Set(r.rows.map(x => x.periodo))].sort();
     const por = new Map();
     const cobertura = {};   // periodo → { desde, hasta, fuente }
     for (const row of r.rows) {
-      if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.base || null, meses: {} });
+      if (!por.has(row.unidad)) por.set(row.unidad, { unidad: row.unidad, base: row.base || null, grupo: row.grupo, meses: {} });
       const km = parseFloat(row.km) || 0, litros = parseFloat(row.litros) || 0;
       por.get(row.unidad).meses[row.periodo] = {
         km, litros,
@@ -728,22 +740,29 @@ auditorRouter.get('/km-gps', authenticate, canAudit, async (req, res) => {
       if (h && (!c.hasta || h > c.hasta)) c.hasta = h;
     }
 
-    const totales = {};
-    for (const p of periodos) {
-      const filas = [...por.values()].map(u => u.meses[p]).filter(Boolean);
-      totales[p] = {
+    // Totales por grupo: flota (lo único que suma), semis/acoplados y autoelevadores.
+    const totalizar = (filas) => {
+      const t = {
         km:         filas.reduce((a, m) => a + m.km, 0),
         km_rend:    filas.filter(m => !m.sin_cargas).reduce((a, m) => a + m.km, 0),
         litros:     filas.reduce((a, m) => a + m.litros, 0),
         unidades:   filas.length,
         sin_cargas: filas.filter(m => m.sin_cargas).length,
       };
-      totales[p].km_l = (totales[p].km_rend > 0 && totales[p].litros > 0)
-        ? +(totales[p].km_rend / totales[p].litros).toFixed(2) : null;
+      t.km_l = (t.km_rend > 0 && t.litros > 0) ? +(t.km_rend / t.litros).toFixed(2) : null;
+      return t;
+    };
+    const totales = {}, totales_autoelev = {}, totales_semi = {};
+    const us = [...por.values()];
+    const del = (grupo, p) => us.filter(u => u.grupo === grupo).map(u => u.meses[p]).filter(Boolean);
+    for (const p of periodos) {
+      totales[p]          = totalizar(del('flota', p));
+      totales_autoelev[p] = totalizar(del('autoelev', p));
+      totales_semi[p]     = totalizar(del('semi', p));
     }
 
     res.json({
-      periodos, cobertura, totales,
+      periodos, cobertura, totales, totales_autoelev, totales_semi,
       unidades: [...por.values()].sort((a, b) => a.unidad.localeCompare(b.unidad)),
     });
   } catch (err) { console.error('[auditor km-gps]', err.message); res.status(500).json({ error: 'Error del servidor' }); }
