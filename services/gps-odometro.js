@@ -83,7 +83,7 @@ async function capturarOdometros() {
       }
   } catch (e) { return { ok: false, error: 'respuesta GPS ilegible' }; }
 
-  let guardados = 0, sinOdo = 0, sinVehiculo = 0;
+  let guardados = 0, sinOdo = 0, sinVehiculo = 0, sinMotor = 0;
   for (const u of unidades) {
     let det;
     try { det = await apiRequest(`/Fleetcore.Api/api/fleetview/vehicles/${u.id}`, { timeout: 12000 }); }
@@ -94,8 +94,11 @@ async function capturarOdometros() {
     try { odo = parseFloat(JSON.parse(det.body)?.data?.vehicle?.odometer); } catch (_) {}
     if (!(odo > 0)) { sinOdo++; continue; }
 
-    const veh = await query('SELECT id FROM vehicles WHERE UPPER(plate)=$1 OR UPPER(code)=$1', [u.patente]);
+    const veh = await query('SELECT id, LOWER(COALESCE(type,\'\')) AS tipo FROM vehicles WHERE UPPER(plate)=$1 OR UPPER(code)=$1', [u.patente]);
     if (!veh.rows[0]) { sinVehiculo++; continue; }
+    // Semis y acoplados tienen rastreador pero no motor: su km es el del tractor
+    // que los arrastra. Guardarlos duplica km en el total de la flota.
+    if (/semi|acoplad|remolque|autoelev/.test(veh.rows[0].tipo)) { sinMotor++; continue; }
 
     await query(
       `INSERT INTO vehicle_gps_odometro (vehicle_id, fecha, odometro_km)
@@ -107,7 +110,7 @@ async function capturarOdometros() {
   }
 
   _ultimaCaptura = new Date().toISOString();
-  return { ok: true, fecha, guardados, sinOdo, sinVehiculo, total: unidades.length };
+  return { ok: true, fecha, guardados, sinOdo, sinVehiculo, sinMotor, total: unidades.length };
 }
 
 // ── Consolidar el km de un mes a partir de las fotas diarias ──

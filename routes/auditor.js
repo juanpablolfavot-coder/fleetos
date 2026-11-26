@@ -634,13 +634,21 @@ auditorRouter.get('/comparativo', authenticate, canAudit, async (req, res) => {
         // que no carga en FleetOS (hoy Córdoba y Rosario) contra los litros de las
         // que sí cargan daría un km/L falsamente bueno.
         hayGps ? query(`
-          SELECT COALESCE(SUM(km),0)                                       AS km_gps,
-                 COALESCE(SUM(km)     FILTER (WHERE COALESCE(litros,0)>0),0) AS km_rend,
-                 COALESCE(SUM(litros) FILTER (WHERE COALESCE(litros,0)>0),0) AS litros_rend,
-                 COUNT(*)                                                  AS unidades,
-                 COUNT(*)             FILTER (WHERE COALESCE(litros,0)=0)  AS sin_litros,
-                 MIN(desde) AS desde, MAX(hasta) AS hasta
-            FROM vehicle_gps_km WHERE periodo = $1`, [periodo])
+          SELECT COALESCE(SUM(g.km),0)                                         AS km_gps,
+                 COALESCE(SUM(g.km)     FILTER (WHERE COALESCE(g.litros,0)>0),0) AS km_rend,
+                 COALESCE(SUM(g.litros) FILTER (WHERE COALESCE(g.litros,0)>0),0) AS litros_rend,
+                 COUNT(*)                                                      AS unidades,
+                 COUNT(*)               FILTER (WHERE COALESCE(g.litros,0)=0)  AS sin_litros,
+                 MIN(g.desde) AS desde, MAX(g.hasta) AS hasta
+            FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
+           WHERE g.periodo = $1
+             -- Semis y acoplados llevan rastreador propio, pero no tienen motor:
+             -- recorren los mismos km que el tractor que los arrastra. Sumarlos
+             -- duplica km. Las autoelevadoras van en horas.
+             AND COALESCE(LOWER(v.type),'') NOT LIKE '%semi%'
+             AND COALESCE(LOWER(v.type),'') NOT LIKE '%acoplad%'
+             AND COALESCE(LOWER(v.type),'') NOT LIKE '%remolque%'
+             AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'`, [periodo])
                 : Promise.resolve({ rows: [{}] }),
       ]);
 
@@ -696,6 +704,10 @@ auditorRouter.get('/km-gps', authenticate, canAudit, async (req, res) => {
       SELECT g.periodo, COALESCE(v.code, v.plate) AS unidad, v.base,
              g.km, COALESCE(g.litros,0) AS litros, g.fuente, g.desde, g.hasta, g.notas
         FROM vehicle_gps_km g JOIN vehicles v ON v.id = g.vehicle_id
+       WHERE COALESCE(LOWER(v.type),'') NOT LIKE '%semi%'      -- sin motor: repiten el km del tractor
+         AND COALESCE(LOWER(v.type),'') NOT LIKE '%acoplad%'
+         AND COALESCE(LOWER(v.type),'') NOT LIKE '%remolque%'
+         AND COALESCE(LOWER(v.type),'') NOT LIKE '%autoelev%'   -- van en horas
        ORDER BY g.periodo, COALESCE(v.code, v.plate)`);
 
     const periodos = [...new Set(r.rows.map(x => x.periodo))].sort();
