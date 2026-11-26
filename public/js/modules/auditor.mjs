@@ -800,7 +800,9 @@ async function renderAuditorComparativo(el) {
               ? `<span style="font-weight:600" title="Odómetro del GPS: última lectura del mes menos la del mes anterior">${f0(kmG)} km</span>
                  <div style="font-size:10px;color:${m.gps_parcial ? 'var(--warn)' : 'var(--text3)'}">🛰 GPS · ${m.gps_unidades} unid.${cob}</div>
                  ${m.gps_sin_litros > 0 ? `<div style="font-size:10px;color:var(--text3)" title="Unidades con km del GPS pero sin combustible registrado en FleetOS: su km no entra al rendimiento">para rendimiento: ${f0(kmGr)} km (${m.gps_sin_litros} unid. sin cargas afuera)</div>` : ''}
-                 <div style="font-size:10px;color:var(--text3)">odómetro cargas: ${km > 0 ? f0(km) : '—'}</div>`
+                 <div style="font-size:10px;color:var(--text3)">odómetro cargas: ${km > 0 ? f0(km) : '—'}</div>
+                 ${m.gps_semi > 0 ? `<div style="font-size:10px;color:var(--text2);margin-top:3px" title="Semis y acoplados: sin motor, recorren los km del tractor que los arrastra. Van aparte, no se suman al km de la flota">🚛 semis (aparte): ${f0(m.km_gps_semi || 0)} km · ${m.gps_semi} unid.</div>` : ''}
+                 ${m.gps_autoelev > 0 ? `<div style="font-size:10px;color:var(--text2)${m.gps_semi > 0 ? '' : ';margin-top:3px'}" title="Autoelevadores: van aparte, no se suman al km de la flota ni a su rendimiento">🏗 autoelevadores (aparte): ${f0(m.km_gps_autoelev || 0)} km · ${m.gps_autoelev} unid.</div>` : ''}`
               : (km > 0 ? `${f0(km)} km<div style="font-size:10px;color:var(--text3)">odómetro cargas</div>` : '—');
             // ── Rendimiento ───────────────────────────────────────────────────
             // Con GPS: km exactos del mes ÷ litros de ESAS MISMAS unidades. Sin GPS,
@@ -870,7 +872,29 @@ function renderKmGpsPorUnidad(gps) {
       ${fmt(m.km)}<div style="font-size:10px;color:${m.sin_cargas ? 'var(--warn)' : 'var(--text3)'}">${
         m.sin_cargas ? '⚠ sin cargas' : (m.km_l ? f1(m.km_l) + ' km/L' : '—')}</div></td>`;
   };
-  const sinCargas = gps.unidades.filter(u => P.some(p => u.meses[p] && u.meses[p].sin_cargas));
+  const flota    = gps.unidades.filter(u => (u.grupo || 'flota') === 'flota');
+  const semis    = gps.unidades.filter(u => u.grupo === 'semi');
+  const autoelev = gps.unidades.filter(u => u.grupo === 'autoelev');
+  const sinCargas = flota.filter(u => P.some(p => u.meses[p] && u.meses[p].sin_cargas));
+  const fila = u => `<tr>
+              <td class="td-mono" style="font-weight:600">${escapeHtml(u.unidad)}</td>
+              <td style="font-size:12px;color:var(--text3)">${escapeHtml(u.base || '—')}</td>
+              ${P.map(p => cel(u.meses[p])).join('')}
+            </tr>`;
+  const filaTotal = (titulo, tot) => `<tr style="border-top:2px solid var(--border2);font-weight:700">
+            <td colspan="2">${titulo}</td>
+            ${P.map(p => {
+              const t = tot?.[p] || {};
+              return `<td class="td-mono" style="text-align:right">${fmt(t.km)}
+                <div style="font-size:10px;font-weight:400;color:var(--text3)">${
+                  t.sin_cargas ? `rend.: ${fmt(t.km_rend)} km · ` : ''}${t.km_l ? f1(t.km_l) + ' km/L' : '—'}</div></td>`;
+            }).join('')}
+          </tr>`;
+  const seccion = (titulo, nota, us, tituloTotal, tot) => !us.length ? '' : `
+            <tr><td colspan="${2 + P.length}" style="padding-top:18px;font-weight:700;font-size:12px;color:var(--text2)">
+              ${titulo} <span style="font-weight:400;color:var(--text3)">— ${nota}</span></td></tr>
+            ${us.map(fila).join('')}
+            ${filaTotal(tituloTotal, tot)}`;
 
   return `
     <div class="card" style="padding:0">
@@ -890,21 +914,11 @@ function renderKmGpsPorUnidad(gps) {
             }</th>`).join('')}
           </tr></thead>
           <tbody>
-            ${gps.unidades.map(u => `<tr>
-              <td class="td-mono" style="font-weight:600">${escapeHtml(u.unidad)}</td>
-              <td style="font-size:12px;color:var(--text3)">${escapeHtml(u.base || '—')}</td>
-              ${P.map(p => cel(u.meses[p])).join('')}
-            </tr>`).join('')}
+            ${flota.map(fila).join('')}
+            ${filaTotal('TOTAL FLOTA', gps.totales)}
+            ${seccion('🚛 Semis y acoplados', 'sin motor: repiten el km del tractor, no suman a la flota', semis, 'TOTAL SEMIS', gps.totales_semi)}
+            ${seccion('🏗 Autoelevadores', 'aparte, no suman al km de la flota', autoelev, 'TOTAL AUTOELEVADORES', gps.totales_autoelev)}
           </tbody>
-          <tfoot><tr style="border-top:2px solid var(--border2);font-weight:700">
-            <td colspan="2">TOTAL</td>
-            ${P.map(p => {
-              const t = gps.totales?.[p] || {};
-              return `<td class="td-mono" style="text-align:right">${fmt(t.km)}
-                <div style="font-size:10px;font-weight:400;color:var(--text3)">${
-                  t.sin_cargas ? `rend.: ${fmt(t.km_rend)} km · ` : ''}${t.km_l ? f1(t.km_l) + ' km/L' : '—'}</div></td>`;
-            }).join('')}
-          </tr></tfoot>
         </table>
       </div>
       <div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border2);line-height:1.6">
@@ -936,27 +950,41 @@ async function exportKmGpsPDF() {
   doc.text(`Generado ${new Date().toLocaleString('es-AR')}`, 40, 68);
   doc.setTextColor(0);
 
+  // Flota primero, con su total; los autoelevadores aparte, con el suyo.
+  const filaU = u => [u.unidad, u.base || '—', ...g.periodos.flatMap(p => {
+    const m = u.meses[p];
+    return m ? [fmt(m.km), m.sin_cargas ? 'sin cargas' : (m.km_l ? f1(m.km_l) : '—')] : ['—', '—'];
+  })];
+  const filaT = (titulo, tot) => [titulo, '', ...g.periodos.flatMap(p => {
+    const t = tot?.[p] || {};
+    return [fmt(t.km), t.km_l ? f1(t.km_l) : '—'];
+  })];
+  const deGrupo = gr => g.unidades.filter(u => (u.grupo || 'flota') === gr);
+  const flotaU = deGrupo('flota');
+  const body = [...flotaU.map(filaU), filaT('TOTAL FLOTA', g.totales)];
+  const negritas = new Set([body.length - 1]);
+  for (const [titulo, us, tituloT, tot] of [
+    ['SEMIS Y ACOPLADOS (aparte, no suman)', deGrupo('semi'),     'TOTAL SEMIS',          g.totales_semi],
+    ['AUTOELEVADORES (aparte, no suman)',    deGrupo('autoelev'), 'TOTAL AUTOELEVADORES', g.totales_autoelev],
+  ]) {
+    if (!us.length) continue;
+    body.push([titulo, '', ...g.periodos.flatMap(() => ['', ''])]);
+    negritas.add(body.length - 1);
+    body.push(...us.map(filaU), filaT(tituloT, tot));
+    negritas.add(body.length - 1);
+  }
+
   doc.autoTable({
     startY: 84,
     head: [['Unidad', 'Base', ...g.periodos.flatMap(p => [`${lbl(p)} km`, `${lbl(p)} km/L`])]],
-    body: [
-      ...g.unidades.map(u => [u.unidad, u.base || '—',
-        ...g.periodos.flatMap(p => {
-          const m = u.meses[p];
-          return m ? [fmt(m.km), m.sin_cargas ? 'sin cargas' : (m.km_l ? f1(m.km_l) : '—')] : ['—', '—'];
-        })]),
-      ['TOTAL', '', ...g.periodos.flatMap(p => {
-        const t = g.totales?.[p] || {};
-        return [fmt(t.km), t.km_l ? f1(t.km_l) : '—'];
-      })],
-    ],
+    body,
     styles: { fontSize: 7.5, cellPadding: 3 },
     headStyles: { fillColor: [30, 41, 59], fontSize: 7.5 },
     columnStyles: Object.fromEntries(g.periodos.flatMap((_, i) => [[2 + i * 2, { halign: 'right' }], [3 + i * 2, { halign: 'right' }]])),
-    didParseCell: d => { if (d.row.index === g.unidades.length && d.section === 'body') d.cell.styles.fontStyle = 'bold'; },
+    didParseCell: d => { if (d.section === 'body' && negritas.has(d.row.index)) d.cell.styles.fontStyle = 'bold'; },
   });
 
-  const sin = g.unidades.filter(u => g.periodos.some(p => u.meses[p]?.sin_cargas)).map(u => u.unidad);
+  const sin = flotaU.filter(u => g.periodos.some(p => u.meses[p]?.sin_cargas)).map(u => u.unidad);
   if (sin.length) {
     doc.setFontSize(8); doc.setTextColor(150, 90, 0);
     doc.text(`Unidades con km del GPS y sin combustible registrado en FleetOS (excluidas del km/L): ${sin.join(', ')}`,

@@ -96,6 +96,8 @@ async function capturarOdometros() {
 
     const veh = await query('SELECT id FROM vehicles WHERE UPPER(plate)=$1 OR UPPER(code)=$1', [u.patente]);
     if (!veh.rows[0]) { sinVehiculo++; continue; }
+    // Se guardan todas, semis y autoelevadores incluidos: el auditor los separa
+    // por tipo al sumar (routes/auditor.js, GRUPO_GPS_SQL).
 
     await query(
       `INSERT INTO vehicle_gps_odometro (vehicle_id, fecha, odometro_km)
