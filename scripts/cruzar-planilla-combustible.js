@@ -162,21 +162,24 @@ async function main() {
     return m ? `${parseInt(m[1], 10)}-${parseInt(m[2], 10)}` : null;
   };
 
+  // Primera pasada: por número de comprobante, para TODAS las facturas. Tiene que
+  // ir antes que la de fecha+litros: si no, una factura de otra sucursal con los
+  // mismos litros "se roba" una carga que en realidad tiene su comprobante exacto.
   const resultado = PLANILLA.map((r) => {
-    // 1) Por número de comprobante.
-    let hit = cargas.find((c) => !usadas.has(c.id) && ticketDe(c.notes) === norm(r.cpte));
-    let como = 'comprobante';
-    // 2) Por fecha ±1 día + litros ±0,5 L (la más cercana).
-    if (!hit) {
-      const cands = cargas
-        .filter((c) => !usadas.has(c.id) && diasEntre(c.dia, r.fecha) <= 1 && Math.abs(c.litros - r.litros) <= 0.5)
-        .sort((a, b) => diasEntre(a.dia, r.fecha) - diasEntre(b.dia, r.fecha) || Math.abs(a.litros - r.litros) - Math.abs(b.litros - r.litros));
-      hit = cands[0];
-      como = cands.length > 1 ? `fecha+litros (hay ${cands.length} parecidas, revisar)` : 'fecha+litros';
-    }
+    const hit = cargas.find((c) => !usadas.has(c.id) && ticketDe(c.notes) === norm(r.cpte));
     if (hit) usadas.add(hit.id);
-    return { ...r, hit, como };
+    return { ...r, hit, como: 'comprobante' };
   });
+  // Segunda pasada: las que quedaron, por fecha ±1 día + litros ±0,5 L (la más cercana).
+  for (const r of resultado) {
+    if (r.hit) continue;
+    const cands = cargas
+      .filter((c) => !usadas.has(c.id) && diasEntre(c.dia, r.fecha) <= 1 && Math.abs(c.litros - r.litros) <= 0.5)
+      .sort((a, b) => diasEntre(a.dia, r.fecha) - diasEntre(b.dia, r.fecha) || Math.abs(a.litros - r.litros) - Math.abs(b.litros - r.litros));
+    r.hit = cands[0];
+    r.como = cands.length > 1 ? `fecha+litros (hay ${cands.length} parecidas, revisar)` : 'fecha+litros';
+    if (r.hit) usadas.add(r.hit.id);
+  }
 
   const deps = [...new Set(PLANILLA.map((r) => r.dep))];
   let totYa = 0, totFalta = 0, litrosFalta = 0;
