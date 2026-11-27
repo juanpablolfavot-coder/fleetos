@@ -160,6 +160,30 @@ const CARGAS = [
   // AA508SW. Km en serie: 510.355 (27/10) → 510.961 (03/11). El número de
   // comprobante sale borroso (06362-0005…); se toma el 55818 anotado a mano.
   { code:'AA508SW', fecha:'2026-11-03 09:24:41', litros:79.2079,  total:199999.95, km:510961, estacion:'YPF — Operadora de Estaciones de Servicios',                  ticket:'06362-00055818', nota:'pagado con Mercado Pago' },
+
+  // ── Tanda 6 · tickets recibidos el 27/11/2026 (11/11 al 26/11) ───────────
+  // En el lote venían 5 tickets ya cargados (08/10 y 14/10 AF041MB, 14/10
+  // AE517UM La Fuente, 16/10 AA508SW y 04/11 AE517UM Traslux): el dedup los
+  // saltea, no se repiten acá. Km con decimales se redondean (INTEGER).
+  // AE517UM. Km en serie: 295.212 (05/11) → 297.226 (24/11).
+  // 17/11 y 18/11 son dos cargas seguidas (304 y 347 km): los tramos sueltos dan
+  // 26 y 38 L/100, pero 11/11→24/11 en conjunto (1.731 km, 421 L) da 24: normal.
+  { code:'AE517UM', fecha:'2026-11-11 08:25:07', litros:75.5572,  total:199999.91, km:295495, estacion:'YPF — Operadora de Estaciones de Servicios (CABA)',           ticket:'07768-00019771', nota:'pagado con Visa Electrón' },
+  { code:'AE517UM', fecha:'2026-11-13 07:51:23', litros:78.8955,  total:200000.10, km:295942, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00029-00029753', nota:'pagado con Visa' },
+  { code:'AE517UM', fecha:'2026-11-17 08:24:55', litros:79.713,   total:199999.92, km:296246, estacion:'YPF — Red Petrol SA, Av. Cnel. Roca (CABA)',                 ticket:'00029-00029805', nota:'pagado con Visa' },
+  // 18/11: Diesel 500 (grado común). El total incluye $2.549,11 de percepción
+  // IIBB CABA.
+  { code:'AE517UM', fecha:'2026-11-18 14:52:43', litros:132.2168, total:302549.03, km:296593, estacion:'YPF — OPESSA, Av. Cnel. Roca y Escalada (CABA)',             ticket:'06398-00031220', nota:'pagado con Visa Electrón (anotado: transferencia + efectivo) · Diesel 500 · incluye percepción IIBB CABA $2.549,11' },
+  { code:'AE517UM', fecha:'2026-11-24 16:19:06', litros:130.4348, total:300000.05, km:297226, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00009-00007538', nota:'pagado en efectivo' },
+  // AF041MB. Km en serie: 281.743 (04/11) → 283.039 (24/11).
+  // 12/11: el total incluye $1.694,01 de percepción IIBB CABA.
+  { code:'AF041MB', fecha:'2026-11-12 08:23:05', litros:77.973,   total:201693.99, km:282167, estacion:'YPF — Servicentro Los Remeros, Av. Agustín García 6269, Tigre (BA)', ticket:'00034-00009392', nota:'pagado con Mercado Pago (anotado: transferencia + efectivo) · incluye percepción IIBB CABA $1.694,01' },
+  { code:'AF041MB', fecha:'2026-11-17 11:04:00', litros:77.8513,  total:199999.99, km:282677, estacion:'YPF — Tobago SA, Av. Lacaze 6593 (CABA)',                    ticket:'0120-00010202',  nota:'pagado con Mercado Pago' },
+  { code:'AF041MB', fecha:'2026-11-24 07:08:00', litros:79.5229,  total:200000.09, km:283039, estacion:'NAFPUR XXI — CABA',                                          ticket:'0036-00000690',  nota:'pagado con Mercado Pago' },
+  // AA508SW. Km en serie: 510.961 (03/11) → 512.721 (26/11).
+  { code:'AA508SW', fecha:'2026-11-11 14:12:46', litros:86.9565,  total:199999.96, km:511557, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00006-00025686', nota:'pagado en efectivo' },
+  { code:'AA508SW', fecha:'2026-11-17 07:56:57', litros:86.9565,  total:199999.96, km:512047, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00009-00007408', nota:'pagado en efectivo' },
+  { code:'AA508SW', fecha:'2026-11-26 14:13:12', litros:86.9565,  total:199999.96, km:512721, estacion:'ARGUMAL SA — Lanús Oeste (BA)',                              ticket:'00009-00007581', nota:'pagado en efectivo' },
 ];
 
 async function main() {
